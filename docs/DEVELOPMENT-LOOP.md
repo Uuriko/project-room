@@ -77,3 +77,31 @@ The integration test uses a committed synthetic Node assertion failure, actual
 JUnit, a loopback Room HTTP server, the real subprocess adapter and SQLite request
 journal. It proves the connected data/retry path, not a browser interaction or a
 two-laptop execution. Retain actual Chromium and peer-host observations separately.
+
+For one explicit handoff, the native host can finish without leaving a watcher
+running:
+
+```sh
+node scripts/run-codex-room.mjs --capabilities
+node scripts/run-codex-room.mjs --preflight /absolute/runtime.json
+ROOM_AGENT_CONFIG=/absolute/room.json node scripts/run-codex-room.mjs --run-request /absolute/journal.sqlite /absolute/runtime.json REQUESTER_ID REQUEST_ID
+```
+
+Capabilities describe installed code, not current authentication or availability.
+Preflight checks the dedicated profile without a model turn. `--run-request`
+selects exactly one requester and one addressed request; its `request_selection`
+event records the operator's choice, not acceptance of linked work. The runner
+then revalidates Room access, records execution intent, and automatically returns
+the saved answer through the existing reply API. The final `delivered` event
+includes the request ID and receipt. Other queued requests are untouched.
+
+After sleep, process interruption or a lost acknowledgement, rerun the same
+command with the same journal. A saved answer is redelivered with its original
+operation ID without starting Codex, even if that backend is unavailable. An
+intent without a saved answer remains unknown and refuses reexecution; inspect
+and reconcile it rather than deleting the journal or changing IDs. Errors exit
+nonzero with an unconfirmed-delivery event. The command does not install a wake
+service, reconnect a physically sleeping laptop, or claim that every interrupted
+execution can be recovered automatically. Local tests simulate a lost reply
+acknowledgement and reopen the SQLite journal; physical sleep remains a separate
+host qualification.

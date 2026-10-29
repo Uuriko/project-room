@@ -356,3 +356,60 @@ test("explicit confirmed reconciliation clears refusal without changing or rerun
   assert.equal(recovered.delivery_refused, 0); assert.equal(recovered.delivered, 1);
   assert.equal(recovered.response, saved.response); assert.equal(recovered.attempt_id, saved.attempt_id);
 });
+
+test("single selected request returns its receipt and leaves other work untouched", async t => {
+  const f = await fixture(t), id = f.post(), other = f.post(), events = [];
+  const result = await f.run({ singleRequest: true, allowedRequestIds: [id], signal: AbortSignal.timeout(1500),
+    emit: event => events.push(event) }).promise;
+  assert.equal(result?.status, "delivered");
+  assert.equal(result.requestMessageId, id);
+  assert.equal(result.hostExecuted, true);
+  assert.equal(f.rpc.starts, 1);
+  assert.equal((await f.client.replyContext(other)).request.status, "open");
+  assert.ok(events.some(e => e.type === "request_selection" && e.requestMessageId === id));
+  const owner = new WatchJournal(f.directory); owner.close(); // Completed mode released its owner lock.
+});
+
+test("single request resumes saved delivery after disconnect and restart without reconnecting execution", async t => {
+  const f = await fixture(t), id = f.post(), original = RoomAgentClient.prototype.replyAction;
+  // Server commits the answer, but the laptop loses its acknowledgement.
+  RoomAgentClient.prototype.replyAction = async function (...args) {
+    await original.apply(this, args);
+    throw new TypeError("Synthetic disconnected delivery acknowledgement");
+  };
+  try {
+    await assert.rejects(f.run({ singleRequest: true, allowedRequestIds: [id] }).promise, /disconnected delivery/);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+  const saved = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.ok(saved.response); assert.equal(saved.delivered, 0);
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+  f.reopen();
+  await assert.rejects(f.run({ singleRequest: true, allowedRequestIds: [id], allowedRequesterIds: ["reviewer"] }).promise,
+    { code: "requester_not_allowed" });
+  const replay = await f.run({ singleRequest: true, allowedRequestIds: [id], connectOnStart: true,
+    connect: () => assert.fail("Saved delivery must not require an available execution backend") }).promise;
+  assert.equal(replay.status, "delivered"); assert.equal(replay.hostExecuted, false);
+  assert.equal(f.rpc.starts, 1);
+  const recovered = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.equal(recovered.id, saved.id); assert.equal(recovered.response, saved.response);
+  assert.equal(recovered.attempt_id, saved.attempt_id); assert.equal(recovered.delivered, 1);
+});
+
+test("single request never reruns unknown execution after interrupted host and restart", async t => {
+  const f = await fixture(t, "unknown"), id = f.post();
+  await assert.rejects(f.run({ singleRequest: true, allowedRequestIds: [id] }).promise);
+  assert.equal(f.rpc.starts, 1);
+  const intent = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.equal(intent.response, null);
+  f.reopen();
+  await assert.rejects(f.run({ singleRequest: true, allowedRequestIds: [id],
+    connect: () => assert.fail("Unknown host outcome must not be restarted") }).promise, /outcome is unknown/);
+  assert.deepEqual(f.db.prepare("SELECT * FROM request_runs").get(), intent);
+  assert.equal((await f.client.replyContext(id)).request.status, "open");
+});
+
+test("single request requires one explicit requester and request", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.run({ singleRequest: true }).promise, /exactly one/);
+  await assert.rejects(f.run({ singleRequest: true, allowedRequestIds: ["one", "two"] }).promise, /exactly one/);
+});
