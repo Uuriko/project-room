@@ -11,6 +11,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { doctorHealthUrl } from "../scripts/agent-doctor.mjs";
+import { mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -100,10 +101,10 @@ test("doctor with only an origin looks for a saved connection first", async t =>
 });
 
 test("doctor reports HTTP access health without claiming native host or execution verification", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { origin, ownerCommons, store } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Doctor Bot");
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work", "complete_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work", "complete_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") });
   const base = mkdtempSync(join(tmpdir(), "doctor-healthy-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent"); // saveAgentConnection creates it; must not exist yet
@@ -125,7 +126,7 @@ test("doctor reports HTTP access health without claiming native host or executio
   assert.equal(result.json.repair, undefined);
 });
 
-test("doctor does not invent a membership diagnosis from an ambiguous identity 401", async t => {
+test("doctor names no_access when a valid identity has no room link", async t => {
   const { origin } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Unlinked Bot");
   const result = await doctor([], {
@@ -134,9 +135,9 @@ test("doctor does not invent a membership diagnosis from an ambiguous identity 4
   assert.equal(result.status, 1);
   assert.equal(check(result, "origin").ok, true);
   assert.equal(check(result, "credential").ok, true);
-  assert.equal(check(result, "access").detail, "credential_or_membership_rejected");
-  assert.match(result.json.repair, /cannot distinguish/);
-  assert.doesNotMatch(result.json.repair, /bootstrap-agent-room|identity-create/);
+  assert.equal(check(result, "access").detail, "no_access");
+  assert.match(result.json.repair, /no access to this room/);
+  assert.doesNotMatch(result.json.repair, /cannot distinguish|bootstrap-agent-room|identity-create/);
   assert.ok(result.json.repair.includes(identityId));
   assert.ok(!JSON.stringify(result.json).includes(secret), "doctor must never print the secret");
 });
@@ -218,10 +219,10 @@ test("signature table covers the stale-MCP-client and outdated-CLI failures", as
 });
 
 test("healthy doctor output carries no signature table", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { origin, ownerCommons, store } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Healthy Sig Bot");
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") });
   const base = mkdtempSync(join(tmpdir(), "doctor-sig-healthy-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent");
@@ -255,7 +256,7 @@ test("doctor never echoes the credential in output, healthy or not (RC-2026-09-1
   const origin = `http://127.0.0.1:${server.address().port}`;
   const { identityId, secret } = await createAgentIdentity(origin, "Quiet Doctor Bot");
   const owner = new RoomAgentClient({ origin, roomId: "lab", token: ownerLab, memberId: "owner" });
-  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "lab") });
   const base = mkdtempSync(join(tmpdir(), "doctor-secret-quiet-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const dir = join(base, "agent");
@@ -266,10 +267,11 @@ test("doctor never echoes the credential in output, healthy or not (RC-2026-09-1
     "healthy doctor output must never contain the credential");
 });
 
-// Doctor's public JSON must preserve actual transport distinctions. The old
-// token-prefix heuristic mislabeled invalid secrets and proxy denials as missing
-// membership. Real HTTP tests exercise CLI parsing, client error mapping and the
-// real server, while request journals prove doctor stays read-only. No test seam.
+// Doctor's public JSON must preserve actual transport distinctions. A valid
+// identity with no room link is 403 no_access. An unknown secret is 401
+// credential_rejected. A proxy denial stays proxy_denied. Real HTTP tests
+// exercise CLI parsing, client error mapping and the real server, while
+// request journals prove doctor stays read-only. No test seam.
 test("doctor distinguishes an invalid identity 401 from a proxy 403 without creating identities", async t => {
   for (const denied of [false, true]) {
     const { origin, store, requests } = await serve(t, denied ? {
@@ -284,7 +286,7 @@ test("doctor distinguishes an invalid identity 401 from a proxy 403 without crea
       ROOM_AGENT_MEMBER: "ai_existing", ROOM_AGENT_TOKEN: `pri_${"s".repeat(43)}` });
     assert.equal(result.status, 1);
     assert.equal(check(result, "origin").ok, true);
-    assert.equal(check(result, "access").detail, denied ? "proxy_denied" : "credential_or_membership_rejected");
+    assert.equal(check(result, "access").detail, denied ? "proxy_denied" : "credential_rejected");
     assert.doesNotMatch(result.json.repair, /identity-create|bootstrap-agent-room|No membership/);
     assert.equal(identityCount(), before, "diagnostics never create an identity");
     assert.deepEqual(requests.map(r => r.method), ["GET", "GET"]);

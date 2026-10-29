@@ -4,7 +4,7 @@ import { messageRepository } from "./message-repository.mjs";
 // enqueues no wake. Human browser push is a separate path
 // (server/human-push.mjs) and does not read this feed. Every read re-authenticates, so a member
 // whose access ended gets 401/403 and never a stale list.
-import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
+import { EVENT_TYPES as T, canInviteMembers, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./service-error.mjs";
 import { mutedEvent } from "./moderation.mjs";
@@ -13,7 +13,7 @@ import { rowInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request", "access_decision"]);
+export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request", "access_decision", "pair_request"]);
 // Bounded tail: the feed never scans unbounded history. Older unread events
 // stay reachable through the return brief; the response says where it started.
 export const NOTIFICATION_TAIL = 500;
@@ -111,6 +111,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     // access request. Approval is their explicit decision and nothing else
     // surfaces the queue, so this is not gated on work_updates preferences —
     // like the session-enforcement carve-out below, it waits on the owner.
+    if (event.type === T.PAIR_REQUESTED) {
+      if (canInviteMembers(state, member.id)) {
+        put("pair_request", "pairId", event.data.pairId, row, {
+          eventId: event.id,
+          displayName: event.data.displayName,
+          userCode: event.data.userCode,
+          duplicateMemberId: event.data.duplicateMemberId ?? null,
+          label: event.data.duplicateMemberId ? "may already be in the room" : "asks to pair"
+        });
+      }
+      continue;
+    }
     if (event.type === T.ACCESS_REQUESTED) {
       if (member.id === state.room?.ownerId || member.permissions?.includes("manage_members")) {
         put("access_request", "requestId", event.data.requestId, row, {
