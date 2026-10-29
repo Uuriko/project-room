@@ -1,0 +1,40 @@
+  /api/rooms/{roomId}/work-claims/{claimId}/renew:
+    post:
+      summary: Renew a work claim's lease
+      description: |
+        Owner-only; starts a fresh lease window from now, extending
+        leaseExpiresAt by the lease duration (explicit leaseHours, else the
+        room's default). A heartbeat body is enough. progressMessageId is
+        optional evidence: when present it must be the holder's own public
+        message posted after the current lease window began. Refused on
+        claims without a lease and on lapsed leases (claim again instead).
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                progressMessageId: { type: string }
+                leaseHours: { type: number }
+                note: { type: string }
+      responses:
+        '200':
+          description: The renewed item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '404': { description: work_claim_not_found }
+        '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
+        '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
