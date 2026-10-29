@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DurableDatabase, isWriteSql } from '../cloudflare/storage.mjs';
+import { DurableDatabase, isWriteSql as durableIsWriteSql } from '../cloudflare/storage.mjs';
+import { isWriteSql } from '../server/sql-write-classification.mjs';
+
+test('Durable storage uses the shared SQL classification implementation', () => {
+  assert.equal(durableIsWriteSql, isWriteSql);
+});
 
 test('isWriteSql counts every write shape and no plain read', () => {
   for (const sql of ['INSERT INTO t VALUES(1)', '  update t set a=1', 'DELETE FROM t', 'REPLACE INTO t VALUES(1)',

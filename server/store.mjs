@@ -1,3 +1,4 @@
+import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
@@ -1258,7 +1259,10 @@ const INTEGRITY_PARITY_ARCHIVED = new RegExp(
 const INTEGRITY_PARITY_MISSING = new RegExp(
   `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): stored message body missing$`);
 const INTEGRITY_PARITY_RECORD = new RegExp(
-  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}) differs$`);
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}(?::channel)?) differs(?: \\(([a-z_, ]+)\\))?$`);
+const INTEGRITY_PARITY_FIELDS = new Set(['projection_message', 'record_json', 'reducer_extras_json', 'seq',
+  'author_id', 'body', 'channel_id', 'thread_root_id', 'reply_to_id', 'to_member_id', 'work_item_id',
+  'created_at', 'edited_at', 'deleted_at', 'pinned']);
 const INTEGRITY_BACKFILL_STOP = new RegExp(
   `^messages backfill stopped at (\\d+) before room (${INTEGRITY_MESSAGE_ID}) reached sequence (\\d+)$`);
 function allowlistedIntegrityMessage(step, error) {
@@ -1271,7 +1275,11 @@ function allowlistedIntegrityMessage(step, error) {
   const missing = INTEGRITY_PARITY_MISSING.exec(text);
   if (missing) return `messages parity failed for ${missing[1]}: stored message body missing`;
   const record = INTEGRITY_PARITY_RECORD.exec(text);
-  if (record) return `messages parity failed for ${record[1]}: current record ${record[2]} differs`;
+  if (record) {
+    const fields = record[3]?.split(', ') ?? [];
+    if (fields.length <= INTEGRITY_PARITY_FIELDS.size && fields.every(field => INTEGRITY_PARITY_FIELDS.has(field)))
+      return `messages parity failed for ${record[1]}: current record ${record[2]} differs${fields.length ? ` (${fields.join(', ')})` : ''}`;
+  }
   if (/^messages parity failed for /.test(text)) return "messages parity failed: stored messages disagree with the projection";
   const backfill = INTEGRITY_BACKFILL_STOP.exec(text);
   if (backfill) return `messages backfill stopped at ${backfill[1]} before room ${backfill[2]} reached sequence ${backfill[3]}`;
@@ -1309,6 +1317,13 @@ const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 // SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
 // They must invalidate too now that metadata-only commits keep their cache.
 const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
+// Exact controls used by nodeStorage do not change entity contents. Keep
+// rollback and every other PRAGMA conservative; never exempt SQL prefixes.
+const ENTITY_CACHE_READ_CONTROLS = new Set([
+  "BEGIN", "BEGIN IMMEDIATE", "COMMIT", "SAVEPOINT room_isolated_write", "RELEASE room_isolated_write",
+  "PRAGMA query_only", "PRAGMA query_only=ON", "PRAGMA query_only=0", "PRAGMA query_only=1"
+]);
+const mayMutateMessageEntities = sql => !ENTITY_CACHE_READ_CONTROLS.has(sql) && isWriteSql(sql);
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -1359,10 +1374,10 @@ class ProjectionCache {
     this.entries.set(roomId, entry);
     return entry.value;
   }
-  insert(roomId, sequence, value, weight) {
+  insert(roomId, sequence, value, weight, messageEntities = false) {
     const prior = this.entries.get(roomId);
     if (prior) { this.entries.delete(roomId); this.bytes -= prior.weight; }
-    this.entries.set(roomId, { sequence, value, weight });
+    this.entries.set(roomId, { sequence, value, weight, messageEntities });
     this.bytes += weight;
     while (this.entries.size > PROJECTION_CACHE_MAX_ROOMS || (this.bytes > PROJECTION_CACHE_MAX_BYTES && this.entries.size > 1)) {
       const oldest = this.entries.keys().next().value;
@@ -3415,12 +3430,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       else pending.delete(roomId);
     }
   }
+  _dropMessageEntityCache() {
+    for (const [roomId, entry] of this._projectionCache?.entries ?? []) {
+      if (entry.messageEntities) this._projectionCache.delete(roomId);
+    }
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      for (const [roomId, entry] of pending) if (entry.messageEntities) pending.delete(roomId);
+    }
+  }
   _queueProjectionCache(roomId, sequence, state, projection) {
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+    pending.set(roomId, { messageEntities: this.messageEntityProjection, sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3437,6 +3460,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      if (mayMutateMessageEntities(sql)) {
+        // Any mutation can change entities through a trigger or maintenance.
+        // Conservative invalidation applies only to entity-dependent caches.
+        const invalidateEntities = () => this._dropMessageEntityCache();
+        for (const method of ["run", "get", "all"]) {
+          if (typeof stmt[method] !== "function") continue;
+          const execute = stmt[method].bind(stmt);
+          stmt[method] = (...args) => {
+            invalidateEntities();
+            try { return execute(...args); } finally { invalidateEntities(); }
+          };
+        }
+        if (typeof stmt.iterate === "function") {
+          const iterate = stmt.iterate.bind(stmt);
+          stmt.iterate = function* (...args) {
+            invalidateEntities();
+            try { yield* iterate(...args); } finally { invalidateEntities(); }
+          };
+        }
+      }
       const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
       if (!roomsWrite && !eventAppend) return stmt;
       const run = stmt.run.bind(stmt);
@@ -3457,7 +3500,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof this.db.exec === "function") {
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
-        const result = exec(sql);
+        const entityWrite = typeof sql === "string" && mayMutateMessageEntities(sql);
+        if (entityWrite) this._dropMessageEntityCache();
+        let result;
+        try { result = exec(sql); }
+        finally { if (entityWrite) this._dropMessageEntityCache(); }
         if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
@@ -3528,7 +3575,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
         const cache = this._projectionCache ??= new ProjectionCache();
-        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight, entry.messageEntities);
       }
       // Publish committed appends only after the cache promotion above, so
       // streams woken by the flush observe the post-commit projection state.
@@ -3588,17 +3635,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return hit;
       }
     }
-    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
-    cache.insert(roomId, meta.sequence, value, weight);
+    const { value, weight, messageEntities } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
+    cache.insert(roomId, meta.sequence, value, weight, messageEntities);
     return value;
   }
   _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
+    const raw = JSON.parse(row.projection);
+    const messageEntities = raw.messages?.some(message => message?._entity === 1) ?? false;
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, raw, { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    return { value: Object.freeze({ sequence, state }),
+    return { value: Object.freeze({ sequence, state }), messageEntities,
       weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
@@ -5833,16 +5882,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          ORDER BY sequence DESC LIMIT ?`);
       let dmThrough = Number.MAX_SAFE_INTEGER, dmScannedAfter = after;
       // Keep newest-first delivery, but refill past tombstones using descending
-      // bounds. Current records cover both retained and archived messages.
+      // bounds. Keep the healthy first page small; after tombstones require a
+      // refill, batch event and canonical-record reads to avoid one SQL trip per
+      // deleted message. Total history scanned is still not capped here.
       while (directMessages.length < limit) {
-        const want = limit - directMessages.length;
+        const want = Math.min(200, Math.max(limit - directMessages.length, dmThrough === Number.MAX_SAFE_INTEGER ? 1 : 64));
         const batch = dmStatement.all(roomId, messageAfter, dmThrough, T.MESSAGE_POSTED, memberId, want);
         if (!batch.length) break;
-        for (const row of batch) {
-          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
+        const decoded = batch.map(row => {
           const parsed = JSON.parse(row.body);
-          const messageId = parsed.data.messageId ?? parsed.id;
-          const current = currentMessages.get(messageId);
+          return { row, parsed, messageId: parsed.data.messageId ?? parsed.id };
+        });
+        const records = currentMessages.getMany(decoded.map(item => item.messageId));
+        for (const { row, parsed, messageId } of decoded) {
+          if (directMessages.length === limit) break;
+          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
+          const current = records.get(messageId);
           if (current?.deletedAt) continue;
           directMessages.push({
             sequence: row.sequence,
@@ -6406,7 +6461,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // transaction rewrite the log and advance the room sequence.
         if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
           const redacted = commitMessageRedaction(this.db, {
-            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest,
+            retainedMessageIds: messageWrite.retainedMessageIds
           });
           state = redacted.state;
         }

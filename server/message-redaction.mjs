@@ -58,7 +58,9 @@ export function readRedactionLog(db, roomId) {
 
 // writeProjection: false skips the rooms-row projection write. Only for a
 // caller that writes or rebuilds the projection itself after its last call.
-export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false, log = null, writeProjection = true }) {
+// retainedMessageIds is an ordinary-delete allowlist from its pre-command
+// carrier. Bulk account deletion deliberately uses the empty default.
+export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false, log = null, writeProjection = true, retainedMessageIds = [] }) {
   if (typeof roomId !== "string" || typeof messageId !== "string" || !messageId) {
     return { state, sequence: null, rewritten: 0 };
   }
@@ -174,7 +176,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const stored = compact(next);
   if (!isRoomArchived(state)) {
-    if (writeProjection) db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest }), roomId);
+    if (writeProjection) db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest, retainedMessageIds }), roomId);
     else db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, roomId);
   }
   return { state: stored, sequence, rewritten };
