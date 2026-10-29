@@ -76,6 +76,11 @@ function readOnlySql(text) {
   return /^WITH\b/i.test(body) && !WRITE_WORD.test(body);
 }
 const writeSqlCache = new Map();
+// Process-only invalidation identity, shared by wrappers of one storage object.
+// Unlike writeStatements, attempted mutations count even when they fail or DDL
+// reports zero rows. It is not a certificate: raw storage access is outside this
+// boundary, and consumers must still respect snapshots and transaction commits.
+const mutationTokens = new WeakMap();
 export function isWriteSql(sql) {
   let hit = writeSqlCache.get(sql);
   if (hit === undefined) {
@@ -88,10 +93,24 @@ export function isWriteSql(sql) {
 export class DurableDatabase {
   constructor(storage, { observeStatement } = {}) {
     this.storage = storage; this.isTransaction = false; this.rowsRead = 0;
+    if (!mutationTokens.has(storage)) mutationTokens.set(storage, Object.freeze({}));
     // Write statements that changed rows. ProjectRoom.fetch compares it before
     // and after a request to skip re-arming the job alarm when nothing changed.
     this.writeStatements = 0;
     this.observeStatement = observeStatement;
+  }
+  get mutationToken() { return mutationTokens.get(this.storage); }
+  // The caller must already hold a read snapshot. Read these internal counters
+  // directly so our conservative PRAGMA classification does not invalidate the
+  // token merely by observing it. This does not authorize raw external writes.
+  readValidationToken() {
+    return { mutation: this.mutationToken,
+      total: this.storage.sql.exec('SELECT total_changes() AS n').one().n,
+      data: this.storage.sql.exec('PRAGMA data_version').one().data_version };
+  }
+
+  #beforeStatement(sql) {
+    if (isWriteSql(sql)) mutationTokens.set(this.storage, Object.freeze({}));
   }
   // Observers receive only counters, never SQL, bindings or errors. Capture
   // ownership at execution, not prepare(): statements are reused across requests.
@@ -122,6 +141,7 @@ export class DurableDatabase {
     };
   }
   #all(sql, args) {
+    this.#beforeStatement(sql);
     const finish = this.observeStatement ? this.#observation() : null;
     let cursor, failed = false;
     try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
@@ -135,6 +155,7 @@ export class DurableDatabase {
     const db = this;
     function* iterate(...args) {
       // Generator body starts on first next(), including observation capture.
+      db.#beforeStatement(sql);
       if (!db.observeStatement) {
         let cursor;
         try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
