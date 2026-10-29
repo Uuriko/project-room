@@ -44,6 +44,11 @@ function liveCodes() {
   const svcRe = /new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
   const apRe = /new AgentPluginError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
   const adhocRe = /error:\s*\{\s*code:\s*"([a-z][a-z0-9_]*)"/g;
+  // #3658: status-first ad-hoc objects — `{ error: { status: 422, code: … } }`
+  // (server/proof-page.mjs, server/public-read-model.mjs). The code-first
+  // extractor above cannot see this shape, which is how invalid_proof_query
+  // shipped with no catalog row and no guard failure.
+  const statusFirstRe = /error:\s*\{\s*status:\s*\d{3}\s*,\s*code:\s*"([a-z][a-z0-9_]*)"/g;
   for (const f of walk(SERVER)) {
     const t = readFileSync(f, "utf8");
     const addGroups = (re, idxs) => {
@@ -54,6 +59,7 @@ function liveCodes() {
     addGroups(svcRe, [2]);
     addGroups(apRe, [2]);
     addGroups(adhocRe, [1]);
+    addGroups(statusFirstRe, [1]);
   }
   return codes;
 }
@@ -113,6 +119,17 @@ test("every server-emitted code is in the catalog", () => {
   const rows = catalogRows();
   const missing = [...live].filter(c => !rows.has(c));
   assert.deepEqual(missing, [], `codes emitted by the server but missing from the catalog: ${missing.join(", ")}`);
+});
+
+test("status-first emit shapes are extracted (#3658)", () => {
+  // Regression pin: these codes are emitted ONLY as status-first objects
+  // (`{ error: { status: 422, code: … } }`) in server/proof-page.mjs and
+  // server/public-read-model.mjs. A code-first-only extractor misses all
+  // three, so they must be asserted directly against the extraction.
+  const live = liveCodes();
+  for (const code of ["invalid_proof_query", "invalid_receipt_query", "invalid_cursor"]) {
+    assert.ok(live.has(code), `status-first code '${code}' was not extracted from server/`);
+  }
 });
 
 test("ServiceError codes constructed before throwing are extracted (#2897)", () => {
@@ -189,7 +206,13 @@ test("no JSON-RPC numeric code section is empty", () => {
 //     Both resolved (fix landed via PR #3026; #3044 closed as superseded),
 //     and the code is registry-owned now (E4-REG) — the exclusion is
 //     retired so the guard covers it like every other code.
-const AX_COVERAGE_EXCLUDED = new Set([]);
+//   - room_event_budget_low is excluded for the same structural reason
+//     file_lease_conflict is checked explicitly below: its emit site
+//     (server/work-claim-integrity.mjs assertBoardEventBudget) builds the
+//     response body itself, carrying its own hint/next, so it never flows
+//     through agentErrorAx. Its catalog row is pinned against the body's
+//     hint by the #3658 test at the bottom of this file.
+const AX_COVERAGE_EXCLUDED = new Set(["room_event_budget_low"]);
 
 function catalogAxRows() {
   const rows = [];
@@ -363,6 +386,98 @@ test("catalog rows for registry-migrated codes match the registry declaration (E
   }
 });
 
+// ---------------------------------------------------------------------------
+// #3658 catalog self-validation: the catalog must be well-formed on its own
+// terms, not only complete. At the #3658 census, 127 rows carried a Meaning
+// cell containing pasted emit-site source (the generator's extractor broke
+// on multi-line / helper-mediated emit sites) and 3 rows carried HTTP `0`
+// (body-builder sites whose status lives at the return site). The 2026-10-24
+// regeneration re-derived every such row from live source; these tests keep
+// the whole defect class from returning. There is no grandfather list: a
+// fragment or status-0 row fails, full stop.
+// ---------------------------------------------------------------------------
+
+function catalogFullRows() {
+  const rows = [];
+  for (const line of catalogSection().split("\n")) {
+    const m = /^\| `([a-z][a-z0-9_]*)` \|/.exec(line);
+    if (!m) continue;
+    const cells = line.split(" | ");
+    rows.push({
+      code: m[1],
+      status: cells[1] ? cells[1].trim() : "",
+      meaning: cells[2] ? cells[2].trim() : "",
+      recovery: cells[4] ? cells[4].replace(/\|\s*$/, "").trim() : "",
+    });
+  }
+  return rows;
+}
+
+// Shapes that only occur when emit-site source was pasted where a message
+// belongs. Plain messages — including ${placeholder} interpolations from
+// the server's own message templates — match none of these.
+const SOURCE_FRAGMENT_PATTERNS = [
+  /\bfail\s*\(/,
+  /\breject\s*\(/,
+  /new ServiceError\(/,
+  /new AgentPluginError\(/,
+  /\bthrow new\b/,
+  /\b(?:const|let|var)\s+[\w$]+\s*=/,
+  /=>/,
+  /\bexport\s+(?:function|const|default)\b/,
+  /\bfunction\s+[\w$]+\s*\(/,
+  /;\s*\}/,
+  /;;/,
+  /error:\s*\{\s*code:/,
+  /\bthis\.[\w$]+/,
+  /\.mjs\b/,
+  /^[A-Z][\w$]*Error\(\d+\)$/,
+  /\bcatch\s*\(/,
+];
+
+test("catalog self-validation: HTTP cells are real statuses or internal (#3658)", () => {
+  const rows = catalogFullRows();
+  assert.ok(rows.length > 800, `expected the full catalogued row set, got ${rows.length} rows`);
+  const isRealStatus = s => s === "internal" || (/^\d{3}$/.test(s) && Number(s) >= 100 && Number(s) <= 599);
+  const invalid = rows.filter(r => !isRealStatus(r.status)).map(r => `${r.code} (HTTP cell: ${JSON.stringify(r.status)})`);
+  assert.deepEqual(invalid, [], `catalog rows whose HTTP cell is not a real status or 'internal': ${invalid.join(", ")}`);
+});
+
+test("catalog self-validation: Meaning cells carry no source fragments (#3658)", () => {
+  const rows = catalogFullRows();
+  const bad = rows.filter(r => SOURCE_FRAGMENT_PATTERNS.some(re => re.test(r.meaning))).map(r => `${r.code}|${r.status}`);
+  assert.deepEqual(bad, [], `catalog Meaning cells containing pasted source fragments (write the message the server sends, not its emit-site code): ${bad.join(", ")}`);
+});
+
+test("catalog 'no mapped recovery' markers match live agentErrorAx (#3658)", () => {
+  // The census found 196 rows claiming no mapped recovery while live
+  // agentErrorAx returned a named or family recovery for the code at its
+  // real status+message (bad_cursor was the verified example). Re-derive:
+  // no row may carry the marker when AX maps the code. Rows whose emit body
+  // carries its own hint/next (AX_COVERAGE_EXCLUDED) are pinned separately.
+  const stale = [];
+  for (const { code, status, meaning, recovery } of catalogFullRows()) {
+    if (!/no mapped recovery/.test(recovery)) continue;
+    if (!/^\d{3}$/.test(status) || AX_COVERAGE_EXCLUDED.has(code)) continue;
+    const ax = agentErrorAx({ httpStatus: Number(status), code, message: meaning });
+    if (!ax.hint.startsWith("Unknown error")) stale.push(`${code}|${status}`);
+  }
+  assert.deepEqual(stale, [], `catalog rows claiming 'no mapped recovery' that live agentErrorAx actually maps: ${stale.join(", ")}`);
+});
+
+test("room_event_budget_low: catalog row matches the emit body's own hint (#3658)", () => {
+  // The emit body (server/work-claim-integrity.mjs) carries hint/next
+  // itself; the catalog Recovery must be that hint, and the HTTP cell the
+  // status the builder assigns (409), not the 0 the old generator wrote.
+  const row = catalogFullRows().find(r => r.code === "room_event_budget_low");
+  assert.ok(row, "room_event_budget_low must be catalogued");
+  assert.equal(row.status, "409");
+  assert.equal(row.recovery, "Ask the room owner to finish or archive work here, or continue in a new room.");
+  const integrity = readFileSync(join(SERVER, "work-claim-integrity.mjs"), "utf8");
+  assert.match(integrity, /error\.status = 409/, "emit site must assign status 409");
+  assert.match(integrity, /Ask the room owner to finish or archive work here, or continue in a new room\./, "emit body hint must match the catalogued recovery");
+});
+
 test("flagship #3055 codes name their catalogued recovery, not 'no known recovery'", () => {
   const cases = [
     // [code, httpStatus, message, hint must match]
@@ -375,6 +490,9 @@ test("flagship #3055 codes name their catalogued recovery, not 'no known recover
     ["cursor_stale", 409, "The list changed; start again without a cursor", /without a cursor/],
     ["ndjson_required", 415, "Use application/x-ndjson", /NDJSON/],
     ["wake_dead", 409, "This wake is dead; requeue it explicitly.", /[Rr]equeue/],
+    // #3658: the census's verified wrong marker — the catalog claimed no
+    // mapped recovery while AX returns the named cursor recovery.
+    ["bad_cursor", 400, "cursor must be the opaque nextCursor from a prior receipts response", /nextCursor/],
   ];
   for (const [code, httpStatus, message, recovery] of cases) {
     const ax = agentErrorAx({ httpStatus, code, message });
