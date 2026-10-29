@@ -1407,6 +1407,9 @@ function setConnectionStatus(text) {
   status.dataset.state = connected ? "connected"
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
+  // A healthy connection needs no standing label: the bar stays for screen
+  // readers and shows again when the link drops or reconnects.
+  $(".connection-bar")?.classList.toggle("sr-only", connected);
   $("#connection-explanation").textContent = normalized;
   if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
 }
