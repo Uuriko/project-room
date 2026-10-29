@@ -49,7 +49,11 @@ export function checksGreen(runs, required = REQUIRED_CHECKS) {
 // cleanly (ignoring generated files) on top of everything already in it.
 // tryMerge(base, pr) -> { ok, next, conflicts } is injected so this is testable.
 export function planBatches(candidates, { batchSize = 10, tryMerge, start }) {
-  const batches = [], skipped = [];
+  // A zero, negative, fractional or NaN size would either report every PR as
+  // conflicting (size 0) or silently build one unbounded batch (NaN).
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new RangeError(`batch size must be an integer from 1 to 100, got ${batchSize}`);
+  if (typeof tryMerge !== "function") throw new TypeError("tryMerge must be a function");
+  const batches = [], skipped = [], tips = [];
   let pending = [...candidates];
   let base = start;
   while (pending.length) {
@@ -63,10 +67,11 @@ export function planBatches(candidates, { batchSize = 10, tryMerge, start }) {
     }
     if (!batch.length) { skipped.push(...rest); break; }
     batches.push(batch);
+    tips.push(tip);
     base = tip;
     pending = rest;
   }
-  return { batches, skipped };
+  return { batches, skipped, tips };
 }
 
 function sh(cmd, args, opts = {}) {
@@ -78,17 +83,23 @@ function tryGit(args, opts = {}) {
 }
 function ghJson(path) { return JSON.parse(sh("gh", ["api", path])); }
 
-function args(argv) {
+export function parseArgs(argv) {
   const out = { batch: 10, limit: 400, label: "ready-to-land", json: null, repo: "Uuriko/project-room" };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].replace(/^--/, "");
-    if (key in out) out[key] = ["batch", "limit"].includes(key) ? Number(argv[++i]) : argv[++i];
+    if (!(key in out) || !argv[i].startsWith("--")) throw new Error(`unknown option ${argv[i]}`);
+    const value = argv[++i];
+    if (value === undefined) throw new Error(`--${key} needs a value`);
+    out[key] = ["batch", "limit"].includes(key) ? Number(value) : value;
   }
+  if (!Number.isInteger(out.batch) || out.batch < 1 || out.batch > 100) throw new Error("--batch must be an integer from 1 to 100");
+  if (!Number.isInteger(out.limit) || out.limit < 1) throw new Error("--limit must be a positive integer");
+  if (!/^[\w.-]+\/[\w.-]+$/.test(out.repo)) throw new Error("--repo must look like owner/name");
   return out;
 }
 
 async function main() {
-  const opt = args(process.argv.slice(2));
+  const opt = parseArgs(process.argv.slice(2));
   sh("git", ["fetch", "-q", "origin", "main"]);
   const main = sh("git", ["rev-parse", "origin/main"]);
   const prs = [];
@@ -139,6 +150,16 @@ async function main() {
     return { ok: true, next, regenerate: conflicts };
   };
   const plan = planBatches(report.candidates, { batchSize: opt.batch, tryMerge, start: main });
+  // Handoff: each batch names its exact base, ordered PR heads, and the tree
+  // the simulation produced. Trees are content-addressed, so a qualifier who
+  // composes the same heads in the same order on another machine can check
+  // it got the same tree before testing (generated files differ until rebuilt).
+  let base = main;
+  report.handoff = plan.batches.map((batch, i) => {
+    const entry = { batch: i + 1, base, heads: batch.map(pr => ({ number: pr.number, head: pr.head })), regenerate: [...new Set(batch.flatMap(pr => pr.regenerate))], simulatedTree: sh("git", ["rev-parse", `${plan.tips[i]}^{tree}`]) };
+    base = `batch ${i + 1}`;
+    return entry;
+  });
   report.batches = plan.batches.map(batch => batch.map(({ number, title, head, regenerate }) => ({ number, title, head: head.slice(0, 8), regenerate })));
   report.blocked = plan.skipped.map(({ number, conflicts }) => ({ number, conflicts }));
   if (opt.json) writeFileSync(opt.json, JSON.stringify(report, null, 2));

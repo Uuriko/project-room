@@ -1,7 +1,7 @@
 // Read-only merge-train planner: check selection and greedy batching.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checksGreen, planBatches, isGenerated } from "../scripts/train-plan.mjs";
+import { checksGreen, planBatches, isGenerated, parseArgs } from "../scripts/train-plan.mjs";
 
 test("required checks must each be green at their latest run", () => {
   const runs = [
@@ -39,4 +39,31 @@ test("batches keep order, cap size, and defer PRs that conflict with the batch",
   const { batches, skipped } = planBatches([1, 2, 3, 4, 5].map(number => ({ number })), { batchSize: 3, tryMerge, start: [] });
   assert.deepEqual(batches.map(batch => batch.map(pr => pr.number)), [[1, 2, 4], [5]]);
   assert.deepEqual(skipped.map(pr => pr.number), [3], "#3 conflicts with #1 on main and stays out");
+});
+
+test("batch size must be an integer from 1 to 100", () => {
+  const tryMerge = () => ({ ok: true, next: [] });
+  for (const batchSize of [0, -1, 1.5, Number.NaN, 101, "10"]) {
+    assert.throws(() => planBatches([{ number: 1 }], { batchSize, tryMerge, start: [] }), RangeError, String(batchSize));
+  }
+  assert.deepEqual(planBatches([{ number: 1 }], { batchSize: 1, tryMerge, start: [] }).batches.length, 1);
+  assert.throws(() => planBatches([], { batchSize: 1, start: [] }), TypeError);
+});
+
+test("boundaries: no candidates, everything conflicting, and a batch of exactly the size", () => {
+  const ok = (tip, pr) => ({ ok: true, next: [...tip, pr.number] });
+  assert.deepEqual(planBatches([], { batchSize: 3, tryMerge: ok, start: [] }), { batches: [], skipped: [], tips: [] });
+  const none = planBatches([{ number: 1 }, { number: 2 }], { batchSize: 3, tryMerge: () => ({ ok: false, conflicts: ["x"] }), start: [] });
+  assert.deepEqual([none.batches.length, none.skipped.map(pr => pr.number)], [0, [1, 2]]);
+  const exact = planBatches([1, 2, 3].map(number => ({ number })), { batchSize: 3, tryMerge: ok, start: [] });
+  assert.deepEqual(exact.batches.map(batch => batch.length), [3]);
+  assert.deepEqual(exact.tips, [[1, 2, 3]], "each batch reports the tip it ends on");
+});
+
+test("command-line options are validated", () => {
+  assert.deepEqual(parseArgs([]).batch, 10);
+  assert.equal(parseArgs(["--batch", "5", "--limit", "50"]).batch, 5);
+  for (const bad of [["--batch", "0"], ["--batch", "x"], ["--limit", "-1"], ["--batch"], ["--nope", "1"], ["batch", "5"], ["--repo", "not a repo"]]) {
+    assert.throws(() => parseArgs(bad), Error, bad.join(" "));
+  }
 });
