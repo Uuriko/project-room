@@ -63,6 +63,16 @@ identify enough detail to justify a repair; obtain bounded operator diagnostics
 before changing data or weakening checks. The old statement below about current
 claim failure is superseded by this checkpoint; integrity is still unresolved.
 
+The frozen candidate runtime package now verifies 632 source files and 134 assets,
+schema 42, manifest `7fc27afde765301e78a9f5bd992c78c6cd06eddae368f5c820a2f56e87dd4f9f`.
+The 633-file archive passes local publication preflight with the correct basename;
+archive SHA-256 `230cec3b6a68ab61453a3a5c1f766dd8ad1a3409bf69c3778fb8f71b19d421f7`.
+It has not been published. Additional relay advisory assessment found SDK test
+paths only: Zod is reached by tests with local fixture responses; Express/body-parser
+and express-rate-limit/ip-address are not imported by relay runtime/client paths.
+Both Worker bundles exclude these packages. No live Worker exposure was demonstrated;
+a separate dependency cleanup remains worthwhile.
+
 ### Next release preparation — 16:55 UTC
 
 Preparation only: no next release merge or deployment has started. The peer
