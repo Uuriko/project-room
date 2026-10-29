@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { listOwedReplies } from "../server/updates.mjs";
@@ -74,6 +75,13 @@ test('reactivation hides old message-derived attention and work conversation poi
   send(T.WORK_PROPOSED, { workItemId: 'linked-work', title: 'Visible work', definitionOfDone: 'Done', accountableMemberId: 'agent', mode: 'read' });
   const post = (id, data = {}) => send(T.MESSAGE_POSTED, { messageId: id, body: `SECRET-${id}`, ...data });
   post('old-request', { toMemberId: 'agent', requestKind: 'reply', workItemId: 'linked-work' });
+  const claim = (key, id) => {
+    const request = store.room('commons').state.replyRequests[id];
+    store.requestRuns.apply(key, 'commons', { requestMessageId: id, attemptId: `attempt-${id}`, action: 'claim',
+      expectedRequestRevision: request.revision, contextEventId: request.contextEventId });
+  };
+  claim(agent.memberKey, 'old-request');
+  post('old-unclaimed', { toMemberId: 'agent', requestKind: 'reply' });
   post('old-dm', { toMemberId: 'agent' });
   post('old-mention', { body: 'SECRET-old-mention @Asked Agent please look' });
   for (const active of [false, true]) {
@@ -82,9 +90,20 @@ test('reactivation hides old message-derived attention and work conversation poi
   }
   const key = store.issueAccessKey('commons', 'agent');
   post('fresh-request', { body: 'Current question', toMemberId: 'agent', requestKind: 'reply', workItemId: 'linked-work' });
+  claim(key, 'fresh-request');
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/request-runs`, {
+    headers: { Authorization: `Bearer ${key}` }
+  });
+  assert.equal(response.status, 200);
   const { listRoomUpdates } = await import('../server/updates.mjs');
   const { roomAttention, collectNeedsMe } = await import('../server/needs-me.mjs');
   const observations = {
+    httpRuns: await response.json(),
+    runs: store.requestRuns.list(key, 'commons'),
+    inbox: store.agentInbox(key, 'commons'),
     updates: listRoomUpdates(store, key, 'commons'),
     owed: listOwedReplies(store, agent.secret),
     attention: roomAttention(store, 'commons', 'agent', store.authenticate(key, 'commons').identityId, 0),
@@ -92,13 +111,22 @@ test('reactivation hides old message-derived attention and work conversation poi
     work: store.workContext(key, 'commons', 'linked-work')
   };
   for (const [name, value] of Object.entries(observations)) await t.test(name, () => {
-    assert.doesNotMatch(JSON.stringify(value), /SECRET-old-|old-request|old-dm|old-mention/);
+    assert.doesNotMatch(JSON.stringify(value), /SECRET-old-|old-request|old-unclaimed|old-dm|old-mention/);
     assert.match(JSON.stringify(value), /fresh-request/);
   });
+  for (const [id, action] of [['old-unclaimed', 'claim'], ['old-request', 'working']]) {
+    const request = store.room('commons').state.replyRequests[id];
+    assert.throws(() => store.requestRuns.apply(key, 'commons', { requestMessageId: id, attemptId: `attempt-${id}`, action,
+      expectedRequestRevision: request.revision, contextEventId: request.contextEventId }), e => e.code === 'request_run_changed');
+  }
+  assert.equal(store.db.prepare('SELECT count(*) AS n FROM request_runs WHERE request_id=?').get('old-unclaimed').n, 0);
+  assert.equal(store.requestRuns.apply(key, 'commons', { requestMessageId: 'old-request', attemptId: 'attempt-old-request',
+    action: 'needs_attention' }).state, 'needs_attention', 'the existing host may reconcile without restarting hidden work');
   send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'all' });
   for (const value of [listRoomUpdates(store, key, 'commons'), listOwedReplies(store, agent.secret),
     roomAttention(store, 'commons', 'agent', store.authenticate(key, 'commons').identityId, 0),
-    collectNeedsMe(store, agent.secret), store.workContext(key, 'commons', 'linked-work')]) {
+    collectNeedsMe(store, agent.secret), store.workContext(key, 'commons', 'linked-work'), store.agentInbox(key, 'commons'),
+    store.requestRuns.list(key, 'commons')]) {
     assert.match(JSON.stringify(value), /old-request/);
   }
 });
@@ -116,6 +144,11 @@ test('hidden mention overflow cannot stall visible attention pagination', async 
   }
   for (let i = 0; i < 12; i++) send(T.MESSAGE_POSTED, { messageId: `fresh-${i}`, body: `@Asked Agent current ${i}` });
   const { collectNeedsMe } = await import('../server/needs-me.mjs');
+  const key = store.issueAccessKey('commons', 'agent');
+  const standing = store.agentInbox(key, 'commons', { after: 999999, limit: 20 });
+  assert.deepEqual(standing.directMentions, []);
+  assert.doesNotMatch(JSON.stringify(standing), /hidden-|SECRET-old-/);
+  assert.equal(standing.attention.pendingMentions.length, 12, 'visible unanswered mentions survive an advanced delivery cursor');
   const seen = new Set(); let since = 0, page;
   for (let i = 0; i < 6; i++) {
     page = collectNeedsMe(store, agent.secret, { since });
