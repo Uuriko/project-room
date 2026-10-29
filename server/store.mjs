@@ -1,3 +1,4 @@
+import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
@@ -1309,6 +1310,13 @@ const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 // SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
 // They must invalidate too now that metadata-only commits keep their cache.
 const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
+// Exact controls used by nodeStorage do not change entity contents. Keep
+// rollback and every other PRAGMA conservative; never exempt SQL prefixes.
+const ENTITY_CACHE_READ_CONTROLS = new Set([
+  "BEGIN", "BEGIN IMMEDIATE", "COMMIT", "SAVEPOINT room_isolated_write", "RELEASE room_isolated_write",
+  "PRAGMA query_only", "PRAGMA query_only=ON", "PRAGMA query_only=0", "PRAGMA query_only=1"
+]);
+const mayMutateMessageEntities = sql => !ENTITY_CACHE_READ_CONTROLS.has(sql) && isWriteSql(sql);
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -1359,10 +1367,10 @@ class ProjectionCache {
     this.entries.set(roomId, entry);
     return entry.value;
   }
-  insert(roomId, sequence, value, weight) {
+  insert(roomId, sequence, value, weight, messageEntities = false) {
     const prior = this.entries.get(roomId);
     if (prior) { this.entries.delete(roomId); this.bytes -= prior.weight; }
-    this.entries.set(roomId, { sequence, value, weight });
+    this.entries.set(roomId, { sequence, value, weight, messageEntities });
     this.bytes += weight;
     while (this.entries.size > PROJECTION_CACHE_MAX_ROOMS || (this.bytes > PROJECTION_CACHE_MAX_BYTES && this.entries.size > 1)) {
       const oldest = this.entries.keys().next().value;
@@ -3415,12 +3423,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       else pending.delete(roomId);
     }
   }
+  _dropMessageEntityCache() {
+    for (const [roomId, entry] of this._projectionCache?.entries ?? []) {
+      if (entry.messageEntities) this._projectionCache.delete(roomId);
+    }
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      for (const [roomId, entry] of pending) if (entry.messageEntities) pending.delete(roomId);
+    }
+  }
   _queueProjectionCache(roomId, sequence, state, projection) {
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+    pending.set(roomId, { messageEntities: this.messageEntityProjection, sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3437,6 +3453,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      if (mayMutateMessageEntities(sql)) {
+        // Any mutation can change entities through a trigger or maintenance.
+        // Conservative invalidation applies only to entity-dependent caches.
+        const invalidateEntities = () => this._dropMessageEntityCache();
+        for (const method of ["run", "get", "all"]) {
+          if (typeof stmt[method] !== "function") continue;
+          const execute = stmt[method].bind(stmt);
+          stmt[method] = (...args) => {
+            invalidateEntities();
+            try { return execute(...args); } finally { invalidateEntities(); }
+          };
+        }
+        if (typeof stmt.iterate === "function") {
+          const iterate = stmt.iterate.bind(stmt);
+          stmt.iterate = function* (...args) {
+            invalidateEntities();
+            try { yield* iterate(...args); } finally { invalidateEntities(); }
+          };
+        }
+      }
       const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
       if (!roomsWrite && !eventAppend) return stmt;
       const run = stmt.run.bind(stmt);
@@ -3457,7 +3493,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof this.db.exec === "function") {
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
-        const result = exec(sql);
+        const entityWrite = typeof sql === "string" && mayMutateMessageEntities(sql);
+        if (entityWrite) this._dropMessageEntityCache();
+        let result;
+        try { result = exec(sql); }
+        finally { if (entityWrite) this._dropMessageEntityCache(); }
         if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
@@ -3528,7 +3568,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
         const cache = this._projectionCache ??= new ProjectionCache();
-        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight, entry.messageEntities);
       }
       // Publish committed appends only after the cache promotion above, so
       // streams woken by the flush observe the post-commit projection state.
@@ -3588,17 +3628,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return hit;
       }
     }
-    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
-    cache.insert(roomId, meta.sequence, value, weight);
+    const { value, weight, messageEntities } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
+    cache.insert(roomId, meta.sequence, value, weight, messageEntities);
     return value;
   }
   _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
+    const raw = JSON.parse(row.projection);
+    const messageEntities = raw.messages?.some(message => message?._entity === 1) ?? false;
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, raw, { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    return { value: Object.freeze({ sequence, state }),
+    return { value: Object.freeze({ sequence, state }), messageEntities,
       weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
