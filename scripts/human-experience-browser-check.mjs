@@ -718,8 +718,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
     if (width === 390) {
       await page.locator('#composer-options > summary').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
       await page.locator('#message-to-select').selectOption('producer');
-      await page.locator('#composer-options > summary').click();
     }
     await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
     await page.locator('#human-advanced').check(); await closeSettings(page);
@@ -1098,4 +1098,50 @@ test('human room admin connects assistant without owner identity or redundant st
   const runs=f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=?').all('commons');
   assert.equal(runs.length,1);
   assert.equal(JSON.parse(runs[0].value).initiatorId,'guest');
+});
+
+
+for (const width of [1280, 390]) {
+  test(`keyboard Review keeps focus on Retry without changing Stop intent (${width}px)`, { timeout: 60000 }, async t => {
+    const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'keyboard-review-run', ask: 'keyboard-review-ask' });
+    await api('producer', { action: 'claim', runId: 'keyboard-review-run', attemptId: 'keyboard-review-host', expectedRevision: 0 });
+    const stop = page.locator('#assistant-face [data-cancel]');
+    await stop.focus(); await page.keyboard.press('Enter');
+    const review = page.getByRole('button', { name: 'Review current request', exact: true });
+    await review.waitFor({ state: 'visible' });
+    await review.focus(); state.frozen = false; await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Retry request', exact: true }).waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'assistant-retry');
+    assert.equal(state.controls.length, 1, 'Review does not send another control');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#assistant-error')?.textContent === '');
+    assert.equal(state.controls.length, 2);
+    assert.equal(state.controls[1].expectedAttemptId, 'keyboard-review-host');
+    assert.equal(state.controls[1].expectedRevision, 1);
+    assert.equal((await read()).status, 'cancel_requested', 'request acknowledged, not proof of native halt');
+  });
+}
+
+
+test('Review completing after keyboard navigation does not steal focus back', { timeout: 60000 }, async t => {
+  const { api, page, state } = await claimRaceFixture(t, 1280, { run: 'focus-away-run', ask: 'focus-away-ask' });
+  await api('producer', { action: 'claim', runId: 'focus-away-run', attemptId: 'focus-away-host', expectedRevision: 0 });
+  await page.locator('#assistant-face [data-cancel]').click();
+  const review = page.getByRole('button', { name: 'Review current request', exact: true });
+  await review.waitFor({ state: 'visible' });
+  const captured = deferredResultResponse(), release = deferredResultResponse();
+  t.after(() => release.resolve()); state.frozen = false;
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch(); captured.resolve(); await release.promise;
+    await route.fulfill({ response });
+  });
+  await review.focus(); await page.keyboard.press('Enter'); await captured.promise;
+  await page.keyboard.press('Tab');
+  const destination = await page.evaluate(() => document.activeElement?.id);
+  assert.ok(destination && destination !== 'assistant-review', 'Tab moved focus to another named control');
+  release.resolve();
+  await page.getByRole('button', { name: 'Retry request', exact: true }).waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), destination);
+  assert.equal(state.controls.length, 1);
 });

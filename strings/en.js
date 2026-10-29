@@ -538,6 +538,9 @@ export default {
   "connection.outageTitle": "Room temporarily unavailable",
   "connection.staleAvailability": "Last known availability · connection interrupted",
   "connection.stalePresenceNote": "Availability is stale while the room reconnects.",
+  "composer.privateTo": "Private message to {name}",
+  "composer.privateMessage": "Private message",
+  "composer.directMessage": "Direct message…",
   "composer.saved": "Message saved. ",
   "composer.savedHistoryPending": "Message saved; history is reconnecting. ",
   "composer.viewSaved": "View message",
@@ -574,5 +577,16 @@ export default {
   "cockpit.rosterReceiptHtml": " · <a href=\"{href}\">last receipt {id}…</a>",
   "cockpit.rosterRowHtml": "<article class=\"cockpit-item\" data-work-state=\"{state}\">\n      <header><strong>{name}</strong> <span>{state}{work}</span></header>\n      <p class=\"form-hint\">{room} · tier {tier} · period cost {cost}{receipt}</p>\n    </article>",
   "cockpit.rosterHtml": "<h4>Roster</h4><p class=\"form-hint\">{summary}</p>{rows}",
-  "room.session_changed_recovery": "Your session changed. Private drafts were cleared. Refresh to reconnect, or sign in again."
+  "room.session_changed_recovery": "Your session changed. Private drafts were cleared. Refresh to reconnect, or sign in again.",
+  "join.nameUnavailable.title": "Name not available",
+  "join.nameUnavailable.reserved.message": "That display name is reserved. Edit the name and try again.",
+  "join.nameUnavailable.reserved.suggested": "That display name is reserved. You could use \"{suggestion}\" instead — change the name to it, or edit it, then try again.",
+  "join.nameUnavailable.duplicate.message": "That display name is already used in this room. Edit the name and try again.",
+  "join.nameUnavailable.duplicate.suggested": "That display name is already used in this room. You could use \"{suggestion}\" instead — change the name to it, or edit it, then try again.",
+  "join.nameUnavailable.confusable.message": "That display name is too easy to confuse with a member already in this room. Edit the name and try again.",
+  "join.nameUnavailable.confusable.suggested": "That display name is too easy to confuse with a member already in this room. You could use \"{suggestion}\" instead — change the name to it, or edit it, then try again.",
+  "join.nameUnavailable.control_characters.message": "That display name contains hidden or control characters. Edit the name and try again.",
+  "join.nameUnavailable.control_characters.suggested": "That display name contains hidden or control characters. You could use \"{suggestion}\" instead — change the name to it, or edit it, then try again.",
+  "join.nameUnavailable.unavailable.message": "That display name isn't available. Edit the name and try again.",
+  "join.nameUnavailable.unavailable.suggested": "That display name isn't available. You could use \"{suggestion}\" instead — change the name to it, or edit it, then try again."
 };

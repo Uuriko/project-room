@@ -37,7 +37,11 @@ function roomWithPeer(t) {
   const peer = store.identities.create("Peer agent");
   const created = rooms.create(owner.secret, { title: "Bounty room", purpose: "Escrow error mapping", displayName: "Owner" });
   const roomId = created.roomId;
-  const invite = store.invites.create(owner.secret, roomId, { profile: "chat", displayName: "Peer agent" }, null);
+  // F-X4-1 fixture repair: this peer claims and submits bounties below.
+  // It previously joined on the "chat" profile (permissions []) — exactly
+  // the seat F-X4-1 proved must be refused bounty claim/submit. A worker
+  // peer joins on "collaborate" so these tests keep testing error mapping.
+  const invite = store.invites.create(owner.secret, roomId, { profile: "collaborate", displayName: "Peer agent" }, null);
   const joined = store.invites.redeem(invite.code, { displayName: "Peer agent", identitySecret: peer.secret });
   const peerMemberId = joined.memberId ?? joined.member?.id;
   assert.ok(peerMemberId, "peer member id missing from redeem response");
@@ -98,11 +102,34 @@ test("bounty_claim on an already-claimed bounty surfaces already_claimed/409, no
   const first = await tool(f.call, f.peer.secret, "bounty_claim", { roomId: f.roomId, bountyId, idempotencyKey: `claim-${randomUUID()}` });
   assert.equal(first.result?.isError, undefined, `first claim failed: ${JSON.stringify(first).slice(0, 200)}`);
   const peer2 = f.store.identities.create("Peer two");
-  const invite = f.store.invites.create(f.owner.secret, f.roomId, { profile: "chat", displayName: "Peer two" }, null);
+  // F-X4-1 fixture repair: peer2 is the second claimant; on "chat" it would
+  // now be refused at the work-permission gate (403) before reaching the
+  // already_claimed state check this test owns. It joins on "collaborate".
+  const invite = f.store.invites.create(f.owner.secret, f.roomId, { profile: "collaborate", displayName: "Peer two" }, null);
   f.store.invites.redeem(invite.code, { displayName: "Peer two", identitySecret: peer2.secret });
   const second = await tool(f.call, peer2.secret, "bounty_claim", { roomId: f.roomId, bountyId, idempotencyKey: `claim2-${randomUUID()}` });
   assert.equal(second.result?.isError, true, "expected an error result");
   const value = structured(second);
   assert.equal(value.status, 409, `expected 409, got ${value.status}: ${JSON.stringify(value).slice(0, 200)}`);
   assert.equal(value.code, "already_claimed", `expected already_claimed, got ${value.code}`);
+});
+
+test("F-X4-1: a chat-profile (zero-permission) member's bounty_claim → 403 work_claims_not_permitted", async t => {
+  const f = roomWithPeer(t);
+  const posted = await tool(f.call, f.owner.secret, "bounty_post", { roomId: f.roomId, title: "T", criteria: "C",
+    amount: 10, deadline: futureIso() });
+  const bountyId = structured(posted).bounty.bountyId;
+  await tool(f.call, f.owner.secret, "bounty_fund", { roomId: f.roomId, bountyId, idempotencyKey: `fund-${randomUUID()}` });
+  const chatPeer = f.store.identities.create("Chat peer");
+  const invite = f.store.invites.create(f.owner.secret, f.roomId, { profile: "chat", displayName: "Chat peer" }, null);
+  const joined = f.store.invites.redeem(invite.code, { displayName: "Chat peer", identitySecret: chatPeer.secret });
+  // Same autonomy tier as the worker peer, so the refusal under test is
+  // the work-permission gate, not the tier gate.
+  setTier(f.store.db, f.roomId, joined.memberId ?? joined.member?.id, "t2_standard",
+    { updatedBy: "owner", nowMs: Date.now() });
+  const claimed = await tool(f.call, chatPeer.secret, "bounty_claim", { roomId: f.roomId, bountyId, idempotencyKey: `claim-chat-${randomUUID()}` });
+  assert.equal(claimed.result?.isError, true, "expected an error result");
+  const value = structured(claimed);
+  assert.equal(value.status, 403, `expected 403, got ${value.status}: ${JSON.stringify(value).slice(0, 200)}`);
+  assert.equal(value.code, "work_claims_not_permitted", `expected work_claims_not_permitted, got ${value.code}`);
 });
