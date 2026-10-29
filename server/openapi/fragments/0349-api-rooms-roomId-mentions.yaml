@@ -1,0 +1,33 @@
+  /api/rooms/{roomId}/mentions:
+    get:
+      summary: List mention lifecycle rows (#658)
+      description: >-
+        Member-readable list of @mention lifecycle rows
+        (delivered → acknowledged → responded, or timed_out). memberId
+        defaults to the caller; the room owner may query another member's
+        rows (feeds the #662 attention card's "N mentions unacknowledged").
+        Optional state and after (ISO timestamp) filters. Timeouts are
+        evaluated lazily on read — expired delivered/acknowledged rows flip
+        to timed_out in the read. 403 mention_forbidden when a non-owner
+        queries another member. `view=receipts` is the sender's copy of
+        mentions they sent: each row was delivered, and read/acked is true
+        once the mentioned member acknowledged it or answered it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [delivered, acknowledged, responded, timed_out] }
+        - name: after
+          in: query
+          schema: { type: string, format: date-time }
+        - name: view
+          in: query
+          schema: { type: string, enum: [receipts] }
+          description: receipts returns the caller's sent mentions and whether each was read or acked
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] } or, for view=receipts, { roomId, senderId, receipts: [{ messageEventId, memberId, displayName, delivered, state, read, acked, createdAt, timeoutAt, decidedAt }] }" }
+        '403': { description: mention_forbidden }
