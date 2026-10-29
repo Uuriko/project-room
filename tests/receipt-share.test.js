@@ -34,6 +34,12 @@ const publicWork = { ...base, source: "public-work" };
 // publicWork carries no review block: a submitted receipt, no reviewer
 // decision recorded yet. The rejected twin carries the composed review.
 const publicWorkRejected = { ...base, source: "public-work", review: { state: "rejected" } };
+// A public-work receipt the platform itself checked: the composed receipt
+// carries verification "system_checked" (publicWorkReceiptOutcome), in any
+// delivery state — verified (accepted), submitted, or rejected.
+const publicWorkSystemChecked = { ...base, source: "public-work", verification: "system_checked", state: "verified" };
+const publicWorkSystemCheckedSubmitted = { ...base, source: "public-work", verification: "system_checked", state: "submitted" };
+const publicWorkHashOnly = { ...base, source: "public-work", verification: "hash_only", state: "submitted" };
 const plain = { ...base, source: "room-note" };
 const lot = {
   ...base,
@@ -55,6 +61,35 @@ test("verdict lines are graded and carry their scope in the same breath", () => 
     assert.ok(!/^\s*✓/.test(verdictLineOf(receipt)), verdictLineOf(receipt));
     assert.ok(!/^Verified\b/.test(proofLabelOf(receipt)), proofLabelOf(receipt));
   }
+});
+
+test("a system_checked public-work receipt is not described as worker-reported", () => {
+  // The defect (UT2 F-08-02-1): every public-work receipt inherited the
+  // hash_only verdict line — "checks are worker-reported, not an
+  // acceptance" — including receipts whose checks the platform executed
+  // and receipts that were accepted. The share layer must grade by the
+  // verification fact the receipt carries.
+  for (const receipt of [publicWorkSystemChecked, publicWorkSystemCheckedSubmitted]) {
+    const line = verdictLineOf(receipt);
+    assert.match(line, /^Platform-checked delivery — /);
+    assert.ok(!line.includes("worker-reported"), line);
+    assert.equal(proofLabelOf(receipt), "Platform-checked delivery");
+    const ld = receiptJsonLd(receipt);
+    const props = Object.fromEntries(ld.additionalProperty.map(entry => [entry.name, entry.value]));
+    assert.equal(props["Proof level"], "Platform-checked delivery");
+    assert.ok(receiptBadgeSvg(receipt).includes("Platform-checked delivery"));
+    assert.equal(receiptOgFields(receipt).subtitle, line);
+  }
+  // The platform-checked line must not over-claim either: it names who ran
+  // the checks, never that the delivery was accepted.
+  assert.ok(!/acceptance|accepted/.test(verdictLineOf(publicWorkSystemCheckedSubmitted)));
+});
+
+test("a hash_only public-work receipt keeps the artifact-hash verdict line", () => {
+  assert.match(verdictLineOf(publicWorkHashOnly), /^Artifact hash recorded — .*not an acceptance/);
+  assert.equal(proofLabelOf(publicWorkHashOnly), "Artifact hash recorded");
+  // No verification fact recorded at all reads as the weakest tier too.
+  assert.equal(proofLabelOf(publicWork), "Artifact hash recorded");
 });
 
 test("share text names the work and the verdict, with room text collapsed and capped", () => {
