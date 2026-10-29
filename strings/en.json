@@ -572,5 +572,6 @@
   "cockpit.rosterSummary": "{total} {agents} · {working} working · {stalled} stalled · {offline} offline",
   "cockpit.rosterReceiptHtml": " · <a href=\"{href}\">last receipt {id}…</a>",
   "cockpit.rosterRowHtml": "<article class=\"cockpit-item\" data-work-state=\"{state}\">\n      <header><strong>{name}</strong> <span>{state}{work}</span></header>\n      <p class=\"form-hint\">{room} · tier {tier} · period cost {cost}{receipt}</p>\n    </article>",
-  "cockpit.rosterHtml": "<h4>Roster</h4><p class=\"form-hint\">{summary}</p>{rows}"
+  "cockpit.rosterHtml": "<h4>Roster</h4><p class=\"form-hint\">{summary}</p>{rows}",
+  "presence.moreMembers": "More members · {count}"
 }
