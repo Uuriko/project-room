@@ -206,9 +206,10 @@ export async function checkAgentCardDoor({
   let streak = 0;
   let attempt = 0;
   let staleFetches = 0;
+  let onlyVerifiedStale = true;
   const pending = [];
   const done = (failures, converged) => {
-    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started });
+    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started, retryKind: !converged && staleFetches > 0 && onlyVerifiedStale ? "verified-stale-card" : null });
     return failures;
   };
   for (;;) {
@@ -236,6 +237,11 @@ export async function checkAgentCardDoor({
         return done([], true);
       }
     } else {
+      const oldRevision = r.json?.signedRevision;
+      const verifiedStale = r.status === 200 && /^[0-9a-f]{40}$/.test(oldRevision ?? "")
+        && oldRevision !== expectedRevision && !target
+        && checkAgentCard({ card: r.json, expectedRevision: oldRevision, publicKey, keyId, agentId }).length === 0;
+      onlyVerifiedStale &&= verifiedStale;
       const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
       // The target build itself served a bad card: no amount of waiting fixes it.
       if (target) return done(labelled, false);
@@ -261,13 +267,14 @@ async function main() {
     const doors = [`${origin}/api/version`, `${origin}/api/version/worker`, `${entry}/api/version`, `${entry}/api/version/worker`];
     const deadline = Date.now() + waitMs;
     const last = {};
+    const statuses = {};
     for (;;) {
       const results = await Promise.all(doors.map(get));
-      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; });
-      if (doors.every(d => last[d] === sha) || Date.now() > deadline) break;
+      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; statuses[doors[i]] = r.status; });
+      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() > deadline) break;
       await sleep(10000);
     }
-    for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d] });
+    for (const d of doors) record(`version ${d}`, statuses[d] === 200 && last[d] === sha, { got: last[d], status: statuses[d] });
   }
 
   for (const door of [origin, entry]) {

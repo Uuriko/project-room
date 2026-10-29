@@ -2,6 +2,14 @@
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
+// Which credential route closed a request, stamped by the server on a response
+// (never taken from the caller). "account_session": the response arrived on a
+// human member's signed-in account session. That attests the route the server
+// observed, not that a person composed it (browser automation can drive a
+// session), and it is never permission to execute anything. Anything else
+// (access key, identity secret, API key, agent session) is "room_credential".
+// Responses recorded before the stamp carry none; nothing is inferred for them.
+export const ANSWER_CREDENTIALS = Object.freeze(["account_session", "room_credential"]);
 export const REPLY_FIELDS = Object.freeze(["requestKind", "responseToRequestId", "expectedRequestRevision", "responseOutcome", "contextEventId", "contextSequence"]);
 const own = (value, key) => Object.hasOwn(value, key);
 const id = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)
@@ -90,6 +98,8 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
 export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
   const event = receipt?.event, expected = { ...command.data };
   if (command.type === "message.posted") expected.requestPolicyVersion = REPLY_POLICY_VERSION;
+  if (command.type === "message.posted" && own(command.data, "responseToRequestId") && own(event?.data ?? {}, "answerCredential")
+    && ANSWER_CREDENTIALS.includes(event.data.answerCredential)) expected.answerCredential = event.data.answerCredential;
   if (!Number.isSafeInteger(receipt?.sequence) || receipt.sequence < 1 || typeof receipt.duplicate !== "boolean"
     || !id(event?.id) || event.type !== command.type || event.roomId !== roomId || event.actorId !== memberId
     || event.causationId !== (command.causationId ?? null) || !event.data
@@ -141,8 +151,10 @@ export function prepareReplyPost(state, incoming) {
   // already permits it, so leaving it out here refused every reply request and
   // every answer with "Unexpected reply request fields".
   // PRIV-1: rewritten reply-request posts carry redacted:true and a null body.
-  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", "redacted", "answerCredential", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
+  requireValid(!own(data, "answerCredential") || mode === "respond" && ANSWER_CREDENTIALS.includes(data.answerCredential),
+    "Invalid answer credential");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");
     requireValid(Object.keys(state.replyRequests ?? {}).length < MAX_REPLY_REQUESTS, "Reply request capacity reached");
@@ -185,7 +197,8 @@ export function recordReplyPost(state, incoming, mode) {
     Object.assign(replyRequest(state, data.responseToRequestId), {
       status: data.responseOutcome, revision: data.expectedRequestRevision + 1,
       terminalEventId: incoming.id, terminalActorId: incoming.actorId, closedAt: incoming.at,
-      responseMessageId: messageId, responseContextSequence: data.contextSequence
+      responseMessageId: messageId, responseContextSequence: data.contextSequence,
+      ...(own(data, "answerCredential") ? { answerCredential: data.answerCredential } : {})
     });
   } else if (state.replyRequests) {
     const requestId = replyContextOwners(state).get(messageId), request = requestId && state.replyRequests[requestId];
