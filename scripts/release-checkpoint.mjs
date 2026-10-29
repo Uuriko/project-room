@@ -1,9 +1,11 @@
 // Read-only, bounded release observations. This is not deployment or health proof.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { createHash } from "node:crypto";
 
 const run = promisify(execFile);
 const SHA = /^[a-f0-9]{40}$/i;
@@ -184,9 +186,118 @@ async function versionProbe(origin, worker = false) {
   }
 }
 
+async function sourceBinding(cwd) {
+  const git = async args => (await run('git', args, { cwd, timeout: 10000, maxBuffer: MAX_BYTES })).stdout.trim();
+  return { revision: await git(['rev-parse', 'HEAD']), tree: await git(['rev-parse', 'HEAD^{tree}']),
+    clean: (await git(['status', '--porcelain', '--untracked-files=normal'])) === '' };
+}
+
+async function smokeProcess(kind, { source, expectedRevision, origins }) {
+  const env = { ...process.env };
+  // Keep production signature/count defaults; no inherited test seams or summary writes.
+  for (const key of Object.keys(env)) if (key.startsWith('SMOKE_') || key.startsWith('ROOM_SMOKE_') || key === 'GITHUB_STEP_SUMMARY') delete env[key];
+  const args = kind === 'strict'
+    ? [resolve(source, 'scripts/prod-deploy-smoke.mjs'), '--sha', expectedRevision, '--origin', origins[0], '--entry', origins[1], '--wait-ms', '0']
+    : [resolve(source, 'scripts/live-smoke.mjs')];
+  if (kind === 'live') env.ROOM_SMOKE_ORIGIN = origins[0];
+  let stdout, exitCode;
+  try { const result = await run(process.execPath, args, { cwd: source, env, timeout: 300000, maxBuffer: 2 * 1024 * 1024 }); stdout = result.stdout; exitCode = 0; }
+  catch (error) { stdout = error.stdout; exitCode = Number.isInteger(error.code) ? error.code : null; }
+  // Never persist raw child stderr or command/environment dumps.
+  try { return { exitCode, report: JSON.parse(stdout) }; }
+  catch { return { exitCode, error: 'invalid_or_missing_report' }; }
+}
+
+function expectedSmokeNames(origins) {
+  return origins.flatMap(origin => [
+    ...['/api/version', '/api/version/worker'].map(path => `version ${origin}${path}`),
+    `health ${origin}/api/health`, `ready ${origin}/api/ready`,
+    ...['/terms', '/privacy', '/'].map(path => `page ${origin}${path}`),
+    `agent-card ${origin}/.well-known/agent-card.json`
+  ]);
+}
+
+export function verificationPolicy(strict, live, { expectedRevision, origins }) {
+  const names = expectedSmokeNames(origins), s = strict?.report, l = live?.report;
+  const strictPassed = strict?.exitCode === 0 && s?.ok === true && s.sha === expectedRevision
+    && s.origin === origins[0] && s.entry === origins[1] && Array.isArray(s.checks)
+    && s.checks.length === names.length && new Set(s.checks.map(c => c?.name)).size === names.length
+    && s.checks.every(c => names.includes(c.name) && c.pass === true);
+  const validLive = [0, 1].includes(live?.exitCode) && l?.origin === origins[0] && l.liveRevision === expectedRevision
+    && typeof l.ok === 'boolean' && Array.isArray(l.findings)
+    && l.findings.every(f => typeof f?.code === 'string' && ['warn', 'fail'].includes(f.severity))
+    && l.ok === !l.findings.some(f => f.severity === 'fail') && live.exitCode === (l.ok ? 0 : 1);
+  const advisory = new Set(['deploy_lag', 'deploy_diverged']);
+  return { strictPassed, livePassed: Boolean(validLive && !l.findings.some(f => f.severity === 'fail' && !advisory.has(f.code))),
+    warnings: validLive ? l.findings.filter(f => f.severity === 'warn' || advisory.has(f.code)) : [],
+    policy: 'Explicit deployed target: main lag/divergence advisory only; original reports and exit codes unchanged.' };
+}
+
+// Rerunning verifies everything afresh into a new attempt, never overwriting a
+// failed deployment or claiming that before/after observations are an atomic lock.
+export async function verifyCheckpoint(args, dependencies = {}) {
+  const source = dependencies.source ?? process.cwd();
+  const tooling = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const bind = dependencies.sourceBinding ?? sourceBinding;
+  const probe = dependencies.versionProbe ?? versionProbe;
+  const execute = dependencies.smokeProcess ?? smokeProcess;
+  await mkdir(resolve(args.output), { recursive: true, mode: 0o700 });
+  const directory = await mkdtemp(resolve(args.output, 'verify-'));
+  const save = (name, value) => writeFile(resolve(directory, name), JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+  const report = { schemaVersion: 1, mode: 'verify-only', expectedRevision: args.expectedRevision,
+    origins: args.origins, startedAt: new Date().toISOString(), state: 'incomplete', directory,
+    publicationPerformed: false, authenticatedProbe: 'not_performed',
+    limitations: ['Point-in-time public verification; before/after checks do not exclude an intervening deployment or later change.',
+      'No authenticated or browser journey is implied. Publication remains a separate action with fresh source checks.'] };
+  await save('receipt.json', report);
+  const matching = rows => rows.length === 4 && rows.every(row => !row.error && row.httpStatus === 200 && row.value?.sourceRevision === args.expectedRevision);
+  const doors = () => Promise.all(args.origins.flatMap(origin => [probe(origin, false), probe(origin, true)]));
+  let startedChecks = false;
+  try {
+    if (!/^[a-f0-9]{40}$/.test(args.expectedRevision ?? '') || args.origins.length !== 2) throw new Error('invalid_verification_target');
+    report.sourceBefore = await bind(source);
+    report.toolingBefore = await bind(tooling);
+    if (!report.sourceBefore.clean || report.sourceBefore.revision !== args.expectedRevision || !report.toolingBefore.clean) throw new Error('source_not_pinned_clean');
+    if (args.priorReport) {
+      const raw = await readFile(args.priorReport);
+      if (raw.length > 1000000) throw new Error('prior_report_too_large');
+      let prior;
+      try { prior = JSON.parse(raw.toString('utf8')); } catch { throw new Error('invalid_prior_report'); }
+      if (prior?.ok !== false || prior.sha !== args.expectedRevision || prior.origin !== args.origins[0] || prior.entry !== args.origins[1]
+          || !Array.isArray(prior.checks) || !prior.checks.some(c => c.pass === false)) throw new Error('prior_failure_not_for_target');
+      await writeFile(resolve(directory, 'original-failure.json'), raw, { mode: 0o600, flag: 'wx' });
+      report.originalFailure = { file: 'original-failure.json', sha256: createHash('sha256').update(raw).digest('hex'), bytes: raw.length };
+    }
+    report.before = await doors();
+    if (!matching(report.before)) throw new Error('live_revision_mismatch_before');
+    startedChecks = true;
+    report.strict = await execute('strict', { source, ...args });
+    await save('strict-smoke.json', report.strict);
+    report.live = await execute('live', { source, ...args });
+    await save('live-smoke.json', report.live);
+    report.evaluation = verificationPolicy(report.strict, report.live, args);
+  } catch (error) {
+    const known = ['invalid_verification_target', 'source_not_pinned_clean', 'prior_report_too_large', 'invalid_prior_report', 'prior_failure_not_for_target', 'live_revision_mismatch_before'];
+    report.error = known.includes(error.message) ? error.message : 'verification_observation_failed';
+  } finally {
+    if (startedChecks) {
+      try {
+        report.after = await doors();
+        report.sourceAfter = await bind(source); report.toolingAfter = await bind(tooling);
+        report.stable = matching(report.after) && JSON.stringify(report.sourceBefore) === JSON.stringify(report.sourceAfter)
+          && JSON.stringify(report.toolingBefore) === JSON.stringify(report.toolingAfter);
+      } catch { report.stable = false; }
+    }
+    report.state = !report.error && report.stable && report.evaluation?.strictPassed && report.evaluation?.livePassed ? 'verified' : 'failed';
+    report.completedAt = new Date().toISOString();
+    await save('receipt.json', report);
+  }
+  return report;
+}
+
 function options(argv) {
-  const result = { repository: "Uuriko/project-room", origins: [], format: "json" };
-  const names = { "--pr": "prNumber", "--repo": "repository", "--expected-revision": "expectedRevision", "--origin": "origin", "--output": "output", "--format": "format" };
+  const result = { repository: "Uuriko/project-room", origins: [], format: "json", mode: "observe" };
+  const names = { "--mode": "mode", "--prior-report": "priorReport", "--pr": "prNumber", "--repo": "repository", "--expected-revision": "expectedRevision", "--origin": "origin", "--output": "output", "--format": "format" };
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i], key = names[flag], value = argv[++i];
@@ -195,7 +306,9 @@ function options(argv) {
     if (key === "origin") result.origins.push(value);
     else result[key] = value;
   }
-  if (!/^[1-9]\d*$/.test(result.prNumber ?? "") || !Number.isSafeInteger(Number(result.prNumber))) throw new Error("invalid_pr");
+  if (!["observe", "verify"].includes(result.mode)) throw new Error("invalid_mode");
+  if (result.mode === "verify" && (!sha(result.expectedRevision) || !result.output)) throw new Error("verification_requires_revision_and_output");
+  if (result.mode === "observe" && (!/^[1-9]\d*$/.test(result.prNumber ?? "") || !Number.isSafeInteger(Number(result.prNumber)))) throw new Error("invalid_pr");
   result.prNumber = Number(result.prNumber);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(result.repository)) throw new Error("invalid_repository");
   if (result.expectedRevision !== undefined && !sha(result.expectedRevision)) throw new Error("expected_revision_must_be_full_sha");
@@ -207,15 +320,22 @@ function options(argv) {
     if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("invalid_origin");
     return url.href.replace(/\/$/, "");
   }))];
+  if (result.mode === "verify" && result.origins.length !== 2) throw new Error("verification_requires_two_origins");
   return result;
 }
 
-const HELP = "Usage: node scripts/release-checkpoint.mjs --pr NUMBER [--repo OWNER/REPO] [--expected-revision FULL_SHA] [--origin HTTPS_ORIGIN[/PREFIX]] [--format json|markdown] [--output DIRECTORY]\nRead-only public observations. --origin repeats (max 8); defaults to canonical Room and getdasha/room. --output writes release-checkpoint.json and release-checkpoint.md. No output option writes only stdout. Exit 0 means collection complete, not ready to merge/deploy; exit 1 means incomplete observation; exit 2 means invalid arguments or output failure.";
+const HELP = "Usage: node scripts/release-checkpoint.mjs --pr NUMBER [--repo OWNER/REPO] [--expected-revision FULL_SHA] [--origin HTTPS_ORIGIN[/PREFIX]] [--format json|markdown] [--output DIRECTORY]\nVerification: --mode verify --expected-revision FULL_SHA --output DIRECTORY [--prior-report FAILED_SMOKE_JSON], from a clean target checkout; the tooling checkout must also be clean. No upload or publication. Read-only public observations. --origin repeats (max 8); defaults to canonical Room and getdasha/room. --output writes release-checkpoint.json and release-checkpoint.md. No output option writes only stdout. In verify mode exit 0 means this attempt verified; in observe mode exit 0 means collection complete, not ready to merge/deploy; exit 1 means incomplete observation; exit 2 means invalid arguments or output failure.";
 
 async function main(argv) {
   if (argv.length === 1 && argv[0] === "--help") { console.log(HELP); return; }
   let args;
   try { args = options(argv); } catch { console.error(HELP); process.exitCode = 2; return; }
+  if (args.mode === "verify") {
+    const report = await verifyCheckpoint(args);
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    if (report.state !== "verified") process.exitCode = 1;
+    return;
+  }
   const metadata = "number,headRefOid,baseRefName,baseRefOid,state,mergeStateStatus,mergeCommit";
   const collectPR = async () => {
     const before = await ghSnapshot(args.repository, args.prNumber, metadata);
