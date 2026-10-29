@@ -1342,11 +1342,19 @@ function freezeJsonState(value) {
 }
 
 class ProjectionCache {
-  constructor() { this.entries = new Map(); this.bytes = 0; }
+  // Hit/miss/eviction counters are cumulative for the cache's lifetime and
+  // are NOT reset by clear(): the Durable Object boundary diffs them per
+  // request (RoomStore.storeCounters), so a reset would read as a negative
+  // delta. An eviction is an entry dropped by the size/room caps in
+  // insert(); replacing a room's own entry is a refresh, not an eviction,
+  // and clear() is invalidation, also not an eviction.
+  constructor() { this.entries = new Map(); this.bytes = 0; this.hits = 0; this.misses = 0; this.evictions = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  stats() { return { hits: this.hits, misses: this.misses, evictions: this.evictions }; }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
-    if (!entry || entry.sequence !== sequence) return null;
+    if (!entry || entry.sequence !== sequence) { this.misses++; return null; }
+    this.hits++;
     this.entries.delete(roomId);
     this.entries.set(roomId, entry);
     return entry.value;
@@ -1361,6 +1369,7 @@ class ProjectionCache {
       const dropped = this.entries.get(oldest);
       this.entries.delete(oldest);
       this.bytes -= dropped.weight;
+      this.evictions++;
     }
   }
 }
@@ -3531,6 +3540,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   storageStatus() {
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
+  }
+  // SPEED-PLAN 0.2 (per-request cost surfacing): cumulative counters the
+  // Durable Object boundary diffs per request into the room.do_request log
+  // line, so handler cost per request stops being invisible. rowsRead is
+  // the database adapter's own count (DurableDatabase accumulates
+  // cursor.rowsRead per statement); node:sqlite exposes no such counter,
+  // so on the Node door it is null rather than a fabricated zero.
+  storeCounters() {
+    const cache = this._projectionCache?.stats() ?? { hits: 0, misses: 0, evictions: 0 };
+    return {
+      rowsRead: Number.isFinite(this.db?.rowsRead) ? this.db.rowsRead : null,
+      projectionCacheHits: cache.hits,
+      projectionCacheMisses: cache.misses,
+      projectionCacheEvictions: cache.evictions
+    };
   }
   room(roomId, { verifyBodyHashes = false } = {}) {
     // MSG-0 projection cache. The hit path reads sequence only.

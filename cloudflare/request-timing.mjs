@@ -37,3 +37,36 @@ export function logRoomRequest({ method, path, status, totalMs, servedBy, appMs 
   }
   console.info(JSON.stringify(entry));
 }
+
+// SPEED-PLAN 0.2: per-request store counters on the room.do_request line.
+// The store's counters are cumulative (RoomStore.storeCounters); a request
+// reports the delta from the previous snapshot taken at fetch entry, i.e.
+// the store work done since the previous logged request in this object.
+// Requests that interleave inside the object (an await in one fetch while
+// another runs) share attribution — the honest grain for a census inside a
+// single-threaded Durable Object, and exact for the serialised probe calls.
+export function storeCounterDeltas(before, after) {
+  if (!before || !after) return null;
+  const delta = (a, b) => Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, b - a) : null;
+  return {
+    rowsRead: delta(before.rowsRead, after.rowsRead),
+    projectionCacheHits: delta(before.projectionCacheHits, after.projectionCacheHits) ?? 0,
+    projectionCacheMisses: delta(before.projectionCacheMisses, after.projectionCacheMisses) ?? 0,
+    projectionCacheEvictions: delta(before.projectionCacheEvictions, after.projectionCacheEvictions) ?? 0
+  };
+}
+
+export function doRequestEntry({ method, path, status, appMs, counters }) {
+  const entry = { event: 'room.do_request', method, path, status, appMs };
+  if (counters) {
+    if (Number.isFinite(counters.rowsRead)) entry.rowsRead = counters.rowsRead;
+    entry.projectionCacheHits = counters.projectionCacheHits ?? 0;
+    entry.projectionCacheMisses = counters.projectionCacheMisses ?? 0;
+    entry.projectionCacheEvictions = counters.projectionCacheEvictions ?? 0;
+  }
+  return entry;
+}
+
+export function logDoRequest(fields) {
+  console.info(JSON.stringify(doRequestEntry(fields)));
+}
