@@ -93,10 +93,19 @@ try {
 } catch { /* an older tree without the same server API: the HTTP metrics stay absent */ }
 
 // Rebuilding the room from its log (recovery, account deletion, archive restore).
+// replayMs runs with whatever checkpoint the room carries; replayFullMs then
+// deletes the checkpoint row (this run works on a disposable copy) and prices
+// the fold from event 1 — the only rebuild path ordinary rooms had before
+// S-09's checkpoint-on-write cadence. checkpointSequence/checkpointLag record
+// which of the two the room was actually carrying.
 gc();
 const head = safe(() => store.room(room).sequence);
 result.replayMs = head !== null && head <= REPLAY_CAP && typeof store._replayRoom === "function"
   ? round(safe(() => ms(() => store._replayRoom(room, head))), 0) : null;
+result.checkpointSequence = safe(() => store.db.prepare("SELECT sequence FROM projection_checkpoints WHERE room_id=?").get(room)?.sequence ?? null);
+result.checkpointLag = head === null ? null : head - (result.checkpointSequence ?? 0);
+result.replayFullMs = head !== null && head <= REPLAY_CAP && typeof store._replayRoom === "function"
+  ? round(safe(() => { store.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(room); return ms(() => store._replayRoom(room, head)); }), 0) : null;
 
 result.heapMB = round(process.memoryUsage().heapUsed / 1048576, 0);
 store.close();
