@@ -91,7 +91,9 @@ accepted work/bounty counts. It is not yet this experiment metric: work and boun
 outcomes have no guaranteed deduplication link, current state/update time is not
 an immutable acceptance event, and reported completion can precede required
 verification/owner review. Reported spend can omit attempts. Preserve its
-existing semantics; do not silently relabel its ratio as total causal cost per
+existing API fields `acceptedOutcomes` and `costPerAcceptedOutcome` for compatibility,
+but label their displayed values as recorded outcomes and reported spend. Do not
+silently relabel the ratio as total causal cost per
 user-valued outcome. First implement/export the linkage and coverage needed for
 the selected pilot, then consider a compact view in the existing overview.
 Use `(roomId, workItemId, attempt ordinal)` for attempts and completion event ID
