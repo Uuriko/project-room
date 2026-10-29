@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { chromium, webkit } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import * as T from '../src/events.js';
 import { googleAuth, sub } from './helpers/google-oauth-fixture.mjs';
 
 for (const link of [false, true]) test(`Google ${link ? 'link' : 'sign-in'} returns from a committed cross-site account chooser with Strict cookies`, { timeout: 30000 }, async t => {
@@ -36,6 +37,13 @@ for (const link of [false, true]) test(`Google ${link ? 'link' : 'sign-in'} retu
     f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(expectedAccount), slot.session.sessionRevision);
     await page.context().addCookies([{name:'account_session',value:slot.token,url:origin,httpOnly:true,sameSite:'Strict'}]);
   }
+  if (!link) {
+    const slot = f.store.createAccountSessionSlot();
+    f.store.loginAccountSessionWithGoogle(slot.token, sub, 0);
+    f.store.command(f.keys.owner, 'commons', { id: 'google-browser-member', type: T.EVENT_TYPES.MEMBER_ADDED,
+      data: { memberId: 'googler', displayName: 'Googler', kind: 'human', permissions: [] } });
+    f.store.bindHumanAccount('commons', 'googler', expectedAccount);
+  }
   const startPath = `/api/auth/google/${link ? 'link/' : ''}start`;
   await page.route(origin + startPath, async route => {
     const response = await route.fetch({maxRedirects:0}), url = new URL(response.headers().location);
@@ -48,8 +56,9 @@ for (const link of [false, true]) test(`Google ${link ? 'link' : 'sign-in'} retu
       body:`<meta http-equiv="refresh" content="0;url=${target.replaceAll('&','&amp;')}">`});
   });
   // Establish the Room site first, as the real sign-in/settings UI does.
-  await page.goto(origin + '/');
-  await page.goto(origin + startPath);
+  await page.goto(origin + (link ? '/' : '/?room=commons'));
+  if (link) await page.goto(origin + startPath);
+  else await page.locator('#google-signin').click();
   await page.waitForURL(url => url.hostname === 'localhost');
   assert.equal((await page.context().cookies(origin)).find(c=>c.name==='account_session').sameSite, 'Strict');
   assert.equal(providerCalls, 0);
@@ -60,6 +69,11 @@ for (const link of [false, true]) test(`Google ${link ? 'link' : 'sign-in'} retu
   assert.equal(session.account.id, expectedAccount);
   assert.equal(providerCalls, 2);
   assert.equal((await page.context().cookies(origin)).find(c=>c.name==='account_session').sameSite, 'Strict');
+  if (!link) {
+    await page.locator('#main').waitFor({ state: 'visible' });
+    assert.equal(new URL(page.url()).searchParams.get('room'), 'commons');
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('project-room:google-room-return:v1')), null);
+  }
   const replay = await page.context().request.get(callbackUrl);
   assert.equal(replay.headers()['x-room-auth-failure'], 'google_state_invalid');
   assert.equal(providerCalls, 2, 'replay never exchanges a second code');

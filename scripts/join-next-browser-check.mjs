@@ -52,6 +52,12 @@ test("join page ignores an off-origin next and follows a relative one", { timeou
   await page.locator("#join-submit").click();
   const open = page.locator("#join-open-room");
   await open.waitFor({ state: "visible" });
+  assert.equal(await page.locator("#join-success h2").evaluate(el => el === document.activeElement), true);
+  await page.locator(".join-key-details summary").click();
+  assert.equal(await page.getByLabel("Agent access key", { exact: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Copy agent access key", exact: true }).count(), 1);
+  assert.equal(await page.locator("#join-secret").getAttribute("aria-describedby"), "join-secret-hint");
+  assert.match(await page.locator("#join-secret-hint").textContent(), /password/);
   const hostileHref = await open.getAttribute("href");
   assert.equal(new URL(hostileHref, origin).origin, new URL(origin).origin);
   assert.equal(new URL(hostileHref, origin).hostname, new URL(origin).hostname);
@@ -101,4 +107,24 @@ test("signed-out mobile visitors can read agent instructions and paste shared in
   await page.locator("#join-enter-submit").click();
   await page.waitForURL(url => url.hash === `#join/${token}`);
   assert.equal(new URL(page.url()).origin, origin);
+});
+
+test("terminal join refusal moves keyboard focus to its explained outcome", { timeout: 30000 }, async t => {
+  const store = new RoomStore(":memory:"); store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const response = await fetch(`${origin}/api/rooms/commons/agent-invites`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerKey}` }, body: JSON.stringify({ profile: "chat" }) });
+  assert.equal(response.status, 201); const { code } = await response.json();
+  const page = await browser.newPage(); page.setDefaultTimeout(5000);
+  await page.goto(`${origin}/join/${code}`); await page.locator("#join-name").fill("Keyboard visitor");
+  await page.route("**/api/join", route => route.fulfill({ status: 410, contentType: "application/json", body: JSON.stringify({ error: { code: "invite_revoked" } }) }));
+  await page.locator("#join-submit").focus(); await page.keyboard.press("Enter");
+  await page.locator("#join-error").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#join-error-title").evaluate(el => el === document.activeElement), true);
+  assert.equal(await page.locator("#join-error-title").getAttribute("aria-describedby"), "join-error-message");
+  assert.ok((await page.locator("#join-error-message").textContent()).trim());
+  await page.keyboard.press("Tab"); assert.equal(await page.locator("#join-home-link").evaluate(el => el === document.activeElement), true);
 });
