@@ -15,6 +15,17 @@ test('Worker routing and SQLite serve the bounded agent work observation', async
     headers: { Host: 'room.example.test', 'CF-Connecting-IP': '192.0.2.1', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
   });
   try {
+    const costResponse = await call('/__test-selected-run-cost');
+    assert.equal(costResponse.status, 200, await costResponse.clone().text());
+    const cost = await costResponse.json();
+    assert.equal(cost.seeded, 5001);
+    assert.deepEqual(cost.runs, Object.fromEntries([1, 2, 3].map(i => [
+      `request-${i}`, { state: 'working', updatedAt: cost.now }
+    ])), 'only selected current openings appear; stale same-ID run remains excluded');
+    assert.equal(cost.selectedQueries, 1, 'measure the actual exported helper query');
+    assert.ok(cost.selectedQueryRowsRead > 0 && cost.selectedQueryRowsRead <= 12,
+      `three primary-key lookups must stay bounded despite 5001 stored runs: ${cost.selectedQueryRowsRead} rows`);
+    console.log(JSON.stringify({ selectedRuns: 3, storedRuns: cost.seeded, selectedQueryRowsRead: cost.selectedQueryRowsRead }));
     const provision = await call('/__test-provision'); assert.equal(provision.status, 200);
     const { ownerKey } = await provision.json();
     assert.equal((await call('/api/rooms/commons/agent-work')).status, 401);
