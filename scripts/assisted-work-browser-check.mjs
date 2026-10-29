@@ -1,4 +1,4 @@
-import { clickChrome, openCatchUp } from "./room-chrome.mjs";
+import { clickChrome, openCatchUp, openWorkFromSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
@@ -116,6 +116,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const fillScope = async paths => {
       for (const [name, value] of Object.entries({ ...scope, paths })) await page.locator(`#action-fields [name="${name}"]`).fill(value);
     };
+    await openWorkFromSearch(page, first, item(first).title);
     await card(page, first).locator('[data-action="claim"]').click();
     await fillScope("src/**");
     await saveAction(page);
@@ -125,6 +126,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(item(first).receipt, null);
 
     // The actual server rejects overlapping scope; the rejected command records nothing.
+    await openWorkFromSearch(page, second, item(second).title);
     await card(page, second).locator('[data-action="claim"]').click();
     await fillScope("src/room.js");
     const beforeConflict = snapshot();
@@ -144,6 +146,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const releaser = await context.newPage();
     await releaser.goto(origin);
     await releaser.locator("#main").waitFor({ state: "visible" });
+    await openWorkFromSearch(releaser, first, item(first).title);
     const firstCard = card(releaser, first);
     assert.equal(await firstCard.locator(".work-details").evaluate(node => node.open), false);
     await firstCard.locator(".work-details > summary").click();
