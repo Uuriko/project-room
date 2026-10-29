@@ -26,7 +26,6 @@ export const SKIP_FILES = [/server\/vendor\/gmail-html-sanitizer\.mjs$/, /packag
 // Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
 // and variable assignments (not hardcoded values).
 export const ALLOWLIST = [
-  /ROOM-COORDINATION\.md#when-the-room-is-unavailable/, // Exact public documentation anchor embedded in generated wiki data, not a credential.
   // The scanner's own documented patterns (server/secret-scan.mjs): match the
   // literal regex text (`AKIA[0-9A-Z]{16}` etc.) only. A looser entry here
   // would match real secret-shaped values too and silently disable the
