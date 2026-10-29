@@ -117,26 +117,23 @@ const KNOWN_ERROR_NAMES = ["SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_FULL", "SQLIT
   "RangeError", "TypeError", "ReferenceError", "SyntaxError", "AssertionError", "heap out of memory"];
 const ERROR_SHAPED = /\b(?:SQLITE_[A-Z0-9_]+|ERR_[A-Z0-9_]+|E[A-Z]{3,12}|[A-Za-z]+Error)\b/g;
 const MODULE_NOT_FOUND_SHAPE = /Cannot find (?:module|package) '([^'\r\n]+)'/;
-// The one carved exception to the finite-set rule above (C8-01 diagnosis,
-// RC-2b): when a child dies at import time, the missing module's specifier
-// is an import-graph fact, never an argument value — child secrets travel
-// in argv, not in the import graph. It is surfaced only in shapes that
-// cannot carry an argument value: a bare package name, a path under the
-// repo root (which covers its node_modules), or a repo-relative path.
-// Anything else — any other characters, any other root, e.g. a
-// secret-shaped token — collapses to the constant "other", exactly like
-// unknown error names above. A surfaced specifier is truncated to 200
-// chars. Without this, a module-load failure in a spawned child is
-// undiagnosable from CI logs (only ERR_MODULE_NOT_FOUND survives).
+// Report bounded import-path diagnostics, not arbitrary child stderr. Validate
+// the complete value before truncation; known credential formats and paths
+// escaping the repository are refused. This is shape filtering, not a general
+// guarantee that arbitrary strings supplied by a child cannot contain secrets.
 function missingModuleSpecifier(text) {
   const match = MODULE_NOT_FOUND_SHAPE.exec(text);
   if (!match) return undefined;
-  const specifier = match[1].slice(0, 200);
-  if (/^[a-z0-9@][a-z0-9./_-]*$/.test(specifier) && !specifier.includes("..")) return specifier;
-  if (specifier.startsWith(REPO + "/") && /^[a-z0-9./_-]+$/.test(specifier.slice(REPO.length))) return specifier;
+  const specifier = match[1];
+  if (specifier.split("/").some(part => /^(?:pri_|rak_|ga1\.)/i.test(part))) return "other";
+  if (/^[a-z0-9@][a-z0-9./_-]*$/.test(specifier) && !specifier.includes("..")) return specifier.slice(0, 200);
+  if (specifier.startsWith(REPO + "/") && /^[a-z0-9./_-]+$/.test(specifier.slice(REPO.length))) {
+    const normalized = join(specifier);
+    if (normalized.startsWith(REPO + "/")) return specifier.slice(0, 200);
+  }
   if ((specifier.startsWith("./") || specifier.startsWith("../")) && /^[a-z0-9./_-]+$/.test(specifier)) {
     const resolved = join(REPO, specifier);
-    if (resolved === REPO || resolved.startsWith(REPO + "/")) return specifier;
+    if (resolved === REPO || resolved.startsWith(REPO + "/")) return specifier.slice(0, 200);
   }
   return "other";
 }
@@ -421,6 +418,12 @@ test("module-not-found failures name the missing module, and only the missing mo
   // Truncation: a surfaced specifier is at most 200 chars.
   const longName = "a".repeat(250);
   assert.equal(describeChildFailure(err(), `Error: Cannot find module '${longName}'`).missingModule.length, 200);
+  for (const unsafe of ["pri_" + "a".repeat(43), "rak_" + "a".repeat(43),
+    join(REPO, "server") + "/../../outside.mjs", "a".repeat(210) + "?private=value"]) {
+    const result = describeChildFailure(err(), `Error: Cannot find module '${unsafe}'`);
+    assert.equal(result.missingModule, "other", "unsafe full specifier must not be exposed");
+    assert.ok(!JSON.stringify(result).includes(unsafe.slice(0, 30)));
+  }
   // No module-not-found shape -> no field at all (the finite-set shape is unchanged).
   assert.ok(!("missingModule" in describeChildFailure(err(), "SQLITE_BUSY: database is locked")));
 });
