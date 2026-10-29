@@ -1,0 +1,39 @@
+  /api/rooms/{roomId}/board:
+    get:
+      summary: Read the work Board without loading conversation history
+      description: Authenticated read of work columns, halt records and one live claim page. Preserves room credentials and session binding. Does not sweep leases or change work. evaluatedThrough describes the work projection; the claim page is independently evaluated live state. No automatic pagination or fallback to a room snapshot.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: queue, in: query, schema: { type: string, enum: [ready] } }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 2048 } }
+        - { name: view, in: query, schema: { type: string, enum: [summary] } }
+      responses:
+        '200':
+          description: Work columns and halts with one stored claim page and authenticated viewer metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contractVersion, roomId, columns, counts, halts, claims, claimsPage, evaluatedThrough, evaluatedAt, viewerId, contentTrust]
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  roomId: { type: string }
+                  columns: { type: object }
+                  counts: { type: object }
+                  halts: { type: array, items: { type: object } }
+                  claims: { type: array, items: { type: object } }
+                  claimsPage: { type: object }
+                  evaluatedThrough: { type: integer }
+                  evaluatedAt: { type: string, format: date-time }
+                  viewerId: { type: string }
+                  viewerAccountId: { type: string, nullable: true }
+                  viewerAuthEpoch: { type: integer, nullable: true }
+                  viewerSessionBinding: { type: string, nullable: true }
+                  viewerSessionRevision: { type: integer, nullable: true }
+                  contentTrust: { type: string }
+        '401': { description: Invalid or missing credential }
+        '403': { description: Scope, binding or active membership denied }
+        '422': { description: Invalid query or cursor }
+        '429': { description: Read rate limit exceeded }

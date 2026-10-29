@@ -309,3 +309,22 @@ import('node:fs').then(({appendFileSync})=>{const args=process.argv.slice(2);app
     assert.equal(result.status, fail ? 17 : 0, result.stdout + result.stderr);
   }
 });
+
+
+test("invariant diagnostics survive a failed gate without changing its result", () => {
+  const steps = parse(readFileSync(join(WORKFLOWS, "pr-gates.yml"), "utf8")).jobs.gates.steps;
+  const gate = steps.find(step => step.id === "invariants");
+  assert.notEqual(gate["continue-on-error"], true);
+  for (const name of ["Upload invariant results", "Comment invariant results on PR"]) {
+    const condition = steps.find(step => step.name === name).if;
+    // GitHub implicitly prepends success() unless a status function occurs.
+    const explicitStatus = /\b(always|success|failure|cancelled)\(\)/.test(condition);
+    for (const conclusion of ["success", "failure", "skipped", "cancelled"]) {
+      const source = condition.replaceAll("always()", "true")
+        .replaceAll("github.event_name", JSON.stringify("pull_request"))
+        .replaceAll("steps.invariants.conclusion", JSON.stringify(conclusion));
+      const runs = (explicitStatus || conclusion === "success") && Function(`return (${source})`)();
+      assert.equal(runs, ["success", "failure"].includes(conclusion), `${name}: ${conclusion}`);
+    }
+  }
+});

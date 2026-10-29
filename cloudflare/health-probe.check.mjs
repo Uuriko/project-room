@@ -31,37 +31,59 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
 });
 
-test('a joined probe bounds its own start() by the remaining timeout budget', async () => {
-  const probe = createHealthProbe();
-  let keptAlive = 0;
-  const waitUntil = promise => { keptAlive += 1; promise.then(() => {}, () => {}); };
-  const onSnapshot = (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging', elapsedMs: timing.elapsedMs });
-  const onUnready = (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness, ...timing });
-  // Leader wakes the object quickly, settling the shared gate well inside
-  // the budget. The joiner then runs its own start(), which hangs for
-  // 1000 ms: without a race against the (remaining) budget it would answer
-  // ready after ~1000 ms instead of timing out at 50 ms.
-  const leaderStart = () => new Promise(resolve => {
-    setTimeout(() => resolve(Response.json({ status: 'ok' })), 10);
-  });
-  const joinerStart = () => new Promise(resolve => {
-    setTimeout(() => resolve(Response.json({ status: 'ok' })), 1000);
-  });
-  const startedAt = performance.now();
-  const [leader, joiner] = await Promise.all([
-    probe({ start: leaderStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil }),
-    probe({ start: joinerStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil })
-  ]);
-  const elapsedMs = performance.now() - startedAt;
-  assert.equal(leader.status, 200);
-  assert.equal(joiner.status, 503);
-  const joinerBody = await joiner.json();
-  assert.equal(joinerBody.status, 'degraded');
-  assert.deepEqual(joinerBody.durableObject, { ready: false, status: 'timeout' });
-  assert.equal(joinerBody.do.status, 'timeout');
-  assert.equal(joinerBody.do.timeoutMs, 50);
-  assert.ok(elapsedMs < 400, `joined probe took ${Math.round(elapsedMs)}ms, expected it to time out near 50ms`);
-  assert.ok(keptAlive >= 1, 'timed-out joined start() must be passed to waitUntil so its I/O is not dropped');
+test('concurrent probes share storage but shape separate GET/HEAD responses and do not cache completion', async () => {
+  const probe = createHealthProbe(); let starts = 0, complete;
+  const start = () => { starts++; return new Promise(resolve => { complete = resolve; }); };
+  const options = method => ({ start, timeoutMs: 200,
+    onSnapshot: (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(method), { mode: method, elapsedMs: timing.elapsedMs }),
+    onUnready: () => { throw new Error('unexpected timeout'); } });
+  const get = probe(options('GET')), head = probe(options('HEAD'));
+  complete(Response.json({ emailVerification: 'enforced' }));
+  const [getResponse, headResponse] = await Promise.all([get, head]);
+  assert.equal(starts, 1);
+  const body = await getResponse.json();
+  assert.equal(body.mode, 'GET'); assert.equal(body.emailVerification, 'enforced');
+  assert.equal(headResponse.status, 200); assert.equal(await headResponse.text(), '');
+  const fresh = probe(options('GET'));
+  assert.equal(starts, 2, 'completed snapshots are not cached');
+  complete(Response.json({ emailVerification: 'relaxed-no-mailer' }));
+  assert.equal((await (await fresh).json()).emailVerification, 'relaxed-no-mailer');
+});
+
+test('a shorter joiner deadline does not cancel or duplicate its leader', async () => {
+  const probe = createHealthProbe(); let complete, starts = 0, keptAlive = 0;
+  const start = () => { starts++; return new Promise(resolve => { complete = resolve; }); };
+  const options = { start, waitUntil: promise => { keptAlive++; promise.catch(() => {}); },
+    onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe({ ...options, timeoutMs: 500 });
+  assert.equal(await probe({ ...options, timeoutMs: 10 }), 'timeout');
+  assert.equal(starts, 1); assert.equal(keptAlive, 1);
+  complete(Response.json({ status: 'ok' }));
+  assert.equal(await leader, 'ready');
+});
+
+test('a timed-out leader can still supply an active joiner within its own deadline', async () => {
+  const probe = createHealthProbe(); let complete, starts = 0;
+  const options = { start: () => { starts++; return new Promise(resolve => { complete = resolve; }); },
+    waitUntil: promise => promise.catch(() => {}), onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe({ ...options, timeoutMs: 10 });
+  const joiner = probe({ ...options, timeoutMs: 500 });
+  assert.equal(await leader, 'timeout');
+  complete(Response.json({}));
+  assert.equal(await joiner, 'ready');
+  assert.equal(starts, 1);
+});
+
+test('shared failures reach every caller and a later request retries freshly', async () => {
+  const probe = createHealthProbe(); let reject, starts = 0;
+  const options = { timeoutMs: 200, start: () => { starts++; return new Promise((_, fail) => { reject = fail; }); },
+    onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe(options), joiner = probe(options);
+  reject(new Error('RPC failed'));
+  assert.deepEqual(await Promise.all([leader, joiner]), ['error', 'error']);
+  assert.equal(starts, 1);
+  assert.equal(await probe({ ...options, start: async () => { starts++; return Response.json({}); } }), 'ready');
+  assert.equal(starts, 2);
 });
 
 test('a ready probe reports storage readiness', async () => {

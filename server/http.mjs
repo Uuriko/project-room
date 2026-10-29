@@ -4111,6 +4111,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // Fresh identity preflight ends before history/DM/work projection reads.
+      // The normal room authentication, rate and API-key scope gates above apply.
+      if (route === "" && req.method === "GET" && url.searchParams.get("view") === "identity") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("auth") && !["room", "account"].includes(params.get("auth")))
+            || ["x-project-room-help-context", "x-project-room-offer-context", "x-project-room-audit-view"].some(key => req.headers[key] !== undefined))
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const { ownerId } = store.roomAuthority(roomId);
+        const member = auth.member;
+        return json(res, 200, {
+          snapshotView: "identity", snapshotVersion: 1, roomId,
+          viewerId: member.id, viewerAccountId: auth.account?.id ?? null,
+          viewerAuthEpoch: auth.account?.authEpoch ?? null,
+          viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null,
+          state: { room: { ownerId }, members: { [member.id]: {
+            id: member.id, kind: member.kind, active: member.active, revision: member.revision,
+            permissions: [...member.permissions], delegatedAdmin: member.delegatedAdmin === true,
+          } } },
+        });
+      }
       if (route === "public-work-review") {
         if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
         // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.
@@ -4170,20 +4191,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // A since_join reader also loses messages and events from before their
       // join (server/history-visibility.mjs). null for everyone else.
       const historyFloor = store.historyFloor(roomId, viewerId);
-      const historyMessages = historyFloor ? messageRepository(store, roomId) : null;
+      let historyMessages;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
-      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
-      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      let dmPartyVisible;
+      const dmEventVisible = event => {
+        // Work-only reads have no message events to filter. Resolve history
+        // only when a route actually consumes it.
+        historyMessages ??= historyFloor ? messageRepository(store, roomId) : null;
+        dmPartyVisible ??= dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
+        return eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      };
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
       const peerContext = {
         memberId: viewerId,
         identityId: store.bonds.identityForMember(roomId, viewerId),
-        isOwner: viewerId === store.room(roomId).state.room.ownerId
+        isOwner: viewerId === store.roomAuthority(roomId).ownerId
       };
       const roomEventVisible = event => dmEventVisible(event) && dmConsentEventVisible(event, viewerId, peerContext.isOwner)
         && peerEventVisible(event, peerContext);
@@ -4435,15 +4462,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+        if (params.has("view") && (params.getAll("view").length !== 1 || !["work", "orientation"].includes(params.get("view"))
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
-        if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
+        if (helpContext !== undefined && (helpContext !== "1" || params.get("view") !== "work")) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
-        const snapshotView = params.has("view") ? "work" : "full";
+        const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         if (fullRead) {

@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -16,7 +17,7 @@ import { canInviteMembers, validId } from "../src/events.js";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
-  "request", "mention", "dm", "review_requested", "handoff",
+  "request", "mention", "dm", "review_requested", "work_assigned", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
@@ -168,14 +169,16 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const now = store.now();
   const items = [];
   const requests = state.replyRequests ?? {};
+  const floor = store.historyFloor(roomId, memberId, room.sequence);
   const byId = messageRepository(store, roomId, state);
 
   for (const request of Object.values(requests)) {
-    if (!request || request.recipientId !== memberId) continue;
+    if (!request || request.recipientId !== memberId || !messageInHistory(request, floor)) continue;
     const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
     // Same rule as reply-context (server/reply-requests.mjs): a private message is
     // visible only to its author and recipient, so never echo it as the title.
-    const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
+    const context = !messageInHistory(latest, floor)
+      || latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
     const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
@@ -193,7 +196,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const requestIds = new Set(Object.keys(requests));
   try {
     const rows = store.db.prepare(
-      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt,
+      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt, e.sequence,
               json_extract(e.body,'$.actorId') AS actorId, json_extract(e.body,'$.data.messageId') AS messageId,
               json_extract(e.body,'$.data.body') AS body
        FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
@@ -201,6 +204,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     ).all(roomId, memberId);
     for (const row of rows) {
       const messageId = row.messageId || row.messageEventId;
+      if (floor && row.sequence < floor.sequence) continue;
       if (requestIds.has(messageId)) continue;
       const terminal = row.state === "responded" ? "answered" : row.state === "acknowledged" ? "read" : null;
       const at = iso(row.createdAt);
@@ -218,7 +222,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   }
 
   for (const message of byId.receivedBy(memberId)) {
-    if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (!message || message.toMemberId !== memberId || message.authorId === memberId || !messageInHistory(message, floor)) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({
@@ -270,10 +274,10 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       }));
       continue;
     }
-    if (!["verify", "decide"].includes(next.action)) continue;
+    const review = ["verify", "decide"].includes(next.action);
     const at = iso(item.updatedAt ?? item.createdAt ?? now);
     items.push(draft({
-      kind: "review_requested", roomId, key: `review|${item.id}|${next.action}`,
+      kind: review ? "review_requested" : "work_assigned", roomId, key: `${review ? "review" : "work"}|${item.id}|${next.action}`,
       title: clip(item.title || item.id), actor: item.accountableMemberId ?? null,
       createdAt: iso(item.createdAt ?? at), updatedAt: at,
       basis: `${item.revision}|${item.receipt?.eventId ?? ""}|${next.action}`,
@@ -526,7 +530,7 @@ export function listAccountUpdates(store, token, binding, query = {}) {
 // in `where`), how long it has been waiting (waitingMs), and the suggested
 // next read or reply (next). Reading never acknowledges or resolves items;
 // use the updates mark endpoints for that.
-const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "handoff"]);
+const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "work_assigned", "handoff"]);
 
 function parseOwedQuery({ limit = DEFAULT_LIMIT, cursor = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) fail(422, "invalid_owed_query", "limit must be an integer from 1 to 100");

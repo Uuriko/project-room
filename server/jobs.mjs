@@ -3,7 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { staleSweepDueAt, syncClaimPullRequests, publicNamespaceSqlExclusion } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
@@ -91,6 +91,7 @@ function landDueAt(store, now) {
 }
 
 function claimDueAt(store, now) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   const row = read(store, `SELECT MIN(COALESCE(
       json_extract(item_json, '$.data.pullRequest.nextPollAt'),
       json_extract(item_json, '$.pullRequest.nextPollAt'),
@@ -100,11 +101,11 @@ function claimDueAt(store, now) {
     WHERE (
       json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.data.pullRequest.url')) = 'text'
-      AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL
+      AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL${exclusion}
     ) OR (
       json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
-      AND json_extract(item_json, '$.pullRequest.outcome') IS NULL
+      AND json_extract(item_json, '$.pullRequest.outcome') IS NULL${exclusion}
     )`);
   if (!row?.n) return null;
   const due = Number(row.due);
@@ -116,6 +117,7 @@ function claimDueAt(store, now) {
 // fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
 // only decides whether the job wakes at all.
 function autolinkDueAt(store, now) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   const row = read(store, `SELECT COUNT(*) AS n
     FROM work_claims
     WHERE (
@@ -125,7 +127,7 @@ function autolinkDueAt(store, now) {
         json_extract(item_json, '$.data.pullRequests') IS NULL
         OR json_array_length(json_extract(item_json, '$.data.pullRequests')) = 0
       )
-      AND json_extract(item_json, '$.data.pullRequest.url') IS NULL
+      AND json_extract(item_json, '$.data.pullRequest.url') IS NULL${exclusion}
     ) OR (
       json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.repo')) = 'text'
@@ -133,7 +135,7 @@ function autolinkDueAt(store, now) {
         json_extract(item_json, '$.pullRequests') IS NULL
         OR json_array_length(json_extract(item_json, '$.pullRequests')) = 0
       )
-      AND json_extract(item_json, '$.pullRequest.url') IS NULL
+      AND json_extract(item_json, '$.pullRequest.url') IS NULL${exclusion}
     )`);
   if (!row?.n) return null;
   return now;
@@ -293,7 +295,7 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
 
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
-    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+    COALESCE(MAX(LENGTH(CAST(projection AS BLOB))), 0) AS maxProjectionBytes FROM rooms`).get();
   let dbBytes = 0;
   try {
     const pages = store.db.prepare("PRAGMA page_count").get();

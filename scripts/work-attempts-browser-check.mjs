@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -34,6 +35,9 @@ test("attempt ledger: a work card shows attributable attempts with environment a
   send(T.SESSION_STOPPED, { workItemId: "attempted-work", expectedRevision: revision(), status: "failed", outputs: ["log:run-1"] });
   send(T.SESSION_STARTED, { workItemId: "attempted-work", expectedRevision: revision(), environment: "local-mac-1" });
   const card = page.locator('[data-work-record-id="attempted-work"]');
+  await openSearch(page);
+  await page.locator('#message-search').fill('Port the digest job');
+  await page.locator('#search-list [data-open-work="attempted-work"]').click();
   await card.waitFor();
   if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
   const ledger = card.locator("[data-attempt-ledger]");
@@ -41,11 +45,13 @@ test("attempt ledger: a work card shows attributable attempts with environment a
   const text = await ledger.textContent();
   assert.match(text, /#1 .+ · failed · ci-runner-2/);
   assert.match(text, /#2 .+ · running · local-mac-1/);
-  // An untouched card renders no ledger line.
+  mkdirSync("test-results", { recursive: true });
+  await card.screenshot({ path: "test-results/attempts-card.png" });
+  // An untouched card renders no ledger line, after navigating to that card.
+  await page.locator('#message-search').fill('agenda');
+  await page.locator('#search-list [data-open-work="test-handoff"]').click();
   const plain = page.locator('[data-work-record-id="test-handoff"]');
   if (!await plain.locator(".work-details").evaluate(node => node.open)) await plain.locator(".work-details > summary").click();
   assert.equal(await plain.locator("[data-attempt-ledger]").count(), 0);
-  mkdirSync("test-results", { recursive: true });
-  await card.screenshot({ path: "test-results/attempts-card.png" });
   assert.deepEqual(f.errors, []);
 });

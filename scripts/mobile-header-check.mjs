@@ -233,10 +233,14 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   for (let n = 0; n < 7; n++) send(T.WORK_PROPOSED, { workItemId: `header-work-${n}`, title: `Synthetic header task ${n + 1}`, definitionOfDone: "Exercise the visible current-needs count.", accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
   for (let n = 0; n < 69; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
   await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7 need you · 77 updates");
-  // Catch-up proposals are not actionable Updates. Load a real mention so
-  // the compact-row contract also exercises the Updates badge, not an empty span.
+  // The mention and seven assignments are actionable Updates. Check the
+  // actual destinations as well as the badge before stressing its layout.
   await page.locator("#topbar-updates").click();
-  await page.waitForFunction(() => !document.querySelector("#updates-count").hidden && document.querySelector("#updates-count").textContent === "1");
+  await page.waitForFunction(() => !document.querySelector("#updates-count").hidden && document.querySelector("#updates-count").textContent === "8");
+  assert.equal(await page.locator('#updates-dialog [data-update-id]').count(), 8);
+  for (let n = 0; n < 7; n++) {
+    assert.equal(await page.getByRole("button", { name: `Open Synthetic header task ${n + 1}`, exact: true }).count(), 1);
+  }
   await page.keyboard.press("Escape");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   await layouts("77-updates", "7 need you · 77 updates", { interact: true });
