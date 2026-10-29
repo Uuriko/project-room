@@ -4887,15 +4887,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
       const room = this.withIdentityRevoked(roomId, view === "work" ? this.workProjection(roomId) : this.room(roomId));
-      if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
+      if (view === "work") {
+        // F-S8a-5 (register #47): a work item carrying a private tracked
+        // request exposes no title or definition-of-done to members who
+        // are not parties to that request. The work projection does not
+        // carry replyRequests, so read just that slice here; parties to
+        // every request on an item keep its full record, and items with
+        // no private request are untouched. This snapshot is the read
+        // listWork, the board read and the HTTP work view serialise from.
+        const requestSlice = this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests;
+        const privatePartiesByWork = new Map();
+        for (const request of Object.values(requestSlice ? JSON.parse(requestSlice) : {})) {
+          if (!request?.workItemId) continue;
+          if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
+          privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
+        }
+        const workRecordForViewer = (id, item) => {
+          const parties = privatePartiesByWork.get(id);
+          if (!parties || parties.has(auth.member.id)) return currentWorkRecord(item);
+          return currentWorkRecord({ ...item, title: null, definitionOfDone: null });
+        };
+        return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, workRecordForViewer(id, item)])),
           // The board projection needs halts. The HTTP work view strips this
           // before it is sent; it is not part of that response's state keys.
           agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      }
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
       let messages = room.state.messages, pins = room.state.pins, messagesWindow;
       if (messageLimit !== null || room.state.messagesArchive) {
@@ -5193,9 +5214,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!working.has(worker)) working.set(worker, []);
       working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
     }
+    // F-S6c-3: presence is a shared, viewer-less picture, so a private
+    // act must not advance a member's stamp at all — a targeted
+    // message.posted (or a follow-up event targeting one) is excluded
+    // from the last-activity derivation for every actor. Otherwise the
+    // stamp equals the hidden event's exact timestamp and any member
+    // can time the private act. The member's last room-visible act
+    // (or their enrollment, via addedAt below) is what remains.
     const lastCommandAt = new Map(this.db.prepare(
-      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-       FROM events WHERE room_id=? GROUP BY actor`
+      `SELECT json_extract(e.body,'$.actorId') AS actor, max(json_extract(e.body,'$.at')) AS at
+       FROM events e WHERE e.room_id=?
+         AND NOT (
+           (json_extract(e.body,'$.type')='message.posted'
+             AND COALESCE(json_extract(e.body,'$.data.toMemberId'),'')<>'')
+           OR (json_extract(e.body,'$.type') IN ('message.edited','message.deleted','message.redacted','poll.voted','message.pinned','message.unpinned')
+             AND EXISTS (SELECT 1 FROM events p WHERE p.room_id=e.room_id
+               AND json_extract(p.body,'$.type')='message.posted'
+               AND COALESCE(json_extract(p.body,'$.data.toMemberId'),'')<>''
+               AND (json_extract(p.body,'$.data.messageId')=json_extract(e.body,'$.data.messageId')
+                 OR p.id=json_extract(e.body,'$.data.messageId'))))
+         )
+       GROUP BY actor`
     ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
     const addedAt = new Map(this.db.prepare(
       `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
