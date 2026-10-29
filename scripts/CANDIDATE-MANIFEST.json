@@ -106,7 +106,7 @@
     "src/needs-attention.js": "sha256:1177ebb1a066648f13fa74978b07f40b40b323fc056a3fa5a6096154b98fa080",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
-    "src/owner-cockpit.js": "sha256:65ea5926db90c18a625bfbb8f225a803309944cf02951537255f1497b90f714c",
+    "src/owner-cockpit.js": "sha256:fe1a09e01db419046886c3b4b548d9d05c67c7ff0ac4ef40a2274d70eed11faa",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
     "src/pairing-ui.js": "sha256:a149a8d79be12adaabcbb63241b113ee9f31e45be631d4a1267b99ce92b5f448",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
