@@ -7668,7 +7668,12 @@ document.addEventListener("click", event => {
   const strand = document.activeElement === document.body || document.activeElement?.closest?.("#room-sidebar");
   shell.classList.remove("sidebar-open");
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
-  if (strand) $("#sidebar-toggle").focus();
+  if (strand) {
+    // Channel selection re-renders its button before this listener runs. The
+    // fixed event path retains that navigation intent after the target detaches.
+    const channelNavigation = event.composedPath().some(node => node.dataset?.channel !== undefined);
+    $(channelNavigation ? "#conversation-title" : "#sidebar-toggle").focus({ preventScroll: true });
+  }
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
