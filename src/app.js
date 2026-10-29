@@ -357,6 +357,7 @@ let navigationBoardEpoch = 0;
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
+let confirmedWorkNavigation = null;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
@@ -532,6 +533,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    resumeConfirmedWorkNavigation();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -2230,6 +2232,8 @@ function restoreActiveChannel() {
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function leaveWorkSelection() {
+  // User navigation cancels a pending destination even before its card exists.
+  confirmedWorkNavigation = null;
   if (!activeWorkNavigationId) return false;
   activeWorkNavigationId = null;
   if (/^#pr-record\/work\//.test(location.hash)) {
@@ -3188,6 +3192,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
+  confirmedWorkNavigation = null;
   navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
@@ -6161,6 +6166,14 @@ document.addEventListener("click", async e => {
     button.disabled = false;
   }
 });
+function resumeConfirmedWorkNavigation() {
+  const pending = confirmedWorkNavigation;
+  if (!pending) return;
+  if (!pending.current()) { confirmedWorkNavigation = null; return; }
+  if (busy || !Object.hasOwn(state?.workItems ?? {}, pending.id)) return;
+  confirmedWorkNavigation = null;
+  navigateWorkRecord("work", pending.id);
+}
 function sendWorkProposal() {
   if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
@@ -6168,7 +6181,11 @@ function sendWorkProposal() {
   if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit($("#new-work-form"), async current => {
+  const navigationEpoch = workNavigationEpoch, originUrl = location.href;
+  const originThread = currentThreadId, originChannel = activeChannelId;
+  const operationId = submitOperationId + 1;
+  let completedFormEpoch = null;
+  void submit($("#new-work-form"), async current => {
     try {
       const receipt = await client.send(entry.command);
       if (!current() || !sameSession(generation, roomId, memberId)) return;
@@ -6179,8 +6196,21 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
-  }, { failureHint: "Your work proposal was kept; try again." });
+    closeWorkForm();
+    completedFormEpoch = workFormEpoch;
+    notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+  }, { failureHint: "Your work proposal was kept; try again." }).then(() => {
+    // submit releases busy before navigation. An exact receipt is required;
+    // a late save must not move a replacement session or a newer destination.
+    if (completedFormEpoch === null) return;
+    // A confirmed command can outlive a failed refresh. Reuse the client's
+    // recovery snapshots, retaining only this destination intent, never a write.
+    confirmedWorkNavigation = { id: entry.command.data.workItemId, current: () =>
+      completedFormEpoch === workFormEpoch && operationId === submitOperationId
+      && sameSession(generation, roomId, memberId) && navigationEpoch === workNavigationEpoch
+      && location.href === originUrl && currentThreadId === originThread && activeChannelId === originChannel };
+    resumeConfirmedWorkNavigation();
+  });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;

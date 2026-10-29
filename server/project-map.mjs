@@ -315,6 +315,7 @@ export function graphFromGraphify(doc, { repo, revision = null, now = Date.now()
   const files = Object.create(null);
   let truncated = nodes.length > PROJECT_MAP_LIMITS.nodes || edges.length > PROJECT_MAP_LIMITS.edges || root?.truncated === true;
   const byId = new Map();
+  const symbolNames = new Map();
   let fileCount = 0;
   const ensure = path => {
     if (!files[path] && fileCount >= MAX_FILES) { truncated = true; return null; }
@@ -338,8 +339,12 @@ export function graphFromGraphify(doc, { repo, revision = null, now = Date.now()
     }
     const file = ensure(path);
     if (!file) continue;
-    if (file.symbols.length >= 200) { truncated = true; continue; }
-    if (!file.symbols.some(symbol => symbol.name === name)) {
+    // Persist all definitions in the globally bounded input. The 200-result
+    // packet limit must not make later exact symbol lookups impossible.
+    let names = symbolNames.get(path);
+    if (!names) { names = new Set(); symbolNames.set(path, names); }
+    if (!names.has(name)) {
+      names.add(name);
       file.symbols.push({ name, kind, line: nodeLine(node) });
     }
     if (id) byId.set(id, { path, name });
@@ -437,13 +442,35 @@ function graphMetadata(graph) {
   };
 }
 
+// Upstream extraction labels some methods `.name()`. The importer keeps the
+// canonical `.name` and infers function kind. Alias only these callables, after
+// exact lookup, without adding an index or changing persisted graph content.
+function resolveSymbol(defined, query, file = null) {
+  const scoped = name => (defined.get(name) ?? []).filter(def => !file || def.file === file);
+  const exact = scoped(query);
+  if (exact.length) return { name: query, definitions: exact, alias: false };
+  const name = `.${query}`;
+  const definitions = /^[A-Za-z_$][\w$]*$/.test(query)
+    ? scoped(name).filter(def => def.kind === "function") : [];
+  return { name, definitions, alias: definitions.length > 0 };
+}
+
+function missingCoverage(graph, result) {
+  return !result.found && graph?.truncated === true ? {
+    coverageIncomplete: true,
+    coverageNote: "This bounded map omitted data; not found does not establish absence. Query a map built from a narrower source scope at the same revision, or inspect that revision's source."
+  } : {};
+}
+
 export function mapQuery(graph, q) {
   const result = queryGraph(graph, q);
   let truncated = graph?.truncated === true;
+  if (result.kind === "file") result.symbolCount = result.symbols.length;
   for (const key of ["symbols", "neighbors", "external", "dependents", "callers", "definitions"]) {
     if (result[key]?.length > PROJECT_MAP_LIMITS.results) { result[key] = result[key].slice(0, PROJECT_MAP_LIMITS.results); truncated = true; }
   }
-  return { ...result, ...graphMetadata(graph), truncated };
+  if (result.kind === "file") result.symbolsReturned = result.symbols.length;
+  return { ...result, ...graphMetadata(graph), truncated, ...missingCoverage(graph, result) };
 }
 
 function queryGraph(graph, q) {
@@ -468,7 +495,8 @@ function queryGraph(graph, q) {
       callers
     };
   }
-  const definitions = defined.get(query) ?? [];
+  const resolved = resolveSymbol(defined, query);
+  const definitions = resolved.definitions;
   if (!query || definitions.length === 0) return { found: false, kind: null, query };
   const defFiles = new Set(definitions.map(entry => entry.file));
   const callers = [];
@@ -476,13 +504,14 @@ function queryGraph(graph, q) {
   for (const [otherPath, other] of Object.entries(files)) {
     if (defFiles.has(otherPath)) for (const spec of other.imports ?? []) neighbors.add(spec);
     for (const call of resolvedCalls(otherPath, other, files, defined)) {
-      if (call.name === query && defFiles.has(call.file)) callers.push({ file: otherPath, symbol: query });
+      if (call.name === resolved.name && defFiles.has(call.file)) callers.push({ file: otherPath, symbol: resolved.name });
     }
   }
   const dependentFiles = new Set(callers.map(call => call.file));
   for (const file of defFiles) for (const importer of dependents.get(file) ?? []) dependentFiles.add(importer);
   return {
-    found: true, kind: "symbol", symbol: query, label: query,
+    found: true, kind: "symbol", symbol: resolved.name, label: resolved.name,
+    ...(resolved.alias ? { query, matchedBy: "callable-alias", ambiguous: definitions.length > 1 } : {}),
     definitions, neighbors: [...neighbors].sort(), dependents: [...dependentFiles].sort(), callers
   };
 }
@@ -495,11 +524,14 @@ function nodeIdFor(graph, query) {
   if (hashed) {
     const file = normalizePath(hashed[0]);
     const name = hashed.slice(1).join("#");
-    if (file && files[file] && (files[file].symbols ?? []).some(symbol => symbol.name === name)) return `sym:${file}#${name}`;
+    if (file && files[file]) {
+      const resolved = resolveSymbol(defined, name, file);
+      if (resolved.definitions.length) return `sym:${file}#${resolved.name}`;
+    }
   }
-  const defs = defined.get(String(query ?? "").trim()) ?? [];
-  if (defs.length === 1) return `sym:${defs[0].file}#${query.trim()}`;
-  if (defs.length > 1) return `sym:${defs[0].file}#${query.trim()}`;
+  const resolved = resolveSymbol(defined, String(query ?? "").trim());
+  if (resolved.alias && resolved.definitions.length > 1) return { ambiguous: true };
+  if (resolved.definitions.length) return `sym:${resolved.definitions[0].file}#${resolved.name}`;
   return null;
 }
 
@@ -512,12 +544,14 @@ function presentNode(id) {
 
 export function mapPath(graph, from, to) {
   const result = pathGraph(graph, from, to);
-  return { ...result, ...graphMetadata(graph), truncated: graph?.truncated === true || result.truncated === true };
+  return { ...result, ...graphMetadata(graph), truncated: graph?.truncated === true || result.truncated === true, ...missingCoverage(graph, result) };
 }
 
 function pathGraph(graph, from, to) {
   const start = nodeIdFor(graph, from);
   const goal = nodeIdFor(graph, to);
+  if (start?.ambiguous || goal?.ambiguous) return { found: false, from, to, nodes: [], ambiguous: true,
+    reason: "ambiguous_symbol", guidance: "Use file#symbol to select a definition for each ambiguous callable alias." };
   if (!start || !goal) return { found: false, from, to, nodes: [] };
   if (start === goal) return { found: true, from, to, nodes: [presentNode(start)] };
   const { files, defined } = indexGraph(graph);
