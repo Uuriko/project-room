@@ -42,9 +42,12 @@ unclaimed. This is an independently verified release and publication checkpoint,
 reported 26 failures, all reproduced on baseline `8b19` in
 [run 40838212637](https://github.com/Uuriko/project-room/actions/runs/40838212637).
 They are inherited failures, not harmless results; CI is not green. The test-only
-repair [#5250](https://github.com/Uuriko/project-room/pull/5250) remains open.
-Its landing attempt refused before merging when the expected landing facts did
-not match; the merge slot was released. No test-only repair deployment is implied.
+repair [#5250](https://github.com/Uuriko/project-room/pull/5250) merged at
+`772ec49e868db65c36a7725593eaf5cf662889ee`, exact tree
+`4ccc427f3bc66642b2b37cd63620d4a72d8068e9`. Its earlier landing refused
+because the PR was still draft; after it was marked ready, the guarded merge
+succeeded and the merge slot was released/read back as unclaimed. This test-only
+repair was not redeployed and does not erase the original CI failures.
 
 Private receipts under `release-prep-20261029/` preserve these distinct outcomes:
 `cohesive-verification/verify-8Osog2/receipt.json`, `cohesive-client-live.json`,
