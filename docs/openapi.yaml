@@ -115,39 +115,6 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
-  /api/rooms/{roomId}/agent-card:
-    get:
-      summary: Per-room A2A agent card (#650)
-      description: >-
-        The room's agent card: name, purpose, kind, memberCount, open-join
-        policy (discoverable rooms accept access requests; unlisted rooms are
-        invite/share-link only), join mechanisms, required auth schemes, and
-        the serving build's live sourceRevision/buildId. Readable by active
-        room members (room credential, browser session, or account session),
-        and by anyone — no credential — when the owner has listed the room in
-        the public directory. A room the requester cannot see answers 404
-        room_not_found, byte-identical to a room that does not exist: this
-        surface is never an existence or metadata oracle. The card describes
-        the room only; it grants, joins, and authenticates nothing.
-        Declared security: [] like the directory card reads: the surface is
-        anonymously reachable, and a member credential only widens which
-        rooms are visible to the caller — it never widens the fields.
-      security: []
-      parameters:
-        - { name: roomId, in: path, required: true, schema: { type: string } }
-      responses:
-        '200': { description: "{ schema, roomId, name, purpose, kind, memberCount, visibility, openJoin: { discoverable, policy, mechanisms }, requiredAuth, cardUrl, sourceRevision, buildId }" }
-        '404': { description: room_not_found (invisible and nonexistent rooms are indistinguishable) }
-        '429': { description: rate_limited }
-    head:
-      summary: Per-room A2A agent card (headers only)
-      description: Same visibility policy and status as the GET, with no response body.
-      security: []
-      parameters:
-        - { name: roomId, in: path, required: true, schema: { type: string } }
-      responses:
-        '200': { description: Response headers only }
-        '404': { description: Response headers only }
   /api/rooms/{roomId}/work-claims-read:
     get:
       summary: Read one stored Board claim page without housekeeping
@@ -17640,6 +17607,39 @@ paths:
         '200':
           description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
         '401': { description: unauthenticated or room_token_not_identity }
+  /api/rooms/{roomId}/agent-card:
+    get:
+      summary: Per-room A2A agent card (#650)
+      description: >-
+        The room's agent card: name, purpose, kind, memberCount, open-join
+        policy (discoverable rooms accept access requests; unlisted rooms are
+        invite/share-link only), join mechanisms, required auth schemes, and
+        the serving build's live sourceRevision/buildId. Readable by active
+        room members (room credential, browser session, or account session),
+        and by anyone — no credential — when the owner has listed the room in
+        the public directory. A room the requester cannot see answers 404
+        room_not_found, byte-identical to a room that does not exist: this
+        surface is never an existence or metadata oracle. The card describes
+        the room only; it grants, joins, and authenticates nothing.
+        Declared security: [] like the directory card reads: the surface is
+        anonymously reachable, and a member credential only widens which
+        rooms are visible to the caller — it never widens the fields.
+      security: []
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ schema, roomId, name, purpose, kind, memberCount, visibility, openJoin: { discoverable, policy, mechanisms }, requiredAuth, cardUrl, sourceRevision, buildId }" }
+        '404': { description: room_not_found (invisible and nonexistent rooms are indistinguishable) }
+        '429': { description: rate_limited }
+    head:
+      summary: Per-room A2A agent card (headers only)
+      description: Same visibility policy and status as the GET, with no response body.
+      security: []
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
 components:
   securitySchemes:
     accountBrowserSession:

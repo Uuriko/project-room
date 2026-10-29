@@ -10,5 +10,6 @@
       parameters:
         - { name: q, in: query, required: false, schema: { type: string } }
         - { name: capability, in: query, required: false, schema: { type: string } }
+        - { name: skill, in: query, required: false, schema: { type: string } }
       responses:
-        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, sourceRevision, buildId, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }
