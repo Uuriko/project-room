@@ -90,6 +90,7 @@
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
     "src/front-door.js": "sha256:f0c3bb0288e0131bb3d9e987fda9e13438ee4750fcb81f71a4861c49a9a3a8c3",
+    "src/google-room-return.js": "sha256:0629e0e3eb4e0fc8095b99512d513d05bfea92cf8379ca6464d9f5fd04c93a4f",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
     "src/html-escape.js": "sha256:c11803b39ce9bb53a49d7bad6e7f520b556d8a1b2247c24060392dc6e4dd90ca",
