@@ -13,6 +13,8 @@ test('Worker SQLite cursor pagination has linear scan cost and preserves archive
   assert.deepEqual(r.after,expected.slice(256));assert.deepEqual(r.before,expected.slice(0,256).reverse());
   const visible=m=>!m.deletedAt&&(!m.toMemberId||m.authorId==='viewer'||m.toMemberId==='viewer');
   assert.deepEqual(r.visible,expected.filter(m=>!m.toMemberId||m.authorId==='viewer'||m.toMemberId==='viewer'));
+  assert.deepEqual(r.sequencePage,expected.filter(m=>Number(m.id.slice(1))<18000&&(!m.toMemberId||m.authorId==='viewer'||m.toMemberId==='viewer')).slice(-6).reverse());
+  assert.ok(measures.sequencePage.rowsRead<512,`six-record sequence seek read ${measures.sequencePage.rowsRead} rows`);
   const first=new Map();for(const m of expected){const time=Date.parse(m.createdAt);if(!first.has(m.authorId)||time<first.get(m.authorId))first.set(m.authorId,time);}
   assert.deepEqual(new Map(r.first),first);
   assert.deepEqual(r.recent,expected.filter(visible).slice(-100));assert.equal(r.count,expected.filter(visible).length);
