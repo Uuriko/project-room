@@ -752,6 +752,22 @@ export class BountyEscrow {
 
   nowMs() { return this._now ? this._now() : this.store.now(); }
 
+  // Money guard (UT2 candidate 8): an archived room's money layer used to
+  // stay fully writable — funding created new escrow and new bounties
+  // could be posted after archiving, while ordinary room writes refused
+  // 409 room_archived. Posting and funding now refuse the same way, at
+  // this module so every door (HTTP routes, MCP, settlement) is bound.
+  // A store predating the rooms table has no archived rooms.
+  _roomArchived(roomId) {
+    try { return Boolean(this.db.prepare("SELECT archived_at FROM rooms WHERE id=?").get(roomId)?.archived_at); }
+    catch { return false; }
+  }
+
+  _requireRoomNotArchived(roomId, verb) {
+    if (this._roomArchived(roomId))
+      fail("room_archived", `room "${roomId}" is archived: ${verb} is refused — reading and export stay available, nothing new is recorded`);
+  }
+
   // --- lane identity: membership validation ---------------------------------
   // A lane id is only meaningful when it names a CURRENT member of the room.
   // canonicalLane() is a pure string normalizer — it never consults
@@ -1411,6 +1427,7 @@ export class BountyEscrow {
   postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, disputeDeciderId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
+      this._requireRoomNotArchived(roomId, "posting a new bounty");
       this.ensureGenesis(roomId);
       const lane = this._requireLane(roomId, poster, "poster");
       const act = this._actorFor(roomId, actor, lane);
@@ -1545,6 +1562,7 @@ export class BountyEscrow {
   fundBounty(roomId, bountyId, { funder, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
+      this._requireRoomNotArchived(roomId, "funding a bounty (no new escrow can be created)");
       this.ensureGenesis(roomId);
       const { bounty, lane } = this._triageBounty(roomId, bountyId, funder);
       const act = this._actorFor(roomId, actor, lane);

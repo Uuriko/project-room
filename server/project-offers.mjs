@@ -5,6 +5,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { validId, roomPolicy } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { releaseExpired } from './work-claims.mjs'; // the claim liveness derivation the public task packet serves
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_project_offer', message); };
@@ -147,16 +148,62 @@ export class ProjectOffers {
       return this.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(input.offerId), true);
     });
   }
+  // The live public claim on an offer, in the packet's own terms
+  // (public-work-claims packet()): a claim is live when the task's work
+  // item has a holder whose lease has not lapsed and no receipt has been
+  // submitted at the current generation. A submitted receipt is NOT a
+  // live claim — the owner review path deliberately retains withdrawn
+  // submissions. Returns the enumeration a withdraw refusal must name.
+  livePublicClaim(row) {
+    let task = null;
+    try { task = this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=?').get(row.offer_id); } catch { return null; }
+    if (!task) return null;
+    try {
+      if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, task.generation)) return null;
+    } catch { /* a store predating receipts: the claim item below decides */ }
+    let item = null;
+    try { item = this.store.workClaims?.get?.(task.namespace_key, row.offer_id) ?? null; } catch { item = null; }
+    if (!item) return null;
+    const live = releaseExpired([item], this.store.now())[0];
+    if (!live?.owner) return null;
+    const reward = JSON.parse(row.terms)?.reward ?? {};
+    const amountCredits = reward.kind === 'work_trade' && reward.amountMinor != null
+      ? Number(reward.amountMinor) / 1000 : null;
+    const rewardText = reward.kind === 'work_trade' ? `${amountCredits} credits`
+      : reward.kind === 'cash' && reward.amountMinor != null ? `${Number(reward.amountMinor) / 10 ** (reward.decimals ?? 0)} ${reward.unit}`
+      : 'no reward (unpaid)';
+    return { claimant: live.owner, generation: task.generation,
+      leaseExpiresAt: live.leaseExpiresAt ?? null, amountCredits, rewardText };
+  }
   transition(roomId, actorId, offerId, action, input) {
     this.requireOwner(roomId, actorId);
-    identifier(offerId); shape(input, ['requestId', 'expectedRevision']);
+    identifier(offerId); shape(input, ['requestId', 'expectedRevision'], action === 'withdraw' ? ['forceWithdrawWithLiveClaim'] : []);
     check(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0, 'Expected revision required');
     check(['publish', 'withdraw'].includes(action), 'Invalid action');
+    if (action === 'withdraw' && input.forceWithdrawWithLiveClaim !== undefined)
+      check(typeof input.forceWithdrawWithLiveClaim === 'boolean', 'forceWithdrawWithLiveClaim must be a boolean');
     return this.request(roomId, actorId, { action, offerId, ...input }, () => {
       const row = this.db.prepare('SELECT * FROM project_offers WHERE offer_id=? AND room_id=?').get(offerId, roomId);
       if (!row) fail(404, 'offer_not_found', 'Offer not found');
       if (row.revision !== input.expectedRevision) fail(409, 'stale_offer', 'Offer changed; read it again');
       if (row.status !== (action === 'publish' ? 'draft' : 'published')) fail(409, 'invalid_offer_status', 'Offer cannot make this transition');
+      // Money guard (UT2 candidate 8): withdrawing a published offer whose
+      // public task carries a live claim used to succeed silently and
+      // destroy the claim — the task 404'd for sponsor, worker and anon
+      // while the sponsor's list still showed the offer as claimable.
+      // Refuse with the enumeration, unless the owner explicitly forces
+      // it, in which case the stranded claim rides the journalled outcome.
+      let strandedLiveClaim = null;
+      if (action === 'withdraw') {
+        const liveClaim = this.livePublicClaim(row);
+        if (liveClaim) {
+          if (input.forceWithdrawWithLiveClaim !== true) {
+            fail(409, 'offer_claim_live', `Offer has a live public claim: claimant ${liveClaim.claimant} holds generation ${liveClaim.generation} (lease expires ${liveClaim.leaseExpiresAt ?? 'unknown'}); reward ${liveClaim.rewardText} is committed to this task. Withdrawing now would silently destroy that claim. Let the claim finish, be released, or expire first, or repeat the withdraw with forceWithdrawWithLiveClaim: true to strand the claim on the record.`);
+          }
+          strandedLiveClaim = { claimant: liveClaim.claimant, generation: liveClaim.generation,
+            leaseExpiresAt: liveClaim.leaseExpiresAt, ...(liveClaim.amountCredits !== null ? { amountCredits: liveClaim.amountCredits } : {}) };
+        }
+      }
       if (action === 'publish') {
         const terms = JSON.parse(row.terms);
         check(Boolean(terms.repositoryUrl || terms.submissionUrl), 'Publishing requires a public repository or submission URL');
@@ -164,7 +211,11 @@ export class ProjectOffers {
         validateReview(this.requireOwner(roomId, actorId), JSON.parse(row.terms), links);
       }
       this.db.prepare('UPDATE project_offers SET status=?, revision=revision+1, updated_at=? WHERE offer_id=?').run(action === 'publish' ? 'published' : 'withdrawn', this.store.now(), offerId);
-      return this.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId), true);
+      const outcome = this.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId), true);
+      // A forced withdraw strands the claim ON THE RECORD: this outcome is
+      // what the request journal stores and replays for this requestId.
+      if (strandedLiveClaim) outcome.strandedLiveClaim = strandedLiveClaim;
+      return outcome;
     });
   }
   ownerList(roomId, actorId) {
