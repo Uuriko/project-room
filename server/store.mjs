@@ -1258,7 +1258,10 @@ const INTEGRITY_PARITY_ARCHIVED = new RegExp(
 const INTEGRITY_PARITY_MISSING = new RegExp(
   `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): stored message body missing$`);
 const INTEGRITY_PARITY_RECORD = new RegExp(
-  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}) differs$`);
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}(?::channel)?) differs(?: \\(([a-z_, ]+)\\))?$`);
+const INTEGRITY_PARITY_FIELDS = new Set(['projection_message', 'record_json', 'reducer_extras_json', 'seq',
+  'author_id', 'body', 'channel_id', 'thread_root_id', 'reply_to_id', 'to_member_id', 'work_item_id',
+  'created_at', 'edited_at', 'deleted_at', 'pinned']);
 const INTEGRITY_BACKFILL_STOP = new RegExp(
   `^messages backfill stopped at (\\d+) before room (${INTEGRITY_MESSAGE_ID}) reached sequence (\\d+)$`);
 function allowlistedIntegrityMessage(step, error) {
@@ -1271,7 +1274,11 @@ function allowlistedIntegrityMessage(step, error) {
   const missing = INTEGRITY_PARITY_MISSING.exec(text);
   if (missing) return `messages parity failed for ${missing[1]}: stored message body missing`;
   const record = INTEGRITY_PARITY_RECORD.exec(text);
-  if (record) return `messages parity failed for ${record[1]}: current record ${record[2]} differs`;
+  if (record) {
+    const fields = record[3]?.split(', ') ?? [];
+    if (fields.length <= INTEGRITY_PARITY_FIELDS.size && fields.every(field => INTEGRITY_PARITY_FIELDS.has(field)))
+      return `messages parity failed for ${record[1]}: current record ${record[2]} differs${fields.length ? ` (${fields.join(', ')})` : ''}`;
+  }
   if (/^messages parity failed for /.test(text)) return "messages parity failed: stored messages disagree with the projection";
   const backfill = INTEGRITY_BACKFILL_STOP.exec(text);
   if (backfill) return `messages backfill stopped at ${backfill[1]} before room ${backfill[2]} reached sequence ${backfill[3]}`;
