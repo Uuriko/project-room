@@ -280,7 +280,7 @@ function startColdStart() {
 // first stdout write as "listening", and this line is emitted while the
 // store is still opening.
 function logColdStart(started, db, failed, extra = {}) {
-  const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
+  const record = { event: "room.cold_start", clockSemantics: extra.clockSemantics ?? "runtime-dependent", durationMs: Math.round(performance.now() - started.wall) };
   if (failed) {
     record.failed = true;
     if (failed instanceof Error && failed.message) record.error = failed.message.slice(0, 180);
@@ -316,7 +316,10 @@ function logColdStart(started, db, failed, extra = {}) {
       }
     }
   } catch { /* schema not installed, or the handle is already closing */ }
-  console.error(JSON.stringify(record));
+  // Node reserves stdout for its listening protocol; Cloudflare maps the
+  // console method to severity, so successful opens must use info there.
+  const log = !failed && record.clockSemantics === "io-bound" ? console.info : console.error;
+  log(JSON.stringify(record));
   return record;
 }
 
@@ -2143,7 +2146,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.rememberSchemaStamp();
       phase("checksum");
       phases.checksum = { ms: 0, rowsRead: 0 };
-    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
+    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent" }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
     // Decision #10: backfill projection work items onto the work-claims
     // board (server/work-item-board.mjs). Runs in both integrity modes.
@@ -2171,8 +2174,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // comparable; this separate successful writable-store total includes all
     // initialization through work repository setup and migration.
     this.initializationMs = Math.round(performance.now() - initializationStarted);
-    console.error(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
-      legacyColdStartMs: this.coldStart.durationMs }));
+    const logInitialized = this.storagePlatform.clockSemantics === "io-bound" ? console.info : console.error;
+    logInitialized(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
+      legacyColdStartMs: this.coldStart.durationMs, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent", cpuMeasured: false }));
   }
 
   // Convert one room atomically; interrupted multi-room runs resume by
@@ -2211,7 +2215,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
 
   coldStartExtra(deferIntegrity) {
-    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases };
+    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent" };
     if (!deferIntegrity) return extra;
     extra.skipEventCount = true;
     // The checksum runs in verifyRoomIntegrity, not on this wake.
