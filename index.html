@@ -173,6 +173,10 @@
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
             <ol id="channel-list" class="channel-list"></ol>
           </nav>
+          <nav aria-label="Direct messages">
+            <p class="sidebar-label channels-label"><span>Messages</span><button id="new-direct-message" class="icon-button channel-add" type="button" aria-labelledby="new-direct-title">+</button></p>
+            <ol id="direct-message-list" class="channel-list"></ol>
+          </nav>
           <nav id="tasks-destination" aria-label="Tasks">
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
@@ -260,8 +264,8 @@
             <div class="composer-toolbar" id="composer-toolbar" hidden>
               <label class="audience-label" for="message-to-select">To</label>
               <select id="message-to-select" aria-label="Who this message addresses"></select>
-              <span class="audience-note" id="audience-note" hidden>Private</span>
             </div>
+            <span class="audience-note" id="audience-note" hidden>Private</span>
             <div id="request-mode-bar" class="reply-bar" hidden>
               <span id="request-mode-label"></span>
               <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
@@ -272,6 +276,7 @@
               <details id="composer-options" class="composer-options">
                 <summary id="composer-options-toggle">Options</summary>
                 <div class="composer-options-panel" aria-label="Message options">
+                  <button id="composer-direct-message" class="button ghost" type="button" hidden></button>
                   <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
                   <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
@@ -890,6 +895,12 @@
           <p id="join-agent-status" class="status form-status" role="status"></p>
           <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
         </section>
+      </dialog>
+      <dialog id="new-direct-dialog" aria-labelledby="new-direct-title">
+        <div class="dialog-head"><h2 id="new-direct-title">New message</h2><button id="new-direct-close" type="button" class="button ghost">Cancel</button></div>
+        <label class="sr-only" for="new-direct-search">Find a person or agent</label>
+        <input id="new-direct-search" type="search" autocomplete="off">
+        <ul id="new-direct-people" class="channel-list"></ul>
       </dialog>
 </body>
 </html>
