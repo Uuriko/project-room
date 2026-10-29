@@ -16,6 +16,15 @@ export async function openConversationWork(page, workId) {
   return card;
 }
 
+export async function openWorkFromSearch(page, workId, title) {
+  await openSearch(page);
+  await page.locator("#message-search").fill(title);
+  await page.locator(`#search-list [data-open-work=${JSON.stringify(workId)}]`).click();
+  const card = page.locator(`[data-work-record-id=${JSON.stringify(workId)}]`);
+  await card.waitFor({ state: "visible" });
+  return card;
+}
+
 // The sidebar is always on screen at desktop widths and behind the Menu button
 // below 900px. Anything a check reads out of it - the channel list, People, the
 // archived-room note - has to come through here or it is only ever checked on
