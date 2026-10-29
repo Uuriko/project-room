@@ -100,8 +100,17 @@ export class ReplyRequests {
         verifyAnchor(saved.throughSequence, saved.throughEventId); afterSequence = saved.throughSequence;
       }
       const records = messageRepository(this.store, roomId, state);
-      const byMessage = records.getMany ? records.getMany(rows.filter(row => row.type === 'message.posted').map(row => row.message_id || row.id)) : records;
-      const owners = replyContextOwners({ ...state, messages: records.records() });
+      // Ownership already visits every canonical message in posting order. Keep
+      // those exact records for validation and paging instead of fetching the
+      // entire archive again in ID batches. This is request-local, not an auth cache.
+      const byMessage = new Map();
+      function* indexedRecords() {
+        for (const message of records.records()) {
+          byMessage.set(message.id, message);
+          yield message;
+        }
+      }
+      const owners = replyContextOwners({ ...state, messages: indexedRecords() });
       const byEvent = new Map(rows.map(row => [row.id, row])), terminals = new Map(), openings = new Map();
       for (const request of Object.values(requests)) {
         if (requestMessageId !== null ? request.id !== requestMessageId : !directionMatches(request, auth.member.id, direction)) continue;
