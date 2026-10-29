@@ -69,6 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { disputabilityFor } from "./bounty-disputability.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -1307,6 +1308,14 @@ export class BountyEscrow {
       // confirm an active seat. _mutable/_saveBounty preserve the raw column,
       // including NULL for a verifier-only designation.
       disputeDecider: row.dispute_decider ?? row.verifier ?? null,
+      // DA3-P3 (F-S1a-3): computed disputability, derived at read time from
+      // the same designation disputeBounty seats (the RAW dispute_decider
+      // column ?? verifier) plus the current claimant — see
+      // server/bounty-disputability.mjs for the mirrored derivation and
+      // its scope. Read-only: storage and the composed disputeDecider
+      // above are untouched.
+      disputability: disputabilityFor({ poster: row.poster, verifier: row.verifier,
+        disputeDecider: row.dispute_decider ?? null, claimant: row.claimant }),
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
