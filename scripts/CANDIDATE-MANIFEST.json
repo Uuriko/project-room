@@ -84,7 +84,7 @@
     "src/display-name-guard.js": "sha256:91ea4bfe1b6c3edd516473601c50a37d5c37f37c388a7b2bf28ffd754c850626",
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
     "src/entry-started.js": "sha256:a569941b2109cc91a0da9665700e9395ab3cf7f2de190055c0862c8b17808a2b",
-    "src/entry.js": "sha256:1825c1d62da7e6d71caa472ed5cbccfecca85030232f0af1cb0a0b535be0af40",
+    "src/entry.js": "sha256:f270731980898d55933848be4f0279093c9d3cb83084df04ff7898ac1fa36664",
     "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
     "src/events.js": "sha256:28a87de56c81127fd52d881bf8c75da744adab707183724d4a0e19552a896f99",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
