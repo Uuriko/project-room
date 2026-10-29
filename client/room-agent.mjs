@@ -494,15 +494,22 @@ export class RoomAgentClient {
   }
   async #checkIdentityConnection({ signal } = {}) {
     // Identity checks need current membership and ownership, not message history.
-    // Require the existing versioned work view; never fall back to a full room.
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
+    // Require the versioned identity view; never fall back to a full room.
+    let snapshot;
+    try { snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=identity`, undefined, signal); }
+    catch (error) {
+      if (error instanceof RoomClientError && error.status === 422 && error.code === "invalid_snapshot_view") {
+        throw new RoomClientError(422, "invalid_snapshot_view", "This server does not support identity preflight version 1. Deploy the matching server before using this client; no broader read was attempted.");
+      }
+      throw error;
+    }
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "identity" || snapshot.snapshotVersion !== 1
       || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
       || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
       || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
