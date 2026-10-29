@@ -365,6 +365,7 @@ let confirmedWorkNavigation = null;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let choosingComposerRecipient = false;
 // A message deep link whose target is older than the first (windowed)
 // snapshot cannot reveal on arrival: revealMessage no-ops while the id is
 // not held. A pending hash reveal remembers such a target until a fill or
@@ -607,6 +608,7 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    choosingComposerRecipient = false;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
@@ -1628,18 +1630,29 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
+function composerPrivateLabel() {
+  const to = $("#message-to-select")?.value;
+  if (!to) return null;
+  const member = state?.members && Object.hasOwn(state.members, to) ? state.members[to] : null;
+  return member ? uiText("composer.privateTo", { name: member.displayName }) : uiText("composer.privateMessage");
+}
+function syncComposerAudienceLabel() {
+  $("#composer-label").textContent = composerPrivateLabel() || (currentThreadId ? "Reply in this thread" : "Message the room");
+}
 function syncComposerChrome() {
+  syncComposerAudienceLabel();
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  // bu-09: the audience picker is the broadcast-vs-DM control and stays
-  // visible whenever there is someone to address. Hiding it until a
-  // recipient was already chosen made room-chat DMs undiscoverable — the
-  // hidden control was the only way to start one.
+  // Room chat is the default. Direct messaging is an explicit action in
+  // Message options; never hide an already-addressed private draft.
   if (bar) bar.hidden = !composerAudiencePickerVisible({
-    members: state?.members ? Object.values(state.members) : [],
-    selfId: session?.member?.id,
+    recipientId: to,
     requestMode: Boolean(requestMode),
+    choosingRecipient: choosingComposerRecipient,
   });
+  const startDirect = $("#composer-direct-message");
+  if (startDirect) startDirect.hidden = !Object.values(state?.members ?? {}).some(member =>
+    member.active !== false && member.identityRevoked !== true && member.id !== session?.member?.id);
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -2426,7 +2439,7 @@ function renderMessages() {
   $("#thread-bar").hidden = !currentThreadId;
   syncThreadMuteButton();
   syncAlsoSend();
-  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
+  syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
@@ -2898,6 +2911,7 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
+  choosingComposerRecipient = false;
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
   composerFiles = draft.files ?? [];
@@ -2988,7 +3002,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
+  input.placeholder = archived ? "This room is archived." : (!mode && composerPrivateLabel()) || composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -3042,6 +3056,19 @@ async function openRequestMode(kind, id) {
   }
 }
 const composerOptions = $("#composer-options");
+const startDirectMessage = document.createElement("button");
+startDirectMessage.id = "composer-direct-message";
+startDirectMessage.type = "button";
+startDirectMessage.className = "button ghost";
+startDirectMessage.textContent = uiText("composer.directMessage");
+startDirectMessage.hidden = true;
+composerOptions.querySelector(".composer-options-panel").prepend(startDirectMessage);
+startDirectMessage.addEventListener("click", () => {
+  if (!state || busy || requestReading) return;
+  choosingComposerRecipient = true;
+  syncComposerChrome();
+  $("#message-to-select").focus();
+});
 composerOptions.addEventListener("click", event => {
   if (!event.target.closest("button")) return;
   composerOptions.open = false;
@@ -4722,7 +4749,18 @@ function applyMentionMember(member) {
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 $("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
+$("#message-to-select").addEventListener("change", () => {
+  choosingComposerRecipient = false;
+  saveComposer(); syncRequestComposer(); syncComposerChrome();
+  $("#message-input").focus();
+});
+$("#message-to-select").addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !choosingComposerRecipient) return;
+  event.preventDefault(); event.stopPropagation();
+  choosingComposerRecipient = false;
+  syncComposerChrome();
+  $("#message-input").focus();
+});
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
