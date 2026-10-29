@@ -1310,6 +1310,25 @@ const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 // They must invalidate too now that metadata-only commits keep their cache.
 const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
+// PRES (presence materialisation at commit): per-member activity derived
+// from the event log — last_command_at is max(event.at) per actor,
+// added_at is min(event.at) over that member's member.added events —
+// maintained in the same transaction as each event append (see
+// _recordMemberActivity, fed by the projection-watch prepare wrapper) so
+// presence reads serve O(members) instead of two full event-table scans
+// per call. Purely additive — the DDL is idempotent and runs on store
+// open and lazily on first use — so the strict DDL-text verifySchema
+// and older databases are unaffected; registered in writer-fence
+// lazyAdditiveTables, the purge registry, and room-shard-tables
+// (room-keyed). Values are the event `at` ISO strings, exactly as the
+// scans they replace grouped them.
+export const memberActivitySchema = `
+  CREATE TABLE IF NOT EXISTS member_activity (
+    room_id TEXT NOT NULL, member_id TEXT NOT NULL,
+    last_command_at TEXT, added_at TEXT,
+    PRIMARY KEY(room_id, member_id)
+  );
+`;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1411,6 +1430,7 @@ export class RoomStore {
     // stamp is a counter, not a sequence, so a rolled-back append can never
     // mask a later commit that reuses its sequence.
     this._appendStamps = new Map();
+    this._memberActivitySchemaReady = false;
     this._pendingAppends = new Set();
     this._appendListeners = new Set();
     this.now = now;
@@ -2000,6 +2020,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
       this.db.exec(agentRoomSchema);
       ensureAgentRoomRequestIdColumn(this.db);
+      // PRES: presence activity materialisation — purely additive like
+      // the tables above; created on every full open (and lazily on first
+      // use) so a fresh store's live schema carries it for the shard
+      // classification.
+      this.db.exec(memberActivitySchema);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers
       // have no code path to them, and method rows are always scoped to an
@@ -3194,14 +3219,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (ms > prev) heartbeats.set(session.worker_member_id, ms);
         }
       }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, asMs(row.at)]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, asMs(row.at)]));
+      // PRES: same materialised activity maps presence() serves.
+      const activity = this._memberActivityMaps(roomId);
+      const lastCommandAt = new Map([...activity.lastCommandAt].map(([member, at]) => [member, asMs(at)]));
+      const addedAt = new Map([...activity.addedAt].map(([member, at]) => [member, asMs(at)]));
       const stale = [];
       for (const [memberId, member] of Object.entries(members)) {
         if (member.active === false) continue;
@@ -3450,6 +3471,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
         if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        // PRES: the same positional bind carries the event body, so the
+        // commit-time materialisation rides every events insert in the
+        // codebase (command, initialize, import, side-table appends, and
+        // the satellite modules) inside the caller's transaction.
+        if (eventAppend && typeof args[0] === "string") this._recordMemberActivity(args[0], args[3]);
         return result;
       };
       return stmt;
@@ -3483,6 +3509,115 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rooms = [...this._pendingAppends];
     this._pendingAppends.clear();
     for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // --- PRES: member_activity materialisation ---
+  // Idempotent DDL for the activity table (no-op on warm databases).
+  // Never called on a read-only store: those keep reading through the
+  // legacy scans when the table is absent.
+  ensureMemberActivitySchema() {
+    if (this._memberActivitySchemaReady) return;
+    this.db.exec(memberActivitySchema);
+    this._memberActivitySchemaReady = true;
+  }
+  // Merge the room's full event log into member_activity (monotonic:
+  // last_command_at only grows, added_at only shrinks), so a room whose
+  // history predates materialisation becomes current. Runs inside the
+  // caller's transaction on an append that finds the room rowless.
+  _backfillMemberActivity(roomId) {
+    this.db.prepare(
+      `INSERT INTO member_activity(room_id, member_id, last_command_at, added_at)
+       SELECT room_id, json_extract(body,'$.actorId'), max(json_extract(body,'$.at')), NULL
+       FROM events WHERE room_id=? AND json_extract(body,'$.actorId') IS NOT NULL AND json_extract(body,'$.actorId') <> ''
+       GROUP BY json_extract(body,'$.actorId')
+       ON CONFLICT(room_id, member_id) DO UPDATE SET last_command_at = excluded.last_command_at
+       WHERE member_activity.last_command_at IS NULL OR excluded.last_command_at > member_activity.last_command_at`
+    ).run(roomId);
+    this.db.prepare(
+      `INSERT INTO member_activity(room_id, member_id, last_command_at, added_at)
+       SELECT room_id, json_extract(body,'$.data.memberId'), NULL, min(json_extract(body,'$.at'))
+       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added'
+         AND json_extract(body,'$.data.memberId') IS NOT NULL AND json_extract(body,'$.data.memberId') <> ''
+       GROUP BY json_extract(body,'$.data.memberId')
+       ON CONFLICT(room_id, member_id) DO UPDATE SET added_at = excluded.added_at
+       WHERE member_activity.added_at IS NULL OR excluded.added_at < member_activity.added_at`
+    ).run(roomId);
+  }
+  _upsertMemberActivity(roomId, memberId, lastCommandAt, addedAt) {
+    this.db.prepare(
+      `INSERT INTO member_activity(room_id, member_id, last_command_at, added_at) VALUES(?,?,?,?)
+       ON CONFLICT(room_id, member_id) DO UPDATE SET
+         last_command_at = CASE WHEN excluded.last_command_at IS NOT NULL
+           AND (member_activity.last_command_at IS NULL OR excluded.last_command_at > member_activity.last_command_at)
+           THEN excluded.last_command_at ELSE member_activity.last_command_at END,
+         added_at = CASE WHEN excluded.added_at IS NOT NULL
+           AND (member_activity.added_at IS NULL OR excluded.added_at < member_activity.added_at)
+           THEN excluded.added_at ELSE member_activity.added_at END`
+    ).run(roomId, memberId, lastCommandAt, addedAt);
+  }
+  // One committed event append, called from the prepare wrapper inside
+  // the caller's transaction: the row commits or rolls back with the
+  // event. While a room has no rows (pre-materialisation history, a
+  // history reset, any row loss) the append first backfills from the
+  // full log — one indexed probe per append tells the two cases apart —
+  // so pre-materialisation history is never lost and the table heals
+  // itself. A materialisation failure must never fail the commit (the
+  // append stamp listener precedent): rooms left without rows keep
+  // reading through the legacy scans in _memberActivityMaps.
+  _recordMemberActivity(roomId, bodyJson) {
+    if (this.readOnly) return;
+    try {
+      this.ensureMemberActivitySchema();
+      const hasRows = this.db.prepare("SELECT 1 FROM member_activity WHERE room_id=? LIMIT 1").get(roomId);
+      if (!hasRows) this._backfillMemberActivity(roomId);
+      if (typeof bodyJson !== "string") return;
+      let parsedEvent;
+      try { parsedEvent = JSON.parse(bodyJson); } catch { return; }
+      if (!parsedEvent || typeof parsedEvent.at !== "string" || !parsedEvent.at) return;
+      if (typeof parsedEvent.actorId === "string" && parsedEvent.actorId)
+        this._upsertMemberActivity(roomId, parsedEvent.actorId, parsedEvent.at, null);
+      if (parsedEvent.type === "member.added" && typeof parsedEvent.data?.memberId === "string" && parsedEvent.data.memberId)
+        this._upsertMemberActivity(roomId, parsedEvent.data.memberId, null, parsedEvent.at);
+    } catch { /* presence falls back to the legacy scans for unmaterialised rooms */ }
+  }
+  // History replacement (importEvents) invalidates the room's derived
+  // activity: drop the rows and let the reinserted log rebuild them.
+  _resetMemberActivity(roomId) {
+    if (this.readOnly) return;
+    try {
+      this.ensureMemberActivitySchema();
+      this.db.prepare("DELETE FROM member_activity WHERE room_id=?").run(roomId);
+    } catch { /* the room reads through the legacy scans until its next append */ }
+  }
+  // The two legacy derivations, kept as the fallback for rooms with no
+  // materialised rows (pre-materialisation databases, read-only opens).
+  _scanMemberActivity(roomId) {
+    const lastCommandAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? GROUP BY actor`
+    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+    const addedAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+    ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+    return { lastCommandAt, addedAt };
+  }
+  // The presence activity maps for a room: the materialised rows when
+  // they exist (one indexed read, flat vs room history), else the scans.
+  _memberActivityMaps(roomId) {
+    let rows = [];
+    try {
+      if (!this.readOnly) this.ensureMemberActivitySchema();
+      rows = this.db.prepare(
+        "SELECT member_id AS memberId, last_command_at AS lastCommandAt, added_at AS addedAt FROM member_activity WHERE room_id=?"
+      ).all(roomId);
+    } catch { rows = []; }
+    if (!rows.length) return this._scanMemberActivity(roomId);
+    const lastCommandAt = new Map(), addedAt = new Map();
+    for (const row of rows) {
+      if (row.lastCommandAt) lastCommandAt.set(row.memberId, row.lastCommandAt);
+      if (row.addedAt) addedAt.set(row.memberId, row.addedAt);
+    }
+    return { lastCommandAt, addedAt };
   }
   // The room's append stamp: a counter that changes whenever an event has
   // committed to the room since the caller's last look. Purely in-memory.
@@ -5104,7 +5239,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Who is around: the active roster, plus live SSE watchers and fresh
   // executing sessions. Legacy lastSeenAt also retains enrollment time.
-  // Derived from existing data — no new tables, no people-data store.
+  // Per-member activity is materialised at commit (member_activity, a
+  // derivation of the event log — the log stays the only record); host
+  // presence is read from the heartbeat tables. No people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
@@ -5144,34 +5281,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!working.has(worker)) working.set(worker, []);
       working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
     }
-    const lastCommandAt = new Map(this.db.prepare(
-      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-       FROM events WHERE room_id=? GROUP BY actor`
-    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
-    const addedAt = new Map(this.db.prepare(
-      `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-    ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+    // PRES: per-member activity materialised at commit (member_activity),
+    // one indexed read flat vs room history; rooms without rows fall back
+    // to the legacy event scans inside _memberActivityMaps.
+    const { lastCommandAt, addedAt } = this._memberActivityMaps(roomId);
     const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
     // RC-2026-09-18-051: additive host presence for agent members.
-    const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // PRES: identity links and host statuses are batched — one query for
+    // the room's links and one statusOfMany for its agent identities,
+    // replacing the per-member link lookup + statusOf loop.
+    const identityIdOf = new Map(this.db.prepare(
+      "SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?"
+    ).all(roomId).map(row => [row.memberId, row.identityId]));
+    const hostStatuses = this.agentHeartbeats.statusOfMany(
+      [...new Set(Object.values(members)
+        .filter(m => m && m.kind === "agent" && m.active !== false)
+        .map(m => identityIdOf.get(m.id)).filter(Boolean))]);
     // #660: raw host status per member. status is "online"|"offline"|null
     // (null = no registered host); identityId is the linked agent identity.
     const hostStatusOf = memberId => {
       const m = members[memberId];
       if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-      const link = identityLinkOf.get(roomId, memberId);
-      if (!link) return { identityId: null, status: null, lastSeenAt: null };
-      const status = this.agentHeartbeats.statusOf(link.identityId);
+      const identityId = identityIdOf.get(memberId);
+      if (!identityId) return { identityId: null, status: null, lastSeenAt: null };
+      const status = hostStatuses.get(identityId);
       // Unregistered (no host) stays null so RC-051 clients keep the
       // "no presence field or absent" contract. Roster still lists the member.
-      if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-      return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
-    };
-    const agentPresence = memberId => {
-      const host = hostStatusOf(memberId);
-      if (host.status === null) return null;
-      return { status: host.status, lastSeenAt: host.lastSeenAt };
+      if (!status || status.status === "unregistered") return { identityId, status: null, lastSeenAt: null };
+      return { identityId, status: status.status, lastSeenAt: status.lastSeenAt };
     };
     const listed = Object.values(members)
       .filter(m => m && m.active !== false)
@@ -5184,7 +5321,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           memberId: m.id, displayName: m.displayName, kind: m.kind,
           watching: isWatching, workingOn,
           lastSeenAt, statusMessage: m.statusMessage ?? null,
-          presence: agentPresence(m.id),
+          presence: host.status === null ? null : { status: host.status, lastSeenAt: host.lastSeenAt },
           // #660: derived working state + owner/scope projection (additive).
           state: presenceState({
             kind: m.kind,
@@ -5267,12 +5404,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      // PRES: links + host statuses batched like presenceMembers (the
+      // raw status is kept here, including "unregistered").
+      const identityIdOf = new Map(this.db.prepare(
+        "SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?"
+      ).all(roomId).map(row => [row.memberId, row.identityId]));
+      const hostStatuses = this.agentHeartbeats.statusOfMany(
+        [...new Set(Object.values(members)
+          .filter(m => m && m.kind === "agent" && m.active !== false)
+          .map(m => identityIdOf.get(m.id)).filter(Boolean))]);
       const agentPresence = m => {
         if (!m || m.kind !== "agent" || m.active === false) return null;
-        const link = identityLinkOf.get(roomId, m.id);
-        if (!link) return null;
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        const identityId = identityIdOf.get(m.id);
+        if (!identityId) return null;
+        const status = hostStatuses.get(identityId);
+        if (!status) return null;
         return { status: status.status, lastSeenAt: status.lastSeenAt };
       };
       const listed = Object.values(members)
@@ -5353,6 +5499,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // replace it with one taken from the imported state.
       this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
+      // PRES: the materialised activity derives from the replaced log —
+      // reset it so the reinserted events rebuild it from the new history.
+      this._resetMemberActivity(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);

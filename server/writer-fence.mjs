@@ -525,6 +525,10 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
+// member_activity (PRES presence materialisation, server/store.mjs):
+// purely additive, created on store open and lazily on first use;
+// older writers have no code path to it.
+const PRESENCE_ADDITIVE_TABLES = Object.freeze(["member_activity"]);
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
 // purely additive, created lazily on first lease use. CX5-FIX adds
 // agent_wake_room_activity (room-attributed listener activity), created
@@ -566,7 +570,7 @@ const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotatio
 // queue, open pull file sets, and overlap-notice keys. Created on first
 // push. Older writers have no path to these tables.
 const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...PRESENCE_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
