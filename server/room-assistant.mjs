@@ -435,6 +435,8 @@ export function invokeFromPlainPost(store, roomId, state, actor, data, messageId
     coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
     createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
   // Explicit invokes may already own this derived ID for another source.
-  // Keep their execution and history intact; a plain post still succeeds.
-  store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO NOTHING').run(roomId, run.id, JSON.stringify(run));
+  // Refuse the whole ask instead of acknowledging a message without dispatch.
+  if (store.db.prepare('SELECT 1 FROM room_assistant_runs WHERE room_id=? AND run_id=?').get(roomId, run.id))
+    fail('assistant_run_exists', 'This request ID already belongs to another message');
+  store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?)').run(roomId, run.id, JSON.stringify(run));
 }

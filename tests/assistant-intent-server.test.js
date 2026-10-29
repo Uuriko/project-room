@@ -3,7 +3,7 @@
 // assistant projection being fresh (fo-qa-c10-202610280645).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
@@ -165,10 +165,32 @@ for (const claimed of [false, true]) {
       assert.equal(run.attemptId, 'existing-host-attempt');
       assert.equal(run.activity[0].summary, 'Original execution is in progress');
     }
-    message('owner', 'future-ask', '@Room, please handle this new request.');
+    const head = f.store.headSequence('commons');
+    const command = { id: 'colliding-ask-command', type: 'message.posted', data: { messageId: 'future-ask', body: '@Room, please handle this new request.' } };
+    assert.throws(() => f.store.command(f.keys.owner, 'commons', command), error => error.status === 409 && error.code === 'assistant_run_exists');
+    assert.equal(f.store.headSequence('commons'), head);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM commands WHERE room_id=? AND id=?').get('commons', command.id).n, 0);
     assert.equal(saved(), before, 'derivation must not replace prior inputs, revision, attempt or history');
-    assert.ok(f.store.room('commons').state.messages.some(entry => entry.id === 'future-ask'), 'collision must not refuse the plain post');
+    assert.equal(f.store.room('commons').state.messages.some(entry => entry.id === 'future-ask'), false, 'an undispatched ask must not commit');
     const { runs } = await api('owner');
     assert.equal(runs.filter(run => run.sourceMessageId === 'future-ask').length, 0);
+  });
+}
+
+for (const longFirst of [false, true]) {
+  test(`digest-derived run collision rolls back the ${longFirst ? 'short' : 'long'} ask`, async t => {
+    const { f, api, message } = await setup(t);
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    const longId = 'x'.repeat(128), digestId = createHash('sha256').update(longId).digest('hex').slice(0, 60);
+    const [first, second] = longFirst ? [longId, digestId] : [digestId, longId];
+    message('owner', first, '@Room, handle the first request.');
+    const before = f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? AND run_id=?').get('commons', `run-${digestId}`).value;
+    const head = f.store.headSequence('commons');
+    const command = { id: 'digest-collision-command', type: 'message.posted', data: { messageId: second, body: '@Room, handle the second request.' } };
+    assert.throws(() => f.store.command(f.keys.owner, 'commons', command), error => error.status === 409 && error.code === 'assistant_run_exists');
+    assert.equal(f.store.headSequence('commons'), head);
+    assert.equal(f.store.room('commons').state.messages.some(entry => entry.id === second), false);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM commands WHERE room_id=? AND id=?').get('commons', command.id).n, 0);
+    assert.equal(f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? AND run_id=?').get('commons', `run-${digestId}`).value, before);
   });
 }
