@@ -45,6 +45,71 @@ function rows(store, roomId) {
   return store.db.prepare("SELECT * FROM messages WHERE room_id=? ORDER BY message_id").all(roomId);
 }
 
+test("backfill publishes a caught-up batch once and preserves a parity check between chunks", t => {
+  const store = open(t);
+  store.initialize([
+    ...initialRoom(),
+    messageEvent("commons", "once-post", T.MESSAGE_POSTED, { messageId: "once", body: "Once" }, 10)
+  ]);
+  store.db.exec(`CREATE TABLE publication_audit (room_id TEXT);
+    CREATE TRIGGER audit_publication AFTER UPDATE OF applied_seq ON messages_backfill_cursor
+    WHEN NEW.room_id != '' BEGIN INSERT INTO publication_audit VALUES (NEW.room_id); END;`);
+  let verified = false;
+  const result = store.backfillMessages({ limit: 400, yieldBetween() {
+    const cursor = store.db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id='commons'").get();
+    if (!verified && cursor?.applied_seq === store.room("commons").sequence) {
+      assert.equal(store.checkMessagesParity().ok, true);
+      verified = true;
+    }
+  } });
+  assert.equal(result.done, true);
+  assert.equal(verified, true);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM publication_audit").get().n, 1);
+  const cursor = store.db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  assert.equal(cursor.parity_at_seq, cursor.applied_seq, "redundant publication must not erase a completed parity check");
+});
+
+test("backfill catches a live edit arriving after the final replay chunk", t => {
+  const store = open(t);
+  store.initialize([
+    ...initialRoom(),
+    messageEvent("commons", "yield-post", T.MESSAGE_POSTED, { messageId: "yielded", body: "Before" }, 10)
+  ]);
+  const owner = store.issueAccessKey("commons", "owner");
+  let edited = false;
+  const result = store.backfillMessages({ limit: 400, yieldBetween() {
+    if (edited) return;
+    edited = true;
+    store.command(owner, "commons", {
+      id: "edit-between-chunks", type: T.MESSAGE_EDITED,
+      data: { messageId: "yielded", body: "After", expectedMessageRevision: 0 }
+    });
+  } });
+  assert.equal(result.done, true);
+  assert.equal(edited, true);
+  assert.equal(store.db.prepare("SELECT body FROM messages WHERE message_id='yielded'").get().body, "After");
+  assert.equal(store.checkMessagesParity().ok, true);
+});
+
+test("backfill republishes when its serving certificate is invalidated during the yield", t => {
+  const store = open(t);
+  store.initialize([
+    ...initialRoom(),
+    messageEvent("commons", "repair-post", T.MESSAGE_POSTED, { messageId: "repair", body: "Recover" }, 10)
+  ]);
+  let invalidated = false;
+  const result = store.backfillMessages({ limit: 400, yieldBetween() {
+    if (invalidated) return;
+    invalidated = true;
+    store.db.prepare("UPDATE messages_backfill_cursor SET applied_seq=0, applied_event_id='', parity_at_seq=NULL WHERE room_id='commons'").run();
+    store.db.prepare("DELETE FROM messages WHERE room_id='commons'").run();
+  } });
+  assert.equal(result.done, true);
+  assert.equal(invalidated, true);
+  assert.equal(store.db.prepare("SELECT body FROM messages WHERE message_id='repair'").get().body, "Recover");
+  assert.equal(store.checkMessagesParity().ok, true);
+});
+
 test("backfill replays initialize and importEvents, and a second pass does not add rows", t => {
   const store = open(t);
   const roomId = "commons";

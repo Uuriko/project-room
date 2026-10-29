@@ -4,7 +4,9 @@ import { messageQueries, decodeMessageRecord as decode } from './message-queries
 // Uncertified non-archived rows are never used as a fallback. Authorization stays
 // with the caller; this repository neither caches viewers nor relaxes visibility.
 import { messageReadIndex } from './message-read-index.mjs';
-import { archiveMarker } from './messages-store.mjs';
+import { archiveMarker, archivedMessageRow } from './messages-store.mjs';
+import { hydrateRecordText } from './projection-at-rest.mjs';
+import { hydrateMessageEntities, isMessageEntityRef } from './message-entity-projection.mjs';
 
 export function messageRepository(store, roomId, state = store.room(roomId).state) {
   const live = messageReadIndex(state.messages);
@@ -70,4 +72,20 @@ export function messageThreadRoot(repository, id) {
     message = parent;
   }
   return message?.id;
+}
+
+// Selected canonical lookup across inline, body-reference, entity and archive
+// storage. SQLite still scans the legacy JSON carrier; only one record crosses
+// into JS and unrelated bodies are never hydrated. Call inside a read transaction.
+export function selectedMessageRecord(store, roomId, id, hasArchive = false) {
+  const row = store.db.prepare("SELECT m.value FROM rooms r,json_each(r.projection,'$.messages') m WHERE r.id=? AND json_extract(m.value,'$.id')=? ORDER BY CAST(m.key AS INTEGER) DESC LIMIT 1").get(roomId, id);
+  if (row) {
+    const record = JSON.parse(row.value);
+    if (isMessageEntityRef(record)) return hydrateMessageEntities(store.db, roomId, [record])[0];
+    return JSON.parse(hydrateRecordText(store.db, roomId, row.value,
+      messageId => store.room(roomId, { verifyBodyHashes: true }).state.messages.find(message => message.id === messageId)?.body));
+  }
+  if (!hasArchive) return undefined;
+  const archived = archivedMessageRow(store.db, roomId, id);
+  return archived ? decode(archived) : undefined;
 }

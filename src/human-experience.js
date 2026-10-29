@@ -48,6 +48,8 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
   let boundary = '', projection = null, reading = false, contribution = null, operation = null, rejectedOperation = null, configureOperation = null, error = '', lastRead = 0;
+  // Refresh when the room moves (sync() runs on every stream update); the timer is only a fallback.
+  let seenSequence = -1, roomMoved = false;
   const key = () => ["", client.generation, ":", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
   const pendingKey = () => ["room-assistant-pending:", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
   function persistOperation() { try { if (operation) sessionStorage.setItem(pendingKey(), JSON.stringify(operation)); else sessionStorage.removeItem(pendingKey()); } catch { /* the current tab still has the exact retry */ } }
@@ -251,8 +253,13 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     ask.hidden = !human() || !contribution;
   }
   async function refresh() {
-    if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < (projection?.runs?.some(run => run.status === 'working') ? 500 : 3000)) return;
-    const stamp = key(); reading = true; lastRead = Date.now();
+    // Assistant configuration emits no room event, so while this tab does not
+    // know a connected assistant it keeps the short poll: a stale "not
+    // connected" would turn a first "@Room" ask into a plain post (Fo, C10).
+    const connected = Boolean(projection?.assistant?.coordinatorMemberId) && projection.assistant.availability !== 'not_connected';
+    const since = Date.now() - lastRead, fallback = Object.values(projection?.runs ?? {}).some(run => !CLOSED.includes(run.status)) ? 1000 : connected ? 15000 : 3000;
+    if (!human() || !getState() || reading || document.hidden || since < (roomMoved ? 500 : fallback)) return;
+    const stamp = key(); reading = true; lastRead = Date.now(); roomMoved = false;
     try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
     catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; paint(); } }
     finally { reading = false; }
@@ -369,10 +376,10 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
       section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active;
       if (active) {
-        for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
       if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (client.sequence !== seenSequence) { seenSequence = client.sequence; roomMoved = true; }
       if (boundary !== key()) {
         activity.open = false; activity.hidden = true;
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();

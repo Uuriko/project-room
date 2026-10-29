@@ -5,6 +5,16 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
+import { createHash } from "node:crypto";
+
+function mintProof(displayName) {
+  const bucket = Math.floor(Date.now() / 600000);
+  for (let i = 0; i < 1e6; i++) {
+    const nonce = i.toString(36);
+    if (createHash("sha256").update(`${bucket}:${displayName}:${nonce}`).digest("hex").startsWith("000")) return nonce;
+  }
+  throw new Error("proof search exhausted");
+}
 
 const origin = "https://room.example.test";
 
@@ -210,6 +220,157 @@ test("ordinary read burst coalesces alarm eligibility without changing responses
     await new Promise(resolve => setTimeout(resolve, 50));
     const { body } = await call(mf, "/probe/eligibility-count");
     console.log(JSON.stringify({ readBurst: 10, eligibilityEvaluations: body.count }));
-    assert.ok(body.count > 0 && body.count <= 2, `ten reads must share bounded eligibility work, got ${body.count}`);
+    // Write-gated arming (claude/arm-after-writes): reads that write nothing
+    // skip eligibility entirely, so 0 is the expected floor, not a failure.
+    assert.ok(body.count >= 0 && body.count <= 2, `ten reads must share bounded eligibility work, got ${body.count}`);
   } finally { await mf.dispose(); }
 });
+
+// A read that writes no rows must not re-run earliestFutureAlarm (about 20
+// statements including a full work_claims scan); a request that writes must.
+test("only a request that wrote rows re-arms the job alarm", async () => {
+  const mf = await start();
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+  try {
+    const backfill = await call(mf, "/probe/backfill?name=arm");
+    assert.equal(backfill.body.done, true, JSON.stringify(backfill.body));
+    // Something must be queued, or a re-arm correctly sets no alarm at all.
+    await call(mf, "/probe/seed-due?name=arm&delayMs=600000");
+    await call(mf, "/probe/ensure?name=arm");
+    assert.equal(typeof (await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, "number");
+    // The first request after boot always arms (constructor writes are not
+    // counted); spend it before measuring reads.
+    await call(mf, "/probe/do-fetch?name=arm&method=GET&path=" + encodeURIComponent("/api/rooms/warm-up"));
+    await settle();
+    const cleared = await call(mf, "/probe/clear-alarm?name=arm");
+    assert.equal(cleared.body.alarmAt, null);
+    const read = await call(mf, "/probe/do-fetch?name=arm&method=GET&path=" + encodeURIComponent("/api/rooms/no-such-room"));
+    assert.ok(read.body.status >= 400 && read.body.status < 500, JSON.stringify(read.body));
+    await settle();
+    assert.equal((await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, null, "a read-only request armed the alarm");
+    const displayName = "Arm Probe";
+    const bucket = Math.floor(Date.now() / 600000);
+    let proof = null;
+    for (let i = 0; i < 1e6 && proof === null; i++) {
+      const nonce = i.toString(36);
+      if (createHash("sha256").update(`${bucket}:${displayName}:${nonce}`).digest("hex").startsWith("000")) proof = nonce;
+    }
+    const response = await mf.dispatchFetch(origin + "/probe/do-fetch?name=arm&method=POST&path=" + encodeURIComponent("/api/agent-identities"),
+      { method: "POST", body: JSON.stringify({ displayName, proof }) });
+    const minted = await response.json();
+    assert.equal(minted.status, 201, JSON.stringify(minted));
+    await settle();
+    assert.equal(typeof (await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, "number", "a writing request did not re-arm the alarm");
+  } finally {
+    await mf.dispose();
+  }
+});
+
+// The gate only pays off if real agent traffic reads as read-only. An
+// authenticated needs-me poll (the hottest agent read) must not count as a
+// write: activated_at is guarded by IS NULL, so after the first request it
+// changes no rows.
+test("authenticated agent polls do not re-arm the job alarm", async () => {
+  const mf = await start();
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+  const alarmAt = async () => (await call(mf, "/probe/alarm-at?name=poll")).body.alarmAt;
+  try {
+    assert.equal((await call(mf, "/probe/backfill?name=poll")).body.done, true);
+    await call(mf, "/probe/seed-due?name=poll&delayMs=600000");
+    await call(mf, "/probe/ensure?name=poll");
+    const minted = await mf.dispatchFetch(origin + "/probe/do-fetch?name=poll&method=POST&path=" + encodeURIComponent("/api/agent-identities"),
+      { method: "POST", body: JSON.stringify({ displayName: "Poll Probe", proof: mintProof("Poll Probe") }) }).then(response => response.json());
+    assert.equal(minted.status, 201, JSON.stringify(minted));
+    const { secret } = JSON.parse(minted.body);
+    assert.equal(typeof secret, "string");
+    const poll = () => mf.dispatchFetch(origin + "/probe/do-fetch?name=poll&method=GET&path=" + encodeURIComponent("/api/needs-me"),
+      { headers: { authorization: `Bearer ${secret}` } }).then(response => response.json());
+    // The first authenticated request may stamp activated_at once; spend it.
+    assert.equal((await poll()).status, 200);
+    await settle();
+    await call(mf, "/probe/clear-alarm?name=poll");
+    for (let i = 0; i < 3; i++) assert.equal((await poll()).status, 200);
+    await settle();
+    assert.equal(await alarmAt(), null, "an authenticated read-only agent poll re-armed the alarm");
+  } finally {
+    await mf.dispose();
+  }
+});
+
+// Edge cases for write-gated arming: boot, a refused command, a read racing a write.
+test("write-gated arming: first request after boot, refused command, read racing a write", async () => {
+  const mf = await start();
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+  const alarmAt = async name => (await call(mf, `/probe/alarm-at?name=${name}`)).body.alarmAt;
+  const readPath = "/probe/do-fetch?method=GET&path=" + encodeURIComponent("/api/rooms/no-such-room");
+  const mint = (name, body) => mf.dispatchFetch(origin + `/probe/do-fetch?name=${name}&method=POST&path=` + encodeURIComponent("/api/agent-identities"),
+    { method: "POST", body: JSON.stringify(body) }).then(response => response.json());
+  const prime = async name => {
+    assert.equal((await call(mf, `/probe/backfill?name=${name}`)).body.done, true);
+    await call(mf, `/probe/seed-due?name=${name}&delayMs=600000`);
+    await call(mf, `/probe/ensure?name=${name}`);
+    assert.equal((await call(mf, `/probe/clear-alarm?name=${name}`)).body.alarmAt, null);
+  };
+  try {
+    // Boot: the object's very first request re-arms even though it writes nothing.
+    await prime("boot");
+    await call(mf, readPath + "&name=boot"); await settle();
+    assert.equal(typeof await alarmAt("boot"), "number", "first request after boot did not arm");
+
+    // Refused command: validation fails before any write, so nothing re-arms.
+    await prime("refused");
+    await call(mf, readPath + "&name=refused"); await settle();
+    await call(mf, "/probe/clear-alarm?name=refused");
+    const refused = await mint("refused", { displayName: "", proof: "x" });
+    assert.ok(refused.status >= 400 && refused.status < 500, JSON.stringify(refused));
+    await settle();
+    assert.equal(await alarmAt("refused"), null, "a refused command armed the alarm");
+
+    // Race: a read and a write in flight together; the write still arms.
+    await prime("race");
+    await call(mf, readPath + "&name=race"); await settle();
+    await call(mf, "/probe/clear-alarm?name=race");
+    const [read, written] = await Promise.all([call(mf, readPath + "&name=race"), mint("race", { displayName: "Race Probe", proof: mintProof("Race Probe") })]);
+    assert.ok(read.body.status >= 400, JSON.stringify(read.body));
+    assert.equal(written.status, 201, JSON.stringify(written));
+    await settle();
+    assert.equal(typeof await alarmAt("race"), "number", "a write racing a read did not arm");
+  } finally {
+    await mf.dispose();
+  }
+});
+
+
+for (const phase of ['boot', 'write']) {
+  test(`read retries failed ${phase} alarm reconciliation without another write`, async () => {
+    const mf = await start();
+    const name = `retry-${phase}`;
+    const route = path => `${path}?name=${name}`;
+    const read = () => call(mf, route('/probe/do-fetch') + '&method=GET&path=' + encodeURIComponent('/api/rooms/no-such-room'));
+    const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+    try {
+      assert.equal((await call(mf, route('/probe/backfill'))).body.done, true);
+      await call(mf, route('/probe/seed-due') + '&delayMs=600000');
+      if (phase === 'write') { await read(); await settle(); }
+      await call(mf, route('/probe/clear-alarm'));
+      await call(mf, route('/probe/fail-alarm-read'));
+      if (phase === 'boot') await read();
+      else {
+        const displayName = 'Retry alarm probe';
+        const response = await mf.dispatchFetch(origin + route('/probe/do-fetch') + '&method=POST&path=' + encodeURIComponent('/api/agent-identities'), {
+          method: 'POST', body: JSON.stringify({ displayName, proof: mintProof(displayName) })
+        });
+        assert.equal((await response.json()).status, 201);
+      }
+      await settle();
+      assert.equal((await call(mf, route('/probe/alarm-read-failures'))).body.count, 1, 'injected failure actually ran');
+      assert.equal((await call(mf, route('/probe/alarm-at'))).body.alarmAt, null);
+      await read(); await settle();
+      assert.equal(typeof (await call(mf, route('/probe/alarm-at'))).body.alarmAt, 'number', 'read must retry outstanding alarm work');
+      // Once reconciliation succeeds, a later pure read can skip it again.
+      await call(mf, route('/probe/clear-alarm'));
+      await read(); await settle();
+      assert.equal((await call(mf, route('/probe/alarm-at'))).body.alarmAt, null);
+    } finally { await mf.dispose(); }
+  });
+}

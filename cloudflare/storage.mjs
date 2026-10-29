@@ -61,9 +61,36 @@ const tooBig = error => isTooBig(error)
   ? new ServiceError(409, "pilot_limit", "Room storage limit reached (platform row limit); no data was changed")
   : error;
 
+// Over-counting is harmless (an extra alarm re-arm); missing a write is not.
+// So the rule is an allowlist of reads: after leading comments, one SELECT, or
+// one WITH ... SELECT with no write keyword anywhere. Everything else counts as
+// a write: INSERT/UPDATE/DELETE/REPLACE, WITH ... INSERT, PRAGMA, DDL, a write
+// behind a leading comment, and any multi-statement exec ("SELECT 1; DELETE").
+// A ";" inside a string literal also counts as multi-statement (over-count).
+const LEADING_COMMENTS = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/;
+const WRITE_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE)\b/i;
+function readOnlySql(text) {
+  const body = text.replace(LEADING_COMMENTS, "").replace(/[\s;]+$/, "");
+  if (body.includes(";")) return false;
+  if (/^SELECT\b/i.test(body)) return true;
+  return /^WITH\b/i.test(body) && !WRITE_WORD.test(body);
+}
+const writeSqlCache = new Map();
+export function isWriteSql(sql) {
+  let hit = writeSqlCache.get(sql);
+  if (hit === undefined) {
+    hit = !readOnlySql(String(sql));
+    if (writeSqlCache.size < 4096) writeSqlCache.set(sql, hit);
+  }
+  return hit;
+}
+
 export class DurableDatabase {
   constructor(storage, { observeStatement } = {}) {
     this.storage = storage; this.isTransaction = false; this.rowsRead = 0;
+    // Write statements that changed rows. ProjectRoom.fetch compares it before
+    // and after a request to skip re-arming the job alarm when nothing changed.
+    this.writeStatements = 0;
     this.observeStatement = observeStatement;
   }
   // Observers receive only counters, never SQL, bindings or errors. Capture
@@ -71,6 +98,15 @@ export class DurableDatabase {
   #countRead(cursor) {
     try { const n = Number(cursor?.rowsRead ?? 0); if (n) this.rowsRead += n; }
     catch { /* unavailable diagnostic counters must not change SQL results */ }
+  }
+  // Only write-shaped SQL ever touches cursor.rowsWritten, so plain reads keep
+  // the counter-free fast path. A write that changed no rows (a guarded no-op
+  // UPDATE) does not count; an unknown or failed count does, to stay safe.
+  #countWrite(sql, cursor) {
+    if (!isWriteSql(sql)) return;
+    let n;
+    try { n = cursor?.rowsWritten; } catch { n = undefined; }
+    if (!Number.isFinite(n) || n > 0) this.writeStatements += 1;
   }
   #observation() {
     let finish;
@@ -90,7 +126,7 @@ export class DurableDatabase {
     let cursor, failed = false;
     try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
     catch (error) { failed = true; throw tooBig(error); }
-    finally { if (finish) finish(cursor, failed); else this.#countRead(cursor); }
+    finally { if (finish) finish(cursor, failed); else this.#countRead(cursor); this.#countWrite(sql, cursor); }
   }
   exec(sql) {
     return durableStorage.transaction(this, () => this.#all(sql, []));
@@ -103,7 +139,7 @@ export class DurableDatabase {
         let cursor;
         try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
         catch (error) { throw tooBig(error); }
-        finally { db.#countRead(cursor); }
+        finally { db.#countRead(cursor); db.#countWrite(sql, cursor); }
         return;
       }
       const finish = db.#observation();
@@ -127,7 +163,7 @@ export class DurableDatabase {
         if (iterator.throw) observed.throw = (...values) => iterator.throw(...values);
         yield* observed;
       } catch (error) { throw tooBig(error); }
-      finally { finish(cursor, failed); }
+      finally { finish(cursor, failed); db.#countWrite(sql, cursor); }
     }
     const all = (...args) => this.#all(sql, args);
     return {
@@ -146,6 +182,7 @@ export class DurableDatabase {
 }
 
 export const durableStorage = {
+  clockSemantics: 'io-bound',
   version(db) {
     const hit = cacheOf(db);
     if (hit.versionKnown) return hit.version;
@@ -177,15 +214,19 @@ export const durableStorage = {
     // them (and only recreates the ones a repaired additive table is missing).
     const known = new Map(writerVersions.filter(v => v < STORE_SCHEMA_VERSION).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
     const current = new Map(fences.map(def => [def.name, def.sql]));
-    for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
-      if (current.get(row.name) === row.sql) continue;
-      if (known.get(row.name) !== row.sql) reconciliation();
+    // This synchronous invocation owns its snapshot; never cache it across
+    // migrations or repairs. Deletions below update the install snapshot.
+    const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
+    for (const [name, sql] of triggers) {
+      if (current.get(name) === sql) continue;
+      if (known.get(name) !== sql) reconciliation();
       // 2026-09-30 (phase-3 audit LOW-1): validate the trigger name against
       // the expected pattern before interpolating into SQL. The name comes
       // from sqlite_master (not user input) and is already GLOB-filtered,
       // but defense-in-depth demands an explicit allowlist.
-      if (!/^writer_v\d+_[A-Za-z0-9_]+_(insert|update|delete)$/.test(row.name)) reconciliation();
-      db.exec(`DROP TRIGGER ${row.name}`);
+      if (!/^writer_v\d+_[A-Za-z0-9_]+_(insert|update|delete)$/.test(name)) reconciliation();
+      db.exec(`DROP TRIGGER ${name}`);
+      triggers.delete(name);
     }
     if (hasPermit(db) && permitValue(db) !== STORE_SCHEMA_VERSION) {
       if (!writerVersions.includes(db.migrationSource) || db.migrationSource < 8) reconciliation();
@@ -198,20 +239,20 @@ export const durableStorage = {
       db.storage.sql.exec(`INSERT INTO ${permit} VALUES(1,${STORE_SCHEMA_VERSION})`);
     }
     for (const { name, sql } of fences) {
-      const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
-      if (!existing) db.exec(sql);
-      else if (existing.sql !== sql) throw new Error('Database writer fence requires operator reconciliation');
+      if (!triggers.has(name)) db.exec(sql);
+      else if (triggers.get(name) !== sql) throw new Error('Database writer fence requires operator reconciliation');
     }
     this.setVersion(db, STORE_SCHEMA_VERSION);
   },
   verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
     const expected = new Map(writerVersions.filter(v => version < 8 ? v <= version : v === version).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
-    for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
-      if (expected.get(row.name) !== row.sql) reconciliation(`trigger ${row.name} ${expected.has(row.name) ? 'drifted' : 'unknown'}`);
+    const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
+    for (const [name, sql] of triggers) {
+      if (expected.get(name) !== sql) reconciliation(`trigger ${name} ${expected.has(name) ? 'drifted' : 'unknown'}`);
     }
     if (version >= 8) verifyPermit(db, version, db.isTransaction && !db.readOnlyTransaction ? version : 0);
     for (const { name, sql } of durableFenceDefinitions(version)) {
-      if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
+      if (triggers.get(name) !== sql) {
         reconciliation(`trigger ${name} missing or drifted`);
       }
     }

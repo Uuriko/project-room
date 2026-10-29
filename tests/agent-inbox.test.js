@@ -32,6 +32,37 @@ const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
   headers: secret ? { authorization: `Bearer ${secret}` } : {},
 });
 
+for (const archived of [false, true]) test(`inbox DMs use edited content, refill past deletions, and advance across tombstones (archived=${archived})`, async t => {
+  const fixture = createAcceptanceFixture(), origin = await startServer(t, fixture);
+  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  const store = fixture.store;
+  let clock = Date.now() + 10000; store.now = () => clock;
+  const command = (id, type, data) => { clock += 2001; return store.command(ownerSecret, roomId, { id, type, data }); };
+  command('live', 'message.posted', { messageId: 'live', body: 'Original instruction', toMemberId: memberId });
+  command('edit-live', 'message.edited', { messageId: 'live', expectedMessageRevision: 0, body: 'Corrected instruction' });
+  for (let i = 0; i < 4; i++) {
+    command(`dead-${i}`, 'message.posted', { messageId: `dead-${i}`, body: 'Deleted content', toMemberId: memberId });
+    command(`delete-${i}`, 'message.deleted', { messageId: `dead-${i}`, expectedMessageRevision: 0 });
+  }
+  if (archived) {
+    while (!store.backfillMessages({ limit: 1000 }).done) { /* finish fixture backfill */ }
+    assert.equal(store.checkMessagesParity({ roomId }).ok, true);
+    const archive = store.archiveMessages(roomId, { keepNewest: 1, dryRun: false });
+    assert.equal(archive.ok, true, JSON.stringify(archive));
+    assert.equal(store.room(roomId).state.messages.some(message => message.id === 'live'), false);
+  }
+  const inbox = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
+  assert.deepEqual(inbox.directMessages.map(row => [row.messageId, row.body]), [['live', 'Corrected instruction']]);
+  assert.doesNotMatch(JSON.stringify(inbox), /Original instruction|Deleted content|dead-/);
+  const highestPosted = store.db.prepare("SELECT max(sequence) AS n FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted'").get(roomId).n;
+  assert.equal(inbox.cursor.after, highestPosted, 'filtered newest tombstones still advance the delivery cursor');
+  command('delete-live', 'message.deleted', { messageId: 'live', expectedMessageRevision: 1 });
+  const empty = store.agentInbox(friendSecret, roomId, { limit: 1 });
+  assert.deepEqual(empty.directMessages, []);
+  assert.equal(empty.cursor.after, highestPosted);
+  assert.equal(empty.next.some(step => step.action === 'reply-dm'), false);
+});
+
 // Room with an owner and one approved agent friend; returns their secrets,
 // the room id, and the friend's member id.
 async function roomWithFriend(origin, fixture) {

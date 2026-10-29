@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human tasks against isolated synthetic data; no real user research.
 import test from "node:test";
@@ -28,7 +29,7 @@ for (const mobile of [false, true]) {
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/reminders")) writes.push(request.postDataJSON()); });
     await page.clock.install({ time: at });
     await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" });
-    const card = page.locator('[data-work-record-id="test-handoff"]');
+    const card = await openConversationWork(page, 'test-handoff');
     const open = async () => {
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
       await card.getByRole("button", { name: "Remind me", exact: true }).click();

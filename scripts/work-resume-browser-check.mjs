@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 // Synthetic restart journey in a real browser; no real user data or agents.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,7 +35,7 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(theme => localStorage.setItem('project-room-theme', theme), mobile ? 'light' : 'dark');
   await page.goto(origin); await signInFixture(page, f.keys.owner);
-  const card = page.locator('[data-work-record-id="test-handoff"]');
+  const card = await openConversationWork(page, 'test-handoff');
   const handoff = card.locator('[data-work-handoff]'); await handoff.waitFor({ state: 'visible' });
   assert.match(await handoff.innerText(), /Check escaped separators/);
   assert.equal(await card.getByRole("link", { name: "From this conversation" }).count(), 1);

@@ -83,3 +83,24 @@ The table counts leave out Cloudflare's internal `_cf_*` tables. A table that re
 ## Audit
 
 Every find, plan, and execute writes one row to `operator_actions`. The row holds ids, counts, and the reason you typed. It does not hold message text or secrets. `GET /api/operator/actions?limit=` lists them. Update and delete on that table are rejected.
+
+
+## Interpreting hosted timing
+
+Cloudflare [runtime clocks](https://developers.cloudflare.com/workers/runtime-apis/performance/)
+advance on I/O rather than during synchronous execution. A zero startup,
+`appMs`, or `Server-Timing: app` value does **not** mean that the constructor or
+handler used no CPU. These values retain their existing numeric meaning and
+are annotated `clockSemantics: "io-bound"` on hosted startup/request records.
+`cpuMeasured: false` describes these duration fields; use platform invocation
+CPU/wall telemetry or profiling to investigate CPU, not their difference.
+
+`room.request.residualMs` is the nonnegative difference between the outer
+Worker and inner handler clock deltas. `queueMs` remains an identical legacy
+alias for compatibility. Neither is measured queue time: constructor work,
+transport, scheduling and the clocks' limited visibility can contribute.
+`residualAttribution: "unattributed"` makes that limitation explicit. Request
+measurements end at response headers and exclude subsequent streaming work.
+Store totals cover the code through successful initialization, but cannot
+measure synchronous CPU on the hosted clock. Local Node timings must not be
+interpreted as hosted timing measurements.

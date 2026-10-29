@@ -1,6 +1,5 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
-import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
@@ -16,8 +15,7 @@ import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
-import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
-import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
@@ -178,7 +176,7 @@ function checkedOffers(result) {
   } catch { throw new RoomClientError(200, "invalid_response", "Help offers do not match selected work and participants"); }
 }
 
-function checkedWorkSnapshot(value, roomId) {
+function checkedWorkSnapshot(value, roomId, expectedView = "work") {
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
@@ -190,11 +188,11 @@ function checkedWorkSnapshot(value, roomId) {
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
       const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
-      if (value.snapshotView !== "work" || value.snapshotVersion !== 1
+      if (value.snapshotView !== expectedView || value.snapshotVersion !== 1
         || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
         || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
         || !exact(state, "room members workItems")) throw new Error();
-    } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
+    } else if (expectedView !== "work" || value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
       || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
@@ -450,8 +448,9 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
-    const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    const snapshotRead = suffix === "" || suffix === "?view=work" || suffix === "?view=orientation";
+    const boardRead = suffix === "/board" || suffix.startsWith("/board?");
+    if (this.#memberId && (snapshotRead || boardRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -494,15 +493,22 @@ export class RoomAgentClient {
   }
   async #checkIdentityConnection({ signal } = {}) {
     // Identity checks need current membership and ownership, not message history.
-    // Require the existing versioned work view; never fall back to a full room.
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
+    // Require the versioned identity view; never fall back to a full room.
+    let snapshot;
+    try { snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=identity`, undefined, signal); }
+    catch (error) {
+      if (error instanceof RoomClientError && error.status === 422 && error.code === "invalid_snapshot_view") {
+        throw new RoomClientError(422, "invalid_snapshot_view", "This server does not support identity preflight version 1. Deploy the matching server before using this client; no broader read was attempted.");
+      }
+      throw error;
+    }
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "identity" || snapshot.snapshotVersion !== 1
       || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
       || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
       || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
@@ -556,40 +562,30 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
-  // Agents named before they have a seat. Reading the room snapshot assembles
-  // the network. It grants no access, mints no identity, and issues no invite.
+  // The service assembles canonical introduction history and applies viewer
+  // visibility and verifier authority. A recent-message snapshot is incomplete.
   async outsideAgents({ signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    // Conservative verifier set: the client honors verify records from the
-    // room owner only (it cannot see delegation grants). The server's fuller
-    // set is authoritative; this just lets the client display verified links.
-    const ownerId = snapshot.state?.room?.ownerId;
-    const verifiers = typeof ownerId === "string" && ownerId ? new Set([ownerId]) : null;
-    return {
-      contractVersion: 1,
-      grantsAccess: false,
-      evaluatedThrough: snapshot.sequence,
-      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, { verifiers })
-    };
+    return this.#outsideAgentResponse(await this.#request("/outside-agents", undefined, signal));
   }
-  // Name an agent who has no seat. The post is an ordinary room message.
-  // Reading it grants no access, mints no identity, and issues no invite.
-  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  #outsideAgentResponse(value) {
+    if (!value || value.contractVersion !== 1 || value.grantsAccess !== false
+      || !Number.isSafeInteger(value.evaluatedThrough) || value.evaluatedThrough < 0
+      || !Array.isArray(value.agents) || value.agents.some(agent => !agent || typeof agent.externalRef !== "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent network");
+    }
+    return value;
+  }
   async recordOutsideAgent(input, { signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
-    const snapshot = await this.snapshot({ signal });
-    let plan;
-    try {
-      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
-    } catch (error) {
-      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
-      throw error;
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["externalRef", "displayName", "origin", "reach", "note"].includes(key))) {
+      throw new RoomClientError(422, "invalid_outside_agent", "Choose public agent facts only");
     }
-    if (plan.recorded !== "replay") {
-      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    const value = this.#outsideAgentResponse(await this.#request("/outside-agents", { ...input, action: "introduce" }, signal));
+    if (!["introduce", "sighting", "replay"].includes(value.recorded) || value.externalRef !== input?.externalRef) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent receipt");
     }
-    const network = await this.outsideAgents({ signal });
-    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+    return value;
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
@@ -898,18 +894,27 @@ export class RoomAgentClient {
     const path = params.size ? `/work-claims?${params}` : "/work-claims";
     const page = await this.#request(path, undefined, signal);
     if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
-    const claims = [...(page.claims ?? [])];
+    if (page.hasMore !== true || !Array.isArray(page.claims)) {
+      return { ...page, claims: Array.isArray(page.claims) ? page.claims : [], hasMore: true };
+    }
+    const claims = [...page.claims];
     let next = page.nextCursor;
     const seen = new Set();
+    let done = false;
     for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
       seen.add(next);
       const moreParams = new URLSearchParams(params);
       moreParams.set("cursor", next);
       const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
-      claims.push(...(more?.claims ?? []));
-      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+      // Stop at the malformed page: a later terminal page cannot certify
+      // completeness after omitted claims or contradictory continuation data.
+      const terminal = more?.hasMore === false && more.nextCursor == null;
+      const continuation = more?.hasMore === true && typeof more.nextCursor === "string" && more.nextCursor.length > 0;
+      if (!Array.isArray(more?.claims) || (!terminal && !continuation)) break;
+      claims.push(...more.claims);
+      done = terminal;
+      next = !done ? more.nextCursor : null;
     }
-    const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
   projectMap(args, { signal } = {}) {
@@ -1025,9 +1030,13 @@ export class RoomAgentClient {
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
   }
-  // Selected task only; the normal authenticated snapshot never leaves this client.
+  // Retrieve only selected work and its explicitly requested source before export.
   async workPacket(workItemId, options = {}) {
-    return workPacket((await this.snapshot()).state, workItemId, options);
+    const { signal, ...packetOptions } = options;
+    const selected = await this.workContext(workItemId, { includeSource: packetOptions.includeSource ?? false, signal });
+    const source = selected.context.source;
+    return workPacket({ room: { id: selected.roomId }, workItems: { [workItemId]: selected.work },
+      messages: source.status === "included" ? [source.message] : [] }, workItemId, packetOptions);
   }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
@@ -1394,22 +1403,21 @@ export class RoomAgentClient {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
   async board({ queue, state, limit, cursor, signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    const board = stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ queue, state, limit, cursor })) {
       if (value !== undefined) params.set(key, String(value));
     }
     // One independently evaluated claim page. Never auto-walk or fall back to
     // /work-claims: that older route performs lifecycle housekeeping.
-    const page = await this.#request(`/work-claims-read${params.size ? `?${params}` : ""}`, undefined, signal);
-    if (page?.roomId !== this.#roomId || !Array.isArray(page.claims)
-      || typeof page.hasMore !== "boolean" || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
-      throw new RoomClientError(200, "invalid_response", "Room returned an invalid claim page");
+    const board = await this.#request(`/board${params.size ? `?${params}` : ""}`, undefined, signal);
+    const page = board?.claimsPage;
+    if (board?.contractVersion !== 1 || board.roomId !== this.#roomId || !board.columns || !board.counts
+      || !Array.isArray(board.halts) || !Array.isArray(board.claims)
+      || page?.roomId !== this.#roomId || typeof page.hasMore !== "boolean"
+      || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid Board response");
     }
-    const { claims, swept: _swept, ...claimsPage } = page;
-    return { ...board, claims, claimsPage };
+    return board;
   }
   async orient({ signal, focus = "all", query, sort } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
@@ -1417,7 +1425,7 @@ export class RoomAgentClient {
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
     const snapshot = focus !== "all" || query !== undefined
       ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
-      : await this.snapshot({ signal });
+      : checkedWorkSnapshot(await this.#request("?view=orientation", undefined, signal), this.#roomId, "orientation");
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {

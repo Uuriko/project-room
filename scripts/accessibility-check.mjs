@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openSearch } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
@@ -92,6 +92,15 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator("#main").waitFor({ state: "visible" });
   await enableHumanAdvanced(page);
 
+  const selectWork = async (id, title) => {
+    await openSearch(page);
+    await page.locator('#message-search').fill(title);
+    const link = page.locator(`#search-list [data-open-work="${id}"]`);
+    await link.focus();
+    await link.press('Enter');
+    await page.locator(`[data-work-record-id="${id}"]`).waitFor({ state: 'visible' });
+  };
+  await selectWork('unknown-producer', 'Unknown producer evidence');
   const receipt = page.locator('[data-work-record-id="unknown-producer"] .receipt');
   assert.match(await receipt.textContent(), /Completion reporter\s*Room owner/);
   assert.match(await receipt.textContent(), /Producer\s*Unknown — no producer was reported/);
@@ -120,6 +129,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
 
   // Result sharing remains a visible primary action; Advanced exposes its protocol form.
+  await selectWork('producer-choice', 'Explicit producer choice');
   const producerCard = page.locator('[data-work-record-id="producer-choice"]');
   assert.equal(await producerCard.locator('.button.primary').isVisible(), true);
   assert.equal(await producerCard.locator('[data-action="complete"]').isVisible(), true);
@@ -148,6 +158,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.match(knownReceipt, /Completion reporter\s*Room owner/);
   assert.match(knownReceipt, /Producer\s*Room owner/);
 
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "complete", { keyboard: true });
   await page.locator('#action-form select[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter cannot establish who produced the result");
@@ -202,9 +213,13 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await signInFixture(page, maya);
   await page.locator("#main").waitFor({ state: "visible" });
   await enableHumanAdvanced(page);
+  await selectWork('producer-choice', 'Explicit producer choice');
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");
+  await selectWork('producer-conflict', 'Verifier produced this result');
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "verify", { keyboard: true });
   assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
   assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy independent verification or unlock approval/s);

@@ -342,7 +342,7 @@ test('SDK board reads exactly one canonical claim page and forwards explicit con
   assert.equal(first.claimsPage.hasMore, true);
   assert.equal(Object.hasOwn(first.claimsPage, 'claims'), false);
   assert.equal(Object.hasOwn(first.claimsPage, 'swept'), false);
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 1);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 1);
   const last = await owner.board({ cursor: first.claimsPage.nextCursor });
   assert.deepEqual(last.claims.map(item => item.id), ids.slice(50));
   assert.equal(last.claimsPage.hasMore, false);
@@ -371,12 +371,12 @@ test('SDK board propagates canonical query refusals without returning a legacy-o
     { cursor: '' }, { cursor: 'invalid' }, { queue: 'ready', state: 'done' }]) {
     await assert.rejects(owner.board(options), invalid);
   }
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 8);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 8);
   assert.equal(requests.some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
 // Delay an actual canonical HTTP response after the real route has evaluated
-// it. This detects a lost signal on board()'s second request without a fetch double.
+// it. This detects a lost signal on the Board read without a fetch double.
 test('SDK board cancellation aborts an in-flight canonical claim response', async t => {
   const { origin, token } = await fixture(t);
   let entered, closed, release;
@@ -386,12 +386,12 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   const requests = [];
   const proxy = createServer(async (req, res) => {
     requests.push(req.url);
-    if (req.method !== 'GET' || !['/api/rooms/commons', '/api/rooms/commons/work-claims-read'].includes(req.url)) {
+    if (req.method !== 'GET' || req.url !== '/api/rooms/commons/board') {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith('/work-claims-read')) {
+    if (req.url.endsWith('/board')) {
       res.on('close', closed);
       entered();
       await gate;
@@ -409,7 +409,7 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await refused;
   await disconnected;
   release();
-  assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+  assert.deepEqual(requests, ['/api/rooms/commons/board']);
 });
 
 
@@ -443,4 +443,50 @@ test('SDK invalid repository and branch declarations reach server validation', a
   await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
   const unchanged = await owner.workClaimGet('bad-repo-existing');
   assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
+});
+
+
+test('SDK preserves incomplete coverage on malformed continuation pages and cursor cycles', async () => {
+  for (const more of [
+    { claims: [], hasMore: true },
+    { claims: [], hasMore: true, nextCursor: 42 },
+    { claims: [], nextCursor: null },
+    { claims: [], hasMore: false, nextCursor: 'repeat' },
+    { claims: [], hasMore: true, nextCursor: 'repeat' },
+    { hasMore: false, nextCursor: null }
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => {
+        reads += 1;
+        return new Response(JSON.stringify(reads === 1 ? { claims: [], hasMore: true, nextCursor: 'repeat' } : more),
+          { headers: { 'content-type': 'application/json' } });
+      }
+    });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true, JSON.stringify(more));
+    assert.equal(reads, 2, 'malformed/cyclic metadata never causes an unbounded walk');
+  }
+});
+
+
+test('malformed first or middle pages cannot be hidden by a later terminal page', async () => {
+  const first = { claims: [{ id: 'first' }], hasMore: true, nextCursor: 'middle' };
+  const terminal = { claims: [{ id: 'last' }], hasMore: false, nextCursor: null };
+  for (const pages of [
+    [{ hasMore: true, nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 'true', nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 1, nextCursor: 'middle' }, terminal],
+    [first, { hasMore: true, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], hasMore: false, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], nextCursor: 'terminal' }, terminal]
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => new Response(JSON.stringify(pages[reads++]), { headers: { 'content-type': 'application/json' } }) });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true);
+    assert.equal(reads, pages.length - 1, 'stop before the terminal page can erase an earlier gap');
+    assert.equal(result.claims.some(claim => claim.id === 'last'), false);
+  }
 });

@@ -210,6 +210,8 @@ test("a stream open or error re-reads with the recent window once history is hel
   await f.warm();
   assert.deepEqual(f.reads, [], "warm-up reads are cleared");
   f.connect();
+  // The first open right after a proving read skips its re-read; measure reconnects.
+  f.client.stream.dispatchEvent(new Event("open")); await f.settle();
   for (const type of ["open", "error"]) {
     const before = f.reads.length;
     // An error reads only when the stream is CLOSED; a retrying stream waits for open.
