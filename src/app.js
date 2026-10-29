@@ -674,7 +674,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? "Your session changed. Private drafts were cleared. Refresh to reconnect, or sign in again."
+      : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
