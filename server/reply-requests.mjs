@@ -1,5 +1,4 @@
-import { messageRepository, liveMessageMetadata, selectedMessageRecord } from "./message-repository.mjs";
-import { hydrateWorkItems } from "./work-repository.mjs";
+import { messageRepository } from "./message-repository.mjs";
 import { randomUUID } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
@@ -45,35 +44,17 @@ export class ReplyRequests {
   read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-      let room, resolveMessage;
+      let room;
       if (requestsOnly) {
         // Listing needs no conversation bodies, event history or work payloads.
         // Keep auth and the selected metadata at the same committed sequence.
         const row = this.store.db.prepare("SELECT sequence,json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId);
         if (!row) fail("room_not_found", "Room not found", 404);
         room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
-      } else {
-        const row = this.store.db.prepare("SELECT sequence,json_valid(projection) AS valid_projection,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
-        if (!row) fail("room_not_found", "Room not found", 404);
-        if (row.valid_projection !== 1) throw new Error("projection_corrupt: invalid room JSON");
-        const [metadata, members, workItems, replyRequests, messagesArchive] = JSON.parse(row.fields);
-        const messages = liveMessageMetadata(this.store, roomId);
-        if (messages === null) {
-          // Missing unrelated body references still trigger the established
-          // replay recovery once, and its recovered bodies remain available.
-          room = this.store.room(roomId, { verifyBodyHashes: true });
-          const recovered = messageRepository(this.store, roomId, room.state);
-          resolveMessage = id => recovered.get(id);
-        } else {
-          room = { sequence: row.sequence, state: hydrateWorkItems(this.store.db, roomId,
-            { room: metadata, members, workItems, replyRequests: replyRequests ?? {}, messages,
-              ...(messagesArchive ? { messagesArchive } : {}) }) };
-          resolveMessage = id => selectedMessageRecord(this.store, roomId, id, Boolean(messagesArchive));
-        }
-      }
+      } else room = this.store.room(roomId);
       return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
-        viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room, resolveMessage }), scope };
+        viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room }), scope };
     });
   }
   list(token, roomId, { direction = "incoming", status = "open", expectedSessionBinding = null } = {}) {
@@ -101,7 +82,7 @@ export class ReplyRequests {
     if (!integer(limit) || limit < 1 || limit > REPLY_MAX_PAGE_LIMIT || cursor !== null && checkpoint !== null
       || requestMessageId !== null && checkpoint !== null || requestMessageId === null && !["incoming", "outgoing", "both"].includes(direction))
       fail("invalid_reply_selection", "Choose a bounded page and one continuation or checkpoint");
-    return this.read(token, roomId, expectedSessionBinding, ({ auth, room, resolveMessage }) => {
+    return this.read(token, roomId, expectedSessionBinding, ({ auth, room }) => {
       const state = room.state, requests = state.replyRequests ?? {};
       if (requestMessageId !== null && (!Object.hasOwn(requests, requestMessageId)
         || !directionMatches(requests[requestMessageId], auth.member.id, "both"))) fail("reply_request_not_found", "Request not found in this Room", 404);
@@ -148,7 +129,7 @@ export class ReplyRequests {
       const fullMessages = new Map();
       const withBody = message => {
         if (!fullMessages.has(message.id)) {
-          const full = resolveMessage(message.id);
+          const full = records.get(message.id);
           if (!full) changed();
           fullMessages.set(message.id, full);
         }
