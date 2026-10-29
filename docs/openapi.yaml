@@ -17641,6 +17641,80 @@ paths:
         '200':
           description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
         '401': { description: unauthenticated or room_token_not_identity }
+  /api/public/receipts/gallery:
+    get:
+      summary: Public completed-bounty gallery
+      description: >-
+        Completed bounties from rooms whose owner recorded the
+        public-receipts opt-in, no login: one entry per bounty whose
+        recorded settlement paid the worker, composed at read time
+        from the same lot receipts as /receipts/{id}. Each entry shows
+        the delivered-work summary (the bounty's criteria), the pinned
+        rubric, and the settled amount, plus receipt and clone links.
+        The HTML gallery is /receipts/gallery, and
+        /receipts/{lotId}/clone (HTML, or .json as
+        project-room-bounty-template/1) is the posting draft pre-filled
+        with the entry's title and rubric shape only — no poster or
+        worker lanes, no amounts, no other room content (those paths
+        are outside this /api/ inventory). Failed and unverified
+        settlements, unsettled bounties, and rooms without a recorded
+        opt-in never appear; opting out removes the entry. Query
+        cursor (a lot receipt id from this list) and limit (1–50,
+        default 20).
+      security: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Paged completed-bounty gallery entries, newest settled first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, entries, nextCursor]
+                properties:
+                  schema: { type: string, enum: ['project-room-public-bounty-gallery/1'] }
+                  nextCursor: { type: [string, 'null'] }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /receipts/gallery:
+    get:
+      summary: Completed bounty gallery (HTML)
+      description: >-
+        Script-free HTML twin of /api/public/receipts/gallery: the
+        same completed-bounty entries (delivered-work summary, pinned
+        rubric, settled amount), each linking its lot receipt and its
+        clone-as-template draft at /receipts/{lotId}/clone (HTML, or
+        .json as project-room-bounty-template/1).
+      security: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Gallery page (HTML)
+          content:
+            text/html:
+              schema: { type: string }
+        '422':
+          $ref: '#/components/responses/InvalidInput'
 components:
   securitySchemes:
     accountBrowserSession:

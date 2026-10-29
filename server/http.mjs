@@ -89,10 +89,10 @@ import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGran
 import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
-import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, renderBountyGalleryHtml, renderBountyCloneHtml, bountyGalleryJson, bountyTemplateJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
 import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
-import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt, queryPublicBountyGallery, publicBountyTemplate } from "./receipts-live.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
@@ -227,11 +227,16 @@ const gr1PublicPath = pathname => {
   if (!pathname.startsWith("/room/")) return null;
   const rest = pathname.slice("/room".length);
   if (rest === "/receipts" || rest === "/sitemap.xml") return rest;
+  if (rest === "/receipts/gallery") return rest;
+  if (/^\/receipts\/lot_[a-f0-9]{16}\/clone(?:\.json)?$/.test(rest)) return rest;
   if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
 const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})\.json$/;
+const PUBLIC_CLONE_JSON = /^\/receipts\/lot_[a-f0-9]{16}\/clone\.json$/;
 const isPublicReceiptsJson = pathname => pathname === "/api/public/receipts"
+  || pathname === "/api/public/receipts/gallery"
+  || PUBLIC_CLONE_JSON.test(pathname)
   || pathname === "/room/api/public/receipts"
   || PUBLIC_RECEIPT_JSON.test(pathname)
   || (pathname.startsWith("/room") && PUBLIC_RECEIPT_JSON.test(pathname.slice("/room".length)));
@@ -2204,6 +2209,58 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end GR2 ---
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
+      // --- #3526: the completed-bounty gallery and clone-as-template.
+      // A standalone block ahead of the receipts block (the paths are
+      // disjoint from every receipt shape). The gallery paths are named
+      // as direct pathname literals so the route inventory binds their
+      // GET/HEAD methods to them; the clone path is a regex const like
+      // the receipt shapes below.
+      const receiptClone = /^\/receipts\/(lot_[a-f0-9]{16})\/clone(\.json)?$/.exec(url.pathname);
+      if ((url.pathname === "/receipts/gallery" || url.pathname === "/api/public/receipts/gallery" || receiptClone) && ["GET", "HEAD"].includes(req.method)) {
+        rate(`receipts:${remoteAddress}`, 120);
+        if (!url.search) res.setHeader("X-Robots-Tag", "all");
+        // Toggle-controlled like the receipts below: never shared-cached,
+        // so an owner switching public receipts off hides entries at once.
+        res.setHeader("Cache-Control", "no-store");
+        if (receiptClone) {
+          // The draft exists only while the lot is a gallery entry —
+          // the template read applies the same visibility and
+          // paid-settlement gates as the gallery itself.
+          const template = publicBountyTemplate(store, receiptClone[1]);
+          if (!template) reject(404, "not_found", "Not found");
+          res.setHeader("Link", publicPageLinks(url, `/receipts/${receiptClone[1]}`));
+          if (receiptClone[2]) {
+            const body = Buffer.from(JSON.stringify(bountyTemplateJson(template)));
+            res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
+          // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+          // JDOT-PUBLIC-CSP-RUM end
+          const cloneHtml = Buffer.from(renderBountyCloneHtml(template));
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": cloneHtml.length });
+          return res.end(req.method === "HEAD" ? undefined : cloneHtml);
+        }
+        const galleryLimitRaw = url.searchParams.get("limit");
+        const queried = queryPublicBountyGallery(store, {
+          cursor: url.searchParams.get("cursor"),
+          limit: galleryLimitRaw == null ? 20 : Number(galleryLimitRaw),
+        });
+        if (queried.error) reject(queried.error.status, queried.error.code, queried.error.message);
+        res.setHeader("Link", publicPageLinks(url, "/receipts/gallery"));
+        if (url.pathname === "/api/public/receipts/gallery") {
+          const body = Buffer.from(JSON.stringify(bountyGalleryJson(queried)));
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+          return res.end(req.method === "HEAD" ? undefined : body);
+        }
+        // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+        res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
+        // JDOT-PUBLIC-CSP-RUM end
+        const galleryHtml = Buffer.from(renderBountyGalleryHtml(queried));
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": galleryHtml.length });
+        return res.end(req.method === "HEAD" ? undefined : galleryHtml);
+      }
+      if (url.pathname === "/receipts/gallery" || url.pathname === "/api/public/receipts/gallery" || receiptClone) reject(405, "method_not_allowed", "Method not allowed");
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
@@ -2322,6 +2379,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const xml = publicSearchSitemap(ROOM_ORIGIN, [
           ...available.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           { path: "/receipts", lastmod: PUBLIC_PAGE_LASTMOD },
+          { path: "/receipts/gallery", lastmod: PUBLIC_PAGE_LASTMOD },
           ...LEGAL_SITEMAP_PATHS.map(path => ({ path, lastmod: PUBLIC_PAGE_LASTMOD })),
           ...receiptEntries,
           ...publicSitemapEntries(store), // GR2 templates, agents, and opted-in room pages
