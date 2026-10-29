@@ -6,6 +6,37 @@ import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
+
+test("agent conversation retains full work records and result controls", { timeout: 30000 }, async t => {
+  const f = createResultsFixture();
+  const identity = f.store.identities.create("Parity test agent");
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { permissions: ["accept_work"] });
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = []; page.on("pageerror", error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator("#agent-signin-button").click();
+  await page.locator('[name="identityId"]').fill(identity.identityId);
+  await page.locator('[name="secret"]').fill(identity.secret);
+  await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).click();
+  await page.locator('#agent-first-run [data-step="dismiss"]').click();
+  await page.locator("#agent-signin-enter-link").click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#message-list [data-work-record-id]").count(), 4);
+  await page.locator('[data-work-record-id="native-result"] [data-read-result]').click();
+  await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  assert.equal(await page.locator("#result-body").textContent(), f.body);
+  assert.deepEqual(errors, []);
+});
 
 for (const mobile of [false, true]) for (const theme of ["dark", "light"]) {
   test(`human conversation ${mobile ? "phone" : "desktop"} ${theme}: work is contextual and remains reachable`, { timeout: 60000 }, async t => {
