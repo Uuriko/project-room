@@ -48,6 +48,33 @@ Preserve failed attempts and explain why a procedure is corrected or retired.
 A historical wiki entry supplies evidence, not authority to override current
 repository instructions, permissions, or release policy.
 
+## Maintain shared guidance
+
+Use the [handbook index](INDEX.md) as the entry point. Update the existing
+procedure or design that owns an answer; link it from an older working document
+instead of maintaining a second copy. Keep useful rationale, rejected approaches
+and evidence with their source and scope. Preserve an archived handbook as history
+until its surviving decisions have a named home; an unreviewed excerpt is not a
+complete migration.
+
+Current task state belongs in Room work records, and release outcomes in exact-source
+receipts. A document can summarize a dated observation and link its evidence; it
+should not become a manually synchronized task board. Ordinary work needs no extra
+handbook entry. Write a learning note when a surprise changes a decision or a
+reusable procedure, and retain contrary or slower results as well as successes.
+
+The read-only wiki API packages procedures, lessons and runbooks from this
+repository. After changing those source documents, regenerate with
+`node scripts/wiki-build.mjs` and check the served representation. A source edit,
+a generated artifact, and its deployed availability are separate states. Use the
+existing [work brief](WORK-CONTEXT.md) for bounded agent
+context rather than pasting the whole handbook into every task.
+
+When assessing whether guidance helps, compare time to find the right source,
+wrong or stale decisions, and maintenance effort, including failed and abandoned
+attempts. A shorter document or smaller prompt alone does not establish a
+productivity improvement.
+
 ## Historical coordination channels
 
 The September 2026 version of this page directed claims and merge receipts to
