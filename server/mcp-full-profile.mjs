@@ -18,14 +18,13 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
-import { withProjectMapOverlap } from "./project-map-store.mjs";
+import { linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
+import { readBoard } from "./board-read.mjs";
 
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
-import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
@@ -34,7 +33,7 @@ import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trus
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workUsesExpectedRevision } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevision } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
-import { markIfOther, stampAssistantResult, stampBoard, withContentTrust } from "./content-trust.mjs";
+import { markIfOther, stampAssistantResult, withContentTrust } from "./content-trust.mjs";
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map"]);
@@ -359,12 +358,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_board") {
-    const snapshot = store.snapshot(secret, roomId, null, "work");
-    const now = typeof store.now === "function" ? store.now() : Date.now();
-    const { claims, ...claimsPage } = withProjectMapOverlap(store, roomId, buildWorkClaimPage(store.workClaims.list(roomId), roomId,
-      auth.member.id, new URLSearchParams(rest), now));
-    return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
+    return { value: readBoard(store, secret, roomId, null, new URLSearchParams(rest)), isError: false };
   }
   if (name === "room_read_work") {
     try {

@@ -1,6 +1,5 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
-import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
@@ -17,7 +16,7 @@ import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
-import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
@@ -451,7 +450,8 @@ export class RoomAgentClient {
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    const boardRead = suffix === "/board" || suffix.startsWith("/board?");
+    if (this.#memberId && (snapshotRead || boardRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -1410,22 +1410,21 @@ export class RoomAgentClient {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
   async board({ queue, state, limit, cursor, signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    const board = stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ queue, state, limit, cursor })) {
       if (value !== undefined) params.set(key, String(value));
     }
     // One independently evaluated claim page. Never auto-walk or fall back to
     // /work-claims: that older route performs lifecycle housekeeping.
-    const page = await this.#request(`/work-claims-read${params.size ? `?${params}` : ""}`, undefined, signal);
-    if (page?.roomId !== this.#roomId || !Array.isArray(page.claims)
-      || typeof page.hasMore !== "boolean" || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
-      throw new RoomClientError(200, "invalid_response", "Room returned an invalid claim page");
+    const board = await this.#request(`/board${params.size ? `?${params}` : ""}`, undefined, signal);
+    const page = board?.claimsPage;
+    if (board?.contractVersion !== 1 || board.roomId !== this.#roomId || !board.columns || !board.counts
+      || !Array.isArray(board.halts) || !Array.isArray(board.claims)
+      || page?.roomId !== this.#roomId || typeof page.hasMore !== "boolean"
+      || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid Board response");
     }
-    const { claims, swept: _swept, ...claimsPage } = page;
-    return { ...board, claims, claimsPage };
+    return board;
   }
   async orient({ signal, focus = "all", query, sort } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
