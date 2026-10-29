@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 
 async function scenario(t, mutate) {
   const store = new RoomStore(':memory:'), rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen'), worker = store.identities.create('Worker'), other = store.identities.create('Riley');
   rooms.create(owner.secret, { roomId: 'commons', title: 'Work view', purpose: 'Test', kind: 'personal' });
   for (const identity of [worker, other]) {
-    store.identities.link(owner.secret, 'commons', { identityId: identity.identityId, displayName: identity === worker ? 'Worker' : 'Riley', permissions: [] });
+    linkWithProof(store, owner.secret, 'commons', identity, { displayName: identity === worker ? 'Worker' : 'Riley', permissions: [] });
     store.dmConsents.request('commons', owner.identityId, identity.identityId, 'Fixture');
     store.dmConsents.decide('commons', identity.identityId, owner.identityId, 'approve');
   }
