@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 
 test("share-link joins credit the link's issuer on the referral board, once per joiner", t => {
   const directory = mkdtempSync(join(tmpdir(), "room-share-referrals-"));
@@ -39,4 +40,25 @@ test("share-link joins credit the link's issuer on the referral board, once per 
   assert.deepEqual(board.leaderboard.map(entry => [entry.memberId, entry.referralCount]), [["owner", 2]]);
   assert.doesNotThrow(() => store.shareLinks.verify());
   assert.equal(store.verifyInvitationAudit().consistent, true);
+});
+
+test("creditReferral ignores a prototype-named issuer but credits a real member issuer (#3224)", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-share-referrals-proto-"));
+  const now = Date.now(), store = new RoomStore(join(directory, "room.sqlite"), { now: () => now });
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom("commons", "owner"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  // A real member who has not been referred by anyone yet.
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "referee", displayName: "Referee", kind: "human", permissions: [] } });
+  const credited = () => store.db.prepare("SELECT count(*) n FROM referrals WHERE room_id='commons' AND referee_member_id='referee'").get().n;
+  // "toString" is not an own member: members["toString"] resolves through
+  // Object.prototype, so a raw index would pose as an issuer and attempt a
+  // bogus referral record. Through ownMember it is not a member at all.
+  assert.doesNotThrow(() => store.transaction(() =>
+    store.shareLinks.creditReferral({ room_id: "commons", issuer_member_id: "toString" }, "referee", now)));
+  assert.equal(credited(), 0);
+  // The same path with a real member issuer still records the referral.
+  store.transaction(() => store.shareLinks.creditReferral({ room_id: "commons", issuer_member_id: "owner" }, "referee", now));
+  assert.equal(credited(), 1);
 });
