@@ -1345,6 +1345,10 @@ function freezeJsonState(value) {
 class ProjectionCache {
   constructor() { this.entries = new Map(); this.bytes = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  delete(roomId) {
+    const entry = this.entries.get(roomId);
+    if (entry) { this.entries.delete(roomId); this.bytes -= entry.weight; }
+  }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
     if (!entry || entry.sequence !== sequence) return null;
@@ -1370,6 +1374,7 @@ export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    const initializationStarted = performance.now();
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
@@ -2141,10 +2146,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
     // Decision #10: backfill projection work items onto the work-claims
-    // board (server/work-item-board.mjs). Runs in both integrity modes —
-    // a deferred (Durable Object) database holds one room, so the pass is
-    // bounded there too; the versioned marker makes repeat opens a single
-    // marker read per room. "manual" defers the pass to an explicit
+    // board (server/work-item-board.mjs). Runs in both integrity modes.
+    // The shared pilot can contain many rooms; current markers avoid their
+    // projection work but selection still scans room metadata.
+    // "manual" defers the pass to an explicit
     // backfillWorkItemClaims() call (tests staging a legacy corpus, or an
     // operator-controlled rollout). A failing room never bricks the
     // open: its marker stays behind and the next open retries it.
@@ -2162,6 +2167,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     configureWorkRepository(this.db, this.workEntities);
     if (this.workEntities && version < 42) this.migrateWorkProjections();
+    // Legacy coldStart.durationMs ends before the backfill above. Keep it
+    // comparable; this separate successful writable-store total includes all
+    // initialization through work repository setup and migration.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.error(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
+      legacyColdStartMs: this.coldStart.durationMs }));
   }
 
   // Convert one room atomically; interrupted multi-room runs resume by
@@ -3392,9 +3403,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.close();
   }
   // Invalidate both parsed reads and unpublished command candidates.
-  _dropProjectionCache() {
-    this._projectionCache?.clear();
-    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  _dropProjectionCache(roomId = null) {
+    if (roomId === null) this._projectionCache?.clear();
+    else this._projectionCache?.delete(roomId);
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      if (roomId === null) pending.clear();
+      else pending.delete(roomId);
+    }
   }
   _queueProjectionCache(roomId, sequence, state, projection) {
     const pending = this._pendingProjectionFrames?.at(-1);
@@ -3407,6 +3422,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
     const invalidate = () => this._dropProjectionCache();
+    // Only these literal statements prove one affected room. Unknown SQL,
+    // work entity writes, bulk statements and exec retain global invalidation.
+    const scopedUpdates = new Map([
+      ["UPDATE rooms SET projection=? WHERE id=?", 1],
+      ["UPDATE rooms SET sequence=?,projection=? WHERE id=?", 2],
+      ["UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?", 3]
+    ]);
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
@@ -3416,7 +3438,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
         const result = run(...args);
-        if (roomsWrite) invalidate();
+        if (roomsWrite) {
+          const roomIndex = scopedUpdates.get(sql);
+          const roomId = roomIndex === undefined ? null : args[roomIndex];
+          this._dropProjectionCache(typeof roomId === "string" && args.length === roomIndex + 1 ? roomId : null);
+        }
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
         if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
@@ -3478,7 +3504,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     // Savepoints collect candidates separately, but never publish before
-    // the outer commit. Every rooms write invalidates all earlier candidates.
+    // the outer commit. A scoped rooms write invalidates that room's earlier candidates;
+    // unknown writes and rollbacks invalidate every candidate.
     const boundary = outermost || isolated;
     const frames = this._pendingProjectionFrames ??= [];
     if (boundary) frames.push(new Map());

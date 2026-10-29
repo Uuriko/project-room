@@ -125,6 +125,7 @@ export function shouldArmAfterRequest(before, after) {
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    const initializationStarted = performance.now();
     // DurableObject stores the context on this.ctx. Keep this.state and this.env
     // as aliases so existing reads of either name stay valid.
     this.state = ctx;
@@ -216,6 +217,11 @@ export class ProjectRoom extends DurableObject {
       }
     });
     this.handler = httpServerHandler(this.server);
+    // Successful non-maintenance initialization, before the first RPC/fetch.
+    // Includes RoomStore, bootstrap, provider configuration and HTTP adapter.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.info(JSON.stringify({ event: 'room.do_initialized', initializationMs: this.initializationMs,
+      storeInitializationMs: this.store.initializationMs }));
   }
   #sqlScope(kind, operation, fn, options) {
     if (!this.sqlCosts) return fn();
@@ -243,6 +249,7 @@ export class ProjectRoom extends DurableObject {
         const line = {
           event: 'room.cold_start', phase: 'first_request',
           constructMs: cold.durationMs, firstRequestMs: appMs,
+          storeInitializationMs: this.store.initializationMs, durableObjectInitializationMs: this.initializationMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
         };
         if (cold.phases) line.phases = cold.phases;

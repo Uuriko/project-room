@@ -3135,7 +3135,7 @@ function revealWorkTimeline(id) {
   workspaceUI?.showRooms();
   activeWorkNavigationId = id;
   switchThread(null, false, true);
-  const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
+  const channelId = timelineWorkEntries(id)[0]?.channelId;
   if (channelId && channelId !== activeChannelId) setActiveChannel(channelId, true);
   renderMessages();
   return workRecord(id);
@@ -3782,6 +3782,7 @@ function releaseSubmission(ticket, { restoreFocus = false } = {}) {
 // chronologically with messages (Discord/Slack-style). Work cards follow the
 // active channel: a card shows when its proposal message is in the channel.
 function timelineWorkEntries(onlyId) {
+  if (onlyId === null) return [];
   const now = Date.now();
   const draftsByWork = new Map();
   for (let index = state.messages.length - 1; index >= 0; index--) {

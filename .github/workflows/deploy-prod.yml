@@ -269,19 +269,25 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
+        id: smoke
         shell: bash
-        # One retry before recovery: after a Worker upload the Durable Object
-        # can keep answering /api/version with the previous build for more
-        # than the 5-minute window (run 37880461862 rolled back a healthy
-        # deploy that way; the identical redeploy passed). The retry waits
-        # SMOKE_RETRY_DELAY_SECONDS (default 150) and re-checks for 60s more;
-        # a broken build still fails and recovers, about 3.5 minutes later.
+        # Retry only verified propagation failures. Preserve the original report
+        # and observe convergence during the former 150s idle-delay budget.
         run: |
+          record_smoke_digest() {
+            if [ -n "${GITHUB_OUTPUT:-}" ] && [ -f "$RUNNER_TEMP/prod-smoke.json" ]; then
+              node --input-type=module -e 'import { readFileSync, appendFileSync } from "node:fs"; import { createHash } from "node:crypto"; const raw = readFileSync(process.env.RUNNER_TEMP + "/prod-smoke.json"); appendFileSync(process.env.GITHUB_OUTPUT, "report_sha256=" + createHash("sha256").update(raw).digest("hex") + "\n");'
+            fi
+          }
+          trap record_smoke_digest EXIT
           if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
             cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
           else
-            echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
-            sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
+            cp "$RUNNER_TEMP/prod-smoke-attempt1.log" "$RUNNER_TEMP/prod-smoke.json"
+            if ! node scripts/prod-smoke-retry.mjs "$RUNNER_TEMP/prod-smoke-attempt1.log" --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN"; then
+              cat "$RUNNER_TEMP/prod-smoke-attempt1.log"
+              exit 1
+            fi
             node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
@@ -296,6 +302,9 @@ jobs:
         env:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          SMOKE_REPORT_SHA256: ${{ steps.smoke.outputs.report_sha256 }}
+          SMOKE_REPORT_PATH: ${{ runner.temp }}/prod-smoke.json
         run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.pre.outcome == 'success'

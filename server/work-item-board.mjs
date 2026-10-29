@@ -990,10 +990,14 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
   // both lazy tables, which is what the purge registry's optional entry
   // and the health reader assume.
   store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
-  const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
-  const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
-  for (const roomId of roomIds) {
-    if (!force && markers.get(roomId) === WORK_ITEM_BOARD_BACKFILL_VERSION) continue;
+  // A shared store can contain many settled rooms. Keep their IDs/markers
+  // in SQLite; only pending rooms need projection reads and JS allocation.
+  // This still scans room metadata and probes the marker primary-key index.
+  const rooms = force ? store.db.prepare("SELECT id FROM rooms").all()
+    : store.db.prepare(`SELECT rooms.id FROM rooms LEFT JOIN ${WORK_ITEM_BOARD_BACKFILL_TABLE} AS marker
+        ON marker.room_id = rooms.id WHERE marker.version IS NULL OR marker.version != ?`)
+      .all(WORK_ITEM_BOARD_BACKFILL_VERSION);
+  for (const { id: roomId } of rooms) {
     const report = store.transaction(() => backfillRoomWorkItems(store, roomId, { nowMs }));
     aggregate.rooms += 1;
     aggregate.items += report.items;
