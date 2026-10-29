@@ -92,7 +92,7 @@ in 320 ms despite the caller exceeding its one-second deadline. These are
 contention leads, not proof that one route explains every timeout. Keep the
 readiness contract and investigate the shared-object work before changing it.
 
-The two-laptop native execution trial remains unverified. Both laptops ran the
+The original manual two-laptop trial did not verify native execution. Both laptops ran the
 same pinned-source native-host guard tests: 10 passed on each, but the peer ran
 them manually and its native receiver was stopped. The manual run does not
 populate the native request journal; the original request was answered with
@@ -108,17 +108,28 @@ using a fake-node fixture, not a live model.
 
 An actual native app was built from a clean checkout of that exact merged source,
 with 52 runtime files; ad-hoc signing and deep strict signature verification
-passed. This is build and provenance evidence, not installed or actively running
-receiver evidence. Reconcile the installed selection and consent configuration,
-then run a fresh directed request through native execution, saved journal and
-interrupted-delivery recovery. Preserve selection and recovery behavior when
-updating the installed watcher. Do not replay the already-answered manual trial.
-The original stopped process's exit cause remains unknown. Inventory existing
-host journals, directed requests and saved results before extending scheduling.
-A protocol fixture or an independently run remote command is not evidence of
-cross-host dispatch, interrupted delivery or duplicate-result recovery. Retain
-source/toolchain, elapsed time, duplicate execution count and original failures
-for the real trial; report a specific investigated blocker if it cannot run.
+passed. The peer downloaded and verified the app but has not installed it.
+A subsequent packaged-CLI trial on the exact `46321313` source used a writable
+scratch workspace with the source export outside it. Node 24.19.0 ran the two
+native-host test files: 10 passed, zero failed or skipped, in 206.913667 ms
+(228.638791 ms command wall time); all 3,915 source-file hashes were unchanged.
+An initial Python wrapper failed before tests; the actual Node command ran once.
+The prior read-only run's five passes and five temporary-write failures remain
+part of the evidence, not a successful test result.
+
+After an injected post-commit acknowledgement loss (HTTP 201, Room sequence
+22618), restart reconciled the same operation, attempt and response digest.
+Local delivery changed from pending to delivered, exiting 0 at
+2026-10-29T07:38:24.664Z. The completed model-turn count remained one and
+`providerTaskStartedCount` was one. This demonstrates cross-laptop packaged-CLI
+execution and saved-result recovery for the injected failure. It does not prove
+installed desktop execution or every disconnect/cancellation case. The matching
+local ten-test run took 269.583584 ms; receiver launch to answer took about
+69 seconds, so no overall speedup is claimed. See the existing
+[host guide](CODEX-ROOM-HOST.md#test-jobs-that-need-temporary-files) for the bounded
+scratch configuration. Preserve selection and consent when installing the app;
+do not replay the already-answered original manual trial. The original stopped
+process's exit cause remains unknown.
 
 The local MCP connector was also stale: its validator rejected the same
 answered-request response that the qualified runtime accepted. A fresh stdio
@@ -140,7 +151,8 @@ The handoff and timeline test-debt fixes
 Private maintainer receipts retain the original failures and exact evidence:
 `release-prep-20261029/execution-checkpoint.json`,
 `readiness-bounded-2b1-summary.json`, `native-selected-build-receipt.json`,
-`PR5229-SWIFT-REVIEW.json`, and `stream-failing-grok-22418.json` (the latter four
+`PR5229-SWIFT-REVIEW.json`, `native-corrected-job-evidence.json`, and
+`stream-failing-grok-22418.json` (the latter five
 under the same evidence directory). These are local evidence references, not
 public download links; do not publish private logs or identity material.
 Inventory reconciliation remains bounded: ten of 104 bundle dispositions have
