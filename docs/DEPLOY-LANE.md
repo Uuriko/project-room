@@ -103,3 +103,52 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
 | `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+
+### Reverify an already deployed revision without uploading Workers
+
+From a clean checkout of the exact deployed commit, run the checkpoint CLI from
+this or another clean tooling checkout:
+
+```sh
+node /path/to/tooling/scripts/release-checkpoint.mjs --mode verify \
+  --expected-revision FULL_40_CHARACTER_SHA --output /outside/checkout/receipts \
+  --prior-report /path/to/original-failed-prod-smoke.json
+```
+
+The target need not be on main (for example, an intentional rollback). Both the
+target and tooling revision/tree are recorded. All four version endpoints must
+return HTTP200 and the target SHA before and after strict production smoke and
+public live-smoke. Each run creates a new attempt directory; the original failed
+report is copied byte-for-byte with its digest and is never overwritten. Omit
+`--prior-report` when there is no earlier failed smoke. Keep output outside both
+checkouts so receipts do not dirty source verification.
+
+Only explicit-target main lag/divergence findings become advisory; the original
+live-smoke report and exit code remain unchanged, alongside the policy result.
+Other failures prevent a verified receipt. Known warnings remain visible. This
+is public verification, not an authenticated or browser journey. Before/after
+observations bound races but are not a deployment lock. The command never
+uploads, rolls back, or publishes a runtime; publication remains separate and
+must recheck the deployed source rather than treating an old receipt as current.
+
+
+### Portable runtime archive
+
+After creating a runtime package, create a new archive with:
+
+```sh
+python3 scripts/runtime-archive.py /absolute/runtime /absolute/new-runtime.tar.gz --expected-commit EXACT_COMMIT
+```
+
+For an older target package, invoke this script from a newer tooling checkout
+that contains the creator and a compatible runtime-package verifier. Keep
+`--expected-commit` pinned to the target package commit, not the tooling checkout.
+Use `--node /path/to/node` when Node is not on PATH. The creator invokes the
+existing runtime-package verifier before archiving, then checks the manifest
+hash and every file again. It refuses extras, symlinks, mismatched content and
+existing output. Tar entries are sorted with normalized timestamps and owner
+metadata; executable files use mode 0755 and other files 0644. Filesystem
+extended attributes and macOS AppleDouble metadata are never archived. The
+output is deterministic for identical content and executable bits within the
+same Python/zlib implementation. This verifies content consistency, not source
+provenance or deployment readiness. Workflow integration is separate.

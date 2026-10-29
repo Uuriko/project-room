@@ -16,7 +16,7 @@ import { canInviteMembers, validId } from "../src/events.js";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
-  "request", "mention", "dm", "review_requested", "handoff",
+  "request", "mention", "dm", "review_requested", "work_assigned", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
@@ -270,10 +270,10 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       }));
       continue;
     }
-    if (!["verify", "decide"].includes(next.action)) continue;
+    const review = ["verify", "decide"].includes(next.action);
     const at = iso(item.updatedAt ?? item.createdAt ?? now);
     items.push(draft({
-      kind: "review_requested", roomId, key: `review|${item.id}|${next.action}`,
+      kind: review ? "review_requested" : "work_assigned", roomId, key: `${review ? "review" : "work"}|${item.id}|${next.action}`,
       title: clip(item.title || item.id), actor: item.accountableMemberId ?? null,
       createdAt: iso(item.createdAt ?? at), updatedAt: at,
       basis: `${item.revision}|${item.receipt?.eventId ?? ""}|${next.action}`,
@@ -526,7 +526,7 @@ export function listAccountUpdates(store, token, binding, query = {}) {
 // in `where`), how long it has been waiting (waitingMs), and the suggested
 // next read or reply (next). Reading never acknowledges or resolves items;
 // use the updates mark endpoints for that.
-const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "handoff"]);
+const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "work_assigned", "handoff"]);
 
 function parseOwedQuery({ limit = DEFAULT_LIMIT, cursor = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) fail(422, "invalid_owed_query", "limit must be an integer from 1 to 100");
