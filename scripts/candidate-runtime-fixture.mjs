@@ -25,7 +25,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/message-replay-snapshot.mjs');
   paths.add('server/work-repository.mjs');
   paths.add('server/message-command-service.mjs');
-  paths.add('server/agent-pause.mjs');
   paths.add('src/message-reducers.js');
   paths.add('src/work-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
@@ -194,8 +193,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
-  paths.add('server/door-funnel.mjs'); paths.add('server/routes/door-funnel.mjs'); // DOOR-FUNNEL-READ: public door funnel aggregates (imported by server/routes/table.mjs)
-  paths.add('server/verdict-inbox.mjs'); paths.add('server/verdict-inbox-read.mjs'); paths.add('server/routes/verdict-inbox.mjs'); // COMP-DEEP #1 verdict inbox (imported by server/routes/table.mjs)
   paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
@@ -213,6 +210,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-search.mjs'); // public search assets (imported by server/http.mjs)
   paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('cloudflare/channel-drain-tick.mjs'); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
+  paths.add('cloudflare/edge-mcp.mjs'); // anonymous MCP answered outside the Durable Object (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
   // Decision #36 (#3254, Option A): the generated agent pages are build
