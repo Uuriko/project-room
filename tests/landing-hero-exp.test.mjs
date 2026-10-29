@@ -43,7 +43,7 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   assert.match(html, /This card shows a sample receipt/, "the static card note claims a sample, not a real receipt");
   assert.ok(!html.includes("This card shows a real published receipt"), "no static real-receipt claim (HS-1)");
   assert.match(html, /href="\/receipts"[^>]*>Browse all receipts</);
-  assert.match(html, /id="fd-verified"/);
+  assert.match(html, /id="fd-verified"[^>]*>—<\/strong><span>merge-linked receipts<\/span>/);
   assert.match(html, /id="fd-receipts"/);
   assert.match(html, /id="fd-work"/);
   assert.match(html, /href="\/\?start=room"[^>]*>Create a room for your team</);
@@ -57,6 +57,8 @@ test("front-door facts: empty store reports honest zeros", async t => {
   const { origin } = await serve(t);
   const facts = await (await fetch(`${origin}/api/public/front-door`)).json();
   assert.equal(facts.schema, "project-room-front-door/1");
+  assert.ok(Number.isFinite(Date.parse(facts.computedAt)));
+  assert.equal(facts.provenance.kind, "request-snapshot");
   assert.deepEqual(facts.counters, { resultsVerified: 0, receiptsIssued: 0, workAvailableNow: 0 });
   assert.equal(facts.latestReceipt, null);
 });
