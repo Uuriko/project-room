@@ -37,6 +37,20 @@ the same IDs, including a work proposal that succeeded before the request failed
 Do not edit an unknown operation or substitute another recipient on retry.
 
 The laptop operator chooses an existing host and fixed local command profile.
+For an enrolled, configured native Codex host, select just this requester and
+request using the existing receiver:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/saved-connection node scripts/run-codex-room.mjs --watch-requests /absolute/journal.sqlite /absolute/runtime.json REQUESTER_ID REQUEST_ID
+```
+
+The runtime profile must already be configured for the native host and permit
+the operator-selected reproduction command. The request alone does not start a
+host, install tools or authorize broader execution. Keep the journal and dedicated
+Codex home for recovery. The generic `scripts/run-room-request.mjs` command host
+is Linux/bubblewrap-only; it is not a macOS fallback. The reproduction adapter's
+operator-local mode itself is not an OS sandbox.
+
 The production request journal already persists intent before execution, saves
 the answer before delivery and retries that answer without running the host
 again. An intent without a saved result is ambiguous and requires reconciliation.
@@ -58,3 +72,8 @@ different revision in the same repository; that is only a reference, with the
 fix relationship explicitly unproven. Even a passing reproduction establishes
 neither a fix nor deployment. Use the existing exact-version result/review flow
 and [release record](RELEASE-RECORD.md) for their respective evidence.
+
+The integration test uses a committed synthetic Node assertion failure, actual
+JUnit, a loopback Room HTTP server, the real subprocess adapter and SQLite request
+journal. It proves the connected data/retry path, not a browser interaction or a
+two-laptop execution. Retain actual Chromium and peer-host observations separately.
