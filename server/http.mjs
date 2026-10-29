@@ -8,7 +8,7 @@ import { readConversation } from "./conversation-sync.mjs";
 import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
-import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
+import { publicAssetPaths, generatedAgentPages, assetCachePolicy, assetEtagValue, etagMatches } from "./public-assets.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2475,14 +2475,33 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           catch { /* this platform has no early hints */ }
         }
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
-        if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
-        else if (path === "src/styles.css") res.setHeader("Cache-Control", "public, max-age=3600");
-        else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
         const payload = path === "index.html"
           ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
           : data;
+        // #4065: the same asset cache policy the edge applies
+        // (assetCachePolicy in server/public-assets.mjs), over the served
+        // bytes (the edge likewise hashes bodyBytes after the front-door
+        // transform). Binary images and fonts keep their one-day cache;
+        // scripts, styles, SVG and the web manifest revalidate (no-cache)
+        // against a content ETag, so an unchanged file costs a 304 instead
+        // of a re-download. Types with no policy (HTML, text, JSON) keep
+        // the server-wide defaults. This shared policy supersedes the
+        // Node-only styles.css max-age=3600 / shell max-age=60 headers
+        // added on main by c50f44cac: aligning Node with the edge is this
+        // PR's pinned behaviour (tests/asset-cache-node.test.js asserts
+        // styles.css no-cache and the shell no-store with no ETag).
+        const policy = assetCachePolicy(type);
+        if (policy) {
+          res.setHeader("Cache-Control", policy);
+          const etag = assetEtagValue(createHash("sha256").update(payload).digest());
+          res.setHeader("ETag", etag);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            res.writeHead(304);
+            return res.end();
+          }
+        }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : payload);
         }
