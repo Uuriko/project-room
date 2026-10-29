@@ -1,0 +1,1814 @@
+{
+ "generatedAtUtc": "2026-10-29T01:24:48.107512Z",
+ "mainAt": "aaa749065a6451321a949ddcb923f3174504fe35",
+ "backlog": {
+  "path": "docs/backlog/project-room-total-backlog.json",
+  "capturedAtUtc": "2026-10-18T08:32:18.598928+00:00",
+  "items": 773
+ },
+ "method": "Read-only. Existing IDs come only from backlog url fields matching numbers the PR references. Candidate obligations are keyword matches on titles and are NOT verified. Overlaps come from the 2026-10-28 triage file lists (generated manifest excluded).",
+ "prs": [
+  {
+   "pr": 5064,
+   "head": "392b6de83e6a0f217e17afa53aae87d34cfd463a",
+   "branch": "claude/human-panel-event-refresh",
+   "title": "Human panel: refresh on room events, slow the fallback poll",
+   "url": "https://github.com/Uuriko/project-room/pull/5064",
+   "createdAt": "2026-10-27T20:28:36Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "EXE-10",
+     "status": "open",
+     "title": "Preserve Retry-After minima, permanent-auth refusal and assistant_run_owned behavior from earlier native fixes",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3413",
+     "status": "needs-verification",
+     "title": "[Perf][Medium] Room/board reads are O(board) per request: 2,000-item board work view ~0.5 s median idle (10x s",
+     "url": "https://github.com/Uuriko/project-room/issues/3413",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3640",
+     "status": "needs-verification",
+     "title": "llms.txt: wake poll without hostId does not 422 for an agent with a registered host (doc inaccuracy, both revi",
+     "url": "https://github.com/Uuriko/project-room/issues/3640",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3980",
+     "status": "needs-verification",
+     "title": "W-3 gate build 1: land.mjs polls job conclusion (not status) and refuses foreground execution (catalogue L-5/L",
+     "url": "https://github.com/Uuriko/project-room/issues/3980",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5044,
+     "title": "Preserve Share result drafts across closing and reload",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/human-experience.js"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "Fo verified at cf2a35c9 (seq 20234); re-verify at 392b6de8",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 4 commits behind main at triage time; re-run at composed head"
+   ]
+  },
+  {
+   "pr": 5100,
+   "head": "024df9fa6b3438003c1829d031bf63adf78f2f86",
+   "branch": "claude/room-open-fanout",
+   "title": "room open: skip the redundant first-open room re-read",
+   "url": "https://github.com/Uuriko/project-room/pull/5100",
+   "createdAt": "2026-10-28T00:59:25Z",
+   "referencedNumbers": [
+    4948
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "ADP-07",
+     "status": "open",
+     "title": "Evaluate bounded speculative preparation on authorized read-only data with cancellation and total-cost account",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-02",
+     "status": "open",
+     "title": "Provide field selection, conditional reads, stable pagination, resource handles and explicit omission/partial-",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-03",
+     "status": "open",
+     "title": "Add bounded parallel batch reads with declared watermark consistency and per-item errors.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-07",
+     "status": "open",
+     "title": "Prefer deterministic read composition first; route every supported effect through authority and effect journal",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5120,
+     "title": "room open: defer panel-only reads until the startup burst drains (stac",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4868,
+     "title": "Drop the snapshot event log and append new posts",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4857,
+     "title": "Window the default room load to the newest 50 messages",
+     "class": "LANDED-ELSEWHERE",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4996,
+     "title": "Client state: heal windowed-read divergence (D2-2 F-1) + mirror redact",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 4899,
+     "title": "Hide empty overview sections, skip caught-up briefs, and unserve board",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 25 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5120,
+   "head": "6931eaf5a655fc3d426ba335d095fd48a5a0befc",
+   "branch": "claude/defer-startup-reads",
+   "title": "room open: defer panel-only reads until the startup burst drains (stacked on #5100)",
+   "url": "https://github.com/Uuriko/project-room/pull/5120",
+   "createdAt": "2026-10-28T03:09:16Z",
+   "referencedNumbers": [
+    5100
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "ADP-07",
+     "status": "open",
+     "title": "Evaluate bounded speculative preparation on authorized read-only data with cancellation and total-cost account",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-02",
+     "status": "open",
+     "title": "Provide field selection, conditional reads, stable pagination, resource handles and explicit omission/partial-",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-03",
+     "status": "open",
+     "title": "Add bounded parallel batch reads with declared watermark consistency and per-item errors.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-07",
+     "status": "open",
+     "title": "Prefer deterministic read composition first; route every supported effect through authority and effect journal",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "#5100"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 4868,
+     "title": "Drop the snapshot event log and append new posts",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/app.js",
+      "src/client.js",
+      "tests/client-recent-refresh.test.js"
+     ],
+     "sharedCount": 4
+    },
+    {
+     "pr": 5100,
+     "title": "room open: skip the redundant first-open room re-read",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4899,
+     "title": "Hide empty overview sections, skip caught-up briefs, and unserve board",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/app.js",
+      "src/client.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4857,
+     "title": "Window the default room load to the newest 50 messages",
+     "class": "LANDED-ELSEWHERE",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js",
+      "tests/client.test.js"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 4996,
+     "title": "Client state: heal windowed-read divergence (D2-2 F-1) + mirror redact",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/client.js",
+      "tests/client-recent-refresh.test.js"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "skipped",
+    "contract": "skipped",
+    "lint": "skipped",
+    "browser": "skipped",
+    "cloudflare": "skipped"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "required checks not green at head: test=skipped, contract=skipped, lint=skipped, browser=skipped, cloudflare=skipped",
+    "CI ran 25 commits behind main at triage time; re-run at composed head",
+    "no independent review record found",
+    "conflicts with current main: scripts/CANDIDATE-MANIFEST.json"
+   ]
+  },
+  {
+   "pr": 5121,
+   "head": "3b026172e6ef2748dbf7ebdfb47c00ebb182e6ff",
+   "branch": "claude/next6-quiet-sidebar",
+   "title": "room screen: hide \"Connected\" while connected; one Invite entry in the sidebar (NEXT-6 slice)",
+   "url": "https://github.com/Uuriko/project-room/pull/5121",
+   "createdAt": "2026-10-28T03:40:12Z",
+   "referencedNumbers": [
+    5085
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3379",
+     "status": "needs-verification",
+     "title": "Invite redeem: mint-vs-link fork is unsignaled in the 201 response and undisclosed in llms.txt (silent duplica",
+     "url": "https://github.com/Uuriko/project-room/issues/3379",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3672",
+     "status": "needs-verification",
+     "title": "agent-invites: legacy v1 invite codes \u2014 header comment contradicts codeHash; holders get a misleading 404",
+     "url": "https://github.com/Uuriko/project-room/issues/3672",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3794",
+     "status": "needs-verification",
+     "title": "Creating an invite link never surfaces the new link's URL \u2014 the dialog keeps showing a pre-existing guest link",
+     "url": "https://github.com/Uuriko/project-room/issues/3794",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3949",
+     "status": "needs-verification",
+     "title": "Invite replay: credential-less re-rotation is unlimited within the 30-day window \u2014 code+requestId replays repe",
+     "url": "https://github.com/Uuriko/project-room/issues/3949",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "manifest-only conflict with #5135 after either lands"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5158,
+     "title": "Plainer account menu and Go to dialog copy",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 4946,
+     "title": "G4: Room UI design pass",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 6 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5135,
+   "head": "4815725f077b033fa3b189d88d1750b7b505d5cc",
+   "branch": "claude/next6-active-members",
+   "title": "room sidebar: Members header with an avatar stack; list who is around now (NEXT-6 slice)",
+   "url": "https://github.com/Uuriko/project-room/pull/5135",
+   "createdAt": "2026-10-28T05:20:59Z",
+   "referencedNumbers": [
+    5121
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "API-09",
+     "status": "open",
+     "title": "Complete cold agent onboarding through identity, first useful work, membership, wake setup and recovery, inclu",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3211",
+     "status": "needs-verification",
+     "title": "AGENT-START-HERE ends at first public-work receipt: no route to room membership, activation pack, plugin, or h",
+     "url": "https://github.com/Uuriko/project-room/issues/3211",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3224",
+     "status": "needs-verification",
+     "title": "[tracking] Finish raw members[...] migration behind ownMember/requireMember and add the lint ban",
+     "url": "https://github.com/Uuriko/project-room/issues/3224",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3343",
+     "status": "needs-verification",
+     "title": "Owner Cockpit slice 2: Money (cents + credits, never mixed) and Roster sections",
+     "url": "https://github.com/Uuriko/project-room/issues/3343",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "manifest-only conflict with #5121"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/conversation.js"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4946,
+     "title": "G4: Room UI design pass",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4942,
+     "title": "G5: Agent front door and discovery",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4730,
+     "title": "Add the owner dialog for public agent pages",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 6 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5150,
+   "head": "a5b8ec5844434c912fccd2b677375169d7fe82fe",
+   "branch": "claude/fo-presence-stale",
+   "title": "presence: Refresh availability only when stale (Fo's patch, stacked on #5135)",
+   "url": "https://github.com/Uuriko/project-room/pull/5150",
+   "createdAt": "2026-10-28T11:44:07Z",
+   "referencedNumbers": [
+    5135
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "PRO-05",
+     "status": "open",
+     "title": "Define conversation-first navigation with one useful default assistant presence and contextual specialist acce",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "#5135"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/conversation.js"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4946,
+     "title": "G4: Room UI design pass",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4942,
+     "title": "G5: Agent front door and discovery",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4730,
+     "title": "Add the owner dialog for public agent pages",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 5
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "Fo verified at a5b8ec58",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 6 commits behind main at triage time; re-run at composed head"
+   ]
+  },
+  {
+   "pr": 5139,
+   "head": "d10de5ce5032e888cdfa2ce6db83f634dbacb62b",
+   "branch": "claude/next6-rooms-page",
+   "title": "rooms page: visible New room / Account disclosure rows; tidy Join room (NEXT-6)",
+   "url": "https://github.com/Uuriko/project-room/pull/5139",
+   "createdAt": "2026-10-28T06:24:28Z",
+   "referencedNumbers": [
+    5121,
+    5135
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [],
+   "prerequisites": [
+    "manifest-only conflict"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5159,
+     "title": "Dim the room behind the phone menu drawer",
+     "class": "RED",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5157,
+     "title": "Icons grow with the reader's text size",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5140,
+     "title": "styles: use type-scale tokens where raw sizes already equal them (no v",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 6 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5140,
+   "head": "846bbf50b05b8a391580f7e62d4901028f8e2d12",
+   "branch": "claude/tokens-font-exact",
+   "title": "styles: use type-scale tokens where raw sizes already equal them (no visual change)",
+   "url": "https://github.com/Uuriko/project-room/pull/5140",
+   "createdAt": "2026-10-28T06:58:35Z",
+   "referencedNumbers": [
+    5094,
+    5135,
+    5139
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "API-13",
+     "status": "open",
+     "title": "Measure model turns, transport calls, bytes, tokens, total accepted-task latency and debugging quality.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "CTX-12",
+     "status": "open",
+     "title": "Measure retrieval accuracy, missing-evidence failures, context bytes/tokens, update lag, battery/disk cost and",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3545",
+     "status": "needs-verification",
+     "title": "Core work-claim leases have no fencing token: finish path is gated by owner identity only",
+     "url": "https://github.com/Uuriko/project-room/issues/3545",
+     "matched": 1
+    },
+    {
+     "id": "PERF-08",
+     "status": "open",
+     "title": "Reduce first-load bytes, fonts, JavaScript, parsing and startup work while preserving accessible rendering.",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "manifest-only conflict"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5159,
+     "title": "Dim the room behind the phone menu drawer",
+     "class": "RED",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5157,
+     "title": "Icons grow with the reader's text size",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5139,
+     "title": "rooms page: visible New room / Account disclosure rows; tidy Join room",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 4 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5146,
+   "head": "58dfe47a2cc2893cb879324196c05687a923db6e",
+   "branch": "claude/ask-owner-attest",
+   "title": "reply requests: server stamps which credential answered (ask_owner part A)",
+   "url": "https://github.com/Uuriko/project-room/pull/5146",
+   "createdAt": "2026-10-28T08:02:12Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "CTX-09",
+     "status": "open",
+     "title": "Track tool availability, version, workspace grants, credential readiness and host capacity without exposing se",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3602",
+     "status": "needs-verification",
+     "title": "Feedback scrubber stores the product's own credentials (pri_/rak_/ga1.) verbatim",
+     "url": "https://github.com/Uuriko/project-room/issues/3602",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3625",
+     "status": "needs-verification",
+     "title": "dr: no operator procedure for post-restore credential re-issue or first-tick verification (game-day steps had ",
+     "url": "https://github.com/Uuriko/project-room/issues/3625",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3712",
+     "status": "needs-verification",
+     "title": "Board projection drops review basis and verifier attestation: reviewed completion unreachable via the board do",
+     "url": "https://github.com/Uuriko/project-room/issues/3712",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5148,
+     "title": "ask_owner: one call to ask your owner, returns at once; read the outco",
+     "class": "RED",
+     "sharedFiles": [
+      "client/reply-actions.mjs",
+      "client/work-actions.mjs",
+      "server/store.mjs"
+     ],
+     "sharedCount": 5
+    },
+    {
+     "pr": 4864,
+     "title": "Fix error codes, owner gates, and MCP room-key copy",
+     "class": "STALE-CONFLICTING",
+     "sharedFiles": [
+      "client/reply-actions.mjs",
+      "client/work-actions.mjs",
+      "server/store.mjs"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 5080,
+     "title": "feat(native): expose identity-bound Room collaboration tools",
+     "class": "RED",
+     "sharedFiles": [
+      "client/work-actions.mjs",
+      "server/store.mjs"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5059,
+     "title": "feat(native): reconcile cancelled requests proven before dispatch",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "client/work-actions.mjs",
+      "server/store.mjs"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5054,
+     "title": "fix: observe model attempts at the runtime dispatch boundary",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "client/work-actions.mjs",
+      "server/store.mjs"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "Codex review points addressed (Claude's claim); no independent LAND-READY record",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 4 commits behind main at triage time; re-run at composed head"
+   ]
+  },
+  {
+   "pr": 5148,
+   "head": "cc64312ae6dba63e43d1abd8a9e628657a9a368d",
+   "branch": "claude/ask-owner-route",
+   "title": "ask_owner: one call to ask your owner, returns at once; read the outcome later (part B, stacked on #5146)",
+   "url": "https://github.com/Uuriko/project-room/pull/5148",
+   "createdAt": "2026-10-28T09:27:05Z",
+   "referencedNumbers": [
+    5146
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "ADP-12",
+     "status": "open",
+     "title": "Measure sustained net improvement after evaluation, human oversight and maintenance costs.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "ART-04",
+     "status": "open",
+     "title": "Preserve simultaneous human and agent edits; evaluate CRDTs for mergeable content with authoritative permissio",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "CTX-04",
+     "status": "open",
+     "title": "Expose what work is using so humans can add, correct or exclude context.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3371",
+     "status": "needs-verification",
+     "title": "[Outfitter v0] /outfitter human page (thin, server-rendered)",
+     "url": "https://github.com/Uuriko/project-room/issues/3371",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [
+    "#5146"
+   ],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "docs/openapi.yaml",
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "scripts/runtime-package.mjs"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 4943,
+     "title": "G9: Decision records",
+     "class": "RED",
+     "sharedFiles": [
+      "docs/openapi.yaml",
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "scripts/runtime-package.mjs"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 4942,
+     "title": "G5: Agent front door and discovery",
+     "class": "RED",
+     "sharedFiles": [
+      "docs/openapi.yaml",
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "scripts/runtime-package.mjs"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 4897,
+     "title": "Keep the landing page small, publish the OpenAPI spec, and cap MCP blu",
+     "class": "RED",
+     "sharedFiles": [
+      "client/reply-actions.mjs",
+      "client/work-actions.mjs",
+      "docs/openapi.yaml"
+     ],
+     "sharedCount": 7
+    },
+    {
+     "pr": 4892,
+     "title": "Add an optional agent join profile on redeem and member routes",
+     "class": "SUPERSEDED",
+     "sharedFiles": [
+      "docs/openapi.yaml",
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "scripts/runtime-package.mjs"
+     ],
+     "sharedCount": 7
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 4 commits behind main at triage time; re-run at composed head"
+   ]
+  },
+  {
+   "pr": 5149,
+   "head": "f983d59abbb65afbfcc0cf19b7548eb69203839c",
+   "branch": "claude/attachment-quota-detail",
+   "title": "room files: attachment_quota 409 names the limit, used, max and remaining",
+   "url": "https://github.com/Uuriko/project-room/pull/5149",
+   "createdAt": "2026-10-28T11:17:29Z",
+   "referencedNumbers": [
+    5102
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "ARC-14",
+     "status": "open",
+     "title": "Measure unrelated files/domains touched, merge conflict burden and new-contributor time on representative chan",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "ART-06",
+     "status": "open",
+     "title": "Distinguish local-only files from uploaded, durable shared artifacts and verify bytes before reporting availab",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "COV-01",
+     "status": "open",
+     "title": "Inventory active and archived Project Room chats, local session indexes, attachments and accessible agent reco",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "COV-06",
+     "status": "open",
+     "title": "Inventory local branches, worktrees, patch bundles, code drops and historical recovery files; identify the ori",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5148,
+     "title": "ask_owner: one call to ask your owner, returns at once; read the outco",
+     "class": "RED",
+     "sharedFiles": [
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "skills/project-room/references/errors-catalog.md",
+      "src/agent-error.mjs"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "skills/project-room/references/errors-catalog.md",
+      "src/agent-error.mjs"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 5080,
+     "title": "feat(native): expose identity-bound Room collaboration tools",
+     "class": "RED",
+     "sharedFiles": [
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "skills/project-room/references/errors-catalog.md",
+      "src/agent-error.mjs"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 5069,
+     "title": "Money guards: refuse offer withdraw with a live claim and archive with",
+     "class": "RED",
+     "sharedFiles": [
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "skills/project-room/references/errors-catalog.md",
+      "src/agent-error.mjs"
+     ],
+     "sharedCount": 3
+    },
+    {
+     "pr": 5059,
+     "title": "feat(native): reconcile cancelled requests proven before dispatch",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "plugins/project-room/skills/project-room/references/errors-catalog.md",
+      "skills/project-room/references/errors-catalog.md",
+      "src/agent-error.mjs"
+     ],
+     "sharedCount": 3
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "Fo verified",
+   "incompleteAcceptanceEvidence": []
+  },
+  {
+   "pr": 5157,
+   "head": "1208b8d0b832ac0e7bd7e2216b08a4ee57b69f1c",
+   "branch": "claude/icons-scale-with-text",
+   "title": "Icons grow with the reader's text size",
+   "url": "https://github.com/Uuriko/project-room/pull/5157",
+   "createdAt": "2026-10-28T18:01:11Z",
+   "referencedNumbers": [
+    5151
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "NATIVE-MAC01",
+     "status": "needs-verification",
+     "title": "supportedOS/hardware/Intel-AppleSilicon matrix chosen from actualusers.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "UI-13",
+     "status": "open",
+     "title": "Qualify keyboard, screen-reader, IME, reduced-motion, zoom, narrow/mobile layouts and reachable touch targets.",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5159,
+     "title": "Dim the room behind the phone menu drawer",
+     "class": "RED",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5140,
+     "title": "styles: use type-scale tokens where raw sizes already equal them (no v",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5139,
+     "title": "rooms page: visible New room / Account disclosure rows; tidy Join room",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/styles.css"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "John's Tab LAND-READY at 1208b8d0 (seq 21359)",
+   "incompleteAcceptanceEvidence": []
+  },
+  {
+   "pr": 5158,
+   "head": "223504c6a92d2624938dd055c4b6625d90682c4b",
+   "branch": "claude/copy-account-goto",
+   "title": "Plainer account menu and Go to dialog copy",
+   "url": "https://github.com/Uuriko/project-room/pull/5158",
+   "createdAt": "2026-10-28T18:06:14Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5121,
+     "title": "room screen: hide \"Connected\" while connected; one Invite entry in the",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 4946,
+     "title": "G4: Room UI design pass",
+     "class": "RED",
+     "sharedFiles": [
+      "index.html",
+      "src/app.js"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "John's Tab LAND-READY at 223504c6 (seq 21335)",
+   "incompleteAcceptanceEvidence": []
+  },
+  {
+   "pr": 5159,
+   "head": "a85a0121f9ed2070a2b071c052137f893f93c804",
+   "branch": "claude/drawer-scrim",
+   "title": "Dim the room behind the phone menu drawer",
+   "url": "https://github.com/Uuriko/project-room/pull/5159",
+   "createdAt": "2026-10-28T18:24:18Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3740",
+     "status": "needs-verification",
+     "title": "Session-one (mobile): a human cannot claim public work \u2014 every offer ends at 'Take it to your agent'",
+     "url": "https://github.com/Uuriko/project-room/issues/3740",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3744",
+     "status": "needs-verification",
+     "title": "Mobile tap targets under 44px across public and owner surfaces (measured: /receipts 8 of 8)",
+     "url": "https://github.com/Uuriko/project-room/issues/3744",
+     "matched": 1
+    },
+    {
+     "id": "UI-13",
+     "status": "open",
+     "title": "Qualify keyboard, screen-reader, IME, reduced-motion, zoom, narrow/mobile layouts and reachable touch targets.",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5150,
+     "title": "presence: Refresh availability only when stale (Fo's patch, stacked on",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5135,
+     "title": "room sidebar: Members header with an avatar stack; list who is around ",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 5094,
+     "title": "Add account-bound room requests and explicit first-login choices",
+     "class": "UNKNOWN",
+     "sharedFiles": [
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 4946,
+     "title": "G4: Room UI design pass",
+     "class": "RED",
+     "sharedFiles": [
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 2
+    },
+    {
+     "pr": 4942,
+     "title": "G5: Agent front door and discovery",
+     "class": "RED",
+     "sharedFiles": [
+      "src/app.js",
+      "src/styles.css"
+     ],
+     "sharedCount": 2
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "failure",
+    "contract": "success",
+    "lint": "success",
+    "browser": "failure",
+    "cloudflare": "success"
+   },
+   "review": "Member 2 reviewed a85a0121 focus fix requests; no LAND-READY record",
+   "incompleteAcceptanceEvidence": [
+    "required checks not green at head: test=failure, browser=failure"
+   ]
+  },
+  {
+   "pr": 5161,
+   "head": "17f1bd3c8a1ecb8831c975048ffa3956b2f98a97",
+   "branch": "claude/mention-late-ack",
+   "title": "Mentions: a late ack clears a timed-out mention from the open list",
+   "url": "https://github.com/Uuriko/project-room/pull/5161",
+   "createdAt": "2026-10-28T19:01:44Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3948",
+     "status": "needs-verification",
+     "title": "Agent inbox after-cursor silently loses messages: burst over limit is skipped forever, and an over-head cursor",
+     "url": "https://github.com/Uuriko/project-room/issues/3948",
+     "matched": 2
+    },
+    {
+     "id": "ADP-10",
+     "status": "open",
+     "title": "Detect drift and regressions; retain policy versions, explanation, rollback and a deterministic fallback.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-09",
+     "status": "open",
+     "title": "Complete cold agent onboarding through identity, first useful work, membership, wake setup and recovery, inclu",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-12",
+     "status": "open",
+     "title": "Test supported clients for structured results, resource links, interactive fallbacks and error recovery rather",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5148,
+     "title": "ask_owner: one call to ask your owner, returns at once; read the outco",
+     "class": "RED",
+     "sharedFiles": [
+      "server/store.mjs"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5146,
+     "title": "reply requests: server stamps which credential answered (ask_owner par",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "server/store.mjs"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5138,
+     "title": "Search coherence (Option A): newest-first ordering + parameter honesty",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      "server/store.mjs"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5134,
+     "title": "RRC: room.title_set rename verb + room-create budget honesty",
+     "class": "RED",
+     "sharedFiles": [
+      "server/store.mjs"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5133,
+     "title": "PRES: materialise presence activity at commit (kill the per-read event",
+     "class": "RED",
+     "sharedFiles": [
+      "server/store.mjs"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "Member 2 reviewed; ack-then-late-ack fix at 17f1bd3c not re-reviewed",
+   "incompleteAcceptanceEvidence": []
+  },
+  {
+   "pr": 5167,
+   "head": "d7d12acb79a38e53a0c4850cb5d31bd9263f01bc",
+   "branch": "claude/door-join-agent-packet",
+   "title": "Agent packet: enrollment before the setup pointer in the named-room section",
+   "url": "https://github.com/Uuriko/project-room/pull/5167",
+   "createdAt": "2026-10-29T00:40:39Z",
+   "referencedNumbers": [
+    4448,
+    5047,
+    5050,
+    5055
+   ],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3209",
+     "status": "needs-verification",
+     "title": "llms.txt under-specifies three contracts it names: access-request join path, wants-work capabilities enum, ful",
+     "url": "https://github.com/Uuriko/project-room/issues/3209",
+     "matched": 2
+    },
+    {
+     "id": "GH-I-3655",
+     "status": "needs-verification",
+     "title": "llms.txt served by a non-production deployment links the production origin for the full packet, MCP, and agent",
+     "url": "https://github.com/Uuriko/project-room/issues/3655",
+     "matched": 2
+    },
+    {
+     "id": "GH-I-3706",
+     "status": "needs-verification",
+     "title": "llms-full.txt is smaller than llms.txt and is not a superset \u2014 the 'Full agent packet' omits the work-claim bo",
+     "url": "https://github.com/Uuriko/project-room/issues/3706",
+     "matched": 2
+    },
+    {
+     "id": "AUT-04",
+     "status": "open",
+     "title": "Build review packets containing changes, provenance, independent checks, risks and required decisions.",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [],
+   "requiredChecksAtHead": {
+    "test": "cancelled",
+    "contract": null,
+    "lint": null,
+    "browser": "cancelled",
+    "cloudflare": null
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "required checks not green at head: test=cancelled, contract=None, lint=None, browser=cancelled, cloudflare=None",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 5013,
+   "head": "29bfe6fe5d9cc1f236635042f3ec020d74c941ff",
+   "branch": "claude/ci-browser-shards-timeout",
+   "title": "ci: raise browser-shards timeout to 30 minutes",
+   "url": "https://github.com/Uuriko/project-room/pull/5013",
+   "createdAt": "2026-10-27T08:04:16Z",
+   "referencedNumbers": [],
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "ADP-08",
+     "status": "open",
+     "title": "Adapt concurrency, batching, retries and cache policies under stability, fairness and budget constraints.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "ADP-09",
+     "status": "open",
+     "title": "Adapt context and memory policies with contradiction, deletion, freshness and missing-evidence guardrails.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "ADP-11",
+     "status": "open",
+     "title": "Prevent adaptive policies from granting themselves permissions or silently rewriting production code/data.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "API-02",
+     "status": "open",
+     "title": "Provide field selection, conditional reads, stable pagination, resource handles and explicit omission/partial-",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 5062,
+     "title": "fix: isolate ineligible PR workflow concurrency",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      ".github/workflows/test.yml"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 5048,
+     "title": "docs(workflows): correct stale branch-protection comments (comment-onl",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      ".github/workflows/test.yml"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 4951,
+     "title": "Land green ready-to-land pull requests and deploy main hourly",
+     "class": "RED",
+     "sharedFiles": [
+      ".github/workflows/test.yml"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 4219,
+     "title": "CI: never cancel merge-group (composed head) runs of the test workflow",
+     "class": "CANDIDATE",
+     "sharedFiles": [
+      ".github/workflows/test.yml"
+     ],
+     "sharedCount": 1
+    },
+    {
+     "pr": 3399,
+     "title": "Bump actions/checkout from 4.4.0 to 7.0.1",
+     "class": "RED",
+     "sharedFiles": [
+      ".github/workflows/test.yml"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "success",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "CI ran 74 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  },
+  {
+   "pr": 3846,
+   "head": "7ad607c01c49ee18672d6c5de741aaaa1acb66ee",
+   "branch": "claude/docs-font",
+   "title": "Login font 140 KB -> 4.6 KB; document short merge-slot leases and code drops",
+   "url": "https://github.com/Uuriko/project-room/pull/3846",
+   "createdAt": "2026-10-17T02:47:54Z",
+   "referencedNumbers": [
+    2833
+   ],
+   "existingObligationIds": [
+    "GH-PR-3846"
+   ],
+   "candidateObligations_unverified": [
+    {
+     "id": "MAC-07",
+     "status": "open",
+     "title": "Prove execution isolation before enabling automatic Mac agent actions; keep host enrollment separate from huma",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "NATIVE-MAC40",
+     "status": "needs-verification",
+     "title": "launchatlogin optin and uninstall/logout do not leave unexplainedhelpers.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "NATIVE-MAC45",
+     "status": "needs-verification",
+     "title": "localagent enrollment separatefromhumanlogin and membership.",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "PERF-08",
+     "status": "open",
+     "title": "Reduce first-load bytes, fonts, JavaScript, parsing and startup work while preserving accessible rendering.",
+     "url": "",
+     "matched": 1
+    }
+   ],
+   "prerequisites": [],
+   "overlappingOpenPRs_candidates": [
+    {
+     "pr": 4939,
+     "title": "Treat the open-PR cap as a throughput signal",
+     "class": "RED",
+     "sharedFiles": [
+      "docs/ROOM-COORDINATION.md"
+     ],
+     "sharedCount": 1
+    }
+   ],
+   "requiredChecksAtHead": {
+    "test": "failure",
+    "contract": "success",
+    "lint": "success",
+    "browser": "success",
+    "cloudflare": "success"
+   },
+   "review": "none recorded",
+   "incompleteAcceptanceEvidence": [
+    "required checks not green at head: test=failure",
+    "CI ran 740 commits behind main at triage time; re-run at composed head",
+    "no independent review record found"
+   ]
+  }
+ ],
+ "branches": [
+  {
+   "branch": "claude/train-planner",
+   "head": "1b7eb748d84b581c4492305822ed69aec419e79c",
+   "existingObligationIds": [],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3548",
+     "status": "needs-verification",
+     "title": "Landing hero: collaboration front door (room, real receipt, live counters, two doors)",
+     "url": "https://github.com/Uuriko/project-room/issues/3548",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-4071",
+     "status": "needs-verification",
+     "title": "Post-landing correction owed: PR #3953's three reviewed findings shipped uncorrected",
+     "url": "https://github.com/Uuriko/project-room/issues/4071",
+     "matched": 1
+    }
+   ],
+   "notes": "Read-only planner. Jill ruled advisory (seq 21696). Member 2 review: 3 fixes confirmed, zero-batch validation open (seq 21717).",
+   "incompleteAcceptanceEvidence": [
+    "zero-batch validation missing",
+    "never run against a composed CI result"
+   ]
+  },
+  {
+   "branch": "claude/door-join-client",
+   "head": "2432235c",
+   "existingObligationIds": [],
+   "notes": "door-join pack steps 1, 2, 3, 5 (workItemId design-2026-10-28-door-join). Prerequisites #5050, #5055, #5047 (pack step 0).",
+   "incompleteAcceptanceEvidence": [
+    "pack \u00a75.4 network trace (\u226410 requests, \u2264200 KB) not run",
+    "113,371 B closure is above the 110 KB target",
+    "steps 4 and 6 not started"
+   ],
+   "candidateObligations_unverified": [
+    {
+     "id": "GH-I-3796",
+     "status": "needs-verification",
+     "title": "Join dialog stays open after a successful account creation \u2014 focus dropped to <body>, room reachable only afte",
+     "url": "https://github.com/Uuriko/project-room/issues/3796",
+     "matched": 2
+    },
+    {
+     "id": "GH-I-3209",
+     "status": "needs-verification",
+     "title": "llms.txt under-specifies three contracts it names: access-request join path, wants-work capabilities enum, ful",
+     "url": "https://github.com/Uuriko/project-room/issues/3209",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3212",
+     "status": "needs-verification",
+     "title": "Hosted MCP: room_join hidden behind undiscoverable tools/list profile parameter \u2014 guided join path lands on a ",
+     "url": "https://github.com/Uuriko/project-room/issues/3212",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3294",
+     "status": "needs-verification",
+     "title": "PERF-1: signed-out / page weight \u2014 execute the approved budget (D5-5)",
+     "url": "https://github.com/Uuriko/project-room/issues/3294",
+     "matched": 1
+    }
+   ]
+  },
+  {
+   "branch": "claude/arm-after-writes-on-5092",
+   "head": "7cae79d8",
+   "existingObligationIds": [],
+   "notes": "Job alarm re-arms only after writes. Composes with #5126 (manifest-only conflict).",
+   "incompleteAcceptanceEvidence": [
+    "combined tree with #5126 never qualified",
+    "no PR"
+   ],
+   "candidateObligations_unverified": [
+    {
+     "id": "SCH-01",
+     "status": "open",
+     "title": "Inventory existing jobs, alarms, heartbeats, watchers and manual automation before introducing another schedul",
+     "url": "",
+     "matched": 3
+    },
+    {
+     "id": "AUT-13",
+     "status": "open",
+     "title": "Compare every automation with its manual/simple-rule baseline including setup, review, false alarms and mainte",
+     "url": "",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-3980",
+     "status": "needs-verification",
+     "title": "W-3 gate build 1: land.mjs polls job conclusion (not status) and refuses foreground execution (catalogue L-5/L",
+     "url": "https://github.com/Uuriko/project-room/issues/3980",
+     "matched": 1
+    },
+    {
+     "id": "GH-I-4061",
+     "status": "needs-verification",
+     "title": "Worker claim-prs job never runs autolink discovery or deploy linking (production is the Worker)",
+     "url": "https://github.com/Uuriko/project-room/issues/4061",
+     "matched": 1
+    }
+   ]
+  }
+ ]
+}
