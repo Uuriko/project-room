@@ -32,20 +32,34 @@ export function protectedRoomIds(env = globalThis.process?.env ?? {}) {
   return new Set([...BUILTIN_PROTECTED, ...extra]);
 }
 
-function where(entry, kind) {
+function where(entry, kind, id) {
   const parts = [];
-  let params = 0;
+  const args = [];
   for (const column of entry.match?.[kind] ?? []) {
     parts.push(`${q(column)}=?`);
-    params += 1;
+    args.push(id);
   }
   const via = entry.via?.[kind];
   if (via) {
     parts.push(`${q(via.childKey)} IN (SELECT ${q(via.parentKey)} FROM ${q(via.parent)} WHERE ${q(via.scope)}=?)`);
-    params += 1;
+    args.push(id);
   }
   if (!parts.length) return null;
-  return { sql: parts.join(" OR "), params };
+  let sql = parts.join(" OR ");
+  // A guard narrows the match with constant column equalities for this kind
+  // (for example, only abuse reports whose kind is 'room', so a room purge
+  // never reaches receipt or agent reports that share the target string).
+  // The same predicate feeds counts and deletes, so the two cannot drift.
+  const guard = entry.guard?.[kind];
+  if (guard) {
+    const fixed = [];
+    for (const [column, value] of Object.entries(guard)) {
+      fixed.push(`${q(column)}=?`);
+      args.push(value);
+    }
+    if (fixed.length) sql = `(${sql}) AND ${fixed.join(" AND ")}`;
+  }
+  return { sql, args };
 }
 
 function purgeTable(db, entry) {
@@ -58,19 +72,19 @@ function purgeTable(db, entry) {
 }
 
 function countEntry(db, entry, kind, id) {
-  const clause = where(entry, kind);
+  const clause = where(entry, kind, id);
   if (!clause) return 0;
   const table = purgeTable(db, entry);
   if (!table) return 0;
-  return db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${clause.sql}`).get(...Array(clause.params).fill(id)).n;
+  return db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${clause.sql}`).get(...clause.args).n;
 }
 
 function deleteEntry(db, entry, kind, id) {
-  const clause = where(entry, kind);
+  const clause = where(entry, kind, id);
   if (!clause) return 0;
   const table = purgeTable(db, entry);
   if (!table) return 0;
-  return db.prepare(`DELETE FROM ${table} WHERE ${clause.sql}`).run(...Array(clause.params).fill(id)).changes;
+  return db.prepare(`DELETE FROM ${table} WHERE ${clause.sql}`).run(...clause.args).changes;
 }
 
 export function countPurge(store, targets) {
