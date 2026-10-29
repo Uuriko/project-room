@@ -1,4 +1,4 @@
-// Required GitHub status + the existing durable MERGE-SLOT. No daemon, new
+// Existing durable MERGE-SLOT, plus GitHub status only when required. No daemon, new
 // credential, permission grant, or second queue. Dry-run unless --apply.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -29,11 +29,18 @@ export function grantOf(slot, identity, candidate, now = Date.now()) {
   }
   return { ...grant, owner: slot.owner, claimedAt: slot.claimedAt };
 }
+export function landingProtection(full) {
+  if (!full || !Object.hasOwn(full, 'required_status_checks')) fail('Complete branch protection is required');
+  const checks = full.required_status_checks === null ? [] : full.required_status_checks?.checks;
+  if (!Array.isArray(checks) || checks.some(check => typeof check?.context !== 'string' || !check.context)) fail('Complete required checks are required');
+  return { ...full.required_status_checks, checks, enforceAdmins: full.enforce_admins?.enabled === true };
+}
+const usesLandingStatus = protection => protection.checks.some(check => check.context === CONTEXT);
 export function candidateReady(candidate, info, main, protection) {
   if (!Number.isSafeInteger(candidate.pr) || candidate.pr < 1 || !SHA.test(candidate.head) || !SHA.test(candidate.base)) fail('Full head/base SHAs and positive PR number required');
   if (info.state !== 'OPEN' || info.isDraft || info.headRefOid !== candidate.head || info.baseRefName !== 'main' || main !== candidate.base ||
       !['MERGEABLE'].includes(info.mergeable)) fail('PR head/base, draft state or mergeability changed');
-  if (!protection.checks.some(check => check.context === CONTEXT)) fail('Install the required landing status before authorizing a merge');
+  if (!Array.isArray(protection?.checks)) fail('Complete required checks are required');
   if (protection.enforceAdmins !== true) fail('Administrator enforcement must remain enabled');
   for (const required of protection.checks) {
     if (required.context === CONTEXT) continue;
@@ -71,20 +78,23 @@ export async function guardedMerge(candidate, io, { apply = true } = {}) {
     const grant = grantOf(view.slot, view.identity, candidate);
     problemKeyCheck(grant, view.claims);
     pauseCheck(view.pause, grant);
-    if (view.openAuthorizations?.some(pr => pr.headRefOid !== candidate.head)) fail('Another open head has an unreconciled landing status; revoke it first');
-    return { grant, slot: view.slot };
+    if (usesLandingStatus(view.protection) && view.openAuthorizations?.some(pr => pr.headRefOid !== candidate.head)) fail('Another open head has an unreconciled landing status; revoke it first');
+    return { grant, slot: view.slot, landingStatus: usesLandingStatus(view.protection) };
   };
   const first = await inspect();
   // Persist only the grant validated here, never a caller-provided snapshot.
-  // The fresh inspection after publication remains the decisive race check.
+  // The fresh inspection immediately before merging remains the decisive race check.
   await io.validated?.(structuredClone(first.grant));
   if (!apply) return { dryRun: true };
   let authorized = false;
   try {
-    authorized = true; // revoke even if the status response is lost
-    await io.status({ state: 'success', context: CONTEXT, description: 'Exact candidate authorized by the current Room landing lease' });
+    if (first.landingStatus) {
+      authorized = true; // revoke even if the status response is lost
+      await io.status({ state: 'success', context: CONTEXT, description: 'Exact candidate authorized by the current Room landing lease' });
+    }
     const last = await inspect();
-    if (JSON.stringify(last.grant) !== JSON.stringify(first.grant)) fail('MERGE-SLOT grant or generation changed after status publication');
+    if (last.landingStatus !== first.landingStatus) fail('Landing status requirement changed during inspection');
+    if (JSON.stringify(last.grant) !== JSON.stringify(first.grant)) fail('MERGE-SLOT grant or generation changed between inspections');
     return await io.merge({ sha: candidate.head, merge_method: 'merge' });
   } finally {
     if (authorized) await io.status({ state: 'failure', context: CONTEXT, description: 'Landing authorization consumed or revoked; obtain a fresh Room lease' });
@@ -182,12 +192,13 @@ async function main() {
     const pages = await Promise.all(['claimed', 'in_progress', 'blocked'].map(state => room.workClaims({ state })));
     const claims = claimsFromPages(pages);
     const fullProtection = gh(['api', `repos/${repo}/branches/main/protection`]);
+    const protection = landingProtection(fullProtection);
     return { identity: access.memberId, slot, pause,
-      openAuthorizations: openAuthorizations(after => gh(['api', 'graphql', '--input', '-'], { query: OPEN_PR_QUERY, variables: { after } }).data?.repository?.pullRequests),
+      openAuthorizations: usesLandingStatus(protection) ? openAuthorizations(after => gh(['api', 'graphql', '--input', '-'], { query: OPEN_PR_QUERY, variables: { after } }).data?.repository?.pullRequests) : [],
       claims,
       pr: gh(['pr', 'view', String(candidate.pr), '--repo', repo, '--json', 'state,isDraft,headRefOid,baseRefName,mergeable,statusCheckRollup']),
       main: gh(['api', `repos/${repo}/git/ref/heads/main`]).object.sha,
-      protection: { ...fullProtection.required_status_checks, enforceAdmins: fullProtection.enforce_admins?.enabled === true } };
+      protection };
   };
   const result = await guardedMerge(candidate, { inspect,
     validated: grant => { journal = { ...journal, candidate, grant }; save(); },
@@ -195,7 +206,7 @@ async function main() {
     merge: input => write(`repos/${repo}/pulls/${candidate.pr}/merge`, input, 'PUT') }, { apply });
   if (apply) {
     if (!result?.merged) fail('GitHub did not confirm the merge');
-    journal.result = result; journal.phase = 'merged-and-revoked'; save();
+    journal.result = result; journal.phase = journal.writes.some(write => write.input?.context === CONTEXT) ? 'merged-and-revoked' : 'merged'; save();
   }
   console.log(JSON.stringify({ action, applied: apply, candidate, phase: journal.phase }));
 }

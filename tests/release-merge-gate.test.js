@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT, REQUIRED, protectionPlan, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
+import { CONTEXT, REQUIRED, protectionPlan, landingProtection, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
 const candidate = { repo: 'Uuriko/project-room', pr: 4102, head: 'a'.repeat(40), base: 'b'.repeat(40) };
 const grant = { kind: 'room.release-merge.v1', ...candidate, purpose: 'deploy-fix', directiveMessageId: 'owner-directive', problemKeys: ['release:landing'], workClaimId: 'source-work' };
 const protection = { enforceAdmins: true, strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
@@ -20,7 +20,7 @@ test('fresh exact head/base and all actual required checks are necessary', () =>
   assert.throws(() => candidateReady(candidate, info, 'c'.repeat(40), protection), /changed/);
   assert.throws(() => candidateReady(candidate, { ...info, statusCheckRollup: info.statusCheckRollup.slice(1) }, candidate.base, protection), /not green/);
   assert.throws(() => candidateReady(candidate, { ...info, statusCheckRollup: [...info.statusCheckRollup, { name: 'test', status: 'IN_PROGRESS', conclusion: '' }] }, candidate.base, protection), /not green/);
-  assert.throws(() => candidateReady(candidate, info, candidate.base, { checks: [] }), /Install/);
+  assert.throws(() => candidateReady(candidate, info, candidate.base, { checks: [] }), /Administrator/);
 });
 test('lease binds holder, lifetime, generation note, exact head/base and directive', () => {
   const v = view(); assert.equal(grantOf(v.slot, v.identity, candidate).pr, 4102);
@@ -206,21 +206,51 @@ else process.exit(9);
 console.log(JSON.stringify(out));
 `, { mode: 0o700 });
   const run = promisify(execFile), script = new URL('../scripts/release-merge-gate.mjs', import.meta.url).pathname;
-  for (const changed of [false, true]) {
+  for (const statusRequired of [true, false]) for (const changed of [false, true]) {
+    writeFileSync(fixture, JSON.stringify({ info, base: candidate.base, protection: { enforce_admins: { enabled: true }, required_status_checks: statusRequired ? { strict: false, checks: [{ context: CONTEXT }] } : null } }));
     requests.length = 0;
-    const calls = join(root, `calls-${changed}.jsonl`), journal = join(root, `journal-${changed}.json`);
+    const calls = join(root, `calls-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${statusRequired}-${changed}.json`);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE_DATA: fixture, FIXTURE_CALLS: calls, FIXTURE_JOURNAL: journal, CHANGE_HEAD: changed ? '1' : '0' };
     const command = run(process.execPath, [script, 'merge', '--pr', String(candidate.pr), '--head', candidate.head, '--base', candidate.base, '--state', journal, '--connection', connection, '--apply'], { env });
     if (changed) await assert.rejects(command, /head\/base/); else await command;
     const observed = readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(observed.filter(x => x.a.includes('graphql')).length, 2);
+    assert.equal(observed.filter(x => x.a.includes('graphql')).length, statusRequired ? 2 : 0);
     // One explicit identity check plus the SDK's fresh preflight on each
     // of five selected reads per inspection remains intact.
     assert.equal(requests.filter(url => url === '/api/session').length, 12);
     assert.equal(requests.filter(url => url.includes('/work-claims?')).length, 6);
-    assert.deepEqual(observed.filter(x => x.input?.context === CONTEXT).map(x => x.input.state), ['success', 'failure']);
+    assert.deepEqual(observed.filter(x => x.input?.context === CONTEXT).map(x => x.input.state), statusRequired ? ['success', 'failure'] : []);
     assert.equal(observed.filter(x => x.a.includes('PUT')).length, changed ? 0 : 1);
     const saved = JSON.parse(readFileSync(journal));
-    assert.equal(saved.grant.head, candidate.head); assert.equal(saved.writes.at(-1).input.state, 'failure');
+    assert.equal(saved.grant.head, candidate.head);
+    if (statusRequired) assert.equal(saved.writes.at(-1).input.state, 'failure');
+    else assert.equal(saved.writes.length, changed ? 0 : 1);
+  }
+});
+
+test('null required checks means none; incomplete protection and disabled admin enforcement refuse', () => {
+  const p = landingProtection({ required_status_checks: null, enforce_admins: { enabled: true } });
+  candidateReady(candidate, { ...info, statusCheckRollup: [] }, candidate.base, p);
+  assert.throws(() => landingProtection({}), /Complete/);
+  assert.throws(() => landingProtection({ required_status_checks: {} }), /Complete/);
+  assert.throws(() => candidateReady(candidate, info, candidate.base, { ...p, enforceAdmins: false }), /Administrator/);
+});
+test('status-free merge still refuses required check, pause, ownership and protection races', async () => {
+  for (const change of ['check', 'pause', 'owner', 'protection', 'base', 'expiry', 'grant']) {
+    let reads = 0; const writes = [];
+    await assert.rejects(guardedMerge(candidate, { inspect: async () => {
+      const v = view(); v.protection = { ...protection, checks: protection.checks.filter(x => x.context !== CONTEXT) };
+      if (++reads === 2) {
+        if (change === 'check') v.pr.statusCheckRollup[0].conclusion = 'FAILURE';
+        if (change === 'pause') v.pause = null;
+        if (change === 'owner') v.slot.owner = 'peer';
+        if (change === 'protection') v.protection = protection;
+        if (change === 'base') v.main = 'c'.repeat(40);
+        if (change === 'expiry') v.slot.leaseExpiresAt = new Date().toISOString();
+        if (change === 'grant') v.slot.history[0].note = JSON.stringify({ ...grant, directiveMessageId: 'changed' });
+      }
+      return v;
+    }, status: async x => writes.push(x), merge: async x => writes.push(x) }));
+    assert.deepEqual(writes, []);
   }
 });
