@@ -16,7 +16,7 @@ import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
+import { publishBountyEvent, mayWorkOnBounties, WORK_CLAIMS_GATE_MESSAGE } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
 import { readBoard } from "./board-read.mjs";
@@ -444,6 +444,11 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       enforceAutonomyTierForAction({ db: store.db, roomId,
         state: { room: { ownerId: store.roomAuthority(roomId).ownerId } },
         actor: current.member, action: route });
+      // F-X4-1: bounty claim/submit enforce the board's work-permission
+      // gate, identical to the HTTP route (same helper, same refusal),
+      // checked before idemExecute so replays are gated too.
+      if ((route === "bounty.claim" || route === "bounty.submit") && !mayWorkOnBounties(store, roomId, current))
+        throw new ServiceError(403, "work_claims_not_permitted", WORK_CLAIMS_GATE_MESSAGE);
       return escrow.idemExecute(roomId, key, route, status, thunk,
         { callerLane: caller, bountyId: bountyId ?? null, payload });
     });
