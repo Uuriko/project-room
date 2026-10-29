@@ -947,7 +947,7 @@ for (const width of [1280, 390]) {
     assert.equal(stops[1].expectedAttemptId, 'race-host', 'Review rebinds Stop to the attempt it just showed, still as an exact id');
     const run = (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === 'race-run');
     assert.equal(run.status, 'cancel_requested');
-    await page.screenshot({ path: `/tmp/probe/race-${width}.png` });
+    await page.screenshot({ path: `test-results/assistant-stop-race-${browserEngine}-${width}.png` });
   });
 }
 
