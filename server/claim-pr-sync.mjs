@@ -1180,12 +1180,16 @@ export function staleSweepDueAt(store, _nowMs) {
             WHERE LOWER(CAST(value AS TEXT)) = 'never-sweep'
           )
       )`).get();
-  } catch {
-    // Fail soft like the scheduler's other due probes (jobs.mjs read()):
-    // a probe error must never disable the whole claim-prs job, pull
-    // requests included. The probe's SQL is pinned by unit tests against
-    // a real store, so a regression there fails loudly in tests instead.
-    return null;
+  } catch (error) {
+    // A missing table is the cold-store case: no opted-in room can hold a
+    // candidate, so there is legitimately no wake. Any other probe error
+    // surfaces (B8-4/B8-5): returning null for a locked or corrupt store
+    // stood the sweep down indefinitely with no signal. The throw does
+    // not silently disable the claim-prs job — the registry wrappers log
+    // it and the scheduler records it as that job's failed tick, while
+    // the job's other probes and every other job keep being evaluated.
+    if (/no such table/i.test(error?.message ?? "")) return null;
+    throw error;
   }
   if (!row || row.activityMs == null) return null;
   let due = Number(row.activityMs) + STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
