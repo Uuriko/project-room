@@ -1,12 +1,16 @@
-// Replay-matrix conformance — #3676 (PREP-3676-3677 §A.1/§A.5), PR-2.
+// Replay-matrix conformance — #3676 (PREP-3676-3677 §A.1/§A.5), PR-2,
+// extended by PR-3.
 //
 // The 8-row starter set from §A.5, each driven through R1-R5 + R7-R8 by
 // the shared driver in harness.mjs. R6 (crash between execute and
-// persist) is included ONLY for the two control rows (5 buyer-signoff,
-// 6 attention — the executeOnce adopters), via PR-0's fixture reopen()
-// and a transaction-rollback crash; R6 for every other row is PR-3,
-// separately chartered, and is recorded NOT_APPLICABLE in harness.mjs
-// rather than silently joining this slice.
+// persist) covered the two control rows (5 buyer-signoff, 6 attention —
+// the executeOnce adopters) in PR-2, via PR-0's fixture reopen() and a
+// transaction-rollback crash. PR-3 extends R6 to the six non-control
+// rows (1-4, 7, 8) with the same two shapes — restart-after-commit
+// (reopen, retry, no double effect) and transaction-rollback crash
+// (effect + journal both absent, retry executes exactly once) — driven
+// by runR6Restart / runR6Crash over R6_ADAPTERS. No row's R6 is left
+// NOT_APPLICABLE: every surface proved harnessable at the PR-2 base.
 //
 // Rows 5, 7 and 8 pin money-path behaviour (see ROWS moneyKind): a wrong
 // pin here is a money-semantics claim, which is why this PR lands singly
@@ -19,9 +23,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   ROWS, DIVERGENCES, NOT_APPLICABLE,
-  runR1, runR2, runR3, runR4, runR5, runR7, runR8,
+  runR1, runR2, runR3, runR4, runR5, runR6Crash, runR6Restart, runR7, runR8,
 } from "./harness.mjs";
-import { ADAPTERS } from "./adapters.mjs";
+import { ADAPTERS, R6_ADAPTERS } from "./adapters.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const key = (row, scenario) => `rm-${row.id}-${scenario.toLowerCase()}-key`;
@@ -116,12 +120,52 @@ for (const row of ROWS.filter(r => r.control)) {
   });
 }
 
-test("R6 is scoped to the control rows in this slice (PR-3 owns the rest)", () => {
+// ------------------------------------------------------------ R6, non-control rows (PR-3)
+for (const row of ROWS.filter(r => !r.control)) {
+  const adapter = R6_ADAPTERS[row.id];
+
+  test(`row ${row.id} (${row.surface}): R6 restart after commit — no double effect`, async t => {
+    const ctx = await adapter.setup(t);
+    await runR6Restart(adapter, row, ctx, key(row, "R6"));
+  });
+
+  test(`row ${row.id} (${row.surface}): R6 crash between execute and persist leaves neither effect nor journal`, async t => {
+    const ctx = await adapter.setup(t);
+    await runR6Crash(adapter, row, ctx, key(row, "R6C"));
+  });
+}
+
+test("R6 covers every row (PR-3): no R6 NOT_APPLICABLE declarations remain", () => {
+  assert.ok(!NOT_APPLICABLE.some(n => n.scenario === "R6"),
+    "PR-3 retired every R6 n/a declaration — a new one must name the concrete unharnessable reason");
   for (const row of ROWS) {
     if (row.control) assert.equal(row.r6, true, `control row ${row.id} must declare R6`);
-    else assert.ok(NOT_APPLICABLE.some(n => n.row === row.id && n.scenario === "R6"),
-      `non-control row ${row.id}: R6 must be recorded as PR-3 scope, not silently included`);
+    else {
+      assert.ok(row.r6 && ["replay", "conflict-409", "upsert"].includes(row.r6.restart) && row.r6.crash === "rollback",
+        `non-control row ${row.id} must declare its R6 restart mode + rollback crash`);
+      assert.ok(R6_ADAPTERS[row.id], `non-control row ${row.id} has an R6 adapter`);
+      assert.equal(typeof R6_ADAPTERS[row.id].reopen, "function", `row ${row.id} R6 adapter reopens its store`);
+      assert.equal(typeof R6_ADAPTERS[row.id].crashAttempt, "function", `row ${row.id} R6 adapter has a crash attempt`);
+    }
   }
+});
+
+test("row 7 (bounty-escrow): R6 crash rolls the idempotency journal back with the fund (MONEY)", async t => {
+  const adapter = ADAPTERS[7];
+  const ctx = await adapter.setup(t);
+  const k = key(ROWS.find(r => r.id === 7), "R6J");
+  const crashed = await adapter.crashAttempt(ctx, { key: k });
+  assert.ok(crashed.status >= 400, "the crash attempt itself fails");
+  assert.equal(await adapter.journalCount(ctx, { key: k }), 0,
+    "no journal row survives the rollback — a retry can never replay a fund that never committed");
+  const retry = await adapter.submit(ctx, { key: k, payload: "same", actor: "primary" });
+  assert.equal(retry.status, 200, "the retry after the crash executes the fund");
+  assert.equal(await adapter.journalCount(ctx, { key: k }), 1, "exactly one journal row after the retry");
+  await adapter.reopen(ctx);
+  assert.equal(await adapter.journalCount(ctx, { key: k }), 1, "the journal row survives a restart");
+  const afterRestart = await adapter.submit(ctx, { key: k, payload: "same", actor: "primary" });
+  assert.equal(afterRestart.status, 200, "the post-restart retry replays the stored outcome");
+  assert.equal(await adapter.effectCount(ctx, { key: k, actor: "primary" }), 1, "the fund executed exactly once across crash + restart");
 });
 
 // ------------------------------------------------------------ row-specific pins
@@ -177,7 +221,7 @@ test("registry: exactly the 8 §A.5 starter rows, every scenario declared", () =
   assert.deepEqual(money, [5, 7, 8], "the singleton money rows are exactly 5, 7, 8");
   for (const d of DIVERGENCES) {
     assert.ok(ROWS.some(r => r.id === d.row), `divergence ${d.id} names a real row`);
-    assert.ok(["R1", "R2", "R7"].includes(d.scenario) && d.debt.length > 40, `divergence ${d.id} carries its debt`);
+    assert.ok(["R1", "R2", "R6", "R7"].includes(d.scenario) && d.debt.length > 40, `divergence ${d.id} carries its debt`);
   }
 });
 
