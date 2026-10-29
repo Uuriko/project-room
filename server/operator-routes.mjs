@@ -8,6 +8,7 @@ import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
 import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
+import { wakeAccounting, wakeRecordFailures } from "./wake-metrics.mjs";
 
 const POST = "POST";
 const GET = "GET";
@@ -19,6 +20,7 @@ const ROUTES = Object.freeze({
   "/api/operator/projection/plan": POST,
   "/api/operator/projection/execute": POST,
   "/api/operator/actions": GET,
+  "/api/operator/wake-accounting": GET,
   "/api/operator/status": GET,
   "/api/operator/drift": GET
 });
@@ -66,6 +68,21 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
       const limit = raw == null ? 50 : Number(raw);
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) reject(422, "invalid_limit", "limit must be an integer from 1 to 200");
       json(res, 200, { actions: listOperatorActions(store, limit) });
+      return true;
+    }
+    if (path === "/api/operator/wake-accounting") {
+      // Wake-reliability accounting (#3345): the production read surface
+      // for wakeAccounting, on the same operator counter pattern as the
+      // MCP per-tool counter route (#4984) — the figures are readable
+      // without a store file. ?roomId= narrows to one room; without it
+      // the whole store is reported. recordFailures is the recorder's
+      // own failure count (server/wake-metrics.mjs): a broken counter
+      // store shows up here and in the log, never silently.
+      const roomParam = url.searchParams.get("roomId");
+      const roomId = roomParam ? roomParam : null;
+      json(res, 200, { roomId,
+        accounting: wakeAccounting(store.db, { now: typeof store.now === "function" ? store.now() : Date.now(), roomId }),
+        recordFailures: wakeRecordFailures() });
       return true;
     }
     if (path === "/api/operator/status") {

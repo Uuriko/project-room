@@ -23,6 +23,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { AgentHeartbeats, HeartbeatError, agentHeartbeatSchema } from "../server/agent-heartbeats.mjs";
 import { recordWakeEvent, wakeAccounting } from "../server/wake-metrics.mjs";
+import { registerBareIsolatedTransactions } from "./helpers/bare-db-isolated-transactions.mjs";
 import { enqueueClaimWake } from "../server/work-claim-events.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -33,6 +34,7 @@ const T0 = 1_750_000_000_000;
 function unit(t) {
   const db = new DatabaseSync(":memory:");
   db.exec(agentHeartbeatSchema);
+  registerBareIsolatedTransactions(db);
   let at = T0;
   const store = { db, now: () => at,
     transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const r = fn(); db.exec("COMMIT"); return r; } catch (e) { db.exec("ROLLBACK"); throw e; } } };
@@ -154,7 +156,7 @@ test("fault injection: a dead push endpoint is counted and journaled without err
 });
 
 test("recordWakeEvent refuses non-allowlisted reasons and never throws on a bare db", t => {
-  const db = new DatabaseSync(":memory:");
+  const db = registerBareIsolatedTransactions(new DatabaseSync(":memory:"));
   t.after(() => db.close());
   assert.equal(recordWakeEvent(db, { at: 1, store: "signals", event: "failed", reason: "raw exception text" }), false);
   assert.equal(recordWakeEvent(db, { at: 1, store: "signals", event: "failed", reason: "enqueue_error", subjectId: "ai_x" }), true);

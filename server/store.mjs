@@ -159,6 +159,7 @@ import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } fr
 import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
+import { registerWakeTransactionRunner } from "./wake-transaction.mjs"; // Isolated runner registry for wake accounting (recordWakeEvent's counter+journal atomicity).
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -1434,6 +1435,7 @@ export class RoomStore {
     this.workEntities = workEntities === true;
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
+    registerWakeTransactionRunner(this.db, fn => this.transaction(fn, { isolated: true }));
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
     this.delegation = new MembershipDelegation(this);
