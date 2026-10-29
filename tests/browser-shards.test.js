@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { browserPlan, parseShard, verifyBrowserShards } from "../scripts/browser-shards.mjs";
 import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
@@ -112,4 +112,18 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
     const share = shard.estimatedMs / total;
     assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
   }
+});
+
+test("an affected plan may leave a shard empty when its receipt lists the same files", () => {
+  const script = canonicalBrowserScript();
+  const plan = browserPlan(script, { only: browserPlan(script).files.slice(0, 2) });
+  assert.ok(plan.shards.some(shard => shard.files.length === 0));
+  const identity = { matrixResult: "success", revision: "rev", runId: "run", runAttempt: "1" };
+  const receipts = plan.shards.map(shard => ({
+    index: shard.index, total: 6, files: shard.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "rev", runId: "run", runAttempt: "1",
+  }));
+  assert.equal(verifyBrowserShards(plan, receipts, identity).shards, 6);
+  receipts[0] = { ...receipts[0], files: ["scripts/not-in-the-plan.mjs"] };
+  assert.throws(() => verifyBrowserShards(plan, receipts, identity), /mismatched evidence/);
 });
