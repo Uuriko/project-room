@@ -4111,6 +4111,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // Fresh identity preflight ends before history/DM/work projection reads.
+      // The normal room authentication, rate and API-key scope gates above apply.
+      if (route === "" && req.method === "GET" && url.searchParams.get("view") === "identity") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("auth") && !["room", "account"].includes(params.get("auth")))
+            || ["x-project-room-help-context", "x-project-room-offer-context", "x-project-room-audit-view"].some(key => req.headers[key] !== undefined))
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const { ownerId } = store.roomAuthority(roomId);
+        const member = auth.member;
+        return json(res, 200, {
+          snapshotView: "identity", snapshotVersion: 1, roomId,
+          viewerId: member.id, viewerAccountId: auth.account?.id ?? null,
+          viewerAuthEpoch: auth.account?.authEpoch ?? null,
+          viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null,
+          state: { room: { ownerId }, members: { [member.id]: {
+            id: member.id, kind: member.kind, active: member.active, revision: member.revision,
+            permissions: [...member.permissions], delegatedAdmin: member.delegatedAdmin === true,
+          } } },
+        });
+      }
       if (route === "public-work-review") {
         if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
         // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.

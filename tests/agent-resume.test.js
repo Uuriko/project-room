@@ -193,6 +193,10 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
     const response = await fetch(url, options); baselineRequests++; baselineBytes += Buffer.byteLength(await response.clone().text()); return response;
   } });
   await baselineClient.roomContext();
+  const roomContextBytes = baselineBytes;
+  baselineBytes = 0; baselineRequests = 0;
+  const baseline = await baselineClient.snapshot();
+  assert.ok(baseline.state.messages.some(message => message.body.includes('private-body-sentinel')));
   const first = await resumeAgent({ connection: config });
   assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, []);
   assert.ok(first.obligations.some(x => x.id === 'task'));
@@ -232,7 +236,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   } });
   assert.equal(ended.connection.status, 'unconfirmed');
   assert.deepEqual(ended.attention, []); assert.deepEqual(ended.obligations, []); assert.deepEqual(ended.observedThroughBySource, {});
-  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, first: first.metrics, repeat: repeat.metrics }));
+  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, roomContextBytes, first: first.metrics, repeat: repeat.metrics }));
 });
 
 // Contract: current open addressed requests survive an advanced observation cursor.
