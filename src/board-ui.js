@@ -421,7 +421,7 @@ export function claimReviewForm(item) {
     " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\">",
     "</label>",
     "<span class=\"form-hint\">", uiText("board.review.summary.placeholder"), "</span>",
-    "<button type=\"submit\" class=\"button secondary\">", uiText("board.review.submit"), "</button>",
+    `<button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: uiText("board.review.submit"), item: item.title || item.id }))}">`, uiText("board.review.submit"), "</button>",
     "</form>"
   ].join("");
 }
@@ -548,7 +548,7 @@ export function claimDeliverForm(item) {
         "</select>", "</label>");
     });
   }
-  parts.push("<button type=\"submit\" class=\"button primary\">", uiText("board.action.deliver"), "</button>", "</form>");
+  parts.push(`<button type="submit" class="button primary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: uiText("board.action.deliver"), item: item.title || item.id }))}">`, uiText("board.action.deliver"), "</button>", "</form>");
   return parts.join("");
 }
 
@@ -775,7 +775,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
   }
   if (canLinkPullRequest(item, viewer, now)) {
-    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
+    actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: "Link PR", item: item.title || item.id }))}">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
@@ -821,7 +821,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     actions.push(button("release", "Release", "secondary"));
     const options = Object.values(members ?? {}).filter(member => member && member.active !== false && member.id !== ownerId)
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
-    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
+    if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: "Move", item: item.title || item.id }))}">Move</button></form>`);
   }
   // Claim lifecycle: close (holder or claim manager) and cancel (creator of
   // an unclaimed item, or its holder) retire open work without delivery.
