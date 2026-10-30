@@ -281,6 +281,11 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       l.verifier ? `<div><dt>Verifier</dt><dd>${escapeHtml(l.verifier)}</dd></div>` : "",
       `<div><dt>Bounty</dt><dd><code>${escapeHtml(l.bountyId)}</code></dd></div>`,
       l.bountyState ? `<div><dt>Bounty state</dt><dd>${escapeHtml(l.bountyState)}</dd></div>` : "",
+      l.pending?.state === "disputed"
+        ? `<div><dt>Outcome</dt><dd>Accepted, then disputed — not final. A dispute is open${l.pending.disputeId ? ` (<code>${escapeHtml(l.pending.disputeId)}</code>)` : ""} and no settlement has been recorded; the amounts shown can still change.</dd></div>`
+        : l.pending
+        ? `<div><dt>Outcome</dt><dd>Accepted — challenge window open${l.pending.challengeEnds ? ` until <time datetime="${escapeHtml(l.pending.challengeEnds)}">${escapeHtml(l.pending.challengeEnds)}</time>` : ""}. Not settled yet: no payment has been recorded, and a dispute can still change this outcome.</dd></div>`
+        : "",
       `<div><dt>Award</dt><dd>${credits(l.awardCredits)}</dd></div>`,
       s.kind ? `<div><dt>Settlement</dt><dd>${escapeHtml(s.kind)}</dd></div>` : "",
       // The settlement's own amounts, on the face: for a split these are
@@ -311,6 +316,8 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   // unsigned (docs/RECEIPTS-PAGE.md).
   const provenNote = verification
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
+    : receipt.source === "bounty-lot" && receipt.lot?.pending
+    ? "Verification tier: recorded ledger movement. What was checked: the room's credit ledger recorded this movement and the acceptance shown. No settlement has been recorded yet, so this outcome is not final. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.source === "bounty-lot"
     ? "Verification tier: recorded ledger movement. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.source === "public-work" && receipt.review?.decidedAt
