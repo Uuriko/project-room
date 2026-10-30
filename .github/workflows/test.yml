@@ -62,7 +62,7 @@ jobs:
   contract:
     needs: [changes]
     # Drafts skip the job (the check reports once the PR is ready). A docs-only
-    # diff still runs the job so the required `contract` check reports success.
+    # diff still runs the job so the `contract` check reports success.
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -288,7 +288,7 @@ jobs:
           name: conversation-browser-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: ignore
-  # Keep the required check name stable. Dependency success alone cannot prove
+  # Keep the `browser` check name stable. Dependency success alone cannot prove
   # the intended matrix was complete: require each exact-run completion receipt.
   browser:
     needs: [changes, browser-shards]
@@ -299,7 +299,7 @@ jobs:
       CI_BROWSER_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'full' }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      # Required check name stays `browser`. An intentional shard skip must
+      # Check name stays `browser`. An intentional shard skip must
       # report success; a skip for any other reason fails closed.
       - name: Browser paths unchanged versus the merge base
         if: needs.changes.result == 'success' && needs.changes.outputs.browser == 'false' && needs.browser-shards.result == 'skipped'
@@ -408,11 +408,11 @@ jobs:
           name: cloudflare-browser-evidence
           path: cloudflare/test-results/
           if-no-files-found: ignore
-  # Branch protection requires a check named "test". The package workflows that
-  # used that job id are gone. This job keeps the name and passes only when
+  # The aggregator job below is named "test". The package workflows that
+  # used that job id are gone. It keeps the name and passes only when
   # the suite jobs above have succeeded. Default success() also fails when any
   # job in the graph was skipped, so an intentional browser-shard skip would
-  # skip this required check. Evaluate the direct results instead.
+  # skip the aggregator check. Evaluate the direct results instead.
   coverage:
     # Nightly, manual, and merge-queue only. Pull requests and main pushes
     # skip this job; the `test` check treats that skip as success. A skip on
@@ -557,7 +557,7 @@ jobs:
               continue
             fi
             # Docs-only diffs skip unit and the refresh-marker guard. The
-            # required names above still ran and passed.
+            # other checks above still ran and passed.
             if [ "$DOCS_ONLY" = "true" ] && [ "$result" = "skipped" ] && { [ "$name" = "unit" ] || [ "$name" = "visual-refresh-guard" ]; }; then
               continue
             fi

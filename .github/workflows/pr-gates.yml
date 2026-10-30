@@ -7,8 +7,8 @@
 #
 # schema-gate stays its own workflow: deploy-prod and auto-revert select the
 # workflow by the name `schema-gate`. None of these checks are in the merge
-# gate's required set (test, contract, lint, browser, cloudflare, plus the
-# room/release-lease status).
+# gate's required set (the sole required check is the room/release-lease
+# status).
 #
 # Quarantined tests are slow and non-blocking. They run on the nightly
 # schedule and on workflow_dispatch, not on every main push.
