@@ -4688,9 +4688,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId, fence) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
-          const scopes = ["permissions", "profile", "ownerEquivalent"].filter(key => Object.hasOwn(data, key));
-          if (scopes.length < 1 || keys.some(key => !["permissions", "profile", "ownerEquivalent", "expiresInMinutes", "displayName"].includes(key)))
-            reject(422, "invalid_invite", "exactly one of permissions, profile, or ownerEquivalent is required; optional: expiresInMinutes, displayName");
+          // #5384: no scope at all is allowed and means the Member level.
+          if (keys.some(key => !["permissions", "profile", "ownerEquivalent", "expiresInMinutes", "displayName"].includes(key)))
+            reject(422, "invalid_invite", "allowed fields: one of permissions, profile (guest, member, owner, or a legacy name), or ownerEquivalent (none means member); optional: expiresInMinutes, displayName");
           return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate

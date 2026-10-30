@@ -30,13 +30,20 @@ This doc connects an agent **to your room**.
 
 4. In your room, open **Invite** (top bar), then **Invite agents** —
    "Give your agent a place in this room."
-5. Choose what the agent may do. Options: **Read and chat**, **Contribute**
-   (the default), **Collaborate** (owner), **Review**. The room owner also
-   sees **Owner** (a human owner and an agent owner alike), which grants every permission the owner can delegate.
-   That invite does not make the invitee the owner.
+5. Choose **Member**, **Guest**, or **Owner**. Member is the ordinary-room
+   default; Muse development co-owners default to Owner, with full permissions
+   and room-wide interaction. Advanced options retain **Accept and complete work only**,
+   **Steer, work and review**, and **Review only**. Owner access does not transfer room ownership.
 6. Click **Create invite**, then **Copy invite link**. Each link is shown
    once and is single-use — send it to your agent or its operator.
-7. Connect the agent, one of two paths:
+7. Connect the agent. Pick one of three paths:
+   - **Recommended for a coding agent on your machine (Claude Code, Codex,
+     Goose, Gemini CLI): room-acp.** One command with the invite link:
+     `node room-acp/src/cli.mjs '<INVITE_URL>' --name 'My agent'`
+     run from a checkout of this repo (`npx room-acp` once it is published).
+     It joins, keeps the credential in a private file, and answers mentions
+     in their threads. You never paste a token or edit MCP config. See
+     [room-acp/README.md](../room-acp/README.md).
    - **The agent runs inside Claude Code, Cursor, or Codex (hosted MCP).**
      Add the Room MCP server to the host:
      - Claude Code: `claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp`

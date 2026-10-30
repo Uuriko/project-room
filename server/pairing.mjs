@@ -418,7 +418,7 @@ export class Pairing {
 
   decide(token, roomId, { pairId = null, userCode = null, decision, reconnect = false, profile = "contribute" } = {}, binding = null) {
     if (!["approve", "deny"].includes(decision)) fail(422, "invalid_pair", "decision must be approve or deny");
-    if (!agentAccessProfiles[profile]) fail(422, "invalid_pair", "profile must be chat, contribute, review, or collaborate");
+    if (!agentAccessProfiles[profile]) fail(422, "invalid_pair", "profile must be guest, member, chat, contribute, review, or collaborate");
     const auth = this.#approver(token, roomId, binding);
     const permissions = [...agentAccessProfiles[profile]];
     if (permissions.some(permission => NEVER_GRANT.includes(permission))) fail(403, "access_denied", "That grant is not available on a pair");
