@@ -448,3 +448,71 @@ test("releaseExpired clears fileBlocks alongside files, attestations and reviews
   const manual = updateWork(claimed, "quill", { state: "unclaimed", now: T0 });
   assert.deepEqual(manual.fileBlocks, {});
 });
+
+// #4116: reassignWork's delivered→in_progress reopen must not hand the
+// new owner a lapsed lease. Delivered is not an active claim state, so
+// a lease lapsing while the claim awaited review is inert — the sweep
+// cannot reap a delivered claim — but the reopen re-enters the sweep's
+// jurisdiction, and keeping the lapsed lease would let the next sweep
+// reap the reopened claim, clearing the new owner and the retained
+// delivery record with it (the dead-lease inheritance the send-back
+// transition already refuses, #4085 D2). A lapsed lease restarts at
+// the room default for the new owner's rework spell.
+test("reassign: reopening a delivered claim whose lease lapsed restarts the lease at the room default (#4116)", () => {
+  const room = { workClaims: { defaultLeaseHours: 48 } };
+  let item = createWork({ id: "w4116", title: "w4116", reviewPolicy: "self_attested" },
+    { now: T0, agentId: "poster" });
+  item = claimWork(item, "alice", { now: T0, leaseHours: 2, room });
+  item = updateWork(item, "alice", { state: "in_progress", now: T0 + H });
+  item = updateWork(item, "alice", { state: "delivered", now: T0 + H });
+  assert.equal(item.state, "delivered");
+  assert.equal(item.leaseExpiresAt, new Date(T0 + 2 * H).toISOString());
+  // The lapse is inert while delivered: the sweep passes it through.
+  const [untouched] = releaseExpired([item], T0 + 5 * H);
+  assert.equal(untouched.state, "delivered");
+  assert.equal(untouched.owner, "alice");
+  // Reassign after the lapse: the round reopens for Carol.
+  const moved = reassignWork(item, "alice", "carol", { now: T0 + 5 * H, room });
+  assert.equal(moved.state, "in_progress");
+  assert.equal(moved.owner, "carol");
+  assert.equal(moved.verification, null);
+  // The reopened claim does NOT hold the lapsed lease: it restarts at
+  // the room default (48h), not the claim's original 2h spell.
+  assert.equal(moved.leaseStartAt, new Date(T0 + 5 * H).toISOString());
+  assert.equal(moved.leaseExpiresAt, new Date(T0 + 5 * H + 48 * H).toISOString());
+  // And the restarted lease is a live one: no sweep reaps the reopened
+  // claim now; it lapses only when the new spell runs out.
+  const [survivor] = releaseExpired([moved], T0 + 5 * H);
+  assert.equal(survivor.state, "in_progress");
+  assert.equal(survivor.owner, "carol");
+  assert.equal(isLeaseExpired(moved, T0 + 5 * H + 47 * H), false);
+  assert.equal(isLeaseExpired(moved, T0 + 5 * H + 48 * H), true);
+});
+
+test("reassign: reopening a delivered claim keeps a live lease and a lease-less claim untouched (#4116 controls)", () => {
+  const room = { workClaims: { defaultLeaseHours: 48 } };
+  // Live-lease control: the remaining budget is the owner's and is
+  // carried over byte-identical — no restart, no extension.
+  let live = createWork({ id: "w4116-live", title: "w4116-live", reviewPolicy: "self_attested" },
+    { now: T0, agentId: "poster" });
+  live = claimWork(live, "alice", { now: T0, leaseHours: 24, room });
+  live = updateWork(live, "alice", { state: "in_progress", now: T0 + H });
+  live = updateWork(live, "alice", { state: "delivered", now: T0 + 2 * H });
+  const movedLive = reassignWork(live, "alice", "carol", { now: T0 + 4 * H, room });
+  assert.equal(movedLive.state, "in_progress");
+  assert.equal(movedLive.owner, "carol");
+  assert.equal(movedLive.leaseStartAt, live.leaseStartAt);
+  assert.equal(movedLive.leaseExpiresAt, live.leaseExpiresAt);
+  // Lease-less control: a claim that opted out of leases stays
+  // lease-less across the reopen, however late the reassign lands.
+  let plain = createWork({ id: "w4116-plain", title: "w4116-plain", reviewPolicy: "self_attested" },
+    { now: T0, agentId: "poster" });
+  plain = claimWork(plain, "alice", { now: T0, leaseHours: null, room });
+  plain = updateWork(plain, "alice", { state: "in_progress", now: T0 + H });
+  plain = updateWork(plain, "alice", { state: "delivered", now: T0 + 2 * H });
+  const movedPlain = reassignWork(plain, "alice", "carol", { now: T0 + 500 * H, room });
+  assert.equal(movedPlain.state, "in_progress");
+  assert.equal(movedPlain.owner, "carol");
+  assert.equal(movedPlain.leaseStartAt, null);
+  assert.equal(movedPlain.leaseExpiresAt, null);
+});
