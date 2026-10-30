@@ -26,6 +26,7 @@ import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
+import { claimThread } from "./claim-thread.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -213,7 +214,7 @@ function validRoomArgs(name, args) {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
   }
-  if (name === "room_work_claim_provenance") {
+  if (name === "room_work_claim_provenance" || name === "room_work_claim_thread") {
     return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
   }
   if (name === "room_post_message") {
@@ -614,6 +615,13 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
       mentions: typeof args.mentions === "string" ? args.mentions : null,
       compact: args.compact === true
     }), store.redactionMessages(roomId)), auth.member.id);
+  }
+  if (name === "room_work_claim_thread") {
+    // #5378: same data as GET /api/rooms/:roomId/work-claims/:claimId/thread.
+    store.authenticate(secret, roomId);
+    const item = store.workClaims.get(roomId, args.claimId);
+    if (!item) throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
+    return claimThread(store, roomId, item);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET

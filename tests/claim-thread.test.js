@@ -10,6 +10,9 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { claimThreadKind, mergeClaimThread } from '../server/claim-thread.mjs';
+import { AgentRooms, agentRoomSchema } from '../server/agent-rooms.mjs';
+import { createHostedRoomMcp } from '../server/mcp-room-profile.mjs';
+import { createWork } from '../server/work-claims.mjs';
 
 test('claimThreadKind sorts actions into the PR -> CI -> review -> merge -> deploy arc', () => {
   assert.equal(claimThreadKind('claimed'), 'claim');
@@ -74,4 +77,25 @@ test('claim thread route returns the claim and PR steps in order, for members on
 
   assert.equal((await call('/missing-claim/thread')).status, 404);
   assert.equal((await call('/thread-fix/thread', undefined, null)).status, 401);
+});
+
+test('MCP room_work_claim_thread returns the same thread as the route', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'claim-thread-mcp-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  store.initialize(initialRoom('commons'));
+  store.db.exec(agentRoomSchema);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const owner = store.identities.create('Owen');
+  const { roomId } = new AgentRooms(store).create(owner.secret, { title: 'Thread room', purpose: 'thread test', displayName: 'Owen' });
+  store.workClaims.set(roomId, createWork({ id: 'root', title: 'Root' }, { now: '2026-10-30T00:00:00.000Z', agentId: 'coord' }));
+  const mcp = createHostedRoomMcp(store);
+  const call = claimId => mcp({ jsonrpc: '2.0', id: claimId, method: 'tools/call',
+    params: { name: 'room_work_claim_thread', arguments: { roomId, claimId } } }, { authorization: `Bearer ${owner.secret}` });
+  const response = await call('root');
+  assert.ok(!response.error, JSON.stringify(response.error ?? null).slice(0, 200));
+  const value = response.result.structuredContent ?? JSON.parse(response.result.content[0].text);
+  assert.equal(value.claimId, 'root');
+  assert.ok(Array.isArray(value.entries));
+  const missing = await call('nope');
+  assert.ok(missing.error || missing.result?.isError, 'unknown claim is an error');
 });

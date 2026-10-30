@@ -119,7 +119,7 @@ export const WORK_CLAIM_ROUTES = Object.freeze([
     auth: "room", capability: null, scope: "room", handler: provenanceRoute,
     schema: { params: { type: "object", required: ["roomId", "claimId"], properties: { roomId: { type: "string" }, claimId: { type: "string" } } }, response: { type: "object" } }, events: [] })),
   ...["GET", "HEAD"].map(method => Object.freeze({ id: `claim-thread-${method}`, method,
-    path: "/api/rooms/{roomId}/work-claims/{claimId}/thread", parity: "exempt:read-only claim thread; MCP tool follows in the next #5378 PR",
+    path: "/api/rooms/{roomId}/work-claims/{claimId}/thread", parity: "mcp:room_work_claim_thread",
     auth: "room", capability: null, scope: "room", handler: threadRoute,
     schema: { params: claimParameters, response: { type: "object" } }, events: [] })),
   Object.freeze({ id: "work-claim-close", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/close",
