@@ -42,7 +42,6 @@ export const KEEP = [
   // runtime wiring is a separate product decision, not implicit enablement.
   "src/handoff-store.mjs",
   "src/dm-room-wiring.mjs",
-  "src/owner-alerts.mjs",
   // Operational/test entry points not discovered by this literal graph.
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
