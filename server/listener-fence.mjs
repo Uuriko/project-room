@@ -9,7 +9,7 @@ export function assertListenerFence(store, auth, roomId, token) {
   const identityId = auth.identityId ?? auth.member?.identityId;
   const link = identityId && store.db.prepare('SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?').get(roomId, identityId);
   const member = link && store.roomAuthority(roomId).members?.[link.memberId];
-  if (!member || member.active === false || member.kind !== 'agent')
+  if (!member || member.active === false || member.kind !== 'agent' || auth.member && auth.member.id !== link.memberId)
     throw new ServiceError(403, 'listener_identity_mismatch', 'The listener identity must be an active agent in this room');
   store.agentHeartbeats.ensureListenerSchema();
   const lease = store.db.prepare('SELECT fencing_token AS token, lease_expires_at AS expires FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?').get(identityId, roomId);

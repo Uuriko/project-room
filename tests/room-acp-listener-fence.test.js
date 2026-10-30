@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { assertListenerFence } from '../server/listener-fence.mjs';
 import { Bridge } from '../room-acp/src/bridge.mjs';
 import { RoomClient } from '../room-acp/src/room.mjs';
 import { join } from '../room-acp/src/join.mjs';
@@ -89,4 +90,11 @@ test('expired listener token fails even before another laptop acquires it', asyn
   fixture.f.store.db.prepare('UPDATE agent_wake_listener_leases SET lease_expires_at=0 WHERE fencing_token=?').run(token);
   await assert.rejects(client.checkListener(token), stale);
   await assert.rejects(client.post({ body: 'expired runtime', listenerToken: token }), stale);
+});
+
+test('authenticated member and listener identity must agree', async t => {
+  const { fixture, connection, token } = await setup(t);
+  assert.throws(() => fixture.f.store.transaction(() => assertListenerFence(fixture.f.store,
+    { identityId: connection.identityId, member: { id: 'different-member' } }, connection.roomId, token)),
+    error => error.status === 403 && error.code === 'listener_identity_mismatch');
 });

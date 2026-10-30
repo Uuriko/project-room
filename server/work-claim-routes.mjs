@@ -650,6 +650,7 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
     const current = reauthorize ? reauthorize() : auth;
+    assertListenerFence(store, current, roomId, listenerToken);
     if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
     if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
     if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
