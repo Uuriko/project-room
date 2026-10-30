@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // room-acp: connect a local ACP agent to a Project Room with one invite link.
 import { parseArgs, USAGE } from "./args.mjs";
-import { candidates, probe } from "./agents.mjs";
+import { adapterHints, candidates, probe } from "./agents.mjs";
 import { join } from "./join.mjs";
 import { loadConnection, forgetConnection, publicView } from "./credentials.mjs";
 import { redact } from "./redact.mjs";
@@ -9,7 +9,10 @@ import { run, selectAgent } from "./run.mjs";
 
 export async function doctor(options, { print = console.log, env = process.env } = {}) {
   const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
-  if (!list.length) { print("No ACP agent found. Install one of: claude-agent-acp, codex-acp, goose, gemini, or pass --agent-cmd."); return 1; }
+  if (!list.length) {
+    print(["No ACP agent found. Room needs an agent that speaks ACP:", ...adapterHints(env).map(line => `  - ${line}`), "Or pass --agent-cmd with any installed ACP adapter."].join("\n"));
+    return 1;
+  }
   let ok = 0;
   for (const candidate of list) {
     const result = await probe(candidate, { cwd: options.cwd ?? process.cwd(), env, timeoutMs: candidate.command === "npx" ? 120000 : 10000 });
