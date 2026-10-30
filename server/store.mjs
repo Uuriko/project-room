@@ -55,7 +55,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp, repairMessagesParityDrift, MESSAGES_PARITY_REPAIR_EVENT_CEILING } from "./messages-store.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
@@ -2461,15 +2461,40 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // drifted from its projection is recorded and the parity sweep moves on
   // to the next room in the same visit; a room that certifies clears any
   // earlier record.
-  runIntegrityParityStep() {
+  runIntegrityParityStep(deadline = Infinity) {
     // Legacy record shapes would fail parity forever; upgrade them first.
     this.upgradeLegacyMessageShapes();
+    // PARITY-REPAIR-1 gating: a repair is attempted only for a room whose
+    // failure row already stands when this visit records its failure
+    // (never on first failure), only when the row's failures counter
+    // crosses a power of two with this recording (2, 4, 8, ... — durable
+    // backoff with no new table), and at most one room per parity visit
+    // (the first eligible failing room in the sweep's picker order).
+    const standingBefore = new Map(this.integrityFailures()
+      .filter(row => row.step === "messages_parity" && row.recordId)
+      .map(row => [row.recordId, row.failures]));
+    const parityRepairs = [];
+    let repairAttempted = false;
     const result = runMessagesParityCheck(this, {
       report: ({ roomId, error }) => {
-        if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
-        else this.clearIntegrityFailure("messages_parity", roomId);
+        if (!error) { this.clearIntegrityFailure("messages_parity", roomId); return; }
+        const before = standingBefore.get(roomId);
+        this.recordIntegrityFailure("messages_parity", roomId, error);
+        if (before === undefined || repairAttempted) return;
+        const failures = before + 1;
+        if (failures < 2 || (failures & (failures - 1)) !== 0) return;
+        repairAttempted = true;
+        const eventCount = this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE room_id=?").get(roomId).n;
+        if (eventCount > MESSAGES_PARITY_REPAIR_EVENT_CEILING) {
+          parityRepairs.push({ roomId, outcome: "repair_deferred_ceiling" });
+          return;
+        }
+        const repair = repairMessagesParityDrift(this, roomId, { deadline });
+        if (repair?.outcome) parityRepairs.push({ roomId, outcome: repair.outcome });
+        if (repair?.healed) this.clearIntegrityFailure("messages_parity", roomId);
       }
     });
+    if (parityRepairs.length) result.parityRepairs = parityRepairs;
     // A room deleted since its failure was recorded is never picked by the
     // sweep again; its record is moot. The step-scoped record (record id
     // "") is not a room record — the batch loop clears it, against
@@ -2582,7 +2607,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
       ["messages_backfill", () => this.runIntegrityBackfillStep(deadline)],
-      ["messages_parity", () => this.runIntegrityParityStep()]
+      ["messages_parity", () => this.runIntegrityParityStep(deadline)]
     ];
     this.recheckIntegrityFailures();
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
