@@ -162,6 +162,7 @@ optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (i
 optional.push("server/mcp-result-text.mjs"); // withholds minted credentials from MCP result text blocks (imported by server/mcp-identity-mint.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
+optional.push("cloudflare/mcp-event-transport.mjs"); // Restricted native Events transport imported by the packaged Worker.
 optional.push("server/mcp-oauth.mjs", "server/mcp-modern.mjs", "server/mcp-events-runtime.mjs", "server/mcp-event-subscriptions.mjs", "server/mcp-events-wire.mjs", "server/mcp-invite-oauth.mjs", "server/routes/mcp-invite-oauth.mjs", "server/listener-fence.mjs"); // Native OAuth principals and local runtime fencing.
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
 optional.push("server/mcp-request-defaults.mjs"); // pinned API-key roomId defaults for hosted MCP calls (imported by server/mcp-room-profile.mjs and server/mcp-full-profile.mjs)
