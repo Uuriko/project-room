@@ -154,7 +154,6 @@
     "scripts/session-boundary-check.mjs": 11456,
     "scripts/spend-allowance-browser-check.mjs": 2984,
     "scripts/start-room-browser-check.mjs": 2162,
-    "scripts/starter-recipes-browser-check.mjs": 1625,
     "scripts/stream-recovery-browser-check.mjs": 6152,
     "scripts/thread-options-browser-check.mjs": 2165,
     "scripts/unified-journey-check.mjs": 2233,
