@@ -879,6 +879,34 @@ function liftResolvedBlock(store, row) {
   });
 }
 
+// A reducer tightening can reject an event the backfill already certified.
+// Losing the replay snapshot then makes the next fill start at sequence 0,
+// name that same event, and park the room on it forever: later diagnoses
+// also start from zero and name it again. The event is already in the
+// certified prefix. Adopt the live projection — the state that write
+// produced — as the replay head, publish messages after the cursor, and
+// drop the park. A failure after the cursor, or a log that stops before
+// the head, stays parked. Returns false when this block is not the
+// already-certified case. A throw leaves the caller to park it.
+function adoptCommittedProjection(store, roomId, blockedSeq, eventId) {
+  if (typeof eventId !== "string" || eventId === "") return false;
+  if (!Number.isInteger(blockedSeq) || blockedSeq <= 0) return false;
+  const cursor = readCursor(store.db, roomId);
+  if (!cursor || !Number.isInteger(cursor.applied_seq) || cursor.applied_seq <= 0 || blockedSeq > cursor.applied_seq) return false;
+  if (store.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, blockedSeq)?.id !== eventId) return false;
+  const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence;
+  if (!Number.isInteger(head) || head < cursor.applied_seq) return false;
+  const anchor = head === 0 ? "" : (store.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, head)?.id ?? "");
+  if (head > 0 && anchor === "") return false;
+  const state = compactState(store.room(roomId).state);
+  store.transaction(() => {
+    saveCursor(store.db, roomId, head, anchor, state);
+    publishReplayMessages(store, roomId, head, anchor, state);
+    store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+  });
+  return true;
+}
+
 // Parked rooms whose head moved since the block was recorded earn one fresh
 // diagnosis (the log may have been repaired or replaced underneath them);
 // a room that now replays cleanly has its block cleared and rejoins the
@@ -910,6 +938,12 @@ function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity
   for (const row of rows) {
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
+    // A stamped park on an already-certified event clears here, ahead of
+    // the 6h wait, including a quiet room whose head never moved. An
+    // unstamped row only starts its cadence clock below.
+    try {
+      if (row.last_diagnosed_at && adoptCommittedProjection(store, row.room_id, row.sequence, row.event_id)) continue;
+    } catch { /* the standing park remains; the diagnosis below can refresh it */ }
     if (head !== row.head_seq) {
       settle(row, recheckBlock(store.db, row));
       continue;
@@ -1269,6 +1303,18 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
       if (!isRoomDataError(error)) throw error;
       const block = diagnoseFreshBlock(store.db, room.id);
       if (!block) throw error; // not a stored-event failure: propagate as before
+      // An already-certified event is not a poison. Adopting the live
+      // projection clears it in this call. A throw, or a failure after the
+      // cursor, falls through and parks the room as before.
+      try {
+        if (adoptCommittedProjection(store, room.id, block.sequence, block.eventId)) {
+          roomId = room.id;
+          const adopted = readCursor(store.db, room.id);
+          appliedSeq = adopted?.applied_seq ?? null;
+          replaySeq = adopted?.state_seq ?? null;
+          continue;
+        }
+      } catch { /* park the diagnosed block */ }
       // Park the room durably (later calls skip it until the block goes
       // stale) and report it as this call's fresh failure for the unified
       // integrity_failures surface.
