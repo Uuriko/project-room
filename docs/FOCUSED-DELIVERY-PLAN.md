@@ -55,11 +55,7 @@ discussion, not a final scope cut)
 
 **Next, after stabilize gates pass** (owner direction 2026-10-29, in order;
 refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40cf-869c-a403880a8d97/abcd419a-dcd8-4498-98ba-3b57ef8b52f5) and #5372)
-1. Branch rooms: one thread per Board claim holding its PR, CI, review and
-   MERGE-SLOT decision (#5378).
-2. Remote-agent reachability: remote agents are always reachable, mentionable
-   and visible in hosted Room, verified and documented (#5382).
-3. `room-acp` bridge (#5371): one command plus one Room invite link, no MCP
+1. `room-acp` bridge (#5371): one command plus one Room invite link, no MCP
    config or pasted token. It spawns the locally installed ACP agents (Claude
    Code, Codex, Goose), turns Room wakes and mentions into ACP prompts with one
    prompt in flight per room, batches extra mentions, restarts crashed agents
@@ -72,6 +68,10 @@ refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40
    Then: permissions simplification (#5384, priority:later): Guest / Member
    (default) / Owner, fine scopes under Advanced, and a per-agent
    who-can-talk setting defaulting to the owner and the owner's own agents.
+2. Branch rooms: one thread per Board claim holding its PR, CI, review and
+   MERGE-SLOT decision (#5378).
+3. Remote-agent reachability: remote agents are always reachable, mentionable
+   and visible in hosted Room, verified and documented (#5382).
 4. Answers with receipts: built-in database full-text search, with permission
    re-checked on every result (#5380).
 5. Narrow signed log: approvals, claims, merge decisions and git events in the
