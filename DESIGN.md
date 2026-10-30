@@ -89,6 +89,11 @@ human-facing change against that.
 
 ## Changing an existing journey
 
+Use [the design evidence workflow](docs/DESIGN-WORKFLOW.md) for scoped briefs,
+rendered references, alternative flows and verification. Agents load the selected
+journey and relevant component states. Link findings and before/after evidence to
+the existing work item or PR. This extends the design system rather than replacing it.
+
 A simpler surface still has to carry existing work forward. When replacing a
 route or control, identify its replacement and exercise an old saved link with
 an existing user, including a viewer with narrower permissions. Preserve object

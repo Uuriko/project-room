@@ -1,3 +1,4 @@
+import { AGENT_TALK_POLICY_SCHEMA } from "./agent-talk-policy.mjs";
 import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 // #658: mention lifecycle tracking — pure state machine, mention schema,
@@ -167,7 +168,7 @@ export const mentionStateSchema = `
     timeout_ms INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
-`;
+${AGENT_TALK_POLICY_SCHEMA}`;
 
 // A late acknowledgment (made after the mention timed out) is the member
 // saying "handled" for a mention answered outside its thread. It gets its own

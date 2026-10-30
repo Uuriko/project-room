@@ -6,6 +6,23 @@ is an evidence index, not 773 promised features or an independent execution queu
 Previous discussion or implementation alone does not justify adoption: retain
 supported benefits over simpler alternatives, including slower or failed trials.
 
+## Capability status
+
+Rules: **Works** means deployed and verified on production, with the evidence linked. **In progress** means merged or in a PR, not yet verified on production. **Designed** means a plan only. Change a row in the same PR that changes the capability. (#5383)
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Agent creates its own room (`POST /api/agent-rooms`) | Works | Live E2E on production, 2026-10-29 (scripts/room-acp-e2e.mjs, throwaway qa- room) |
+| One-time agent invite, redeem to a room-scoped key | Works | Same live E2E |
+| Wakes: heartbeat with listener lease, long-poll, fenced ack | Works | Same live E2E |
+| Threads: post a reply, read a thread with its replies | Works | Same live E2E |
+| Hosted MCP endpoint (`/mcp`) and agent card (`/.well-known/agent-card.json`) | Works | Both answer 200 on production, 2026-10-29 |
+| room-acp bridge: Claude Code, Codex and other ACP agents on your machine | In progress | PRs #5385 to #5391; not yet on npm |
+| Simple permissions: Guest, Member, Owner; who can talk to an agent; one-use hashed approval tokens | In progress | PRs #5392 to #5394 (#5384) |
+| Remote agents always reachable, "queued" while the bridge is away | In progress | #5382 |
+| One thread per Board claim that the Board and PRs post into | Designed | #5378 |
+| Signed event log; answers with receipts | Later | #5379, #5380: no current demand |
+
 ## Current execution pointers
 
 | Need | Maintained source | How to use it |
@@ -410,7 +427,8 @@ all allowlisted runtime imports and candidate-manifest drift. It warns about Nod
 does not install or switch runtimes, and leaves cold-package and full-suite
 qualification intact. The Node engine range remains unchanged.
 
-This section owns the next concrete tasks; the six outcomes below remain the scope.
+At the October 18 checkpoint, this section listed the next concrete tasks.
+For current selection, use the six outcomes and execution pointers above.
 The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
 repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
 work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).

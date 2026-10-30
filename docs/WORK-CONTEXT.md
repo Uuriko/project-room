@@ -274,3 +274,25 @@ rule inside the command transaction. Finishing a prerequisite makes dependent
 work eligible through existing available-work reads; it does not start work or
 resolve a separately reported blocker. Board deletion retains its existing
 explicit dependency-waiver behavior. Reads grant no execution authority.
+
+### Conditional source reads
+
+With `includeSource: true`, selected work returns the visible source's `observation`
+(room, work, viewer, message, revision and SHA-256 of body), `editedAt` and an
+executable `nextRead`. Pass `sourceObservation` on a subsequent single-work read
+with `includeSource: true`. First reads report `freshness: observed`; changed
+reads report `changed` and carry the current body. Matching reads report
+`freshness: unchanged`, `status: not_modified` and `message: null`.
+
+Authorization and source visibility are checked again before every comparison.
+Missing, deleted, private and pre-history-floor sources all report unavailable
+without an observation. The observation is a content comparison, not an access
+or execution grant; foreign room/work/viewer observations are refused. An edit
+followed by a revert still changes the message revision. Omitted source remains
+unknown, and older services without observations cannot certify a comparison.
+
+Compact reads and derived briefs omit source bodies. Brief source section hashes
+include the stable observation; relative freshness and whether a body was delivered
+are in `observed`, outside version comparison. `contentObserved` means the current
+source was eligible for comparison, including `not_modified`; it does not mean
+that a body was delivered in this read. This API does not add a human updated-since-view UI.

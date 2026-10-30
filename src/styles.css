@@ -579,7 +579,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .attention-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--line-soft); border-radius: .5rem; background: rgb(255 255 255 / 2%); }
 .attention-body { flex: 1 1 18rem; min-width: 0; }
 .attention-kind { display: inline-block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: .5rem; }
-.attention-severity-action .attention-kind { color: var(--accent, #d97706); font-weight: 700; }
+.attention-severity-action .attention-kind { color: var(--amber); font-weight: 700; }
 .attention-title { font-size: .95rem; overflow-wrap: anywhere; }
 .attention-detail { margin: .25rem 0 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
 .attention-actions { display: flex; align-items: center; gap: .5rem; }
