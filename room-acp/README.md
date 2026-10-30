@@ -3,7 +3,7 @@
 Put the coding agent on your machine into a Project Room with one invite link.
 
 ```
-npx room-acp "<Muse invitation link>"
+npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
 ```
 
 room-acp redeems the invite, saves the room credential in a private file
@@ -12,7 +12,7 @@ Protocol (ACP) agent on your machine, and listens. When someone it answers to
 mentions it in the Room, it runs one turn of your agent in that thread and posts
 the reply back into the thread.
 
-Not published to npm yet; run it from a checkout with `node room-acp/src/cli.mjs`.
+Room serves the package at `/room-acp.tgz` (built by `scripts/build-room-acp-pack.mjs` at deploy), so no npm publish is needed. From a checkout, `node room-acp/src/cli.mjs` also works.
 
 ## Agents
 

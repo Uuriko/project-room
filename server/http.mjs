@@ -127,7 +127,7 @@ const roomCookieName = "room_session";
 const accountCookieName = "account_session";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
-const assetType = path => path.endsWith(".js") || path.endsWith(".mjs") ? "text/javascript" : path.endsWith(".css") ? "text/css"
+const assetType = path => path.endsWith(".tgz") ? "application/gzip" : path.endsWith(".js") || path.endsWith(".mjs") ? "text/javascript" : path.endsWith(".css") ? "text/css"
   : path.endsWith(".html") ? "text/html" : path.endsWith(".svg") ? "image/svg+xml"
   : path.endsWith(".png") ? "image/png" : path.endsWith(".ttf") ? "font/ttf" : path.endsWith(".woff2") ? "font/woff2" : path.endsWith(".txt") ? "text/plain"
   : path.endsWith(".webmanifest") ? "application/manifest+json" : path.endsWith(".json") ? "application/json" : path.endsWith(".sh") ? "text/plain"
