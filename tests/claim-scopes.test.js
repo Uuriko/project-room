@@ -202,7 +202,7 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   const superseded = f.store.workClaims.get('commons', 'lane');
   assert.equal(superseded.supersededBy, 'lane-b');
   assert.equal(superseded.chain.at(-1).kind, 'supersede');
-  assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, ['lane']);
+  assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, []);
 });
 
 test('a handoff from a member without the board profile is refused and writes no board cards', t => {
@@ -306,4 +306,20 @@ test('historical overlapping reservations still initialize, replay and reopen un
   assert.deepEqual(f.store.room(roomId).state, before);
   const reopened = new RoomStore(f.filename);
   try { assert.deepEqual(reopened.room(roomId).state, before); } finally { reopened.close(); }
+});
+
+for (const explicitPredecessor of [false, true]) test(`replacement retains its explicit ${explicitPredecessor ? 'superseded predecessor' : 'other unfinished'} prerequisite`, t => {
+  const f = fixture(t); f.propose('old'); f.propose('prerequisite');
+  const dependency = explicitPredecessor ? 'old' : 'prerequisite';
+  f.store.command(f.keys.owner, 'commons', command(T.WORK_PROPOSED, {
+    workItemId: 'replacement', title: 'Replacement', definitionOfDone: 'Versioned result',
+    accountableMemberId: 'a', mode: 'write', independentVerificationRequired: false,
+    ownerDecisionRequired: false, dependsOn: [dependency]
+  }));
+  f.mutate('owner', T.WORK_SUPERSEDED, 'old', { supersededByWorkItemId: 'replacement', reason: 'New scope' });
+  assert.deepEqual(f.store.workClaims.get('commons', 'replacement').dependsOn, [dependency], 'phantom preserves declared prerequisites');
+  f.mutate('a', T.WORK_ACCEPTED, 'replacement');
+  assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'replacement', f.scope()), { code: 'work_claim_dependencies_unmet' });
+  assert.deepEqual(f.store.workClaims.get('commons', 'replacement').dependsOn, [dependency]);
+  assert.equal(f.item('replacement').claim, null);
 });

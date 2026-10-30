@@ -208,32 +208,35 @@ test("mapping: superseded -> closed with supersededBy and a supersede chain link
   assert.deepEqual(row.chain, [{ kind: "supersede", targetId: "task-b", at: at(8 * H), actorId: "owner", note: "replanned" }]);
 });
 
-test("plan: successor lineage matches the mirror's cards (dependsOn on the successor, phantom when cardless)", () => {
+test("plan: supersession lineage does not become a prerequisite on replacement cards", () => {
   const source = item({ id: "task-a", state: "superseded", supersededBy: "task-b" });
   const supersede = ev("work.superseded", 8 * H, "owner", { workItemId: "task-a", supersededByWorkItemId: "task-b", reason: "replanned" });
-  // Target is not a work item in the room: phantom card, dependsOn [source].
+  // A cardless successor has no prerequisites; history stays on the source.
   const phantomPlan = planWorkItemBoardBackfill({ items: [source], events: [supersede], existing: new Map(), nowMs: NOW });
   const phantom = phantomPlan.rows.get("task-b");
   assert.ok(phantom);
   assert.equal(phantom.title, "task-b");
   assert.equal(phantom.workItemId, "task-b");
-  assert.deepEqual(phantom.dependsOn, ["task-a"]);
+  assert.deepEqual(phantom.dependsOn, []);
   // Target is a PROPOSED work item (no mapped row of its own): the
   // mirror still created the successor card at supersede time.
   const proposedPlan = planWorkItemBoardBackfill({ items: [source, item({ id: "task-b", state: "proposed" })], events: [supersede], existing: new Map(), nowMs: NOW });
   assert.equal(proposedPlan.rows.get("task-b").title, "task-b");
-  assert.deepEqual(proposedPlan.rows.get("task-b").dependsOn, ["task-a"]);
-  // Target is an ACCEPTED work item: its mapped card gains the lineage
-  // dependsOn (and keeps its own title).
+  assert.deepEqual(proposedPlan.rows.get("task-b").dependsOn, []);
+  // An accepted successor keeps its own title without a synthetic edge.
   const target = item({ id: "task-b", title: "Replacement", state: "accepted" });
   const realPlan = planWorkItemBoardBackfill({ items: [source, target], events: [supersede], existing: new Map(), nowMs: NOW });
-  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, ["task-a"]);
+  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, []);
   assert.equal(realPlan.rows.get("task-b").title, "Replacement");
-  // And once the phantom exists, the target's own mapping preserves the
-  // dependsOn while replacing the phantom title with the item's title.
+  // Growing the phantom into an accepted item preserves its explicit edges.
   const grown = boardClaimForWorkItem(target, factsFor([]), { nowMs: NOW, existing: phantom });
   assert.equal(grown.title, "Replacement");
-  assert.deepEqual(grown.dependsOn, ["task-a"]);
+  assert.deepEqual(grown.dependsOn, []);
+  // Historical Board edges may have been explicitly authored. Without
+  // provenance, do not silently waive them just because a source supersedes.
+  const existingDependency = { ...phantom, dependsOn: ["task-a"] };
+  const preserved = planWorkItemBoardBackfill({ items: [source, target], events: [supersede], existing: new Map([["task-b", existingDependency]]), nowMs: NOW });
+  assert.deepEqual(preserved.rows.get("task-b").dependsOn, ["task-a"]);
   // Handoff: "-next" phantom titled by the FIRST handoff's nextAction.
   const handed = item({ id: "task-c", state: "working", claim: liveClaimFields(), handoff: { nextAction: "Second step" } });
   const handoff1 = ev("work.handoff_recorded", 5 * H, "worker", { workItemId: "task-c", nextAction: "First step" });

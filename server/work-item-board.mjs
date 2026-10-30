@@ -767,33 +767,23 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
     }
     rows.set(claimId, mapped);
   }
-  // Successor lineage: the source card carries chain + supersededBy;
-  // the successor's card carries dependsOn [source] — the mirror's
-  // shape, created at supersede time whenever the successor has no card
-  // yet (a phantom, even when the successor is a merely-proposed work
-  // item; its own mapping later replaces the phantom's title and keeps
-  // the dependsOn, which the mapping preserves from existing rows). A
-  // successor that already has a board row of its own (board-native, or
-  // mapped from its item) is never given lineage it did not have —
-  // except the mapped-row case below, where the plan owns the row.
+  // Supersession is lineage, not a prerequisite: the source already carries
+  // chain + supersededBy. Waiting for that superseded source to become done
+  // would permanently block its replacement. Preserve explicit Board edges.
+  const itemsById = new Map((items ?? []).filter(item => item && typeof item.id === "string").map(item => [item.id, item]));
   for (const item of items ?? []) {
     if (!item || item.state !== "superseded" || typeof item.supersededBy !== "string") continue;
     const sourceId = boardClaimId(item.id);
     const targetId = boardClaimId(item.supersededBy);
     if (targetId === sourceId) continue;
     const supersedeEvent = (factsByItem.get(item.id)?.supersedeEvents ?? [])[0];
-    if (rows.has(targetId)) {
-      const target = rows.get(targetId);
-      if (!target.dependsOn.includes(sourceId)) {
-        target.dependsOn = [...target.dependsOn, sourceId].slice(0, 16);
-      }
-    } else if (!existing.has(targetId)) {
+    if (!rows.has(targetId) && !existing.has(targetId)) {
       rows.set(targetId, phantomSuccessorCard({
         targetId: item.supersededBy,
         title: item.supersededBy,
         at: supersedeEvent?.at ?? item.updatedAt,
         by: supersedeEvent?.actorId,
-        dependsOn: [sourceId],
+        dependsOn: itemsById.get(item.supersededBy)?.dependsOn ?? [],
       }));
     }
   }
