@@ -17,7 +17,8 @@
 //    ownerId instead of previousOwnerId; closing a position on renew; a
 //    reviewed "approve" verdict judged as bad; duplicate journal rows on a
 //    re-sync; the open-claim count following a reassigned claim to the old
-//    lane instead of the new one.
+//    lane instead of the new one; the #3308 farming shape — serial
+//    claim-release cycling of one item paying more than +1 total.
 // 3. No existing coverage: new module, new table, new signal types.
 // 4. No production seams: deriveClaimSignals is pure; sync/visibility tests
 //    run against in-memory node:sqlite or caller-owned Maps.
@@ -312,6 +313,107 @@ test("duplicate terminals after a mid-history terminal stay silent", () => {
     row(2, "c1", "state_changed", { claimState: "done", ownerId: "lane-a" })
   ];
   assert.equal(signalsFor(rows, "claim_completed").length, 1);
+});
+
+// --- claim_released farming guard (#3308) -----------------------------------
+// claim_released paid +1 on every folded release with no memory, so serial
+// claim -> release -> re-claim -> release cycling of one item farmed
+// standing at zero cost (~40 free cycles reached the trusted band). The
+// guard pays only the first paid release per (lane, claim) pair across the
+// whole fold; repeat releases score 0. The guard is fold state only — a
+// pure function of the folded history — so replay stays deterministic and
+// nothing new is persisted.
+
+function cycleRows(cycles, claimId = "c1", lane = "lane-a") {
+  const rows = [];
+  let seq = 0;
+  for (let i = 0; i < cycles; i += 1) {
+    seq += 1; rows.push(row(seq, claimId, "claimed", { ownerId: lane }));
+    seq += 1; rows.push(row(seq, claimId, "released", { claimState: "unclaimed", ownerId: null }));
+  }
+  return rows;
+}
+
+test("claim-release-reclaim cycling of one item pays claim_released once total (#3308)", () => {
+  const rows = cycleRows(4);
+  const got = signalsFor(rows, "claim_released");
+  assert.equal(got.length, 1, "four cycles of the same item pay +1 total, not +4");
+  assert.equal(got[0].weight, 1);
+  assert.equal(got[0].seq, 2, "the first release is the one that pays");
+  const { reputation } = projectClaimReputation(rows, { nowMs: T0 + 8 * 60_000 });
+  assert.equal(reputation.get("lane-a").positive, 1, "exactly one positive signal lands");
+});
+
+test("an unpaid repeat release still closes the position (#3308)", () => {
+  const rows = [
+    ...cycleRows(2),
+    row(5, "c1", "claimed"),
+    row(6, "c1", "state_changed", { claimState: "done" })
+  ];
+  assert.equal(signalsFor(rows, "claim_released").length, 1);
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1, "the claim reopened after the unpaid release and completed");
+  assert.equal(completed[0].seq, 6);
+});
+
+test("first releases on distinct items still pay (#3308)", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "released", { claimState: "unclaimed", ownerId: null }),
+    row(3, "c2", "claimed"),
+    row(4, "c2", "released", { claimState: "unclaimed", ownerId: null }),
+    row(5, "c3", "claimed"),
+    row(6, "c3", "released", { claimState: "unclaimed", ownerId: null })
+  ];
+  const got = signalsFor(rows, "claim_released");
+  assert.equal(got.length, 3, "the guard is per item, not a global release cap");
+  assert.deepEqual(got.map(s => s.claimId), ["c1", "c2", "c3"]);
+});
+
+test("the guard keys on lane+claim: another lane's first release of the same item still pays (#3308)", () => {
+  const rows = [
+    row(1, "c1", "claimed", { ownerId: "lane-a" }),
+    row(2, "c1", "released", { claimState: "unclaimed", ownerId: null }),
+    row(3, "c1", "claimed", { ownerId: "lane-b" }),
+    row(4, "c1", "released", { claimState: "unclaimed", ownerId: null }),
+    row(5, "c1", "claimed", { ownerId: "lane-b" }),
+    row(6, "c1", "released", { claimState: "unclaimed", ownerId: null })
+  ];
+  const got = signalsFor(rows, "claim_released");
+  assert.equal(got.length, 2, "lane-a's first release and lane-b's first release pay; lane-b's repeat scores 0");
+  assert.deepEqual(got.map(s => s.agent), ["lane-a", "lane-b"]);
+});
+
+test("serial cycling never trips the hoarding surcharge and pays +1 total (#3308)", () => {
+  // The farming shape: one claim at a time, so the concurrent-open hoarding
+  // path never engages — that path is unchanged by the guard.
+  const rows = cycleRows(10);
+  assert.equal(signalsFor(rows, "claim_hoarded").length, 0, "one-at-a-time cycling stays under the cap, as before");
+  assert.equal(signalsFor(rows, "claim_released").length, 1, "ten cycles pay +1 total, not +10");
+});
+
+test("replaying a cycling history yields identical signals (#3308)", () => {
+  const rows = cycleRows(5);
+  const first = deriveClaimSignals(rows);
+  const second = deriveClaimSignals(structuredClone(rows));
+  assert.deepEqual(second, first, "the guard is a pure function of folded history");
+  assert.equal(first.filter(s => s.type === "claim_released").length, 1);
+});
+
+test("journal sync writes one claim_released row for a cycling history (#3308)", () => {
+  const db = eventDb();
+  let seq = 0;
+  for (let i = 0; i < 3; i += 1) {
+    seq += 1;
+    insertEvent(db, "muse-room", seq, "work_claim.updated", { workClaim: "c1", action: "claimed", claimState: "claimed", ownerId: "lane-a" }, T0 + seq * 60_000);
+    seq += 1;
+    insertEvent(db, "muse-room", seq, "work_claim.updated", { workClaim: "c1", action: "released", claimState: "unclaimed", ownerId: null }, T0 + seq * 60_000);
+  }
+  const res = syncClaimReputationJournal(db, { roomId: "muse-room" });
+  assert.equal(res.signalsDerived, 1);
+  assert.equal(res.signalsWritten, 1);
+  const kinds = db.prepare("SELECT kind FROM claim_reputation_signals").all().map(r => r.kind);
+  assert.deepEqual(kinds, ["claim_released"]);
 });
 
 // --- replay / determinism ---------------------------------------------------
