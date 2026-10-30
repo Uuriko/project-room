@@ -104,6 +104,9 @@ test("closest tests win the budget; changed tests are always kept", () => {
   assert.deepEqual(selected.map((s) => s.test), ["tests/core.test.js", "tests/feature.test.js"]);
   assert.deepEqual(new Set(skipped.map((s) => s.test)), new Set(["tests/lazy.test.js", "tests/slow.test.js"]));
 
+  assert.equal(skipped.find(row => row.test === "tests/lazy.test.js").reason, "budget");
+  assert.equal(skipped.find(row => row.test === "tests/slow.test.js").reason, "slow_check_limit");
+
   const kept = selectTests({ changed: ["tests/slow.test.js"], tests, reverse, read, timings, budgetMs: 1 });
   assert.deepEqual(kept.selected.map((s) => s.test), ["tests/slow.test.js"]);
 });

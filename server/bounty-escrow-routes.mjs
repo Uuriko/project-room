@@ -31,6 +31,7 @@
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -78,6 +79,47 @@ export const canReadLaneLedger = (store, roomId, auth, laneIdentity) => {
     && canonicalLane(laneIdentity) === canonicalLane(memberId)) return true;
   return isRoomOwner(store, roomId, auth);
 };
+
+// F-X4-1: bounty claim and submit are work. The board face refuses a
+// member with no work profile (chat profile, permissions []) with 403
+// work_claims_not_permitted, but the money face never checked — a
+// zero-permission member could claim a funded bounty (bond locked) and
+// submit on it. Claim/submit therefore enforce the board's own gate
+// (mayWriteWorkClaims, server/work-claim-routes.mjs) with the board's own
+// refusal. The caller is resolved from the room's LIVE membership
+// (store.roomAuthority, a fresh storage read — the same source the sybil
+// owner gate in this file uses), merging the listed member over the auth
+// member exactly as the board's resolveWorkClaimAccess does, so a profile
+// revoked between calls is refused at the next call. Fails closed: no
+// membership source, no listed member, or an inactive member is not a
+// worker. Only claim and submit are gated; posting/funding/acceptance and
+// the other lifecycle writes keep their existing rules.
+export const WORK_CLAIMS_GATE_MESSAGE =
+  "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
+
+export function mayWorkOnBounties(store, roomId, auth) {
+  let authority = null;
+  if (typeof store?.roomAuthority === "function") {
+    try { authority = store.roomAuthority(roomId); } catch { authority = null; }
+  }
+  const ownerId = typeof authority?.ownerId === "string" && authority.ownerId.length > 0 ? authority.ownerId : null;
+  const members = authority?.members;
+  const memberId = auth?.member?.id;
+  let listed = null;
+  if (members && typeof members === "object" && typeof memberId === "string") {
+    if (Object.hasOwn(members, memberId)) listed = members[memberId];
+    else if (memberId.startsWith("id:agent/")) {
+      // Legacy colon form names the same member (see escrow _memberOf).
+      const colon = `id:agent:${memberId.slice("id:agent/".length)}`;
+      if (Object.hasOwn(members, colon)) listed = members[colon];
+    }
+  }
+  const member = listed && typeof listed === "object"
+    ? { ...auth.member, ...listed, id: memberId,
+        permissions: Array.isArray(listed.permissions) ? listed.permissions : (auth.member.permissions ?? []) }
+    : null;
+  return mayWriteWorkClaims({ ownerId, member });
+}
 
 const runPure = (reject, fn) => {
   try { return fn(); }
@@ -163,6 +205,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
         enforceAutonomyTierForAction({ db: store.db, roomId,
           state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
           actor: current.member, action: `${req.method} bounty ${escrowRoute}`, fail: reject });
+        // F-X4-1: claim/submit enforce the board's work-permission gate,
+        // checked against the reauthorized member inside this transaction,
+        // before idemExecute — so a replayed key from a since-revoked
+        // member is refused too, and a refusal moves no credits.
+        if ((escrowRoute === "claim" || escrowRoute === "submit") && !mayWorkOnBounties(store, roomId, current))
+          reject(403, "work_claims_not_permitted", WORK_CLAIMS_GATE_MESSAGE);
         return escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk),
           { callerLane: caller, bountyId: bountyId ?? sybilFlagId ?? null, payload: Object.fromEntries(Object.entries(payload).filter(([name]) => name !== "idempotencyKey")) });
       });

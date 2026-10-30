@@ -1,4 +1,5 @@
 import { validId } from "../src/events.js";
+import { messageInHistory } from "./history-visibility.mjs";
 
 // This reservation never expires or transfers. A lost host may still be writing.
 // Status is operational metadata, not a message or an answer-basis revision.
@@ -30,11 +31,13 @@ export class RequestRuns {
   list(token, roomId, binding = null) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, binding), state = this.store.room(roomId).state;
+      const floor = this.store.historyFloor(roomId, auth.member.id, this.store.room(roomId).sequence);
       const runs = {};
       if (this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='request_runs' AND type='table'").get()) {
         for (const row of this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=?").all(roomId)) {
           const request = state.replyRequests?.[row.request_id];
           if (!request || request.openingEventId !== row.opening_id
+            || !messageInHistory({ id: request.id, createdAt: request.createdAt }, floor)
             || ![request.requesterId, request.recipientId].includes(auth.member.id)) continue;
           runs[row.request_id] = { state: row.state === "working" && this.store.now() - row.updated_at > 120000 ? "unknown" : row.state,
             updatedAt: row.updated_at };
@@ -56,6 +59,9 @@ export class RequestRuns {
       const row = this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=? AND opening_id=?").get(roomId, request.openingEventId);
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
       if (input.action === "claim" || input.action === "working") {
+        const floor = this.store.historyFloor(roomId, auth.member.id, this.store.room(roomId).sequence);
+        if (!messageInHistory({ id: request.id, createdAt: request.createdAt }, floor))
+          fail("request_run_changed", "Request is outside your visible history; reconcile the original attempt");
         this.store.dmConsents.requireDmAllowed(roomId, auth.member.id, request.requesterId);
         if (request.status !== "open" || state.room.archivedAt || state.members[request.requesterId]?.active !== true
           || this.store.wakeQueue.pauseStatus(roomId, auth.member.id)
@@ -83,4 +89,22 @@ export class RequestRuns {
         state: input.action === "claim" ? "working" : input.action };
     });
   }
+}
+
+// Internal observation only: callers supply canonical requests already filtered
+// for this viewer/history floor within the same read transaction. Never accept
+// request records from HTTP input or use this observation as execution authority.
+export function observeSelectedRuns(store, roomId, requests) {
+  if (!requests.length || !store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='request_runs' AND type='table'").get()) return {};
+  // CROSS JOIN pins selected openings as the outer loop. An ordinary JOIN
+  // can scan every run in the room before consulting the selected JSON array.
+  const rows = store.db.prepare(`SELECT r.request_id,r.state,r.updated_at
+    FROM json_each(?) selected CROSS JOIN request_runs r
+    ON r.room_id=? AND r.opening_id=json_extract(selected.value,'$.openingEventId')
+      AND r.request_id=json_extract(selected.value,'$.id')`).all(
+    JSON.stringify(requests.map(({ id, openingEventId }) => ({ id, openingEventId }))), roomId);
+  return Object.fromEntries(rows.map(row => [row.request_id, {
+    state: row.state === 'working' && store.now() - row.updated_at > 120000 ? 'unknown' : row.state,
+    updatedAt: row.updated_at
+  }]));
 }

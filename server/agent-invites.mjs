@@ -1,3 +1,4 @@
+import { canInviteCoOwners } from "../src/room-administration.js";
 // One-time agent invite codes: the self-serve half of the plug-in loop.
 //
 // An owner mints a short single-use code bound to a room with an explicit
@@ -344,7 +345,7 @@ export class AgentInvites {
       if (profile !== undefined || permissions !== undefined) {
         fail(422, "invalid_invite_scope", "Choose ownerEquivalent or a profile or explicit permissions, not more than one");
       }
-      if (!isRoomOwnerPrincipal(auth, authority)) {
+      if (!isRoomOwnerPrincipal(auth, authority) && (auth.delegate || !canInviteCoOwners(this.store.room(roomId).state, auth.member.id))) {
         fail(403, "owner_equivalent_forbidden", "Only the room owner can mint an owner-level invite");
       }
     } else if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) {
@@ -483,7 +484,7 @@ export class AgentInvites {
       }
       // An owner-level code stays bound to the owner who minted it. A
       // transferred room must not finish the grant under the new owner.
-      if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
+      if (row.owner_equivalent === 1 && !canInviteCoOwners(room.state, row.created_by)) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
       // Reserve two event slots: member.added plus the referral.completed
@@ -678,7 +679,7 @@ export class AgentInvites {
     if (!canInviteMembers(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
-    if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
+    if (row.owner_equivalent === 1 && !canInviteCoOwners(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
     const permissions = JSON.parse(row.permissions_json);

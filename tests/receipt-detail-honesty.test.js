@@ -80,6 +80,48 @@ test("public-work receipt without a merge never claims a verified merge", () => 
   assert.match(html, /unsigned/);
 });
 
+test("recorded public-work decisions do not invent a human reviewer", () => {
+  for (const state of ["verified", "rejected", "revision_requested"]) {
+    for (const verificationReviewerKind of ["human", "agent", undefined]) {
+      const html = renderReceiptDetailHtml({ ...publicWorkReceipt, state,
+        review: { state, decidedAt: "2026-10-07T19:00:00.000Z", verificationReviewerKind, verificationVerdict: "PASS" } });
+      assert.match(html, /Verification tier: reviewer verdict\./);
+      assert.doesNotMatch(html, /Verification tier: human verdict/);
+      assert.match(html, /not identity-verified/);
+      // Structured description must carry the same qualification as the page.
+      const data = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/s.exec(html)[1]);
+      assert.match(data.description, /Verification tier: reviewer verdict\./);
+      assert.doesNotMatch(data.description, /human verdict/);
+    }
+  }
+});
+
+test("a check without a decision does not imply a reviewer verdict", () => {
+  const html = renderReceiptDetailHtml({ ...publicWorkReceipt, state: "submitted",
+    review: { state: "pending", verificationReviewerKind: "human", verificationVerdict: "PASS" } });
+  assert.doesNotMatch(html, /Verification tier: (human|reviewer) verdict/);
+});
+
+test("member-reviewed and ledger receipts do not invent human participation", () => {
+  const cases = [
+    [{ ...publicWorkReceipt, source: "work-claim", verification: { state: "verified" } },
+      "Verification tier: member-reviewed verdict."],
+    ...["human", "agent", undefined].map(kind => [
+      { ...publicWorkReceipt, source: "bounty-lot", lot: { settlement: { settledBy: { id: "reviewer", kind } } } },
+      "Verification tier: recorded ledger movement.",
+    ]),
+  ];
+  for (const [receipt, expected] of cases) {
+    const html = renderReceiptDetailHtml(receipt);
+    assert.ok(html.includes(expected));
+    assert.doesNotMatch(html, /Verification tier: human verdict/);
+    const data = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/s.exec(html)[1]);
+    assert.ok(data.description.includes(expected));
+    assert.match(data.description, /not identity-verified/);
+    assert.match(data.description, /unsigned/);
+  }
+});
+
 test("detail page still shows the core record fields", () => {
   const html = renderReceiptDetailHtml(mergedReceipt);
   assert.match(html, /Fix the needs-attention card overflow/);

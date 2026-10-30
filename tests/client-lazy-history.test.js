@@ -1,6 +1,9 @@
 // Lazy history: a client created with lazyHistory holds the first
-// `?messages=recent` window and pages older history in only when asked
-// (loadHistory) or once re-reading windows has cost more than a fill.
+// `?messages=recent` window and pages older history in only when the
+// reader asks (loadHistory). No number of windowed re-reads fills on
+// its own, and a fill that cannot prove a paged merge never escalates
+// to the unqueried full snapshot read: history stays partial — visibly
+// owed, via owesHistory — until a reader gesture completes it.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomClient } from "../src/client.js";
@@ -26,6 +29,8 @@ const recent = (sequence, messages, omitted) => ({ ...owner, sequence, state: st
   messagesWindow: { mode: "recent", limit: 3, omitted, older: "conversation" } });
 const page = (sequence, messages, nextCursor) => ({ ...owner, generatedAt: at(99), conversationVersion: 1, mode: "replace",
   limit: 100, messageId: null, channelId: null, checkpoint: null, sequence, messages, nextCursor, hasMore: nextCursor !== null });
+const resetPage = sequence => ({ ...owner, generatedAt: at(99), conversationVersion: 1, mode: "reset",
+  limit: 100, messageId: null, channelId: null, checkpoint: null, sequence, messages: [], nextCursor: null, hasMore: false });
 const envelope = (type, n, data) => event({ type, actorId: "human", roomId: "commons", at: at(n), data });
 const receipt = (sequence, env) => ({ sequence, event: env });
 
@@ -95,7 +100,7 @@ test("while only a window is held, an edit re-reads the window instead of the fu
   assert.equal(f.client.heldMessages().partial, true, "still lazy");
 });
 
-test("repeated window re-reads eventually fill, so a long-open tab returns to deltas", async t => {
+test("no number of windowed re-reads fills on its own: a 100-event session stays on the window", async t => {
   const all = history();
   let sequence = 9;
   const f = fixture(t, {
@@ -103,13 +108,36 @@ test("repeated window re-reads eventually fill, so a long-open tab returns to de
     page: url => url.includes("cursor=c1") ? page(sequence, all.slice(0, 2), null) : page(sequence, all, "c1")
   });
   await f.warm();
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 100; i++) {
     sequence++;
     f.notify(receipt(sequence, envelope(T.WORK_CLAIM_UPDATED, sequence, {}))); await f.settle();
   }
+  await wait(400); // past any fill delay the old read budget would have used
+  assert.equal(f.client.heldMessages().partial, true, "history is still the window: no silent fill ran");
+  assert.equal(f.client.owesHistory, true, "the owed history stays visible to the app (the pager)");
+  assert.deepEqual(f.pages, [], "no /conversation page was read without a reader gesture");
+  assert.equal(f.reads.length, 100, "every event re-read only the window");
+  assert.ok(f.reads.every(url => url === RECENT), "no unqueried full read occurred");
+  // The fill is now the reader's act: the same gesture as before completes it.
+  assert.equal(f.client.loadHistory(), true);
   for (let i = 0; i < 80 && f.client.heldMessages().partial; i++) await wait(10);
-  assert.equal(f.client.heldMessages().partial, false, "the fill ran after the read budget");
+  assert.equal(f.client.heldMessages().partial, false, "the reader-requested fill completed history");
   assert.ok(f.pages.length >= 2);
+});
+
+test("a fill whose paging cannot prove a merge stays partial instead of reading the full snapshot", async t => {
+  const all = history();
+  const f = fixture(t, {
+    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("the fill must not escalate to a full snapshot read"),
+    page: () => resetPage(9)
+  });
+  await f.client.refresh();
+  assert.equal(f.client.loadHistory(), true, "the reader asked for history");
+  await wait(600); // the fill runs and its paging fails (bounded resets)
+  assert.ok(f.pages.length >= 1, "the paged fill was attempted");
+  assert.equal(f.client.heldMessages().partial, true, "history stays partial: no full read papered over the failed merge");
+  assert.equal(f.client.owesHistory, true, "the pager stays up so the reader can retry explicitly");
+  assert.deepEqual(f.reads, [RECENT], "the only snapshot read was the opening window");
 });
 
 test("an eager client (the default) still fills 250ms after the first window", async t => {
@@ -128,8 +156,63 @@ test("a new session forgets an earlier request for history", async t => {
   const f = fixture(t, { read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("no full read"),
     page: () => page(9, [], null) });
   await f.client.refresh();
-  f.client.historyWanted = true; f.client.partialReads = 30;
+  f.client.historyWanted = true;
   f.client.disconnect();
   assert.equal(f.client.historyWanted, false);
-  assert.equal(f.client.partialReads, 0);
+  assert.equal("partialReads" in f.client, false, "the windowed-read counter is gone");
 });
+
+test("a failed lazy walk waits for a new gesture, not the next room event", async t => {
+  const all = history(); let sequence = 9, works = false;
+  const f = fixture(t, { read: () => recent(sequence, all.slice(-3), 2),
+    page: url => works ? (url.includes("cursor=c1") ? page(sequence, all.slice(0, 2), null) : page(sequence, all, "c1")) : resetPage(sequence) });
+  await f.warm(); f.client.loadHistory(); await wait(350);
+  assert.equal(f.pages.length, 4);
+  sequence++; f.notify(receipt(sequence, envelope(T.WORK_CLAIM_UPDATED, sequence, {}))); await f.settle(); await wait(350);
+  assert.equal(f.pages.length, 4, "events must not repeatedly walk failed history");
+  assert.equal(f.client.owesHistory, true);
+  works = true; assert.equal(f.client.loadHistory(), true);
+  for (let i = 0; i < 50 && f.client.heldMessages().partial; i++) await wait(10);
+  assert.equal(f.client.heldMessages().partial, false);
+  assert.ok(f.reads.every(url => url === RECENT));
+});
+
+test("an old failed walk cannot start a full read for a replacement session", async t => {
+  let finish; const pending = new Promise(resolve => { finish = resolve; });
+  t.after(() => finish(resetPage(9)));
+  const all = history(); let replacement = false;
+  const f = fixture(t, { lazy: false, read: () => replacement ? recent(10, all, 0) : recent(9, all.slice(-3), 2), page: () => pending });
+  await f.client.refresh();
+  for (let i = 0; i < 60 && !f.pages.length; i++) await wait(10);
+  assert.equal(f.pages.length, 1);
+  f.client.disconnect();
+  assert.equal(f.client.backfilling, false, "replacement session can start its own history load");
+  f.client.session = identity(); replacement = true;
+  await f.client.refresh(); const reads = f.reads.length;
+  finish(resetPage(9)); await wait(100);
+  assert.equal(f.reads.length, reads, "retired walk must not read using replacement credentials");
+  assert.equal(f.client.live.snapshot.sequence, 10);
+});
+
+for (const status of [500, 401, 403]) test(`a lazy history HTTP ${status} never escalates to a full read`, async t => {
+  const all = history();
+  const f = fixture(t, { read: () => recent(9, all.slice(-3), 2), page: () => { throw Object.assign(new Error("unavailable"), { status }); } });
+  await f.client.refresh(); f.client.loadHistory(); await wait(100);
+  assert.deepEqual(f.reads, [RECENT]);
+  assert.equal(f.pages.length, 1);
+  if (status === 500) {
+    assert.equal(f.client.owesHistory, true);
+    assert.equal(f.client.historyWanted, false);
+  } else assert.equal(f.client.session, null, "revoked access ends instead of retaining a partial room");
+});
+
+test("lazy history completes only the server-visible history above its floor", async t => {
+  const all = history(); const visible = all.slice(1);
+  const f = fixture(t, { read: () => recent(9, visible.slice(-3), 1),
+    page: url => url.includes("cursor=c1") ? page(9, visible.slice(0, 1), null) : page(9, visible, "c1") });
+  await f.client.refresh(); f.client.loadHistory();
+  for (let i = 0; i < 50 && f.client.heldMessages().partial; i++) await wait(10);
+  assert.equal(f.client.owesHistory, false);
+  assert.deepEqual(f.client.heldMessages().messages.map(item => item.id), ["m2", "m3", "m4", "m5"]);
+  assert.deepEqual(f.reads, [RECENT]);
+ });

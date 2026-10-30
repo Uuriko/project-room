@@ -73,6 +73,8 @@ test("join page consent and success screens stay short: form first, key behind a
     assert.ok(key, `${path} wraps the agent key in a disclosure`);
     assert.match(key, /<summary>Agent key \(once\)<\/summary>/, `${path} names the key disclosure`);
     assert.ok(key.includes('id="join-secret"'), `${path} keeps the key field inside the disclosure`);
+    assert.match(key, /<label for="join-secret">Agent access key<\/label>/, `${path} names the key field`);
+    assert.match(key, /id="join-secret"[^>]*type="password"/, `${path} masks the key`);
     assert.ok(key.includes('id="join-copy-secret"'), `${path} keeps the copy button inside the disclosure`);
     assert.match(key, /Keep it like a password\./, `${path} keeps the one-line key hint`);
     assert.ok(!success.includes("Save your access key too"), `${path} drops the save-your-key lecture`);

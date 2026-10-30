@@ -19,7 +19,17 @@ async function openWorkspace(options) {
       const session = await accountClient.restore();
       if (session?.authenticated && session.account.id === accountId) options = { accountClient, signedIn: true };
     }
-    const [workspace] = await Promise.all([import("./app.js"), import("./request-access.js")]);
+    // The callback has finished setting its Strict cookie. Start the small
+    // account restore alongside the workspace download, not after the entire
+    // application module graph. Reuse this client to avoid a duplicate read.
+    const googleReturn = !options && new URLSearchParams(location.search).get("google") === "signed-in";
+    const accountFlight = googleReturn ? import("./account-client.js").then(async ({ AccountClient }) => {
+      const accountClient = new AccountClient();
+      await accountClient.restore();
+      return accountClient;
+    }) : Promise.resolve(null);
+    const [workspace, , restoredAccount] = await Promise.all([import("./app.js"), import("./request-access.js"), accountFlight]);
+    if (restoredAccount) options = { accountClient: restoredAccount };
     dispose();
     await workspace.startApp(options);
     try { sessionStorage.removeItem(resumeKey); } catch { /* No stored continuation. */ }

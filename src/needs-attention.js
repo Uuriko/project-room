@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { ACCESS_PRESETS, permissionLabel } from "./access-presets.js";
 // #662 owner attention rollup, plus MEMBER-PERMS reviewed access requests.
 // Admins see only the existing access-request queue their authority permits;
@@ -104,15 +105,18 @@ export function createNeedsAttentionCard(options) {
 
   function actionControls(item) {
     const controls = item.actions.map((action, index) => {
+      const namedAction = action => esc(uiText("action.itemAccessibleName", { action, item: item.title || item.id }));
       if (action.method === "GET" && item.kind !== "spend") {
         const workId = item.kind === "jev_escalation" ? item.workItemId : item.id;
-        return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}">Review</a>`
-          : `<a class="button ghost" href="${esc(action.path)}">Diagnostics</a>`;
+        const reviewName = namedAction("Review");
+        const diagnosticsAttributes = ['href="', esc(action.path), '" aria-label="', namedAction("Diagnostics"), '"'].join("");
+        return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}" aria-label="${reviewName}">Review</a>`
+          : `<a class="button ghost" ${diagnosticsAttributes}>Diagnostics</a>`;
       }
       if (action.method === "POST" && action.body) {
         const label = action.action === "approve" ? "Approve" : action.action === "deny" ? (item.requestKind === "permissions" ? "Decline" : "Deny") : action.action;
         const unavailable = action.action === "approve" && (action.body.permissions ?? []).some(permission => !canGrant(permission));
-        return `<button type="button" class="button${action.action === "approve" ? " primary" : ""} attention-decide" data-action-index="${index}" data-unavailable="${unavailable}"${unavailable ? " disabled" : ""}>${esc(label)}</button>`;
+        return `<button type="button" class="button${action.action === "approve" ? " primary" : ""} attention-decide" data-action-index="${index}" data-unavailable="${unavailable}" aria-label="${namedAction(label)}"${unavailable ? " disabled" : ""}>${esc(label)}</button>`;
       }
       return action.hint ? `<span class="attention-hint">${esc(action.hint)}</span>` : "";
     }).join("");
@@ -123,9 +127,9 @@ export function createNeedsAttentionCard(options) {
     if (permissions.length === 1) return controls + hint;
     const choose = partial?.id === item.id;
     const partialControls = choose ? `<fieldset data-permission-selection><legend>Choose permissions to approve</legend>${permissions.map(permission => `<label><input type="checkbox" data-permission-choice value="${esc(permission)}"${partial.selected.has(permission) ? " checked" : ""}${canGrant(permission) ? "" : " disabled"}> ${esc(permissionLabel(permission))}</label>`).join("")}
-      <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
+      <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve selected", item: item.title || item.id }))}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
       <button type="button" class="button ghost attention-cancel">Cancel</button></fieldset>`
-      : `<button type="button" class="button ghost attention-partial">Approve partial</button>`;
+      : `<button type="button" class="button ghost attention-partial" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve partial", item: item.title || item.id }))}">Approve partial</button>`;
     return controls + partialControls + hint;
   }
 

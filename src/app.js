@@ -1,8 +1,11 @@
+import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
+import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
+import { directDraftKey, directDraftPeer, directMessagePeer } from "./conversation.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -30,7 +33,7 @@ function clipGraphemes(text, maxUnits) {
 }
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
-import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
+import { attemptReceipts, attemptLedger, attemptDeclarationLabel, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
@@ -334,7 +337,10 @@ function stashInviteForOAuth() {
 // invitation before the navigation, since the OAuth round-trip drops the
 // #invite/ fragment.
 { const googleButton = $("#google-signin");
-  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+  if (googleButton) googleButton.addEventListener("click", () => {
+    stashInviteForOAuth();
+    stashGoogleRoom(roomIdFromNext(new URLSearchParams(location.search).get("next")) || selectedRoomFromLocation());
+  }); }
 { const githubButton = $("#github-signin");
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
@@ -358,29 +364,52 @@ let navigationBoardEpoch = 0;
 // JDOT-COH-NAV end
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
+let activeDirectMemberId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
+let confirmedWorkNavigation = null;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
-// A message deep link whose target is older than the first (windowed)
-// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
-// not held. A pending hash reveal remembers such a target until a fill or
-// sync snapshot first holds it, then reveals it exactly once. It is
-// cancelled when the user takes over first — another hash, another room,
-// a thread/channel switch, or a reader scroll (the noteReaderScroll
-// gesture tracker below) — so the late reveal never steals the view.
+let choosingComposerRecipient = false;
+// A deep link resolves its selected message and bounded reply ancestry.
+// Navigation and identity fences prevent a late response stealing the view.
 let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
-const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? channelDraftKey(activeChannelId);
-const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? (activeDirectMemberId ? directDraftKey(activeDirectMemberId) : channelDraftKey(activeChannelId));
+const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : activeDirectMemberId ? directDraftKey(activeDirectMemberId) : `room:${activeChannelId}`;
 // The room timeline renders only its newest TIMELINE_WINDOW root messages; the
 // "Show earlier messages" control adds another page. A room with thousands of
 // messages otherwise builds thousands of rows (and layout reads over them) on
 // open. timelineWindow maps a view key to how many roots that view shows.
 const TIMELINE_PAGER_KEY = "pager:earlier";
+const directDirectory = createConversationDirectory({ read: query => client.conversations(query), changed: () => { if (state) renderDirectMessages(); } });
+const selectedMessage = createMessageSelection({
+  read: query => client.conversation(query),
+  changed: () => {
+    if (!state) return;
+    rebuildConversation(); renderMessages();
+    retryPendingHashReveal();
+    if (selectedMessage.view().error && pendingHashReveal) {
+      pendingHashReveal = null;
+      notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    }
+  },
+});
+const directWindow = createDirectConversationWindow({
+  read: query => client.conversation(query),
+  changed: () => { if (state && activeDirectMemberId) { rebuildConversation(); renderMessages(); } },
+});
+function rebuildConversation() {
+  const pair = directWindow.view();
+  const selected = activeDirectMemberId && pair.peerMemberId === activeDirectMemberId
+    ? [...(pair.anchorMessage ? [pair.anchorMessage] : []), ...pair.messages] : [];
+  const records = new Map([...selectedMessage.view().messages, ...selected, ...(state?.messages ?? [])].map(message => [message.id, message]));
+  conversation = conversationIndex([...records.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)));
+}
+
 const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
@@ -458,6 +487,7 @@ const client = new RoomClient({
     snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) { selectedMessage.clear(); directDirectory.clear(); }
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
@@ -523,11 +553,14 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
+        activeDirectMemberId = saved.directMemberId ?? directMessagePeer(conversation.byId.get(saved.threadId), session.member.id);
         if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
         syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
+        if (!requestMode && draft.toMemberId) activeDirectMemberId = draft.toMemberId;
         restoreComposer(draft);
+        syncChannelChrome();
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
       }
       if (!location.hash) restoreResultSelection();
@@ -535,6 +568,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    resumeConfirmedWorkNavigation();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -544,6 +578,7 @@ const client = new RoomClient({
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    if (pendingSignout) $("#google-signin").href = "/api/auth/google/start?switch=1";
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
     // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
     // room/account switch, or page unload) must not destroy the in-flight
@@ -559,7 +594,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
-    pendingHashReveal = null;
+    pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -603,6 +638,9 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    directWindow.clear();
+    if (!sessionExpired) activeDirectMemberId = null;
+    choosingComposerRecipient = false;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
@@ -675,7 +713,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+      : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -1388,6 +1426,7 @@ const sameSession = (generation, roomId, memberId) => generation === client.gene
 const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
+const messageActionTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
 const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")}`;
 // Keep application-owned fragments outside the valid record-id alphabet. Earlier
@@ -1624,18 +1663,29 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
+function composerPrivateLabel() {
+  const to = $("#message-to-select")?.value;
+  if (!to) return null;
+  const member = state?.members && Object.hasOwn(state.members, to) ? state.members[to] : null;
+  return member ? uiText("composer.privateTo", { name: member.displayName }) : uiText("composer.privateMessage");
+}
+function syncComposerAudienceLabel() {
+  $("#composer-label").textContent = composerPrivateLabel() || (currentThreadId ? "Reply in this thread" : "Message the room");
+}
 function syncComposerChrome() {
+  syncComposerAudienceLabel();
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  // bu-09: the audience picker is the broadcast-vs-DM control and stays
-  // visible whenever there is someone to address. Hiding it until a
-  // recipient was already chosen made room-chat DMs undiscoverable — the
-  // hidden control was the only way to start one.
-  if (bar) bar.hidden = !composerAudiencePickerVisible({
-    members: state?.members ? Object.values(state.members) : [],
-    selfId: session?.member?.id,
+  // Room chat is the default. Direct messaging is an explicit action in
+  // Message options; never hide an already-addressed private draft.
+  if (bar) bar.hidden = Boolean(activeDirectMemberId && !requestMode) || !composerAudiencePickerVisible({
+    recipientId: to,
     requestMode: Boolean(requestMode),
+    choosingRecipient: choosingComposerRecipient,
   });
+  const startDirect = $("#composer-direct-message");
+  if (startDirect) startDirect.hidden = !Object.values(state?.members ?? {}).some(member =>
+    member.active !== false && member.identityRevoked !== true && member.id !== session?.member?.id);
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -1645,7 +1695,8 @@ function syncComposerChrome() {
     // surprise. No row / pending / approved needs no callout.
     const audience = composerAudienceNote(state?.members, to);
     if (audience) {
-      note.textContent = audience;
+      note.textContent = activeDirectMemberId && !requestMode ? uiText("direct.private") : audience;
+      note.title = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
@@ -2019,7 +2070,8 @@ function renderContent(selector, html) {
 }
 function render() {
   ownerOffersUI.sync();
-  conversation = conversationIndex(state.messages);
+  selectedMessage.sync(client.sequence);
+  rebuildConversation();
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   // R350-n1: a seat whose identity signed out for good can't read a direct message.
   selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
@@ -2246,6 +2298,7 @@ $("#event-list").addEventListener("click", event => {
 // their proposal message (the main channel when there is none).
 function channelStorageKey() { return `pr-channel:${activeChannelRoomId ?? "none"}`; }
 function restoreActiveChannel() {
+  activeDirectMemberId = null;
   activeChannelId = DEFAULT_CHANNEL_ID;
   try {
     const saved = localStorage.getItem(channelStorageKey());
@@ -2254,6 +2307,8 @@ function restoreActiveChannel() {
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function leaveWorkSelection() {
+  // User navigation cancels a pending destination even before its card exists.
+  confirmedWorkNavigation = null;
   if (!activeWorkNavigationId) return false;
   activeWorkNavigationId = null;
   if (/^#pr-record\/work\//.test(location.hash)) {
@@ -2267,11 +2322,12 @@ function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
-  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
+  if (next === activeChannelId && !activeDirectMemberId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
   saveComposer();
   viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null;
   currentThreadId = null; assistantDraft = null;
+  activeDirectMemberId = null;
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
   restoreComposer(drafts.get(composerKey()));
@@ -2281,6 +2337,7 @@ function setActiveChannel(id, preserveWork = false) {
 }
 
 function syncChannelChrome() {
+  $("#main").classList.toggle("direct-conversation", Boolean(activeDirectMemberId));
   // If the active channel was archived elsewhere, fall back to the main channel.
   if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt
     && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading")) {
@@ -2288,17 +2345,17 @@ function syncChannelChrome() {
     return;
   }
   const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
-  setText("#conversation-title", `# ${name}`);
+  setText("#conversation-title", activeDirectMemberId ? displayName(activeDirectMemberId) : `# ${name}`);
   const input = $("#message-input");
-  if (input) input.placeholder = `Message #${name}`;
-  renderChannels();
+  if (input) input.placeholder = activeDirectMemberId ? uiText("direct.compose", { name: displayName(activeDirectMemberId) }) : `Message #${name}`;
+  renderChannels(); renderDirectMessages();
 }
 function renderChannels() {
   const list = $("#channel-list");
   if (!list || !state) return;
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   const html = channelList(state).filter(c => !c.archivedAt).map(c => {
-    const active = c.id === activeChannelId;
+    const active = !activeDirectMemberId && c.id === activeChannelId;
     const manage = ownerView && c.id !== DEFAULT_CHANNEL_ID
       ? `<button type="button" class="icon-button channel-manage" data-channel-manage="${esc(c.id)}" aria-label="Channel settings, ${esc(c.name)}" title="Channel settings">⋯</button>` : "";
     return `<li class="channel-row"><button type="button" class="channel${active ? " is-active" : ""}" data-channel="${esc(c.id)}"${active ? ' aria-current="page"' : ""}><span aria-hidden="true">#</span><span class="channel-name">${esc(c.name)}</span></button>${manage}</li>`;
@@ -2310,6 +2367,88 @@ function renderChannels() {
   list.innerHTML = html; list._html = html;
   if (focused) list.querySelector(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
+function visibleConversationMessages() {
+  if (!conversation) return [];
+  const self = session?.member?.id;
+  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || []
+    : activeDirectMemberId ? [...conversation.byId.values()] : conversation.roots;
+  return messages.filter(message => activeDirectMemberId
+    ? directMessagePeer(message, self) === activeDirectMemberId
+    : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
+}
+function openDirectMessage(memberId) {
+  if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+  requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
+  leaveWorkSelection();
+  currentThreadId = null; activeDirectMemberId = memberId;
+  activeChannelId = DEFAULT_CHANNEL_ID;
+  restoreComposer(drafts.get(composerKey()));
+  $("#message-delivery").hidden = true;
+  $("#also-send-to-channel").checked = false;
+  renderTyping([]);
+  syncChannelChrome(); updateReply(); syncRequestComposer(); renderMessages(); renderComposerError(); persistDrafts();
+  $("#message-input").focus();
+}
+function renderDirectMessages() {
+  const list = $("#direct-message-list");
+  if (!state || !list) return;
+  directDirectory.sync(client.generation, client.sequence);
+  const directory = directDirectory.view();
+  list.setAttribute("aria-busy", String(directory.loading));
+  const peers = new Set([...directory.peers.map(peer => peer.memberId), ...state.messages.map(message => directMessagePeer(message, session?.member?.id)).filter(Boolean)]);
+  for (const [key, draft] of drafts.entries) if (directDraftPeer(key) && (draft.body.trim() || draft.files?.length || draft.pending)) peers.add(directDraftPeer(key));
+  if (activeDirectMemberId) peers.add(activeDirectMemberId);
+  const ids = [...peers].filter(id => Object.hasOwn(state.members, id));
+  const signature = JSON.stringify([activeDirectMemberId, ids.map(id => [id, displayName(id)]), directory.cursor, Boolean(directory.error), directory.loading]);
+  if (list.dataset.signature === signature) return;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.directMember : null;
+  list.replaceChildren(...ids.map(id => directPersonRow(id, id === activeDirectMemberId)));
+  if (directory.error || directory.cursor) {
+    const row = document.createElement("li"), button = document.createElement("button");
+    button.type = "button"; button.className = "channel"; button.dataset.directPage = directory.error ? "retry" : "more";
+    button.textContent = uiText(directory.error ? "direct.retryList" : "direct.moreList");
+    button.disabled = directory.loading; row.append(button); list.append(row);
+  }
+  list.dataset.signature = signature;
+  if (focused) list.querySelector(`[data-direct-member="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+}
+function directPersonRow(id, active = false) {
+  const row = document.createElement("li"), button = document.createElement("button");
+  button.type = "button"; button.className = active ? "channel is-active" : "channel";
+  button.dataset.directMember = id; button.textContent = displayName(id);
+  if (active) button.setAttribute("aria-current", "page");
+  row.append(button); return row;
+}
+function renderDirectPeople() {
+  const query = $("#new-direct-search").value.trim().toLocaleLowerCase();
+  const members = Object.values(state?.members ?? {}).filter(member => member.id !== session?.member?.id
+    && member.active !== false && !member.identityRevoked && displayName(member.id).toLocaleLowerCase().includes(query));
+  const list = $("#new-direct-people");
+  list.replaceChildren(...members.map(member => directPersonRow(member.id)));
+  if (!members.length) { const empty = document.createElement("li"); empty.className = "empty-note"; empty.textContent = uiText("direct.noMatches"); list.append(empty); }
+}
+$("#new-direct-message").setAttribute("aria-label", uiText("direct.newMessage"));
+$("#new-direct-message").title = uiText("direct.newMessage");
+$("#new-direct-search").placeholder = uiText("direct.findPerson");
+$("#new-direct-message").addEventListener("click", () => {
+  $("#new-direct-search").value = ""; renderDirectPeople();
+  $("#new-direct-dialog").showModal(); $("#new-direct-search").focus();
+});
+$("#new-direct-close").addEventListener("click", () => $("#new-direct-dialog").close());
+$("#new-direct-search").addEventListener("input", renderDirectPeople);
+for (const selector of ["#direct-message-list", "#new-direct-people"]) $(selector).addEventListener("click", event => {
+  const page = event.target.closest("[data-direct-page]");
+  if (page) { if (page.dataset.directPage === "retry") void directDirectory.retry(); else void directDirectory.more(); return; }
+  const button = event.target.closest("[data-direct-member]");
+  if (!button) return;
+  openDirectMessage(button.dataset.directMember);
+  if (activeDirectMemberId === button.dataset.directMember) {
+    $("#new-direct-dialog").close();
+    if ($("#sidebar-toggle").getAttribute("aria-expanded") === "true") $("#sidebar-toggle").click();
+    $("#message-input").focus();
+  }
+});
 // One-tap replies and a task nudge under the latest message in view
 // (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
 const dismissedSuggestions = new Set();
@@ -2317,8 +2456,7 @@ let askAgentTimer = null;
 function syncChatSuggestions() {
   const box = $("#chat-suggestions");
   if (!box) return;
-  const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
-    : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const messages = !state || !session ? [] : visibleConversationMessages();
   const latest = messages.at(-1);
   // "Ask @Agent" is for the channel view: a thread already has its own replies.
   const ask = latest && !currentThreadId
@@ -2364,6 +2502,7 @@ $("#chat-suggestions")?.addEventListener("click", e => {
 // The server expires beats after 10s, so a missing update clears itself;
 // this also clears on snapshot refresh and when the viewer sends.
 function renderTyping(typists) {
+  if (activeDirectMemberId) typists = [];
   const el = $("#typing-indicator");
   if (!el) return;
   const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
@@ -2378,7 +2517,11 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
-  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+  directWindow.select(activeDirectMemberId, client.generation);
+  directWindow.pin(activeDirectMemberId ? currentThreadId : null);
+  if (activeDirectMemberId) directWindow.sync(client.sequence);
+  const pairWindow = directWindow.view();
+  const list = $("#message-list"), view = conversationViewKey();
   const sameView = list.dataset.view === view;
   if (!sameView) syncChatSuggestions();
   // The read-horizon anchor is recomputed when the view changes (room vs
@@ -2386,19 +2529,21 @@ function renderMessages() {
   // fetches and re-renders.
   if (view !== lastHorizonView && state) {
     lastHorizonView = view;
-    const threadKey = currentThreadId ?? "";
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
-    if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
+    const { cacheKey } = readPositionScope();
+    const messages = visibleConversationMessages();
+    if (horizonCache.has(cacheKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(cacheKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   // Lazy history: a reply whose thread root is older than the held window
   // indexes as a root; it stays in its (unloaded) thread, as it would with
   // full history, instead of posing as a top-level message.
   const owesHistory = client.owesHistory;
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
-  if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
-  const showPager = !currentThreadId && owesHistory;
-  const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  const allMessages = visibleConversationMessages().filter(message => currentThreadId || activeDirectMemberId || !(owesHistory && message.replyToId));
+  if (!activeDirectMemberId && owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
+  const showPager = !currentThreadId && (activeDirectMemberId ? Boolean(pairWindow.cursor || pairWindow.error) : owesHistory);
+  // Private history is already loaded in explicit 50-message pages. A second
+  // 200-record display cap would hide successfully fetched older pages forever.
+  const shownLimit = currentThreadId || activeDirectMemberId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
@@ -2441,11 +2586,11 @@ function renderMessages() {
   $("#thread-bar").hidden = !currentThreadId;
   syncThreadMuteButton();
   syncAlsoSend();
-  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
+  syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
-    $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
+    $("#thread-title").textContent = root ? `Thread with ${name(root.authorId)}` : uiText(pairWindow.loading ? "direct.loadingThread" : "direct.unavailableThread");
+    setText("#thread-context", `${Math.max(0, messages.length - 1)} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -2462,7 +2607,7 @@ function renderMessages() {
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
   // Human conversations expose work through their source messages. A full
   // record is mounted only when opened from a link, search, or Updates.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries(
+  const workEntries = currentThreadId || activeDirectMemberId || !state ? [] : timelineWorkEntries(
     session?.member.kind === "human" ? activeWorkNavigationId : undefined
   ).filter(e => e.channelId === activeChannelId);
   const ordered = [];
@@ -2555,6 +2700,9 @@ function renderMessages() {
       more.textContent = uiText("timeline.earlier");
       pager.append(more);
     }
+    const more = pager.querySelector("button");
+    more.disabled = Boolean(activeDirectMemberId && pairWindow.loading);
+    more.textContent = activeDirectMemberId && pairWindow.error ? uiText("direct.retry") : uiText("timeline.earlier");
     merged.push(pager);
   }
   messages.forEach((message, index) => {
@@ -2562,8 +2710,16 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
-  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  const showInvite = Boolean(!activeDirectMemberId && session?.member?.id && state?.members?.[session.member.id]?.active !== false);
+  if (!messages.length && activeDirectMemberId && (pairWindow.loading || pairWindow.error)) {
+    const item = document.createElement("li"); item.className = "empty-note";
+    item.textContent = uiText(pairWindow.error ? "direct.loadFailed" : "direct.loading");
+    if (pairWindow.error) {
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "text-button";
+      retry.dataset.directRetry = ""; retry.textContent = uiText("direct.retry"); item.append(retry);
+    }
+    list.replaceChildren(item);
+  } else if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -2645,7 +2801,12 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const editHtml = own ? `<button class="message-to-work" data-message-action="edit" data-message-id="${esc(m.id)}" type="button">Edit message</button>` : "";
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
   const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
-  const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
+  // F-U1A3-1: the overflow summary's accessible name carries the message's
+  // identity (author + time), mirroring the "Link to message by … at …"
+  // label in messageContent — a bare "More actions for this message" was
+  // character-identical on every message.
+  const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
+  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => {
     const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
     return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;
@@ -2913,6 +3074,7 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
+  choosingComposerRecipient = false;
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
   composerFiles = draft.files ?? [];
@@ -2924,7 +3086,7 @@ function restoreComposer(draft) {
     select.add(new Option("Previous recipient unavailable", draft.toMemberId));
     select.options[select.options.length - 1].disabled = true;
   }
-  select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  select.value = draft.toMemberId || activeDirectMemberId || ""; replyToId = draft.replyToId; pendingMessage = draft.pending;
   syncComposerChrome();
   autosizeComposer();
 }
@@ -2976,11 +3138,8 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
-  const members = state?.members;
-  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
-  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
-  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  const requestButton = $("#request-reply");
+  const requestHost = $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
   requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
@@ -3003,7 +3162,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
+  input.placeholder = archived ? "This room is archived." : (!mode && composerPrivateLabel()) || composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -3057,6 +3216,12 @@ async function openRequestMode(kind, id) {
   }
 }
 const composerOptions = $("#composer-options");
+const startDirectMessage = $("#composer-direct-message");
+startDirectMessage.textContent = uiText("composer.directMessage");
+startDirectMessage.addEventListener("click", () => {
+  if (!state || busy || requestReading) return;
+  $("#new-direct-message").click();
+});
 composerOptions.addEventListener("click", event => {
   if (!event.target.closest("button")) return;
   composerOptions.open = false;
@@ -3070,7 +3235,7 @@ composerOptions.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!composerOptions.contains(event.target)) composerOptions.open = false;
 });
-$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
@@ -3103,19 +3268,20 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode || assistantDraft) {
     saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+    if (threadId) activeDirectMemberId = directMessagePeer(conversation.byId.get(threadId), session.member.id);
     currentThreadId = threadId; requestMode = null; assistantDraft = null;
     restoreComposer(drafts.get(composerKey()));
     // "Also send to channel" is per-send, off by default in every thread.
     $("#also-send-to-channel").checked = false;
   }
-  updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  syncChannelChrome(); updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   persistDrafts();
   if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
-  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) {
+  if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
   if (!state || busy || !conversation.byId.has(id)) return;
@@ -3125,8 +3291,15 @@ function revealMessage(id) {
   if ($("#later-dialog")?.open) $("#later-dialog").close();
   workspaceUI?.showRooms();
   const message = conversation.byId.get(id);
-  if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-  switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  const peer = directMessagePeer(message, session.member.id);
+  if (peer) {
+    openDirectMessage(peer);
+    if (message.replyToId) switchThread(conversation.rootById.get(id));
+  }
+  else {
+    if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
+    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
@@ -3163,7 +3336,7 @@ function revealWorkTimeline(id) {
   activeWorkNavigationId = id;
   switchThread(null, false, true);
   const channelId = timelineWorkEntries(id)[0]?.channelId;
-  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId, true);
+  if (activeDirectMemberId || channelId && channelId !== activeChannelId) setActiveChannel(channelId ?? DEFAULT_CHANNEL_ID, true);
   renderMessages();
   return workRecord(id);
 }
@@ -3212,6 +3385,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
+  confirmedWorkNavigation = null;
   navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
@@ -3504,24 +3678,23 @@ function revealEvent(id, requireExisting = false) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
-// Remember a message deep-link target the held history does not contain
-// yet, with the navigation context at arm time, so the retry can tell a
-// still-waiting cold load apart from a user who has since gone elsewhere.
+// Resolve a message outside the held window without walking room history.
+// Keep the navigation context so late results cannot steal the current view.
 function pendHashReveal(messageId) {
   pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
-    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
-  client.loadHistory();
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, peerMemberId: activeDirectMemberId, readerScrollAt };
+  selectedMessage.select(messageId, client.generation);
+  selectedMessage.sync(client.sequence);
 }
-// Runs on every snapshot. The pending reveal fires only when this
-// snapshot first holds the target and nothing about the navigation
-// context changed since it was armed; any change cancels it for good.
+// Runs after selected reads and snapshots. Reveal only while the original
+// navigation context is still current.
 function retryPendingHashReveal() {
   const pending = pendingHashReveal;
   if (!pending) return;
   if (!state || client.generation !== pending.generation
     || (state.room?.id ?? session?.roomId) !== pending.roomId
     || location.hash !== pending.hash
-    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId || activeDirectMemberId !== pending.peerMemberId
     || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
   if (busy || !conversation?.byId.has(pending.messageId)) return;
   pendingHashReveal = null;
@@ -3571,9 +3744,7 @@ function revealLocationHash() {
   if (current) {
     const id = decodeFragment(current[2]);
     if (id !== null && current[1] === "message") {
-      // Held already: reveal now (and drop any pending twin). Not held
-      // yet — an older message still behind the background fill: pend it
-      // for the first snapshot that holds it instead of dropping it.
+      // Held already: reveal now. Otherwise resolve exactly this record.
       if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
       else pendHashReveal(id);
       return;
@@ -3672,6 +3843,7 @@ function claimStateLabel(i, now = Date.now()) {
 function receiptCard(i) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
+  const declaration = attemptDeclarationLabel(receipt.attemptSnapshot);
   const earlier = [...drafts.entries].filter(([, draft]) => draft.mode?.resultEventId && draft.mode.workItemId === i.id
     && draft.mode.resultEventId !== receipt.eventId && (draft.body.trim() || draft.pending) && validReplyDraft(draft.mode, state));
   const resume = earlier.map(([key], index) => `<button type="button" class="button ghost" data-resume-credit="${esc(key)}"
@@ -3691,7 +3863,7 @@ function receiptCard(i) {
       : "";
     verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
-  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
+  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl>${declaration ? `<p class="form-hint">Attempt #${receipt.attemptSnapshot.attempt} · ${esc(declaration)}</p>` : ""}<p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
 }
 function shareDraftButton(item, key = "task") {
   return `<button type="button" class="button secondary" data-portable-work="${esc(item.id)}" data-portable-mode="draft" data-focus-key="share-draft:${esc(item.id)}:${esc(key)}">Share draft</button>`;
@@ -3763,6 +3935,10 @@ function workCard(i, now, drafts, messages = []) {
   const nextFor = next.memberId ? ` for ${esc(name(next.memberId))}` : "";
   const quietNext = session.member.kind === "human" && !document.body.classList.contains("human-advanced") && ["in_progress", "complete"].includes(next.action);
   const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
+  const replacement = i.supersededBy && i.supersededBy !== i.id
+    ? Object.hasOwn(state.workItems, i.supersededBy)
+      ? `<p class="form-hint"><a class="source-link" href="${esc(workHref(i.supersededBy))}" data-open-work="${esc(i.supersededBy)}" data-focus-key="replacement:${esc(i.id)}">Open replacement</a></p>`
+      : `<p class="form-hint">Replacement unavailable in this room.</p>` : "";
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
@@ -3778,7 +3954,7 @@ function workCard(i, now, drafts, messages = []) {
   // G7: silence is never termination - a stale-heartbeat run is labeled
   // unresponsive with process state unknown, never "stopped".
   const unresponsiveRun = cancellationState(i, { nowMs: Date.now() }).unresponsive;
-  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
+  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${attemptDeclarationLabel(a) ? ` · ${esc(attemptDeclarationLabel(a))}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
@@ -3787,7 +3963,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${replacement}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -3919,6 +4095,8 @@ $("#invitation-email").addEventListener("click", () => {
 $("#invitation-google").addEventListener("click", event => {
   if (!confirmInvitationSignin() || !signinUI.canLeave()) { event.preventDefault(); return; }
   stashInviteForOAuth();
+  // Invitation account replacement is an explicit identity choice.
+  event.currentTarget.href = "/api/auth/google/start?switch=1";
 });
 $("#invitation-signin-back").addEventListener("click", () => {
   if (!signinUI.canLeave()) return;
@@ -4199,7 +4377,10 @@ $("#signout-button").addEventListener("click", async () => {
     try {
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
-      if (ended || !accountClient.session) endAccountAccess();
+      if (ended || !accountClient.session) {
+        endAccountAccess();
+        $("#google-signin").href = "/api/auth/google/start?switch=1";
+      }
     } catch {
       if (operation !== signoutOperationId) return;
       if (!accountClient.session) {
@@ -4263,7 +4444,16 @@ $("#refresh-button").addEventListener("click", async () => {
         const account = await ensureAccountSession();
         if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
         await client.restore(requestedRoom);
-      } else await client.restore();
+      } else {
+        // Account-home recovery must confirm the browser's current account,
+        // not retry a room cookie that this screen does not own.
+        const account = await accountClient.restore();
+        if (operationId !== refreshOperationId || !account) return;
+        if (account.authenticated) {
+          setFormStatus($("#auth-error"), "");
+          showAccountWorkspace();
+        } else await client.restore();
+      }
     }
     else {
       await client.refresh();
@@ -4484,6 +4674,10 @@ $("#channel-archive-button").addEventListener("click", async e => {
 function submitRequest(form) {
   if (!state || busy || requestReading) return;
   const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  const request = mode?.requestMessageId && state.replyRequests?.[mode.requestMessageId];
+  // Keyboard/programmatic submission must respect the terminal-request state
+  // used by the disabled button. An uncertain command still retries unchanged.
+  if (request && request.status !== "open" && !pendingMessage) return;
   if (!$("#message-input").value.trim()) return;
   const hadPending = Boolean(pendingMessage);
   try {
@@ -4526,8 +4720,8 @@ function submitRequest(form) {
 // Widen the root-timeline window so the message with this id is rendered.
 function expandTimelineTo(id) {
   if (currentThreadId) return;
-  const view = `room:${activeChannelId}`;
-  const roots = conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const view = conversationViewKey();
+  const roots = visibleConversationMessages();
   const current = timelineWindow.get(view) ?? TIMELINE_WINDOW, next = windowToInclude(roots, id, current);
   if (next > current) {
     timelineWindow.set(view, next);
@@ -4536,9 +4730,15 @@ function expandTimelineTo(id) {
   }
 }
 $("#message-list").addEventListener("click", e => {
+  if (e.target.closest("[data-direct-retry]")) { void directWindow.retry(); return; }
   if (e.target.closest("[data-timeline-earlier]")) {
+    if (activeDirectMemberId) {
+      timelineRevealing = true;
+      if (directWindow.view().error) void directWindow.retry(); else void directWindow.older();
+      return;
+    }
     if (client.loadHistory()) return; // older history first; it renders on arrival
-    const view = `room:${activeChannelId}`;
+    const view = conversationViewKey();
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
     renderMessages();
@@ -4721,7 +4921,18 @@ function applyMentionMember(member) {
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 $("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
+$("#message-to-select").addEventListener("change", () => {
+  choosingComposerRecipient = false;
+  saveComposer(); syncRequestComposer(); syncComposerChrome();
+  $("#message-input").focus();
+});
+$("#message-to-select").addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !choosingComposerRecipient) return;
+  event.preventDefault(); event.stopPropagation();
+  choosingComposerRecipient = false;
+  syncComposerChrome();
+  $("#message-input").focus();
+});
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -5265,7 +5476,7 @@ for (const scroller of [$("#message-list"), window]) {
     if (!readerScrolling()) return;
     noteReaderScroll();
     // Lazy history: reading up toward the oldest held message loads the rest.
-    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
+    if (!activeDirectMemberId && client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
@@ -6188,6 +6399,14 @@ document.addEventListener("click", async e => {
     button.disabled = false;
   }
 });
+function resumeConfirmedWorkNavigation() {
+  const pending = confirmedWorkNavigation;
+  if (!pending) return;
+  if (!pending.current()) { confirmedWorkNavigation = null; return; }
+  if (busy || !Object.hasOwn(state?.workItems ?? {}, pending.id)) return;
+  confirmedWorkNavigation = null;
+  navigateWorkRecord("work", pending.id);
+}
 function sendWorkProposal() {
   if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
@@ -6195,7 +6414,11 @@ function sendWorkProposal() {
   if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit($("#new-work-form"), async current => {
+  const navigationEpoch = workNavigationEpoch, originUrl = location.href;
+  const originThread = currentThreadId, originChannel = activeChannelId;
+  const operationId = submitOperationId + 1;
+  let completedFormEpoch = null;
+  void submit($("#new-work-form"), async current => {
     try {
       const receipt = await client.send(entry.command);
       if (!current() || !sameSession(generation, roomId, memberId)) return;
@@ -6206,8 +6429,21 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
-  }, { failureHint: "Your work proposal was kept; try again." });
+    closeWorkForm();
+    completedFormEpoch = workFormEpoch;
+    notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+  }, { failureHint: "Your work proposal was kept; try again." }).then(() => {
+    // submit releases busy before navigation. An exact receipt is required;
+    // a late save must not move a replacement session or a newer destination.
+    if (completedFormEpoch === null) return;
+    // A confirmed command can outlive a failed refresh. Reuse the client's
+    // recovery snapshots, retaining only this destination intent, never a write.
+    confirmedWorkNavigation = { id: entry.command.data.workItemId, current: () =>
+      completedFormEpoch === workFormEpoch && operationId === submitOperationId
+      && sameSession(generation, roomId, memberId) && navigationEpoch === workNavigationEpoch
+      && location.href === originUrl && currentThreadId === originThread && activeChannelId === originChannel };
+    resumeConfirmedWorkNavigation();
+  });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
@@ -6306,6 +6542,8 @@ function openCatchUp() {
 function selectWorkView(view) {
   if (view !== "results") return;
   if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#main").classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#search-form").hidden = false;
   $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
   $("#message-search").value = "has:result";
@@ -6894,6 +7132,15 @@ let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
 let horizonAdvanceTimer = null;
+let horizonOperations = new Map();
+function nextHorizonOperation(key) {
+  const revision = (horizonOperations.get(key) ?? 0) + 1;
+  horizonOperations.set(key, revision); return revision;
+}
+function readPositionScope() {
+  const threadId = currentThreadId ?? "", peerMemberId = currentThreadId ? null : activeDirectMemberId;
+  return { threadId, peerMemberId, cacheKey: peerMemberId ? directDraftKey(peerMemberId) : threadId };
+}
 function nearBottomOfList() {
   const list = $("#message-list");
   if (!list || !state) return false;
@@ -6905,18 +7152,25 @@ function scheduleHorizonAdvance() {
   // scrolls. Only fires while the user holds the bottom of the view, so an
   // explicit Mark unread never gets wiped without a scroll.
   clearTimeout(horizonAdvanceTimer);
-  horizonAdvanceTimer = setTimeout(() => { horizonAdvanceTimer = null; void advanceHorizon(); }, 1500);
+  const generation = client.generation, view = conversationViewKey();
+  horizonAdvanceTimer = setTimeout(() => {
+    horizonAdvanceTimer = null;
+    if (generation === client.generation && view === conversationViewKey()) void advanceHorizon();
+  }, 1500);
 }
 async function advanceHorizon() {
   if (!state || !session || !client.session || !nearBottomOfList()) return;
-  const threadKey = currentThreadId ?? "";
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const latest = messages.length ? messages[messages.length - 1].id : null;
-  if (!latest || horizonCache.get(threadKey) === latest) return;
+  if (!latest || horizonCache.get(cacheKey) === latest) return;
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    await client.setReadHorizon(threadKey, latest);
-    if (!state) return;
-    horizonCache.set(threadKey, latest);
+    const receipt = await client.setReadHorizon(threadId, latest, peerMemberId);
+    if (!receipt || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
+    horizonCache.set(cacheKey, latest);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = null; // everything in view is read; the divider clears
     renderMessages();
   } catch { /* best-effort; the next scroll retries */ }
@@ -6929,7 +7183,7 @@ function resetAttention() {
   $("#later-list").replaceChildren(); delete $("#later-list")._content;
   setText("#later-status", "");
   savedMessageIds = new Set(); savedIdsBusy = false;
-  horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null;
+  horizonAnchorId = null; horizonCache = new Map(); horizonOperations = new Map(); lastHorizonView = null;
   clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
   for (const dialog of ["#later-dialog"]) { const node = $(dialog); if (node?.open) node.close(); }
 }
@@ -6989,29 +7243,40 @@ async function applyHorizonAnchor() {
   // Room-level horizon ("" thread) anchors the "New messages" divider on room
   // open and after mark-unread; the thread view anchors on its own horizon.
   if (!state || !session) return;
-  const threadKey = currentThreadId ?? "";
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    const horizon = await client.readHorizon(threadKey);
+    const horizon = await client.readHorizon(threadId, peerMemberId);
+    if (!horizon || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
     const lastRead = horizon?.lastReadMessageId ?? null;
-    horizonCache.set(threadKey, lastRead);
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+    horizonCache.set(cacheKey, lastRead);
+    if (view !== conversationViewKey()) return;
+    const messages = visibleConversationMessages();
     horizonAnchorId = horizonAnchorFor(messages, lastRead);
-  } catch { horizonAnchorId = null; }
-  if (state) renderMessages();
+  } catch { if (generation !== client.generation || view !== conversationViewKey() || horizonOperations.get(cacheKey) !== operation) return; horizonAnchorId = null; }
+  if (state && generation === client.generation && view === conversationViewKey()) renderMessages();
 }
 async function markMessageUnread(messageId) {
   if (!state || !session || !conversation.byId.has(messageId)) return;
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const index = messages.findIndex(m => m.id === messageId);
   if (index < 0) { notice("That message isn't in this view.", true); return; }
   const previous = index > 0 ? messages[index - 1].id : null;
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    await client.setReadHorizon(currentThreadId ?? "", previous);
-    horizonCache.set(currentThreadId ?? "", previous);
+    const receipt = await client.setReadHorizon(threadId, previous, peerMemberId);
+    if (!receipt || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
+    horizonCache.set(cacheKey, previous);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = messageId;
     renderMessages();
     notice(index === 0 ? "Marked everything unread." : "Marked unread from here.");
   } catch (error) {
+    if (generation !== client.generation || view !== conversationViewKey() || horizonOperations.get(cacheKey) !== operation) return;
     notice(`Couldn't mark unread: ${error.message}`, true);
   }
 }
@@ -7885,6 +8150,20 @@ const ready = (async () => {
     if (initialGoogleFailed) setFormStatus($("#join-link-status"), googleSigninFailureMessage, true);
     return;
   }
+  const googleReturned = new URLSearchParams(location.search).get("google") === "signed-in";
+  if (googleReturned) {
+    // This marker is navigation intent, never authentication. Restore the
+    // current account before using its remembered destination; server room
+    // restoration still checks membership for every target.
+    const account = await ensureAccountSession();
+    const explicitRoom = consumeGoogleRoom();
+    const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
+    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const next = new URL(location.href);
+    next.searchParams.delete("google");
+    if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }
+    history.replaceState(history.state, "", next.pathname + next.search + next.hash);
+  }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
@@ -7893,7 +8172,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation()) {
+    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
       try {
         const joined = await client.restore();
         if (joined?.roomId === requestedRoom) return;

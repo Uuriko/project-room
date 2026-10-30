@@ -297,7 +297,9 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (intent.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
       const reviewed = { ...intent, ...(intent.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in intent ? { expectedAttemptId: run.attemptId || null } : {}) };
       operation = { ...(original.action === 'submit' ? { ...original, intent: reviewed } : reviewed), requestId: crypto.randomUUID() }; rejectedOperation = null; projection = latest; persistOperation();
+      const reviewHadFocus = document.activeElement === $('#assistant-review');
       error = uiText("human.copy.016"); paint();
+      if (reviewHadFocus) $('#assistant-retry').focus({ preventScroll: true });
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };
   $('#assistant-runs').onclick = async event => {
@@ -376,7 +378,6 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
       section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active;
       if (active) {
-        for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
       if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
