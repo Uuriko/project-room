@@ -36,6 +36,8 @@ import {
   handlePrWebhookPayload,
   discoverUnlinkedPulls,
   linkDeployToSettledClaims,
+  recordWebhookDelivery,
+  webhookDeliveryStale,
   prWebhookEnabled,
   PR_WEBHOOK_FLAG,
   PR_WEBHOOK_SECRET_ENV,
@@ -410,4 +412,92 @@ test("POST /api/github/pr-webhook: a signed delivery auto-links; a bad signature
   await assert.rejects(postPrWebhook(bad), error => error.status === 401);
   // the response carries no PR body: claim id, PR number and state only
   assert.deepEqual(Object.keys(out.value).sort(), ["action", "event", "linked", "ok", "settled"]);
+});
+
+// --- 7. issue #4063: superseded matches, repo-case freshness, system actor --
+
+test("findClaimForPull: a superseded match is skipped and the next candidate is tried", () => {
+  const claims = [
+    { id: "lane-old", roomId: "commons", state: "claimed", owner: "owner", repo: REPO, supersededBy: "lane-new" },
+    { id: "lane-new", roomId: "commons", state: "claimed", owner: "owner", repo: REPO },
+  ];
+  // the branch names the superseded claim; the title names its live successor
+  const hit = findClaimForPull({ branch: "lane-old", title: "lane-new takes over", body: "", repo: REPO }, claims);
+  assert.equal(hit.claim.id, "lane-new");
+  assert.equal(hit.source, "title");
+  // a PR whose only match is superseded links nothing
+  assert.equal(findClaimForPull({ branch: "lane-old", title: "", body: "", repo: REPO }, claims), null);
+});
+
+test("handlePrWebhookPayload: a superseded claim does not eat the link; the live successor links", async t => {
+  const make = makeRoom(t);
+  await liveClaim(make, "lane-eaten");
+  await liveClaim(make, "lane-successor");
+  const old = make.store.workClaims.get(make.roomId, "lane-eaten");
+  make.store.workClaims.set(make.roomId, { ...old, supersededBy: "lane-successor" });
+  const out = handlePrWebhookPayload(make.store,
+    prPayload({ pull_request: { head: { ref: "lane-eaten" }, title: "lane-successor takes over" } }), {});
+  assert.equal(out.ok, true);
+  assert.equal(out.linked.claimId, "lane-successor");
+  assert.equal(make.store.workClaims.get(make.roomId, "lane-eaten").pullRequests.length, 0);
+  assert.equal(make.store.workClaims.get(make.roomId, "lane-successor").pullRequest.url, URL_A);
+});
+
+test("webhook journal: a delivery recorded under one repo casing reads fresh under another", async t => {
+  const make = makeRoom(t);
+  const now = 1_700_000_000_000;
+  assert.equal(recordWebhookDelivery(make.store, "Uuriko/Project-Room", now), true);
+  assert.equal(webhookDeliveryStale(make.store, "uuriko/project-room", now + 60_000), false);
+  assert.equal(webhookDeliveryStale(make.store, REPO, now + 60_000), false);
+  // an old delivery is still stale under any casing
+  assert.equal(webhookDeliveryStale(make.store, REPO, now + 25 * 60 * 60_000), true);
+});
+
+test("discoverUnlinkedPulls: a delivery under the payload casing skips a claim repo declared in another casing", async t => {
+  const make = makeRoom(t);
+  await liveClaim(make, "lane-case", { create: { repo: "Uuriko/Project-Room" } });
+  // the webhook delivery arrives with GitHub's casing for the same repo and
+  // names no claim; the delivery journal entry is still recorded
+  handlePrWebhookPayload(make.store,
+    prPayload({ pull_request: { html_url: URL_B, head: { ref: "ghost" }, title: "ghost", body: "" } }), {});
+  const seen = [];
+  const out = await discoverUnlinkedPulls(make.store, {
+    fetchImpl: pullsFetch([], seen), token: "tok", nowMs: 1_700_000_000_000,
+  });
+  assert.equal(seen.length, 0);
+  assert.equal(out.linked.length, 0);
+});
+
+function addSystemMember(make) {
+  const key = make.store.issueAccessKey(make.roomId, "owner");
+  make.store.command(key, make.roomId, { id: "add-system-actor", type: "member.added",
+    data: { memberId: "system", displayName: "Room System", kind: "agent", permissions: [] } });
+}
+
+test("autoLinkPullRequest: the room event is attributed to the system actor, not the claim owner", async t => {
+  const make = makeRoom(t);
+  addSystemMember(make);
+  await liveClaim(make, "lane-actor");
+  const out = autoLinkPullRequest(make.store, make.roomId, "lane-actor",
+    { url: URL_A, source: "branch" }, { nowMs: 1_700_000_000_000 });
+  assert.equal(out.linked, true);
+  const events = claimEvents(make.store, make.roomId);
+  assert.equal(events.at(-1).actorId, "system");
+  // the claim itself still belongs to the owner; only the actor changes
+  assert.equal(events.at(-1).data.ownerId, "owner");
+  assert.equal(make.store.workClaims.get(make.roomId, "lane-actor").history.at(-1).agentId, "system");
+});
+
+test("linkDeployToSettledClaims: the deploy-link event is attributed to the system actor", async t => {
+  const make = makeRoom(t);
+  addSystemMember(make);
+  await liveClaim(make, "lane-land-actor", { create: { kind: "land" } });
+  const rev = "d".repeat(40);
+  const item0 = make.store.workClaims.get(make.roomId, "lane-land-actor");
+  make.store.workClaims.set(make.roomId, { ...item0, state: "done", revision: rev });
+  const out = linkDeployToSettledClaims(make.store, { revision: rev, nowMs: 1_700_000_000_000 });
+  assert.equal(out.linked, 1);
+  const events = claimEvents(make.store, make.roomId);
+  assert.equal(events.at(-1).actorId, "system");
+  assert.equal(events.at(-1).data.ownerId, "owner");
 });
