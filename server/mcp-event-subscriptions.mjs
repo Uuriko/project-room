@@ -46,8 +46,8 @@ function subscriptionIdentity(principal, name, args, delivery) {
   return { id: `sub_${hash(JSON.stringify([key, url.href, name, canonicalArgs]))}`, url, canonicalArgs };
 }
 
-export function createMcpEventSubscriptions({ store, authorize, transport, dnsResolvers, now = () => store.now(), ttlMs = HOUR }) {
-  if (typeof authorize !== "function" || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 24 * HOUR) throw new TypeError("Invalid event configuration");
+export function createMcpEventSubscriptions({ store, authorize, authorizeEvent = () => true, transport, dnsResolvers, now = () => store.now(), ttlMs = HOUR }) {
+  if (typeof authorize !== "function" || typeof authorizeEvent !== "function" || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 24 * HOUR) throw new TypeError("Invalid event configuration");
   const db = store.db;
   db.exec(mcpEventSubscriptionsSchema);
   const sweep = () => {
@@ -107,11 +107,11 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
     return {};
   }
   // Call inside the same transaction that commits the durable Room wake signal.
-  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, timestamp = new Date(now()).toISOString() }) {
+  function enqueueRequested({ roomId, memberId, requestId, messageId, eventId, context, timestamp = new Date(now()).toISOString() }) {
     const data = { roomId: thinId(roomId), memberId: thinId(memberId) };
     if (requestId !== undefined) data.requestId = thinId(requestId);
     if (messageId !== undefined) data.messageId = thinId(messageId);
-    const event = { eventId: thinId(eventId), name: "room.requested", timestamp, data, cursor: null };
+    const event = { eventId: thinId(eventId), name: "room.requested", timestamp, data, cursor: null, ...(context ? { _roomPolicy: context } : {}) };
     if (!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp) || !Number.isFinite(Date.parse(timestamp))) fail("Invalid event time");
     let queued = 0;
     for (const row of db.prepare("SELECT * FROM mcp_event_subscriptions WHERE state='active' AND expires_at>?").all(now())) {
@@ -138,13 +138,15 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
       });
       if (!job) break;
       const row = get(job.subscription_id);
+      const { _roomPolicy: context, ...event } = JSON.parse(job.document);
+      const policyAllowed = () => authorizeEvent(JSON.parse(row.principal), { event, context });
       let result;
       try {
-        result = !await live(row) ? { classification: "revoked" } : await deliverMcpEvent({
-          subscription: JSON.parse(row.document), event: JSON.parse(job.document), transport, dnsResolvers, now: now(),
+        result = !await live(row) || !await policyAllowed() ? { classification: "revoked" } : await deliverMcpEvent({
+          subscription: JSON.parse(row.document), event, transport, dnsResolvers, now: now(),
           authorize: async () => {
             const current = get(row.id);
-            if (current?.generation !== row.generation || !await live(current)) return false;
+            if (current?.generation !== row.generation || !await live(current) || !await policyAllowed()) return false;
             // A paused worker must not send after another worker reclaimed its lease.
             const lease = db.prepare("SELECT lease,lease_until,state FROM mcp_event_outbox WHERE subscription_id=? AND event_id=?").get(job.subscription_id, job.event_id);
             return lease?.state === "leased" && lease.lease === job.lease && lease.lease_until > now();

@@ -114,3 +114,12 @@ test("callback ownership cache is bounded, persistent, and invalidated by key ro
   await x.manager.subscribe({ ...input, delivery: { ...input.delivery, secret: `whsec_${Buffer.alloc(32, 8).toString("base64")}` } });
   assert.equal(x.verified(), 3);
 });
+
+test("event policy is rechecked after DNS resolution immediately before sending", async t => {
+  const x = setup(t); let allowed = true;
+  const manager = createMcpEventSubscriptions({ ...x.options, authorizeEvent: () => allowed });
+  await manager.subscribe(input); manager.enqueueRequested({ ...event, context: { actorId: "owner", kind: "mention" } });
+  x.options.dnsResolvers.lookup = async () => { allowed = false; return [{ address: "8.8.8.8", family: 4 }]; };
+  await manager.drain(); assert.equal(x.seen.length, 0);
+  assert.equal(x.db.prepare("SELECT state FROM mcp_event_outbox").get().state, "dead");
+});

@@ -6821,7 +6821,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
         this.enqueueNativeMcpEvent?.({ roomId, identityId: incoming.data.toIdentityId,
-          messageId: incoming.data.messageId ?? incoming.id, eventId: incoming.id });
+          messageId: incoming.data.messageId ?? incoming.id, eventId: incoming.id, actorId: auth.member.id, kind: "dm" });
         const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
@@ -7105,7 +7105,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, eventId });
+      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, eventId, actorId: senderMemberId, kind });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {

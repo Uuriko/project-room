@@ -1,3 +1,4 @@
+import { writeTalkPolicy } from '../server/agent-talk-policy.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -61,7 +62,7 @@ test('authenticated modern Events subscribe -> atomic permitted wake -> signed c
   assert.equal((await f.rpc('events/list')).status, 401);
 });
 test('native work assignment needs no desktop host registration and unsubscribe stops delivery', async t => {
-  const f = await fixture(t); const sub = await f.subscribe();
+  const f = await fixture(t); const sub = await f.subscribe(); assert.ok(sub.result.id);
   assert.equal(f.store.agentHeartbeats.statusOf(f.grant.identity_id).hosts.length, 0);
   f.store.command(f.owner, 'commons', { id: 'native-assign', type: 'work.proposed', data: { workItemId: 'native-task', title: 'Review the plan', definitionOfDone: 'A concrete review', accountableMemberId: f.grant.member_id, mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
@@ -84,4 +85,22 @@ test('official pinned modern client uses invitation OAuth for attributed Room to
   const posted = await nativeClient.callTool({ name: 'room_post_message', arguments: { id: 'sdk-native-post', body: 'Native SDK connected as my own agent.' } });
   assert.notEqual(posted.isError, true, JSON.stringify(posted));
   assert.equal(f.store.room('commons').state.messages.at(-1).authorId, f.grant.member_id);
+});
+
+test('queued native wake rechecks talk policy; private policy metadata never reaches webhook', async t => {
+  const f = await fixture(t); await f.subscribe(); f.mention('policy-before-delivery');
+  const row = f.store.db.prepare('SELECT document FROM mcp_event_outbox').get();
+  assert.equal(JSON.parse(row.document)._roomPolicy.actorId, 'owner');
+  writeTalkPolicy(f.store.db, f.store.room('commons').state, { roomId: 'commons', actorId: 'owner', memberId: f.grant.member_id, policy: 'nobody' }, Date.now(), (...args) => { throw new Error(args.join(' ')); });
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 0);
+  writeTalkPolicy(f.store.db, f.store.room('commons').state, { roomId: 'commons', actorId: 'owner', memberId: f.grant.member_id, policy: 'room' }, Date.now(), (...args) => { throw new Error(args.join(' ')); });
+  f.mention('policy-restored'); await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  assert.ok(!f.deliveries[0].body.includes('_roomPolicy')); assert.ok(!f.deliveries[0].body.includes('actorId'));
+});
+test('pause blocks pending native deliveries but never prevents unsubscribe', async t => {
+  const f = await fixture(t); const sub = await f.subscribe(); f.mention('before-pause');
+  f.store.wakeQueue.pause(f.owner, 'commons', { requestId: 'pause-native-agent', reason: 'Stop for now' }, null, { memberId: f.grant.member_id });
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 0);
+  assert.equal((await f.rpc('events/unsubscribe', { id: sub.result.id })).result.resultType, 'complete');
+  assert.equal(f.store.db.prepare('SELECT state FROM mcp_event_subscriptions').get().state, 'inactive');
 });
