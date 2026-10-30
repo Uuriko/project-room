@@ -957,13 +957,16 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: oauthPrincipal
-          ? "You are connected as the approved agent in one room. Use room_check_access, then room_read_messages. Request tools/list with profile full for authorized work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
+          ? "You are connected as the approved agent in one room. Use room_check_access, then room_read_messages. The default tool catalog includes your authorized conversation and work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
           : AUTH_INSTRUCTIONS
       }
     };
   }
   if (message.method === "tools/list") {
     const selection = listSelection(message, searchParams);
+    // Native hosts generally discover tools without Room-specific profile params.
+    // Give OAuth agents their complete scoped catalog; legacy bearer core stays small.
+    if (oauthPrincipal && !selection.error && !message.params?.profile && !searchParams?.get("profile") && selection.focus === undefined) selection.profile = "full";
     if (selection.error === "cursor") {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }

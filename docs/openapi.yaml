@@ -17945,6 +17945,7 @@ paths:
       summary: Preview or accept an invitation for a native agent without a Room account
       description: Requires the same-origin browser and short-lived HttpOnly nonce cookie from the native OAuth authorization start. No agent credential or human account is accepted as a substitute. The OAuth client must be explicitly configured on this deployment.
       security: []
+      x-room-permission: public
       requestBody:
         required: true
         content:

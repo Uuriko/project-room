@@ -102,6 +102,8 @@ const PROBES = {
   "POST /mcp": [{}, 200],
   "GET /room/mcp": [undefined, 200],
   "POST /room/mcp": [{}, 200],
+  // Native connection is disabled when no deployment OAuth client is configured.
+  "POST /oauth/invite": [{}, 404],
   "POST /a2a": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],

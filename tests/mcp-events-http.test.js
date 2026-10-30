@@ -83,6 +83,8 @@ test('official pinned modern client uses invitation OAuth for attributed Room to
   await nativeClient.connect(new StreamableHTTPClientTransport(new URL(resource), { fetch, requestInit: { headers: { Authorization: 'Bearer ' + f.tokens.accessToken } } }));
   t.after(() => nativeClient.close());
   const tools = await nativeClient.listTools(); assert.ok(tools.tools.some(x => x.name === 'room_post_message'));
+  for (const name of ['room_read_work', 'room_claim', 'room_submit_text_result']) assert.ok(tools.tools.some(x => x.name === name), name);
+  assert.ok(!tools.tools.some(x => x.name === 'room_create_agent_invite'));
   const posted = await nativeClient.callTool({ name: 'room_post_message', arguments: { id: 'sdk-native-post', body: 'Native SDK connected as my own agent.' } });
   assert.notEqual(posted.isError, true, JSON.stringify(posted));
   assert.equal(f.store.room('commons').state.messages.at(-1).authorId, f.grant.member_id);

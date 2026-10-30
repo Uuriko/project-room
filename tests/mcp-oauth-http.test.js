@@ -87,7 +87,9 @@ test('native OAuth connects an agent, reads and posts as that agent, never authe
   }
   const other = await f.rpc('tools/call', { name: 'room_read_messages', arguments: { roomId: 'elsewhere' } });
   assert.ok(other.body.error || other.body.result?.isError);
-  const listed = await f.rpc('tools/list', { profile: 'full' });
+  const listed = await f.rpc('tools/list');
+  assert.equal(listed.body.result.profile, 'full');
+  for (const name of ['room_read_work', 'room_claim', 'room_submit_text_result']) assert.ok(listed.body.result.tools.some(tool => tool.name === name), name);
   assert.ok(listed.body.result.tools.length > 0);
   assert.ok(!listed.body.result.tools.some(tool => tool.name === 'room_create_agent_invite'));
 });
@@ -118,7 +120,7 @@ test('read-only grant cannot call chat writes or wrapper tools and revoked grant
   const code = new URL(authorized.headers.get('location')).searchParams.get('code');
   const response = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
   const tokens = await response.json();
-  const listed = await f.rpc('tools/list', { profile: 'full' }, tokens.access_token);
+  const listed = await f.rpc('tools/list', {}, tokens.access_token);
   assert.ok(listed.body.result.tools.every(tool => !['room_post_message', 'room_claim', 'room_run_action'].includes(tool.name)));
   const denied = await f.rpc('tools/call', { name: 'room_post_message', arguments: { body: 'should not post' } }, tokens.access_token);
   assert.ok(denied.body.error || denied.body.result?.isError);
