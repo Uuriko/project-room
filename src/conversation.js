@@ -125,7 +125,7 @@ export function queuedNote(member, presence) {
   const n = Number(member?.queuedWakes);
   if (member?.kind !== "agent" || !Number.isSafeInteger(n) || n <= 0) return "";
   if (presence === "listening" || presence === "working") return "";
-  return `${n} queued until it reconnects`;
+  return uiText("people.queued_until_reconnect", { count: n });
 }
 
 // Presence is derived from room work + recent chat. No extra people-data store.
