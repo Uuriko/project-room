@@ -42,7 +42,7 @@ keys are rejected, as with every other inbox contract.
   multi-channel support; `provider` and `mailbox_id` hold the generic
   `provider`/`externalId`, and `channel` lives in `data_json`. No schema bump.
 - Webhook journal: verified provider updates are rows of
-  `pending_channel_updates` (`server/channel-journal.mjs`, `store.channelUpdates`),
+  `pending_channel_updates` (`server/journal.mjs`, `store.channelUpdates`),
   keyed by (account, connection, provider `update_id`) with `received_at`, the
   raw `payload`, `status` pending / imported / failed, `attempts` and
   `last_error`. The table is purely additive at schema 27, exactly like
@@ -372,7 +372,7 @@ into, and neither touches login/auth.
   import path files to `SpamQuarantineJournal` instead (durable); this queue
   remains as the pure in-memory reference. Auto-quarantine policy itself is
   John's call (task 33); the guard ships flag-only by default.
-- `SpamQuarantineJournal` (`server/spam-quarantine-journal.mjs`, on
+- `SpamQuarantineJournal` (`server/journal.mjs`, on
   `store.spamQuarantine`) — the durable backing for the quarantine queue: a
   `spam_quarantine` table (additive, unfenced, `IF NOT EXISTS`) holding
   `held → released | dismissed` records with the flag's signal list as the
@@ -497,7 +497,7 @@ once that file is next edited).
    which verifies the secret in constant time and holds the update; the card
    shows "Last update received". Press **Reconnect** (or call the trigger) to
    import it. Accepted updates are journaled durably in `pending_channel_updates`
-   (`server/channel-journal.mjs`); the server must be started with a
+   (`server/journal.mjs`); the server must be started with a
    `ChannelWebhookInbox`, which `cloudflare/room.mjs` does.
 
 ### Email setup (fixture today; #144 merged the parser, routing still pending)
