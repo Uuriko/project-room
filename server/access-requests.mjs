@@ -775,6 +775,12 @@ export class AccessRequests {
           .run(now, auth.member.id, note?.trim() || null, requestId);
         return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
       }
+      // Issue #3378: the plain-approve path validates the decider's note
+      // exactly as deny does, before any grant side effect — an unusable
+      // note fails the decision instead of being silently discarded.
+      if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
+        fail(422, "invalid_request", "note must be text of at most 500 characters");
+      }
       // Approve: the owner chooses the final permissions (never more than
       // the agent asked for is not enforced — the owner is sovereign — but
       // the request records what was asked).
@@ -829,8 +835,8 @@ export class AccessRequests {
       // #2912), so the flip must land first for that exemption to fire.
       // Flip and link stay inside this one transaction — the pair is
       // still atomic, and a failed link rolls the approval back too.
-      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
-        .run(now, auth.member.id, requestId);
+      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
+        .run(now, auth.member.id, note?.trim() || null, requestId);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
