@@ -126,3 +126,41 @@ test("one-time approval wins when persistent approval is also offered", async ()
   const result = await broker.request({ ...request(), options: [{ kind: "allow_always", optionId: "persistent" }, ...options] });
   assert.equal(choice(result), "allow");
 });
+
+
+test("persistent-only denial cancels rather than changing host policy", async () => {
+  const { broker } = fixture({ thread: id => ({ thread: { replies: [{ authorId: "owner", replyToId: id, body: "deny" }] } }) });
+  const result = await broker.request({ ...request(), options: [options[0], { kind: "reject_always", optionId: "persistent-deny" }] });
+  assert.deepEqual(result, { outcome: { outcome: "cancelled" } });
+});
+
+test("failed approval receipt fails closed instead of silently granting", async () => {
+  const { broker } = fixture({
+    thread: id => ({ thread: { replies: [{ authorId: "owner", replyToId: id, body: "allow" }] } }),
+    post: data => { if (data.body.startsWith("Approval received:")) throw new Error("offline"); },
+  });
+  assert.equal(choice(await broker.request(request())), "deny");
+});
+
+test("latest owner correction in the same poll snapshot wins", async () => {
+  const { broker } = fixture({ thread: id => ({ thread: { replies: [
+    { authorId: "owner", replyToId: id, body: "allow" },
+    { authorId: "owner", replyToId: id, body: "deny" },
+  ] } }) });
+  assert.equal(choice(await broker.request(request())), "deny");
+});
+
+test("failed abort correction leaves a conditional receipt and logs failure", async () => {
+  const controller = new AbortController(), logs = [];
+  const { broker, posts } = fixture({
+    thread: id => ({ thread: { replies: [{ authorId: "owner", replyToId: id, body: "allow" }] } }),
+    post: data => {
+      if (data.body.startsWith("Approval received:")) controller.abort();
+      if (data.body.startsWith("Denied:")) throw new Error("offline correction");
+    },
+  });
+  broker.log = line => logs.push(line);
+  assert.equal(choice(await broker.request(request(), controller.signal)), "deny");
+  assert.match(posts.find(p => p.body.startsWith("Approval received:")).body, /only to this request if it is still active; this is not an execution receipt/);
+  assert.ok(logs.some(line => line.includes("denial receipt failed")));
+});

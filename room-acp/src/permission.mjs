@@ -26,7 +26,7 @@ export class PermissionBroker {
   isPending(threadKey) { return this.pending.has(threadKey) || this.askThreads.has(threadKey); }
 
   async request({ threadKey, toolCall, options }, signal) {
-    const deny = pick(options, ["reject_once", "reject_always"]);
+    const deny = pick(options, ["reject_once"]);
     // A plain Room "allow" authorizes this request only, never a persistent
     // host grant. Persistent choices require a separate explicit consent UI.
     const allow = pick(options, ["allow_once"]);
@@ -59,17 +59,18 @@ export class PermissionBroker {
         const thread = (await this.room.thread(askThread)).thread;
         if (signal?.aborted || Date.now() - askedAt >= this.timeoutMs) break;
         const replies = thread.replies ?? [];
-        for (const reply of replies) {
-          // A generic "allow" elsewhere in the work conversation, or a late
+        for (const reply of [...replies].reverse()) {
+          // Use the latest decision in this ordered snapshot so an immediate
+          // correction wins. A generic "allow" elsewhere in the work conversation, or a late
           // answer to a previous ask, is never authority for this action.
           if (reply.authorId !== this.approverId || reply.replyToId !== messageId) continue;
           const decision = decisionOf(reply.body);
           if (decision) {
             // A receipt records the owner's answer, not a promise that the
             // permission was forwarded or that the tool actually executed.
-            await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Approval received: ${title}` : `Denied: ${title}` }).catch(() => {});
+            await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Approval received: ${title}. Applies only to this request if it is still active; this is not an execution receipt.` : `Denied: ${title}` });
             if (decision === "allow" && (signal?.aborted || Date.now() - askedAt >= this.timeoutMs)) {
-              await this.room.post({ replyToId: askThread, body: `Denied: ${title}. The permission request ended before approval could be forwarded.` }).catch(() => {});
+              await this.room.post({ replyToId: askThread, body: `Denied: ${title}. The permission request ended before approval could be forwarded.` }).catch(error => this.log(`permission denial receipt failed: ${error.message}`));
               return outcome(deny);
             }
             return outcome(decision === "allow" ? allow : deny);
