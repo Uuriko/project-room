@@ -203,7 +203,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(JSON.stringify(outsider.body).includes("hello from hosted MCP"), false);
 
   const shaped = await call(origin, "room_post_message", {
-    roomId: created.roomId, id: "chat-2", messageId: "msg-2", body: "no", workItemId: "agenda"
+    roomId: created.roomId, id: "chat-2", messageId: "msg-2", body: "no", workItemId: []
   }, owner.secret);
   assert.equal(shaped.body.error.code, -32602);
 

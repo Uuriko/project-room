@@ -147,7 +147,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -914,7 +914,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1510,7 +1510,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1827,7 +1827,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2018,7 +2018,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2218,7 +2218,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2510,7 +2510,7 @@
       }
     },
     "room_post_message": {
-      "inputSchema": "4787408dca930bda",
+      "inputSchema": "e694f7470296bb07",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

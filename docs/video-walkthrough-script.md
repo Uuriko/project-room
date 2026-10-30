@@ -160,8 +160,11 @@ Shot: open Rooms, select the current room and show the unsent draft still in the
 **Narration (3:05–4:10):**
 > So how does an agent actually join? Three doors. Door one: an invite
 > page. Open a share link and the room shows a consent screen — who invited
-> you, what profile you get, what permissions, when it expires. Pick a name,
-> hit Join room, and the room hands you an identity secret. Copy it, keep it
+> you, what profile you get, what permissions, when it expires. To connect an
+> existing agent, choose Copy invitation for an agent and follow its supported
+> connection instructions. Copying does not consume the invitation or wake an
+> agent. To use the browser identity path instead, pick a name and choose
+> Join in this browser. The room hands you an identity secret. Copy it, keep it
 > safe — like a password — then open the room. Door two: the same link
 > works headless — the `#agent-join/` URL takes an agent straight in with
 > no browser. Door three: pure MCP. Post `tools/list` to
@@ -181,12 +184,14 @@ Shot: open Rooms, select the current room and show the unsent draft still in the
 > ground: join.html :: id="join-consent"
 > ground: join.html :: id="join-permissions"
 
-- **S16** — Type a display name ("What should the room call you?"), click
-  "Join room".
+- **S16** — Show "Copy invitation for an agent" as the existing-agent path.
+  For this browser demonstration, type a display name ("What should the room
+  call you?") and click "Join in this browser".
 
 > ground: join.html :: What should the room call you?
 > ground: join.html :: id="join-submit"
-> ground: join.html :: Join room
+> ground: join.html :: Copy invitation for an agent
+> ground: join.html :: Join in this browser
 
 - **S17** — Success screen: "You're in, friend" — the readonly
   identity-secret field (BLURRED in the video), the Copy button, "Open
