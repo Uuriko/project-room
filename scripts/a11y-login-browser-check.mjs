@@ -60,7 +60,9 @@ test("login/join entry points are axe-clean (serious/critical)", { timeout: 1800
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `signed-out room page @${viewport.width}px`);
+    const themeBeforeCapture = await page.locator("html").getAttribute("data-theme");
     await captureDesignEvidence(page, { id: "login", title: "First login", fixture: "local RoomStore + real invite; no external provider", testName: t.name, component: "page" });
+    assert.equal(await page.locator("html").getAttribute("data-theme"), themeBeforeCapture, "gallery restores fixture theme");
 
     // 2. Join page consent form with a live invite.
     await page.goto(`${origin}/join/${code}`);

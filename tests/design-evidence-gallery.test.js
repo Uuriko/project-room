@@ -33,5 +33,7 @@ test("gallery escapes fixture labels and keeps coverage and failure limitations 
   assert.match(html, /real-provider sign-in proof/);
   assert.match(html, /Source stable during capture: NO/);
   assert.match(html, /Overall evidence: NOT passed/);
+  assert.match(html, /explicit dark and light themes/);
+  assert.match(html, /Image framing/);
   assert.equal(JOURNEYS.length, 5);
 });

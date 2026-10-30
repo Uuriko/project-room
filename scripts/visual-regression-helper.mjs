@@ -167,17 +167,27 @@ export async function captureDesignEvidence(page, { id, title, fixture, testName
   const directory = process.env.ROOM_DESIGN_EVIDENCE_DIR;
   if (!directory) return;
   if (!/^[a-z0-9-]+$/.test(id)) throw new Error("Invalid design evidence id");
-  const viewport = page.viewportSize(), name = `${id}-${viewport.width}`;
-  await settleForScreenshot(page);
+  const viewport = page.viewportSize();
+  const originalTheme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
   const { axeSerious } = await import("./a11y-axe-helper.mjs");
-  const accessibility = await axeSerious(page);
-  const browserVersion = page.context().browser()?.version() ?? "unknown";
-  const theme = await page.evaluate(() => ({ declared: document.documentElement.getAttribute("data-theme"), colorScheme: getComputedStyle(document.documentElement).colorScheme, prefersDark: matchMedia("(prefers-color-scheme: dark)").matches, prefersContrast: matchMedia("(prefers-contrast: more)").matches }));
-  const png = await page.screenshot({ animations: "disabled", caret: "hide", fullPage: true, type: "png" });
   const { createHash } = await import("node:crypto");
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, name + ".png"), png, { flag: "wx" });
-  writeFileSync(join(directory, name + ".json"), JSON.stringify({ id: name, title, fixture, testName, component,
-    viewport, screenshot: name + ".png", sha256: createHash("sha256").update(png).digest("hex"),
-    accessibility, browserVersion, theme, capturedAt: new Date().toISOString() }, null, 2), { flag: "wx" });
+  try {
+    for (const mode of ["dark", "light"]) {
+      await page.evaluate(value => { document.documentElement.setAttribute("data-theme", value); }, mode);
+      await settleForScreenshot(page);
+      const accessibility = await axeSerious(page);
+      const browserVersion = page.context().browser()?.version() ?? "unknown";
+      const theme = await page.evaluate(() => ({ declared: document.documentElement.getAttribute("data-theme"), colorScheme: getComputedStyle(document.documentElement).colorScheme, prefersDark: matchMedia("(prefers-color-scheme: dark)").matches, prefersContrast: matchMedia("(prefers-contrast: more)").matches }));
+      const name = `${id}-${viewport.width}-${mode}`;
+      const png = await page.screenshot({ animations: "disabled", caret: "hide", fullPage: true, type: "png" });
+      const imageDimensions = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, name + ".png"), png, { flag: "wx" });
+      writeFileSync(join(directory, name + ".json"), JSON.stringify({ id: name, title, fixture, testName, component,
+        viewport, fullPage: true, imageDimensions, screenshot: name + ".png", sha256: createHash("sha256").update(png).digest("hex"),
+        accessibility, browserVersion, theme, capturedAt: new Date().toISOString() }, null, 2), { flag: "wx" });
+    }
+  } finally {
+    await page.evaluate(value => { if (value === null) document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", value); }, originalTheme);
+  }
 }
