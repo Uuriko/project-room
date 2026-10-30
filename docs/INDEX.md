@@ -12,6 +12,7 @@ for each answer rather than copying its contents.
 | Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
 | Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
 | Verify a release | [Latest recorded release evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |
+| See what is broken or planned for cutting | [Known issues](KNOWN-ISSUES.md) | The single ledger of known bugs, cuts and simplifications, with status, owner lane and decision. |
 | Learn from prior work | [Lessons](ROOM-WIKI.md), [history](#history), [backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) | Historical evidence and unresolved requirements, not a second execution queue. |
 
 The [wiki API](WIKI-API.md) serves the repository procedures, lessons and runbooks
