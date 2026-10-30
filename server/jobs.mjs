@@ -559,12 +559,51 @@ export const JOBS = Object.freeze([
             if (Number.isInteger(failure.eventSequence) && failure.eventSequence !== block.sequence) return false;
             return true;
           };
+          // Recovery leg (regression found at re-qualification, room
+          // seq 23565): an operator repair lifts a park — the import
+          // repair deletes the room's block row and cursor — but the
+          // durable failure record stays outstanding until the rotating
+          // backfill step next visits the room and clears it (its
+          // cleanup retires records whose park is gone). The narrowed
+          // partition corroborated only via a standing block, so every
+          // tick in that window went fatal and the parked-summary
+          // recovery case ("no tick fails during recovery", passing
+          // 5/5 at pre-cure 87188ace) failed at both cured heads. The
+          // window is corroborated on positive evidence, never on the
+          // block's absence alone: the block map was read and carries
+          // NO standing block for this room (the park is lifted — a
+          // standing block is judged by the block leg above, so an
+          // unvalidated standing block cannot be bypassed here), and
+          // the record carries the threaded identity that
+          // runIntegrityBackfillStep wrote from the standing block
+          // while the park stood, and that identity still validates
+          // against a real stored event for this room at that
+          // sequence — the same join the block leg requires, applied
+          // to the record's own structured identity (never parsed
+          // from diagnostic strings). An identity-less record, an
+          // identity naming a nonexistent or wrong-sequence event, or
+          // an unreadable event log corroborates nothing: the failure
+          // stays FATAL, exactly as the empty-block specimen requires.
+          // The window is bounded by construction: the next backfill
+          // visit either clears the record (repair held) or re-parks
+          // the room under a fresh validated block (it did not).
+          const isRecoveryCorroboratedPark = failure => {
+            if (blocksByRoom === null || validatedBlocks === null) return false;
+            if (blocksByRoom.has(failure.recordId)) return false;
+            if (typeof failure.eventId !== "string" || failure.eventId === "") return false;
+            if (!Number.isInteger(failure.eventSequence)) return false;
+            try {
+              return Boolean(store.db.prepare(
+                "SELECT 1 AS found FROM events WHERE room_id=? AND id=? AND sequence=?"
+              ).get(failure.recordId, failure.eventId, failure.eventSequence));
+            } catch { return false; }
+          };
           const parked = [];
           const fatal = [];
           for (const failure of failures) {
             if (failure.step === "messages_backfill" && typeof failure.recordId === "string"
               && failure.recordId !== "" && !isLogGapPark(failure)
-              && isCorroboratedEventPark(failure)) parked.push(failure);
+              && (isCorroboratedEventPark(failure) || isRecoveryCorroboratedPark(failure))) parked.push(failure);
             else fatal.push(failure);
           }
           scanParkedCount = parked.length;
@@ -670,11 +709,21 @@ export const JOBS = Object.freeze([
             "SELECT room_id FROM messages_backfill_blocks WHERE skipped=0"
           ).all().map(row => row.room_id));
         } catch { standingBlockRooms = null; }
+        // Recovery-leg amendment (seq 23565 regression): coverage is
+        // standing ⊆ parked, not set equality. A recovery park (above)
+        // is positively corroborated yet has no standing block — its
+        // park was lifted — so the parked set may legitimately exceed
+        // the standing set by exactly those rooms. What suppression
+        // still requires is that every standing block is one of the
+        // parks the partition just rode: a standing block for a room
+        // the scan did not park (the seq 23366 shape) is never
+        // covered, and the count pin still bars duplicate records
+        // from inflating the parked set.
         const guardCoveredByScan = scanReportedFailures
           && Number(observed?.gapBlocks) === 0
           && standingBlockRooms !== null
           && scanParkedCount === scanParkedRooms.size
-          && standingBlockRooms.size === scanParkedRooms.size
+          && standingBlockRooms.size <= scanParkedRooms.size
           && [...standingBlockRooms].every(roomId => scanParkedRooms.has(roomId));
         if (blockedRooms > 0 && !summaryFailed(integrity)
           && !guardCoveredByScan) {
