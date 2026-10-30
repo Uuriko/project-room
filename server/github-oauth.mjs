@@ -63,8 +63,15 @@ export function isGitHubConfigured(env = {}) {
 // slow module load.
 const GITHUB_SIGNIN_MARKUP = /[ \t]*<a id="github-signin"[^>]*>[\s\S]*?<\/a>[ \t]*(?:\r?\n)?/;
 
-export function frontDoorHtml(html, { githubConfigured = false } = {}) {
-  const text = typeof html === "string" ? html : Buffer.from(html).toString("utf8");
+// ROOM_MVP_ONLY: mark the shell so the html[data-mvp-only] rules at the end of src/styles.css hide the panels outside
+// the MVP (needs-me, threads, Board, approvals) and pins needs-me on top.
+export function mvpOnlyEnabled(env = {}) {
+  return env.ROOM_MVP_ONLY === "1" || env.ROOM_MVP_ONLY === "true";
+}
+
+export function frontDoorHtml(html, { githubConfigured = false, mvpOnly = false } = {}) {
+  let text = typeof html === "string" ? html : Buffer.from(html).toString("utf8");
+  if (mvpOnly) text = text.replace(/<html lang="en">/, '<html lang="en" data-mvp-only>');
   if (githubConfigured) return text;
   return text.replace(GITHUB_SIGNIN_MARKUP, "");
 }

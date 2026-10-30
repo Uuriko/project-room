@@ -4,7 +4,7 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../server/public-assets.mjs';
-import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
+import { frontDoorHtml, githubConfig, mvpOnlyEnabled } from '../server/github-oauth.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
@@ -163,12 +163,15 @@ const assetEtags = new WeakMap();
 // is built once for the cached source bytes, and its etag is hashed then.
 // A fresh buffer on every request would miss this cache.
 const strippedFrontDoor = new WeakMap();
-async function frontDoorBody(bytes, githubConfigured) {
-  if (githubConfigured) return bytes;
-  let stripped = strippedFrontDoor.get(bytes);
+const mvpFrontDoor = new WeakMap();
+const mvpGithubFrontDoor = new WeakMap();
+async function frontDoorBody(bytes, githubConfigured, mvpOnly = false) {
+  if (githubConfigured && !mvpOnly) return bytes;
+  const cache = mvpOnly ? (githubConfigured ? mvpGithubFrontDoor : mvpFrontDoor) : strippedFrontDoor;
+  let stripped = cache.get(bytes);
   if (!stripped) {
-    stripped = new TextEncoder().encode(frontDoorHtml(bytes, { githubConfigured: false }));
-    strippedFrontDoor.set(bytes, stripped);
+    stripped = new TextEncoder().encode(frontDoorHtml(bytes, { githubConfigured, mvpOnly }));
+    cache.set(bytes, stripped);
     await assetEtag(stripped);
   }
   return stripped;
@@ -290,7 +293,7 @@ async function assetResponse(request, env, url) {
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
   const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
-  const bodyBytes = file === 'index.html' ? await frontDoorBody(bytes, githubConfigured) : bytes;
+  const bodyBytes = file === 'index.html' ? await frontDoorBody(bytes, githubConfigured, mvpOnlyEnabled(env)) : bytes;
   headers.set('Content-Type', contentType);
   // Static assets were no-store, so every visit re-downloaded the ~1.9 MB app
   // shell (app.js, styles, emoji catalog). Binary images and fonts get the
