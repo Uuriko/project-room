@@ -5,7 +5,7 @@ import { candidates, probe } from "./agents.mjs";
 import { join } from "./join.mjs";
 import { loadConnection, forgetConnection, publicView } from "./credentials.mjs";
 import { redact } from "./redact.mjs";
-import { run } from "./run.mjs";
+import { run, selectAgent } from "./run.mjs";
 
 export async function doctor(options, { print = console.log, env = process.env } = {}) {
   const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
@@ -29,8 +29,16 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   if (options.help || options.command === "help") { print(USAGE); return 0; }
   if (options.command === "doctor") return doctor(options, io);
   const env = io.env ?? process.env;
+  let candidate = null;
   try {
     if (options.command === "join") {
+      if (!io.joinOnly) {
+        candidate = await selectAgent(options, { env });
+        if (!candidate) {
+          print("No working ACP adapter found. Your invitation has not been used. Choose your agent with --agent claude or --agent codex, or pass --agent-cmd for an installed ACP adapter. Ordinary Claude/Codex commands need an ACP adapter. Run room-acp doctor first; then retry the same link.");
+          return 1;
+        }
+      }
       const connection = await join({ link: options.link, displayName: options.name ?? "Coding agent", agent: options.agent, origin: options.origin, env, fetchImpl: io.fetchImpl });
       print(`Joined room ${connection.roomId} as ${connection.displayName}. Credential saved privately; it is never printed.`);
       if (io.joinOnly) return 0;
@@ -49,7 +57,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       print(`Forgot the credential for room ${connection.roomId}. An owner can also remove the member in the Room.`);
       return 0;
     }
-    if (options.command === "run") return await (io.run ?? run)(options, { print, env, fetchImpl: io.fetchImpl, onBridge: io.onBridge });
+    if (options.command === "run") return await (io.run ?? run)(options, { print, env, fetchImpl: io.fetchImpl, onBridge: io.onBridge, candidate });
   } catch (error) {
     print(`room-acp: ${redact(error.message)}`);
     return 1;
