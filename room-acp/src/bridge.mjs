@@ -8,6 +8,7 @@ import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
+import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
 
 export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
@@ -24,15 +25,15 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500 }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, credential: connection.credential, fetchImpl });
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
-    this.restartDelayMs = restartDelayMs; this.crashes = []; this.pausedUntil = 0; this.ready = null;
+    this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
+    this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
-    this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0;
     this.fencingToken = null; this.seen = new Set(); this.controller = new AbortController(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
   }
 
@@ -54,8 +55,11 @@ export class Bridge {
     while (!this.host.running && this.ready && !this.controller.signal.aborted) await this.ready;
   }
 
-  // Overridden in B6: until then, any permission request is declined.
-  async onPermission() { return { outcome: { outcome: "cancelled" } }; }
+  // Tool permission asks go to the agent's accountable human in the thread.
+  async onPermission(request) {
+    if (!this.permissions) return { outcome: { outcome: "cancelled" } };
+    return this.permissions.request(request, this.controller.signal);
+  }
 
   async refreshRoom() {
     const value = await this.room.room();
@@ -63,6 +67,7 @@ export class Bridge {
     this.ownerId = value?.state?.room?.ownerId ?? null;
     this.title = value?.state?.room?.title ?? this.connection.roomId;
     this.me = this.members[this.connection.memberId] ?? { id: this.connection.memberId };
+    this.permissions = new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
   }
 
   async lease() {
@@ -100,6 +105,8 @@ export class Bridge {
       await this.ack([signal.signalId]); this.stats.skipped++; return;
     }
     const root = message.replyToId ? await this.threadRoot(message.replyToId) : message;
+    // An "@agent allow" answer to a pending permission ask is not a new turn.
+    if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
     this.queue.push(root.id, { signalId: signal.signalId, messageId: message.id, author: message.author ?? message.authorId, body: message.body });
   }
 
