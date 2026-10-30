@@ -759,6 +759,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invite_authority_changed` | 409 | Inviter authority changed; ask for a new invite code | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invite_expired` | 410 | Invite code expired | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invite_failed` | 500 | Generated member id is invalid | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `invite_format_retired` | 410 | This invite uses a retired code format — ask the inviter for a fresh code | no | Do not retry this code: the legacy 8-symbol format is retired and never redeems again. Ask the inviter for a fresh code in the current format and redeem that instead. |
 | `invite_not_active` | 409 | Only an unredeemed invite can be revoked | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invite_not_authorized` | 403 | This invite was issued by a member who cannot invite new members | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `invite_not_found` | 404 | No such guest invite in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |

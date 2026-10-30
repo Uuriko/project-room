@@ -17,7 +17,9 @@ import { canInviteCoOwners } from "../src/room-administration.js";
 // a deterministic scrypt (so lookup by hash still works, and no deployment
 // secret is needed) that costs orders of magnitude more per guess than a
 // bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
-// keep redeeming until they expire. Audit is the table: created_by/at,
+// are retired: the sha256 fallback was removed (see codeHash below), so a
+// legacy-format code no longer redeems — redeem() and preview() classify it
+// by format alone and answer 410 invite_format_retired. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 // An owner-equivalent mint also appends agent_invite.minted to the room
 // log, naming the minter. The raw code and its hash stay out of that event.
@@ -58,6 +60,12 @@ const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const LEGACY_CODE_LENGTH = 8;
 const LEGACY_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_PATTERN = new RegExp(`^${CODE_PREFIX}(?:[${CODE_ALPHABET}]{${CODE_LENGTH}}|[${LEGACY_CODE_ALPHABET}]{${LEGACY_CODE_LENGTH}})$`);
+const LEGACY_CODE_PATTERN = new RegExp(`^${CODE_PREFIX}[${LEGACY_CODE_ALPHABET}]{${LEGACY_CODE_LENGTH}}$`);
+// v1 codes are retired (#3672). Classification is by format alone, before
+// any hash lookup: no sha256 lookup is made, not even to classify, so the
+// answer grants nothing and leaks nothing about whether a row exists.
+const isLegacyCode = normalized => LEGACY_CODE_PATTERN.test(normalized);
+const failLegacyRetired = () => fail(410, "invite_format_retired", "This invite uses a retired code format — ask the inviter for a fresh code");
 const CODE_HASH_SALT = "project-room-agent-invite-v2";
 const CODE_HASH_PARAMS = { N: 16384, r: 8, p: 1 };
 
@@ -458,6 +466,7 @@ export class AgentInvites {
     if (!CODE_PATTERN.test(normalized)) {
       fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
+    if (isLegacyCode(normalized)) failLegacyRetired();
     // Hash outside the write transaction: scrypt is deliberately slow.
     const lookup = codeHash(normalized);
     return this.store.transaction(() => {
@@ -687,6 +696,7 @@ export class AgentInvites {
     if (!CODE_PATTERN.test(normalized)) {
       fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code");
     }
+    if (isLegacyCode(normalized)) failLegacyRetired();
     // Hash outside the transaction like redeem(): scrypt is deliberately slow.
     const lookup = codeHash(normalized);
     const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);

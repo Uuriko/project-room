@@ -473,6 +473,7 @@ const AX_NAMED_RECOVERIES = {
   invitation_receipt_unavailable: ["The accepted invitation cannot be reconciled safely. Ask a room administrator to reconcile it; do not retry the redeem.", "Ask a room administrator to reconcile the accepted invitation."],
   invitation_scope_invalid: ["The stored invitation's grants no longer match its role policy. Ask an administrator for a new invitation.", "Ask an administrator for a new invitation; do not retry this one."],
   invite_ambiguous: ["More than one active invite matches this handle. Ask the room owner to revoke the duplicates; do not guess which to redeem.", "Ask the room owner to revoke the duplicate invites, then redeem the remaining one."],
+  invite_format_retired: ["This invite uses a retired code format and can never redeem. Ask the inviter for a fresh code in the current format.", "Ask the inviter for a fresh code; do not retry this code."],
   invite_not_active: ["Only an unredeemed invite can be revoked. Read the invite's current state; nothing was revoked.", "Re-read the invite; only an unredeemed one can be revoked."],
   invite_rejected: ["The invite was rejected — the message names why. Fix the named cause; do not retry unchanged.", "Fix the cause named in the message; do not retry unchanged."],
   invite_unavailable: ["This invite code cannot be redeemed. Check for typos or ask the inviter for a fresh code.", "Check the code for typos, or ask the inviter for a fresh code."],

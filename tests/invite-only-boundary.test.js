@@ -176,7 +176,9 @@ const PROBES = {
   "GET /api/agent-identities/{}/verification": [undefined, 200],
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
-  "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
+  // RM-AAAAAAAA is an 8-symbol legacy-format code: retired by format alone
+  // (#3672), so the anonymous answer is 410 invite_format_retired, not 404.
+  "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 410],
   "GET /api/agent-invites/redeem": [undefined, 200],
   "GET /api/pair": [undefined, 422],
   "POST /api/pair": [{}, 422],
