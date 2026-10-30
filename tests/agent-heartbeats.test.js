@@ -328,8 +328,17 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   const journal = f.store.agentPlugin.webhookJournalFor({ identityId: identity.identityId, subscriptionId: sub.subscriptionId });
   const wakeDeliveries = journal.filter(d => d.eventType === "agent.wake");
   // Subscription URL + the registered wakeUrl (same ping, same sender).
-  assert.equal(wakeDeliveries.length, 2, "the wake ping is journaled pending for the subscriber and its wakeUrl");
-  assert.ok(wakeDeliveries.every(d => d.state === "pending"));
+  // FIX-3778: the wakeUrl delivery journals on the auto-created wake
+  // subscription for that URL, not as an adjunct row on this subscription,
+  // so the pair is read across the identity's directed deliveries.
+  const directed = f.store.db.prepare(`SELECT COALESCE(d.target_url, s.url) AS targetUrl, d.state
+    FROM agent_webhook_deliveries d JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
+    WHERE d.agent_id = ? AND d.event_type = 'agent.wake'`).all(identity.identityId);
+  assert.equal(directed.length, 2, "the wake ping is journaled pending for the subscriber and its wakeUrl");
+  assert.deepEqual(directed.map(row => row.targetUrl).sort(),
+    ["https://agent.example.test/wake", "https://host.example.test/wake"]);
+  assert.ok(directed.every(d => d.state === "pending"));
+  assert.equal(wakeDeliveries.length, 1, "the subscriber's own journal carries its subscription-URL delivery");
   assert.equal(wakeDeliveries[0].attempts, 0, "journal entries are secret-safe and carry no payload data");
   assert.equal(wakeDeliveries[0].data, undefined);
 
