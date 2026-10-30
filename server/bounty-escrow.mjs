@@ -106,6 +106,16 @@ export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the 
 const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
+// S6 (documented as intended, CURE-SMALL-SPECIMENS): the dispute timeout is
+// the system's one strict-> consumer. It fires at opened + 14d + 1ms, NOT at
+// opened + 14d exactly — unlike the main deadline family, where actor actions
+// are legal iff now < bound and keeper transitions fire iff now >= bound.
+// The strict > is self-consistent across every enforcement consumer:
+// _keeperPass below, the epoch keeper's DUE_WHERE, and
+// escrowEpochNextDueAt (which honestly reports opened + TIMEOUT + 1).
+// Do not "align" it to >= without a money-semantics decision: at the exact
+// 14d instant no money is at risk, and changing the comparison would move
+// the release one millisecond earlier for every open dispute.
 export const MAX_CREDITS = 1000000;
 export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
@@ -1656,6 +1666,14 @@ export class BountyEscrow {
   // forfeit -> 2x bond -> cooldown. Derived on read from the append-only
   // bounty_flakes table; every step is journaled as a bounty_events row.
   _flakeStrikes(roomId, lane, now) {
+    // S6 (documented as intended): decay releases AT its boundary — the
+    // strict > here means a strike exactly 30d old (struck_at_ms ==
+    // now - FLAKE_DECAY_MS) no longer counts. This is the opposite edge
+    // from the reputation-packet dedupe below (inclusive >=, still
+    // dedupes at exactly 24h). The asymmetry is deliberate: decay is a
+    // way back for the lane, so the boundary favours the lane; dedupe is
+    // a spam guard, so its boundary favours suppression. See the dedupe
+    // comment in _storeReputationPacket. Do not align without a decision.
     return this.db.prepare(`SELECT struck_at_ms FROM bounty_flakes
       WHERE room_id=? AND lane=? AND struck_at_ms > ? ORDER BY struck_at_ms DESC`)
       .all(roomId, lane, now - FLAKE_DECAY_MS).map(r => r.struck_at_ms);
@@ -2049,6 +2067,12 @@ export class BountyEscrow {
   // suspension or a ban. Deduped to one packet per lane per 24h so a lane
   // retrying a claim does not spam the queue.
   _storeReputationPacket(roomId, lane, bountyId, eligibility) {
+    // S6 (documented as intended): dedupe releases AFTER its boundary —
+    // the inclusive >= here means a packet exactly 24h old still
+    // suppresses a new one; a new packet is issued only at 24h + 1ms.
+    // Opposite edge from flake decay in _flakeStrikes (strict >, strike
+    // gone at exactly 30d). Deliberate: this is a spam guard, so the
+    // boundary favours suppression. Do not align without a decision.
     const cutoff = new Date(this.nowMs() - REPUTATION_PACKET_DEDUPE_MS).toISOString();
     const recent = this.db.prepare(`SELECT packet_id FROM bounty_reputation_packets
       WHERE room_id=? AND agent_id=? AND created_at >= ? LIMIT 1`).get(roomId, lane, cutoff);
@@ -2185,6 +2209,12 @@ export class BountyEscrow {
       // version that governed the work, so arbiters can re-check against it.
       const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
       const at = isoNow(this.nowMs());
+      // S1: sample the acceptance instant ONCE. The event payload's
+      // challengeEnds and the stored challengeEndsMs must name the same
+      // instant; sampling nowMs() separately for each let them diverge
+      // under a ticking clock (announced end earlier than the enforced end).
+      const challengeWindowMs = bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS;
+      const challengeEndsMs = this.nowMs() + challengeWindowMs;
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
       this._acceptanceTransition(bounty, "accepted", { evidence: verifierAttestation });
@@ -2193,8 +2223,7 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.accepted",
         { bountyId, actor: act, before: "submitted", after: "accepted",
           data: { approval: { decision: approval.decision, by: approval.by, at: approval.at },
-            claimant: bounty.claimant, challengeEnds: new Date(this.nowMs() +
-              (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS)).toISOString() } });
+            claimant: bounty.claimant, challengeEnds: new Date(challengeEndsMs).toISOString() } });
       // 2. The escrow release is the explicit consequence of the approval:
       // finality (attribute) requires the terminal acceptance verdict above.
       const lotId = newId("lot_");
@@ -2207,7 +2236,7 @@ export class BountyEscrow {
         rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
         recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
-      bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
+      bounty.challengeEndsMs = challengeEndsMs;
       this._saveBounty(bounty);
       return { bounty: this._getBounty(roomId, bountyId),
         approval,
@@ -3002,6 +3031,8 @@ export class BountyEscrow {
         return { action: bounty.state === "refunded" ? "refunded" : "released", signed };
       }
       if (bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS) {
+        // S6 (documented as intended): strict > is deliberate — see the
+        // DISPUTE_TIMEOUT_MS comment. Fires at opened + 14d + 1ms.
         // Unresolved > 14d: permissionless finalize defaults to RELEASE.
         // A record with no seated decider is a pre-#3727 legacy row —
         // undecidable from the start — so its bond returns to the
