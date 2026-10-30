@@ -369,7 +369,19 @@ export class AccessRequests {
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const room = this.store.room(roomId);
       const member = linked ? ownMember(room.state.members, linked.memberId) ?? null : null;
-      if (linked) {
+      // UT27 15-2: a linked member record that is INACTIVE is not an upgrade
+      // basis — it is a removed member asking to rejoin. The link row is kept
+      // on self-leave and on owner deactivation (only unlink() deletes it),
+      // so this identity used to hit stale_membership on the one documented
+      // recovery path, with a workContext rebase hint it could never follow.
+      // A rejoin is filed as a fresh JOIN-kind request (below) that an owner
+      // can approve or deny; it is never an upgrade and never auto-approved
+      // (see tryAutoApprove). A missing member record, a link bound to a
+      // different identity, or a revoked secret stays stale_membership.
+      const rejoinMember = linked && member && member.active === false
+        && member.identityId === identityId && !this.store.identities.secretRevoked(identityId)
+        ? member : null;
+      if (linked && !rejoinMember) {
         if (!member || member.active === false || member.identityId !== identityId || this.store.identities.secretRevoked(identityId)) {
           fail(409, "stale_membership", "Current active membership required; ask a room owner to review access");
         }
@@ -377,6 +389,9 @@ export class AccessRequests {
           fail(409, "already_member", "This identity is already linked to this room with the requested permissions");
         }
         if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
+      }
+      if (rejoinMember && isRoomArchived(room.state)) {
+        fail(409, "room_archived", "This room is archived; access cannot be rejoined");
       }
       // #3745: expiry is lazy, so this identity's lapsed rows may still be
       // stored 'pending' in a room nobody reads. Materialize them before
@@ -397,14 +412,14 @@ export class AccessRequests {
         assertAdmissibleMemberName(requestName, room.state.members); // Q3-D: roster check plus role names
       }
       const now = this.store.now();
-      const storedPermissions = member ? { version: 1, kind: "permission-upgrade",
+      const storedPermissions = member && !rejoinMember ? { version: 1, kind: "permission-upgrade",
         permissions: requestedPermissions, memberId: member.id, memberRevision: member.revision } : requestedPermissions;
       this.db.prepare(`INSERT INTO access_requests(
           request_id, room_id, identity_id, display_name, requested_permissions,
           note, referred_by, status, created_at) VALUES(?,?,?,?,?,?,?,?,?)`)
         .run(rid, roomId, identityId, requestName, JSON.stringify(storedPermissions),
           note?.trim() || null, typeof referredBy === "string" && referredBy.trim() ? referredBy.trim() : null,
-          member ? UPGRADE_PENDING_STATUS : "pending", now);
+          member && !rejoinMember ? UPGRADE_PENDING_STATUS : "pending", now);
       // RC-2026-09-19-071 (QAJ-006): the arrival is timeline-visible and
       // drives the owner's notification feed. Same transaction as the
       // insert, so a request is never recorded without its event. The
@@ -413,7 +428,7 @@ export class AccessRequests {
       this.emitAccessRequested(roomId, {
         requestId: rid, identityId, displayName: requestName,
         requestedPermissions, note: note?.trim() || null, at: now,
-        upgradeMember: member,
+        upgradeMember: member && !rejoinMember ? member : null,
       });
       // Self-serve admission (RC-2026-09-29-3603): rooms with an auto-approve
       // rule admit matching requests inline, in the same transaction.
@@ -584,6 +599,14 @@ export class AccessRequests {
     if (requestContents(row).account) return { approved: false, pendingNote: "Account admission requires owner review." };
     if (this.upgradeBasis(row)) return { approved: false, pendingNote:
       "Additional permissions for an existing member require an authorized review; this request waits for a decision." };
+    // UT27 15-2: a join-kind row whose identity still holds a link is a
+    // rejoin (the link survives deactivation; fresh joins have no link).
+    // A removed member is never readmitted by a standing rule — rejoining
+    // always waits for an owner's reviewed decision.
+    const existingLink = this.db.prepare(
+      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, row.identity_id);
+    if (existingLink) return { approved: false, pendingNote:
+      "This identity was a member of this room before; rejoining waits for a room owner decision." };
     const config = this.getAutoApproveConfig(row.room_id);
     if (!config) return { approved: false, pendingNote: null };
     const requested = requestContents(row).permissions;
@@ -793,7 +816,17 @@ export class AccessRequests {
       const existingLink = this.db.prepare(
         "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
       ).get(roomId, row.identity_id);
-      if (existingLink) {
+      // UT27 15-2: a join-kind request from a linked-but-inactive member is
+      // a rejoin. Approving it reactivates that same member record (below,
+      // after the grant checks) instead of closing the request as an
+      // already-member no-op. A member reactivated by another path in the
+      // meantime (active again), a link bound to a different identity, or a
+      // revoked secret keeps the already-member closure.
+      const linkedMember = existingLink ? ownMember(authority.members, existingLink.memberId) ?? null : null;
+      const rejoinMember = existingLink && linkedMember && linkedMember.active === false
+        && linkedMember.identityId === row.identity_id && !this.store.identities.secretRevoked(row.identity_id)
+        ? linkedMember : null;
+      if (existingLink && !rejoinMember) {
         // A direct grant already admitted this identity. Recording the
         // decision must not link them again or change the grant they hold.
         this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
@@ -819,6 +852,31 @@ export class AccessRequests {
       if (requestContents(row).account) return this.approveAccount(token, roomId, row, grants, auth, expectedSessionBinding);
       const identities = this.store.identities;
       assertMemberDisplayNameAvailable(row.display_name, this.store.room(roomId).state.members);
+      if (rejoinMember) {
+        // Reactivate the same member record with the owner's chosen grant —
+        // the relink precedent in AgentIdentities.link(): the member's stale
+        // permissions must not come back silently, so the grant replaces
+        // them. No identity_links row is written (it already exists), no
+        // second member is created, and no referral is re-attributed (the
+        // first join already recorded it). The command runs inside this
+        // transaction, so a refused reactivation rolls the decision back.
+        this.store.command(token, roomId, { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+          data: { memberId: rejoinMember.id, expectedMemberRevision: rejoinMember.revision,
+            permissions: grants, active: true } }, expectedSessionBinding);
+        this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
+          .run(now, auth.member.id, requestId);
+        const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+        return Object.freeze({
+          ...updated,
+          memberId: rejoinMember.id,
+          grantedPermissions: Object.freeze([...grants]),
+          rejoined: true,
+          next: Object.freeze([
+            Object.freeze({ action: "see-new-member", method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/presence`,
+              description: "Confirm the rejoined member in the room's member list, with their granted permissions." }),
+          ]),
+        });
+      }
       // Referral attribution: match the "who referred you?" text against
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.

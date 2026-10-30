@@ -154,18 +154,27 @@ test("changed or withdrawn membership invalidates a pending upgrade", async t =>
   }
 });
 
-test("inactive or revoked memberships cannot file upgrades", async t => {
-  for (const mode of ["inactive", "revoked"]) {
-    await t.test(mode, t => {
-      const f = setup(t);
-      if (mode === "inactive") f.change(["steer"], false);
-      else f.store.identities.revoke(f.identity.identityId, f.identity.secret);
-      assert.throws(() => f.request(), error => mode === "revoked"
-        ? error.status === 401 && error.code === "unauthenticated"
-        : error.status === 409 && error.code === "stale_membership");
-      assert.equal(f.requests.list(f.ownerToken, "commons").length, 0);
-    });
-  }
+test("revoked memberships cannot file upgrades; inactive memberships file a rejoin, not an upgrade", async t => {
+  await t.test("revoked", t => {
+    const f = setup(t);
+    f.store.identities.revoke(f.identity.identityId, f.identity.secret);
+    assert.throws(() => f.request(), error => error.status === 401 && error.code === "unauthenticated");
+    assert.equal(f.requests.list(f.ownerToken, "commons").length, 0);
+  });
+  await t.test("inactive", t => {
+    // UT27 15-2: deactivation ends the upgrade basis, so the same call now
+    // files a join-kind rejoin request (tests/access-request-rejoin.test.mjs
+    // covers the full path). It must not surface as a pending upgrade.
+    const f = setup(t);
+    f.change(["steer"], false);
+    const filed = f.request();
+    assert.equal(filed.status, "pending");
+    assert.equal(filed.kind, "join");
+    const listed = f.requests.list(f.ownerToken, "commons");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].kind, "join");
+    assert.equal(f.member().active, false, "filing must not reactivate the member");
+  });
 });
 
 test("HTTP upgrades, status and fresh admission require current identity-holder proof", async t => {
