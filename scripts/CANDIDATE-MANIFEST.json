@@ -41,7 +41,7 @@
     "icons/icon-192.png": "sha256:8b1afa1152a889494606cf1d91479d6a8f0282a0161adbc11deac402f7fb4d8f",
     "icons/icon-512.png": "sha256:29b3c5e64459ea3c61c3ce6ddab857fea403b5270dc3337582fec31b47e3e95c",
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
-    "index.html": "sha256:faf4188086823f17dd44318b5a6098785f9eb81bfca858009b59fedaf6d0f69c",
+    "index.html": "sha256:6a2230dfe8ecfe8c0d8a8650067cd981705a860a1552bfdfe48279d65007497e",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
     "offers.html": "sha256:b1f1052a85efc02e51daf6fed9477d38c3e65cb70f8f2c1c519bee3a1f9a96dc",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
@@ -172,7 +172,7 @@
     "cloudflare/pnpm-lock.yaml": "sha256:ccd56c35c71f2a0e696120d5db191035aea0b091c2f0b95935dd85a59bbf9248",
     "cloudflare/room.mjs": "sha256:d23e1df4d07d2c0e34a62591fe22f4592ea44b808a485768dedf7c4f97098471",
     "cloudflare/storage.mjs": "sha256:efff85a064ff81ea5a863e4d11af5ca1711e28c9c424d724cf8812be35969e41",
-    "cloudflare/wrangler.jsonc": "sha256:bef91d049ffe820b32cfb07b2035fe19a7d6f0084b959c269c5a5f6f3f803e7e",
+    "cloudflare/wrangler.jsonc": "sha256:75ea87db8530369e9701ade2a70220797e8b413426ed8646fff93c981f334014",
     "scripts/deploy-recovery.mjs": "sha256:fc03c7a0ca6514c7262d0590774855f991b7eb0b5c7e0aa7fb0b25eedf7a81a7"
   },
   "packages": {
