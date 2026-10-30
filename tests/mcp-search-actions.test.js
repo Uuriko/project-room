@@ -45,15 +45,17 @@ async function member(t) {
 const stable = body => JSON.parse(JSON.stringify(body, (key, value) => key === "operationId" ? undefined : value));
 const size = tools => JSON.stringify(tools).length;
 
-test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
+test("lean is opt-in: core is the trimmed profile, full is unchanged, lean is short and smaller than core", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
+  assert.equal(core.length, 14, "default core is the trimmed 14-tool profile: the registry core-flag flip removed room_create, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume and bond_propose to focus/full (see tests/mcp-core-profile.test.js)");
   assert.equal(full.length, 122, "full includes room_claim, room_handoff, room_map, room_merge_members and room_read_bootstrap");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
   assert.ok(lean.every(Boolean) && names.every(name => typeof name === "string"));
-  assert.ok(size(lean) < size(core) * 0.75, `lean ${size(lean)} B should be well under core ${size(core)} B`);
+  // After the core trim, lean (also 14 tools) is only slightly smaller than core in bytes;
+  // the old "well under 75% of core" premise described the pre-trim 22-tool core.
+  assert.ok(size(lean) < size(core), `lean ${size(lean)} B should be under core ${size(core)} B`);
 });
 
 test("every lean name is a real definition or join tool", () => {
