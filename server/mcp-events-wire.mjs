@@ -31,9 +31,10 @@ export function signedEventRequest({ subscriptionId, secret, previousSecret, eve
   } };
 }
 
-// An injected transport must connect to these validated addresses, preserve
-// TLS hostname verification, bound response size/time, and NEVER redirect.
-// Workers has no DNS-pinning API: do not silently weaken this contract there.
+// General transports pin the validated public addresses and preserve TLS hostname
+// verification. The explicit Workers trusted-origin adapter is a narrower trust
+// mode documented in MCP-OAUTH-IMPLEMENTATION; it refuses all other origins before
+// DNS. Every adapter bounds response size/time and NEVER follows redirects.
 export async function postMcpEvent({ url, request, dnsResolvers, transport, timeoutMs = 10000, beforeSend }) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000) throw new TypeError("Invalid delivery timeout");
   if (!transport && isWorkersRuntime()) throw new Error("MCP Events requires a vetted egress transport on Workers");
@@ -47,6 +48,7 @@ export async function postMcpEvent({ url, request, dnsResolvers, transport, time
   try {
     return await Promise.race([
       (async () => {
+        transport?.validateTarget?.(url);
         const checked = await resolveWebhookTarget(url, dnsResolvers ?? {});
         remaining();
         if (beforeSend) await beforeSend();
@@ -67,7 +69,10 @@ export async function verifyMcpEventCallback({ subscriptionId, secret, url, dnsR
   const request = signedEventRequest({ subscriptionId, secret, eventId: `verify_${randomBytes(16).toString("hex")}`, body, now });
   let delivery;
   try { delivery = await postMcpEvent({ url, request, dnsResolvers, transport }); }
-  catch { throw callbackError("transport_failed"); }
+  catch (error) {
+    if (error?.code === -32015 && error.data?.reason === "callback_origin_not_allowed") throw error;
+    throw callbackError("transport_failed");
+  }
   if (delivery.classification !== "delivered") throw callbackError("challenge_failed");
   let echoed;
   try {
@@ -104,6 +109,7 @@ export async function deliverMcpEvent({ subscription, event, authorize, now = Da
     } });
     return { status, classification }; // 2xx means receipt, never agent execution.
   } catch (error) {
+    if (error?.data?.reason === "callback_origin_not_allowed") return { classification: "dead" };
     if (error?.code === "event_revoked") return { classification: "revoked" };
     if (error?.code === "event_expired") return { classification: "expired" };
     return { status: 0, classification: error?.code === "webhook_url_not_public" || error?.code === "invalid_webhook" ? "dead" : "retry" };

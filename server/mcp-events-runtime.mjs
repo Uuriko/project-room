@@ -9,8 +9,8 @@ import { isWorkersRuntime } from './ip-blocklist.mjs';
 
 // A native event subscription is an explicit opt-in independent of desktop
 // host registration. Workers deliberately has no automatic egress fallback.
-export function createMcpEventsRuntime({ store, accountProvider, inviteProvider, resource, transport, dnsResolvers }) {
-  if (!resource || isWorkersRuntime()) return null;
+export function createMcpEventsRuntime({ store, accountProvider, inviteProvider, resource, transport, dnsResolvers, externalScheduler = false }) {
+  if (!resource || (isWorkersRuntime() && (!transport || !externalScheduler))) return null;
   const authorize = descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor });
   const authorizeEvent = (descriptor, { context }) => {
     if (!context || typeof context.actorId !== 'string' || !['mention', 'squad-mention', 'dm', 'work'].includes(context.kind)) return false;
@@ -60,9 +60,9 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
   const drain = async () => {
     if (running || stopped) return;
     running = true;
-    try { return await manager.drain({ limit: 10 }); } finally { running = false; }
+    try { return await manager.drain({ limit: externalScheduler ? 1 : 10 }); } finally { running = false; }
   };
-  const timer = setInterval(() => { drain().catch(() => {}); }, 1000);
-  timer.unref?.();
+  const timer = externalScheduler ? null : setInterval(() => { drain().catch(() => {}); }, 1000);
+  timer?.unref?.();
   return { handler, emit, drain, stop() { stopped = true; clearInterval(timer); } };
 }

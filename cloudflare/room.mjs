@@ -1,3 +1,4 @@
+import { createWorkersMcpEventTransport } from './mcp-event-transport.mjs';
 import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
@@ -178,6 +179,9 @@ export class ProjectRoom extends DurableObject {
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
       mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],
+      mcpEventTransport: env.ROOM_MCP_EVENT_CALLBACK_ORIGINS === undefined ? undefined
+        : createWorkersMcpEventTransport(JSON.parse(env.ROOM_MCP_EVENT_CALLBACK_ORIGINS)),
+      mcpEventExternalScheduler: true,
       jobHealth: () => this.jobHealthSnapshot,
       publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
@@ -497,6 +501,10 @@ export class ProjectRoom extends DurableObject {
   // now), POSTs each with a fresh timestamped HMAC signature, and advances
   // the pending -> delivered | failed -> dead_letter lifecycle with
   // exponential backoff. Runs in the DO so signing secrets never leave it.
+  async drainMcpEvents() {
+    if (this.paused || !this.store) return { skipped: "paused" };
+    return this.server.drainMcpEvents();
+  }
   async drainWebhookDeliveries() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();

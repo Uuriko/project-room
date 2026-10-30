@@ -29,7 +29,7 @@ export const CRON_JOB_BUDGET_MS = JOB_BUDGET_MS;
 // due work runs from the Durable Object alarm instead.
 export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.includes("worker")).map(job => Object.freeze({
   name: job.name,
-  periodSeconds: Math.round(job.cadenceMs / 1000),
+  periodSeconds: Math.round((job.heartbeatCadenceMs ?? job.cadenceMs) / 1000),
   redactErrors: job.redactErrors === true,
   required: job.required === true
 })));
