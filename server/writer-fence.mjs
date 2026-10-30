@@ -243,6 +243,9 @@ export const unfencedAdditiveTables = Object.freeze([
   "mention_states",
   "mention_observations", // Durable acknowledgment/reply facts; additive lifecycle-owned schema.
   "room_mention_settings",
+  // agent_talk_policies (#5384 who-can-talk): additive, owned by the mention
+  // lifecycle schema, NOT fenced for the same reason.
+  "agent_talk_policies",
   // agent_key_registry (integration map slice 9): Ed25519 public-key
   // directory with validity windows and rotation overlap. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,
@@ -449,6 +452,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_code_checks",
   // share_link_access: member / co-admin link options. A missing row is a guest link.
   "share_link_access",
+  "development_co_owner_links",
   // projection_bodies: Phase 1a message bodies at rest. Older writers have no
   // path to it; rooms.projection rows they write carry full bodies.
   "projection_bodies",

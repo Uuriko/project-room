@@ -367,3 +367,27 @@ for (const denied of [false, true]) test(`confirmation distinguishes concurrent 
   const next = accountSession("new", 2); restored.resolve(response(next));
   assert.equal(await newRestore, next); assert.equal(replacement.session, next);
 });
+
+test("human admission binds the account and excludes claimed identities", async () => {
+  const owner=accountSession("human",2), calls=[];
+  const client=new AccountClient({fetcher:async(path,options)=>{calls.push({path,options});return response({requestId:"ar_human",principalKind:"account",identityId:null,status:"pending"});}});
+  client.session=owner;
+  await client.submitAccountAccessRequest({roomId:"commons",displayName:"Ada",requestId:"ar_human",requestedPermissions:[],accountId:"victim",identityId:"ai_wrong",secret:"must-not-send"});
+  await client.accountAccessRequest("ar_human");
+  assert.equal(calls[0].path,"/api/account/access-requests");
+  assert.equal(calls[1].path,"/api/account/access-requests/ar_human");
+  for(const {options} of calls){assert.equal(options.credentials,"same-origin");assert.equal(options.headers["X-CSRF-Token"],owner.csrf);assert.equal(options.headers["X-Session-Binding"],owner.sessionBinding);}
+  const body=JSON.parse(calls[0].options.body);
+  for(const key of ["accountId","identityId","secret"]) assert.equal(Object.hasOwn(body,key),false);
+});
+test("human admission ignores late results after account replacement",async()=>{
+  const pending=deferred(),client=new AccountClient({fetcher:()=>pending.promise});
+  client.session=accountSession("old",1);const reading=client.accountAccessRequest("ar_private");
+  client.generation++;client.session=accountSession("new",2);
+  pending.resolve(response({requestId:"ar_private",status:"approved"}));assert.equal(await reading,null);
+});
+test("human admission retires rejected sessions without replay",async()=>{
+  let calls=0;const client=new AccountClient({fetcher:async()=>{calls++;return response({error:{code:"session_binding_changed"}},409);}});
+  client.session=accountSession("old",1);
+  await assert.rejects(client.submitAccountAccessRequest({roomId:"commons"}));assert.equal(client.session,null);assert.equal(calls,1);
+});

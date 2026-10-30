@@ -641,7 +641,7 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   const { store, origin, ownerKey } = await serve(t);
   // The module-level vocabulary names every profile and permission.
   const vocab = store.invites.vocabulary();
-  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "collaborate", "contribute", "review"]);
+  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "collaborate", "contribute", "guest", "member", "review"]);
   for (const [name, entry] of Object.entries(vocab.profiles)) {
     assert.ok(Array.isArray(entry.permissions), `${name} lists permissions`);
     assert.ok(entry.description && entry.description.length > 0, `${name} is described`);
@@ -659,6 +659,22 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   const badProfile = await post(origin, "/api/rooms/commons/agent-invites", { profile: "admin" }, ownerKey);
   assert.equal(badProfile.status, 422);
   assert.ok((badProfile.json?.error?.message ?? "").includes("contribute"));
+});
+
+test("#5384: no scope means Member, guest/owner names work, old names keep their sets", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const plain = await post(origin, "/api/rooms/commons/agent-invites", {}, ownerKey);
+  assert.equal(plain.status, 201, JSON.stringify(plain.json));
+  assert.equal(plain.json.profile, "member");
+  assert.deepEqual([...plain.json.permissions].sort(), ["accept_work", "complete_work", "manage_claims", "steer", "verify", "write_external"]);
+  const guest = await post(origin, "/api/rooms/commons/agent-invites", { profile: "guest" }, ownerKey);
+  assert.equal(guest.status, 201);
+  assert.deepEqual(guest.json.permissions, []);
+  const owner = await post(origin, "/api/rooms/commons/agent-invites", { profile: "owner" }, ownerKey);
+  assert.equal(owner.status, 201);
+  assert.equal(owner.json.ownerEquivalent, true);
+  const legacy = await post(origin, "/api/rooms/commons/agent-invites", { profile: "collaborate" }, ownerKey);
+  assert.deepEqual([...legacy.json.permissions].sort(), ["accept_work", "complete_work", "steer", "verify"]);
 });
 
 test("invite redeem returns machine-readable next steps for a redeemed agent (RC-2026-09-18-026)", async t => {

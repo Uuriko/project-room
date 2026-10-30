@@ -1,3 +1,4 @@
+import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
 // One-time agent invite codes: the self-serve half of the plug-in loop.
 //
 // An owner mints a short single-use code bound to a room with an explicit
@@ -29,6 +30,7 @@ import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHOR
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
+import { seedNewAgentPolicy } from "./agent-talk-policy.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 import { ONBOARDING_REPLAY_WINDOW_MS, onboardingRotateNext } from "./agent-rooms.mjs";
@@ -79,6 +81,8 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   chat: "Read-only: the agent can observe the room but holds no work permissions.",
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
+  guest: "Guest: read and chat.",
+  member: "Member (default): steer, accept, complete, verify, manage claims, record external writes. Not manage_members, decide, or invite_member.",
   collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
@@ -338,13 +342,20 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
+    // "owner" names full access. Muse development co-owners default to full
+    // access; other rooms default to Member.
+    if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
+    if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) {
+      if (roomId === "muse-room" && museDevelopmentAccess(this.store.room(roomId).state) && !auth.delegate && canInviteCoOwners(this.store.room(roomId).state, auth.member.id)) ownerEquivalent = true;
+      else profile = "member";
+    }
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
     if (ownerLevel) {
       if (profile !== undefined || permissions !== undefined) {
         fail(422, "invalid_invite_scope", "Choose ownerEquivalent or a profile or explicit permissions, not more than one");
       }
-      if (!isRoomOwnerPrincipal(auth, authority)) {
+      if (!isRoomOwnerPrincipal(auth, authority) && (auth.delegate || !canInviteCoOwners(this.store.room(roomId).state, auth.member.id))) {
         fail(403, "owner_equivalent_forbidden", "Only the room owner can mint an owner-level invite");
       }
     } else if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) {
@@ -483,7 +494,7 @@ export class AgentInvites {
       }
       // An owner-level code stays bound to the owner who minted it. A
       // transferred room must not finish the grant under the new owner.
-      if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
+      if (row.owner_equivalent === 1 && !canInviteCoOwners(room.state, row.created_by)) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
       // Reserve two event slots: member.added plus the referral.completed
@@ -567,6 +578,8 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
+      // Muse development agents hear the room; ordinary rooms retain owner scope.
+      seedNewAgentPolicy(this.db, row.room_id, memberId, now, state);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);
@@ -678,7 +691,7 @@ export class AgentInvites {
     if (!canInviteMembers(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
-    if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
+    if (row.owner_equivalent === 1 && !canInviteCoOwners(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
     const permissions = JSON.parse(row.permissions_json);

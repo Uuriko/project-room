@@ -5,11 +5,12 @@
         Live facts for the /about front door, no login. The counters
         are computed per request from the same public sources the hero
         links to: the public receipts (issued, and verified = carrying
-        a merged pull request) and the public work board (claimable
-        count). latestReceipt is the newest public receipt, or null
+        both mergedAt and pullRequest, counted per receipt, not per distinct PR) and the public work board (claimable
+        count). computedAt is the request computation time, not publication time
+        or an immutable acceptance event. provenance defines each count unit
+        and its public source. latestReceipt is the newest eligible non-QA public receipt, or null
         when none is published. Never cached (Cache-Control no-store),
-        so the numbers always match the records a visitor can open
-        from the page itself.
+        and later reads may differ after publication or work changes.
       security: []
       responses:
         '200':
@@ -18,9 +19,25 @@
             application/json:
               schema:
                 type: object
-                required: [schema, counters, latestReceipt]
+                required: [schema, computedAt, provenance, counters, latestReceipt]
                 properties:
                   schema: { type: string, enum: ['project-room-front-door/1'] }
+                  computedAt: { type: string, format: date-time }
+                  provenance:
+                    type: object
+                    required: [kind, population, counters]
+                    properties:
+                      kind: { type: string, enum: [request-snapshot] }
+                      population: { type: string }
+                      counters:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          required: [unit, source, definition]
+                          properties:
+                            unit: { type: string }
+                            source: { type: string }
+                            definition: { type: string }
                   counters:
                     type: object
                     required: [resultsVerified, receiptsIssued, workAvailableNow]

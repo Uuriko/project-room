@@ -575,3 +575,23 @@ test("permission upgrades enter the authorized attention feed and disappear afte
   assert.equal(f.store.room('commons').state.members.requester.permissions.includes('complete_work'),false);
   assert.equal((await f.request(path,{token:keys.admin})).body.items.some(i=>i.sourceRef?.requestId==='upgrade-feed'),false);
 });
+
+
+test("human admission appears in authorized Updates without leaking account principal", async t => {
+  const f = serve(t); await f.origin;
+  const outsider = addAgent(f.store, "commons", f.ownerKey, "outsider");
+  f.store.db.prepare(`INSERT INTO access_requests
+    (request_id,room_id,identity_id,display_name,requested_permissions,status,created_at)
+    VALUES(?,?,?,?,?,?,?)`).run("human-feed", "commons", "account:private-pseudonym", "Human applicant", "[]", "pending_account", Date.now());
+  const path = "/api/rooms/commons/updates?state=actionable";
+  const result = await f.request(path, {token: f.ownerKey});
+  assert.equal(result.status, 200);
+  const item = result.body.items.find(i => i.sourceRef?.requestId === "human-feed");
+  assert.ok(item, "pending human requests must reach the owner feed and badge");
+  assert.equal(item.title, "Human applicant asks to join");
+  assert.equal(item.actor, null);
+  assert.doesNotMatch(JSON.stringify(result.body), /private-pseudonym/);
+  assert.equal((await f.request(path, {token: outsider})).body.items.some(i => i.sourceRef?.requestId === "human-feed"), false);
+  f.store.db.prepare("UPDATE access_requests SET status='cancelled' WHERE request_id=?").run("human-feed");
+  assert.equal((await f.request(path, {token: f.ownerKey})).body.items.some(i => i.sourceRef?.requestId === "human-feed"), false);
+});

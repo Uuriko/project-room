@@ -138,6 +138,45 @@ export function eventInHistory(event, floor, messagesById = null) {
   return (at > floor.at || !floor.sameInstant?.has(event.id)) && !targetsHiddenMessage(event, floor, messagesById);
 }
 
+// Existence privacy (F-S6c-3, register #45): a sequence-bearing surface a
+// member reads (a reply-list evaluatedThrough, a needs-me cursor) must be
+// derivable from events that member can see. The viewer's visible horizon
+// is the sequence of their newest visible event at or below the room head:
+// targeted message.posted events (data.toMemberId) are visible only to
+// their sender and addressee, follow-up events (edits, deletes, reactions,
+// pins) follow the message they target, and dm.consent_changed is visible
+// only to its pair and the room owner (the dm-event-visibility rules).
+// A hidden event at the head therefore pulls the horizon back to the last
+// event the viewer could actually observe, instead of counting it.
+const HORIZON_FOLLOW_UP_TYPES = [T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REDACTED,
+  T.POLL_VOTED, T.MESSAGE_PINNED, T.MESSAGE_UNPINNED];
+export function visibleSequenceHorizon(db, roomId, viewerId, headSequence, isOwner = false) {
+  if (!Number.isSafeInteger(headSequence) || headSequence <= 0) return 0;
+  const row = db.prepare(
+    `SELECT MAX(e.sequence) AS horizon FROM events e
+     WHERE e.room_id=? AND e.sequence<=?
+       AND NOT (
+         (json_extract(e.body,'$.type')='message.posted'
+           AND COALESCE(json_extract(e.body,'$.data.toMemberId'),'')<>''
+           AND json_extract(e.body,'$.actorId')<>?
+           AND json_extract(e.body,'$.data.toMemberId')<>?)
+         OR (json_extract(e.body,'$.type') IN (${HORIZON_FOLLOW_UP_TYPES.map(() => "?").join(",")})
+           AND EXISTS (SELECT 1 FROM events p WHERE p.room_id=e.room_id
+             AND json_extract(p.body,'$.type')='message.posted'
+             AND COALESCE(json_extract(p.body,'$.data.toMemberId'),'')<>''
+             AND (json_extract(p.body,'$.data.messageId')=json_extract(e.body,'$.data.messageId')
+               OR p.id=json_extract(e.body,'$.data.messageId'))
+             AND json_extract(p.body,'$.actorId')<>?
+             AND json_extract(p.body,'$.data.toMemberId')<>?))
+         OR (json_extract(e.body,'$.type')='dm.consent_changed' AND ? = 0
+           AND json_extract(e.body,'$.data.requesterId')<>?
+           AND json_extract(e.body,'$.data.targetId')<>?)
+       )`
+  ).get(roomId, headSequence, viewerId, viewerId, ...HORIZON_FOLLOW_UP_TYPES,
+    viewerId, viewerId, isOwner ? 1 : 0, viewerId, viewerId);
+  return Number.isSafeInteger(row?.horizon) ? row.horizon : 0;
+}
+
 // Export authority: only the room owner exports, and every export of a live
 // room appends room.exported (format only, no content) through the normal
 // command path. An archived room records nothing new, so its exports leave
