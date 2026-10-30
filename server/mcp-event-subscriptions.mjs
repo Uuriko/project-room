@@ -40,8 +40,8 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
   const db = store.db;
   db.exec(mcpEventSubscriptionsSchema);
   const sweep = () => {
-    db.prepare("DELETE FROM mcp_event_subscriptions WHERE expires_at<=?").run(now());
-    db.prepare("DELETE FROM mcp_event_outbox WHERE subscription_id NOT IN (SELECT id FROM mcp_event_subscriptions) OR (state IN ('delivered','dead') AND next_at<?)").run(now() - 24 * HOUR);
+    db.prepare("DELETE FROM mcp_event_subscriptions WHERE id IN (SELECT id FROM mcp_event_subscriptions WHERE expires_at<=? LIMIT 100)").run(now());
+    db.prepare("DELETE FROM mcp_event_outbox WHERE rowid IN (SELECT rowid FROM mcp_event_outbox WHERE subscription_id NOT IN (SELECT id FROM mcp_event_subscriptions) OR (state IN ('delivered','dead') AND next_at<?) LIMIT 200)").run(now() - 24 * HOUR);
   };
   const get = id => db.prepare("SELECT * FROM mcp_event_subscriptions WHERE id=?").get(id);
   const live = async row => {

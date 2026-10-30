@@ -107,7 +107,8 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
   if (!Number.isSafeInteger(now) || !Number.isSafeInteger(limit) || limit < 1) {
     throw new TypeError("pruneOAuthProvider requires a timestamp and a positive limit");
   }
-  if (!oauthProviderTablesPresent(db)) return { pruned: 0 };
+  // Invitation-only runtimes need not have mounted the account provider.
+  if (!OAUTH_PROVIDER_TABLES.some(table => db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))) return { pruned: 0 };
   let pruned = 0;
   for (const [table, key] of PRUNE) {
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;

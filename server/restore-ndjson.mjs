@@ -23,7 +23,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -179,6 +179,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  ensureNativeAgentRestoreSchema(db, new Set(byTable.keys()));
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
@@ -440,6 +441,20 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       || record.table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES.includes(record.table)) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
       return;
+    }
+    if (!existing.has(record.table)) {
+      ensureNativeAgentRestoreSchema(db, new Set([record.table]));
+      // These lazy native tables have no foreign keys. Extend the streaming
+      // order only after inspecting real schema; unknown backup names still fail.
+      for (const table of tableNames(db)) {
+        if (existing.has(table)) continue;
+        if (db.prepare(`PRAGMA foreign_key_list(${quoteIdent(table)})`).all().length) throw new Error("Lazy restore table requires dependency ordering");
+        existing.add(table);
+        topoIndex.set(table, topo.length);
+        topo.push(table);
+        deps.set(table, new Set());
+        ancestors.set(table, new Set());
+      }
     }
     if (!existing.has(record.table)) throw new Error("Export names a table this store does not have");
     const keys = Object.keys(record.row);

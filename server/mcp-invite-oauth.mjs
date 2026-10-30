@@ -10,7 +10,7 @@ const rewrite = sql => sql.replaceAll('oauth_provider_', 'oauth_invite_');
 export function inviteOAuthDatabase(db) {
   return { prepare: sql => db.prepare(rewrite(sql)), exec: sql => db.exec(rewrite(sql)) };
 }
-function schema(db) {
+export function ensureMcpInviteOAuthSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS oauth_invite_grants (
     id TEXT PRIMARY KEY, room_id TEXT NOT NULL, identity_id TEXT NOT NULL,
     member_id TEXT NOT NULL, identity_epoch TEXT NOT NULL, invite_hash TEXT NOT NULL, sponsor_member_id TEXT NOT NULL,
@@ -23,7 +23,7 @@ function schema(db) {
 }
 export function createMcpInviteOAuth({ store, clients, resource }) {
   const db = store.db;
-  schema(db);
+  ensureMcpInviteOAuthSchema(db);
   const provider = createOAuthProvider({ db: inviteOAuthDatabase(db), tokenKind: 'invite', clock: () => store.now(),
     isBindingActive: (grantId, binding) => Boolean(validateMcpInviteOAuthBinding(store, grantId, binding)) });
   for (const client of clients) provider.registerClient(client);

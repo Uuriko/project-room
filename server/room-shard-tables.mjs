@@ -10,6 +10,8 @@
 // refuses to invent a home for them.
 //
 // A table missing from all three sets throws. Copy will not guess.
+import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
+import { MCP_EVENT_ADDITIVE_TABLES } from "./writer-fence.mjs";
 import { REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 
 export const ROOM_TABLE_KEYS = Object.freeze({
@@ -107,13 +109,16 @@ export function roomTablesPresent(db) {
   return kept;
 }
 
+// Grant families and callback secrets remain directory authority. They are
+// optional because a fresh store has never mounted OAuth or event delivery.
+const optionalDirectory = new Set([...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
 const directory = new Set(DIRECTORY_TABLES);
 const skipped = new Set(REPLAY_SKIPPED_TABLES);
 
 export function tableHome(name) {
   if (skipped.has(name)) return "skipped";
   if (Object.hasOwn(ROOM_TABLE_KEYS, name)) return "room";
-  if (directory.has(name)) return "directory";
+  if (directory.has(name) || optionalDirectory.has(name)) return "directory";
   throw new Error(`Unclassified SQLite table ${name}`);
 }
 
