@@ -9,6 +9,9 @@ import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { Buffer } from "node:buffer";
+import { ensureOAuthProviderSchema, OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
+import { ensureMcpInviteOAuthSchema, inviteOAuthDatabase } from "./mcp-invite-oauth.mjs";
+import { mcpEventSubscriptionsSchema } from "./mcp-event-subscriptions.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
@@ -39,6 +42,8 @@ export const EXPORT_SECRET_COLUMNS = Object.freeze({
   gmail_mailboxes: Object.freeze(["encrypted"]),
   gmail_pending: Object.freeze(["encrypted"]),
   human_push_subscriptions: Object.freeze(["auth", "p256dh"]),
+  // The callback document contains current and previous signing secrets.
+  mcp_event_subscriptions: Object.freeze(["document"]),
   oauth_pending_states: Object.freeze(["slot_token", "verifier"]),
   public_rooms: Object.freeze(["join_token"]),
   referral_invite_keys: Object.freeze(["private_seed"])
@@ -431,7 +436,13 @@ export function createSanitizedCellTracker(db, { legacySanitize = false } = {}) 
       if (value === null || value === undefined) return null;
       if (isExportSecretColumn(table, column)) {
         record(table, column);
-        return secretSubstitute(table, column);
+        return table === "mcp_event_subscriptions" && column === "document" ? "{}" : secretSubstitute(table, column);
+      }
+      // Sanitized callback keys cannot resume delivery. Require a fresh
+      // authenticated subscribe and challenge after restoring an NDJSON backup.
+      if (table === "mcp_event_subscriptions" && column === "state") {
+        record(table, column);
+        return "inactive";
       }
       if (legacySanitize && table === "accounts" && column === "password_reset_required") {
         record(table, column);
@@ -526,6 +537,17 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 // current reducer, and production rooms written by older code can differ
 // from that replay while the live room serves them fine. A disaster
 // restore needs the data back and the drift named, not a refusal.
+// Restore only the known lazy schemas, never backup-supplied DDL. Streaming
+// restore calls this when it encounters the first row in a native namespace.
+export function ensureNativeAgentRestoreSchema(db, names) {
+  if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_provider_") && names.has(table))) ensureOAuthProviderSchema(db);
+  if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_invite_") && names.has(table))) {
+    ensureMcpInviteOAuthSchema(db);
+    ensureOAuthProviderSchema(inviteOAuthDatabase(db));
+  }
+  if (names.has("mcp_event_subscriptions") || names.has("mcp_event_outbox")) db.exec(mcpEventSubscriptionsSchema);
+}
+
 export function replayNdjson(ndjson, filename, { audit = "strict", retainTables = null } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (retainTables != null && typeof retainTables !== "function") throw new Error("retainTables must be a function");
@@ -544,6 +566,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
   if (existsSync(filename)) throw new Error("Refusing to replay into an existing store");
   const store = new RoomStore(filename);
   try {
+    ensureNativeAgentRestoreSchema(store.db, new Set(byTable.keys()));
     // #3599: sanitized cells resolve to safe substitutes, never the
     // placeholder; legacy streams get the legacy resolutions.
     const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });

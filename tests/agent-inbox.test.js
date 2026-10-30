@@ -121,7 +121,7 @@ test("agent inbox next[] teaches what an empty inbox will carry", async t => {
   assert.equal(res.status, 200);
   const json = await res.json();
   assert.deepEqual(json.directMessages, []);
-  assert.deepEqual(json.next.map(n => n.action), ["watch-inbox", "list-open-requests"]);
+  assert.deepEqual(json.next.map(n => n.action), ["watch-inbox", "list-open-requests", "list-my-work"]);
 });
 
 test("agent inbox keeps ordinary conversation readable without requiring an acknowledgement", async t => {
@@ -144,7 +144,7 @@ test("agent inbox keeps ordinary conversation readable without requiring an ackn
   const json = await res.json();
   assert.equal(json.directMessages.length, 1);
   const actions = json.next.map(n => n.action);
-  assert.deepEqual(actions, ["reply-dm", "list-open-requests"]);
+  assert.deepEqual(actions, ["reply-dm", "list-open-requests", "list-my-work"]);
   const reply = json.next[0];
   assert.equal(reply.optional, true);
   assert.equal(reply.required, false);

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, noteIdentityMint } from "../server/growth-loop.mjs";
-import { llmsTxt, agentsJson } from "../server/agent-discovery.mjs";
+import { llmsFullTxt, agentsJson } from "../server/agent-discovery.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -135,7 +135,8 @@ function payoutRow(store, memberId) {
 }
 
 test("an inviter's own agents do not earn credits, and other payouts stop at the daily cap", t => {
-  assert.match(llmsTxt(), /GET \/api\/rooms\/\{roomId\}\/referrals/);
+  // The short packet has a byte budget; the referrals route lives in the full packet.
+  assert.match(llmsFullTxt(), /GET \/api\/rooms\/\{roomId\}\/referrals/);
   assert.match(agentsJson(), /\/api\/rooms\/\{roomId\}\/referrals/);
   const { store, ownerKey, advance } = openStore(t);
   const ownerInvite = store.referrals.board(ownerKey, "commons").invite;

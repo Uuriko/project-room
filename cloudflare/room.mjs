@@ -177,6 +177,7 @@ export class ProjectRoom extends DurableObject {
     this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],
       jobHealth: () => this.jobHealthSnapshot,
       publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),

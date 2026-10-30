@@ -47,13 +47,14 @@ const size = tools => JSON.stringify(tools).length;
 
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 122, "full includes room_claim, room_handoff, room_map, room_merge_members and room_read_bootstrap");
+  assert.equal(core.length, 14, "default core is the 10 conversation tools plus 4 join readers (fc5a0ea2)");
+  assert.equal(full.length, 123, "full includes room_claim, room_handoff, room_map, room_merge_members, room_read_bootstrap and room_activation_pack");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
   assert.ok(lean.every(Boolean) && names.every(name => typeof name === "string"));
-  assert.ok(size(lean) < size(core) * 0.75, `lean ${size(lean)} B should be well under core ${size(core)} B`);
+  // Since the core trim (fc5a0ea2) core is already small, so lean is measured against full.
+  assert.ok(size(lean) < size(full) * 0.25, `lean ${size(lean)} B should be well under full ${size(full)} B`);
 });
 
 test("every lean name is a real definition or join tool", () => {

@@ -69,6 +69,12 @@ function mentionCandidates(members, identityNames) {
       if (typeof name !== "string" || !name.trim()) return;
       candidates.push({ memberId, lower: name.toLowerCase(), rank });
       if (rank === 1) {
+        // A spaced display name is also reachable as one handle token:
+        // "@QA-Friend-7", "@QA_Friend_7" or "@QAFriend7" all name "QA Friend 7".
+        if (/\s/.test(name.trim())) {
+          const words = name.trim().toLowerCase().split(/\s+/);
+          for (const joiner of ["-", "_", ""]) candidates.push({ memberId, lower: words.join(joiner), rank });
+        }
         for (const match of name.matchAll(/\s+/g)) {
           if (match.index > 0) candidates.push({ memberId, lower: name.slice(0, match.index).toLowerCase(), rank: 3 });
         }

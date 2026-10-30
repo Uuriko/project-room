@@ -101,9 +101,15 @@ response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `account_access_changed` | 409 | Applicant account access changed; a fresh request is required | no | Your account access changed after you asked. File a fresh access request. |
 | `invalid_archive_request` | 422 | Archive request has invalid fields or types | fix+resend | Correct the fields named in the response; use dryRun true to obtain a plan before a real run. |
+| `invalid_listener_token` | 422 | A non-empty listener token is required | fix+resend | Acquire a listener lease and send its non-empty fencing token. |
 | `invalid_room_id` | 422 | Archive roomId is not a valid room identifier | fix+resend | Use the exact room id from current Room access, rather than a room URL. |
 | `invalid_keep_newest` | 422 | Archive retention count is outside the supported range | fix+resend | Set keepNewest to an integer from 100 through 100000 and obtain a new dry run. |
+| `invalid_session_declaration` | 422 | Provider and client are declared when the session starts | fix+resend | Declare provider and client when the session starts, not afterwards; resend. |
+| `invalid_source_observation` | 422 | Invalid or too large source observation (1024 bytes max, JSON) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_talk_policy` | 422 | Who-can-talk applies to agents only / policy must be one of the listed values | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `listener_identity_mismatch` | 403 | The listener identity must be an active agent in this room | no | Use the active agent identity bound to this Room; reconnect or restore membership before acquiring a lease. |
 | `reason_required` | 422 | Operator archive requires a bounded reason | fix+resend | Supply a reason containing 1 through 200 characters. |
 | `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
 | `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
@@ -979,6 +985,8 @@ response's own `hint`/`next` when it names something more specific.
 | `slot_not_authenticated` | 409 | Only an authenticated session slot can rotate its token | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `spend_allowance_budget_required` | 422 | fail(422, "spend_allowance_budget_required", `This room has a spend allowance (${summary}): declare budget.maxSpendCents when the session starts so th | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `spend_allowance_exceeded` | 409 | fail(409, "spend_allowance_exceeded", `Starting this session would reserve ${dollars(cap)} with ${summary} (${dollars(Math.max(0, allowance.allowanceC | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `sponsor_required` | 403 | Only this agent's sponsor can reconnect it | no | Use the account that sponsored this connection. Room sponsorship does not grant control of another person's agent host. |
+| `sponsor_scope_exceeded` | 403 | An agent can only receive working permissions its human sponsor holds | no | Choose access within your current Room permissions, or ask a Room administrator to grant the needed permissions first. |
 | `squad_channel_unknown` | 422 | channelMessageId is not a live message in this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `squad_disbanded` | 409 | A disbanded squad has no roster changes | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `squad_exists` | 409 | Squad "${input.name}" already exists in this room | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -1034,6 +1042,7 @@ response's own `hint`/`next` when it names something more specific.
 | `timeout` | 504 | Fetching the page exceeded the 15 second limit | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `token_conflict` | 409 | Generate a new key | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `too_large` | 413 | Request is too large | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `too_many_pending` | 429 | Too many pending requests for this room | wait | Wait for the owner to decide your pending requests, or cancel one, before filing another. |
 | `transfer_ownership_required` | 409 | Transfer ownership of these shared rooms before deleting this account: … (the message lists them; `detail.rooms` carries each room's id/title/kind) | no | Transfer ownership of each listed room to another member first, then retry the account deletion. |
 | `too_many_link_codes` | 429 | Too many outstanding link codes; use one or let it expire | wait | Wait for the Retry-After interval; retry the exact same request. |
 | `too_many_open_claims` | 409 | ${row.claimant_member_id} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

@@ -413,16 +413,13 @@ const verificationOf = value => {
     check(typeof value.by === "string" && value.by.length > 0 && value.by.length <= 128, "verification by must be 1..128 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "verification at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
-  let jev;
-  if (value.jev !== undefined && value.jev !== null) {
-    check(typeof value.jev === "object" && !Array.isArray(value.jev), "verification jev must be an object");
-    check(typeof value.jev.verdict === "string" && value.jev.verdict.length > 0 && value.jev.verdict.length <= 64,
-      "verification jev verdict must be 1..64 characters");
-    check(typeof value.jev.score === "number" && Number.isFinite(value.jev.score), "verification jev score must be a number");
-    jev = Object.freeze({ verdict: value.jev.verdict, score: value.jev.score });
-  }
+  // D1: the Jev receipt score is shadow measurement, not a verdict on this
+  // fact. A stored `jev` entry (written by an earlier version beside the
+  // verified state) is dropped here, on canonicalisation, so a legacy fact
+  // reads back without it; the full scored decision lives only in the
+  // owner-only shadow journal (server/jev-shadow-journal.mjs).
   return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
-    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}) });
+    executedChecks: executedChecksOf(value.executedChecks) });
 };
 // A delivery as stored on the item: the validated bundle plus the stamp the
 // finish transition froze onto it (digest + who delivered + when).
@@ -1233,7 +1230,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
@@ -1288,14 +1285,6 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   if (delivery !== undefined && delivery !== null) {
     check(finishing, "a delivery bundle is only recorded on the finish transition");
     deliveryOf(delivery);
-  }
-  let jevRecord;
-  if (jev !== undefined && jev !== null) {
-    check(state === "done", "jev is only recorded on the verify transition");
-    check(typeof jev === "object" && !Array.isArray(jev)
-      && typeof jev.verdict === "string" && jev.verdict.length > 0 && jev.verdict.length <= 64
-      && typeof jev.score === "number" && Number.isFinite(jev.score), "jev must be { verdict, score }");
-    jevRecord = Object.freeze({ verdict: jev.verdict, score: jev.score });
   }
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
@@ -1357,7 +1346,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = Object.freeze({
       state: effectivePolicy === "self_attested" ? "self_attested" : "verified",
       by: reviewedBy ?? agent, at: isoOf(atMs), basis: reviewBasisFor(deliveredItem),
-      executedChecks, ...(jevRecord ? { jev: jevRecord } : {}),
+      executedChecks,
     });
   } else if (state === "in_progress" && item.state === "delivered") {
     // changes_requested: the delivery stays as the record of what was

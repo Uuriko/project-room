@@ -15,6 +15,8 @@ import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
 import { withProjectMapOverlap } from "../project-map-store.mjs";
 import { readBoard } from "../board-read.mjs";
+import { claimThread } from "../claim-thread.mjs";
+import { withContentTrust } from "../content-trust.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -87,6 +89,21 @@ export async function closeRoute(ctx) {
     helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
 }
 
+// #5378: the claim thread, one ordered record per Board claim. Same
+// visibility as the claim read: any active room member who may read the
+// claim reads its thread. Entries are board events and the claim's own
+// history only, never chat, so private replies and DMs cannot leak.
+export async function threadRoute(ctx) {
+  const { roomId } = authenticateRead(ctx);
+  const claimId = ctx.params.claimId;
+  if (typeof claimId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(claimId)) {
+    ctx.reject(422, "invalid_claim_input", "Expected claimId matching [A-Za-z0-9_-]{1,128}.");
+  }
+  const item = ctx.store.workClaims.get(roomId, claimId);
+  if (!item) ctx.reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+  return ctx.json(ctx.res, 200, withContentTrust(claimThread(ctx.store, roomId, item)));
+}
+
 const claimParameters = Object.freeze({ type: "object", required: ["roomId", "claimId"],
   properties: { roomId: { type: "string" }, claimId: { type: "string" } } });
 const parameters = Object.freeze({ type: "object", required: ["roomId"],
@@ -101,6 +118,10 @@ export const WORK_CLAIM_ROUTES = Object.freeze([
     path: `/api/rooms/{roomId}/work-claims/{claimId}/${method === "POST" ? "premise-invalid" : "provenance"}`,
     auth: "room", capability: null, scope: "room", handler: provenanceRoute,
     schema: { params: { type: "object", required: ["roomId", "claimId"], properties: { roomId: { type: "string" }, claimId: { type: "string" } } }, response: { type: "object" } }, events: [] })),
+  ...["GET", "HEAD"].map(method => Object.freeze({ id: `claim-thread-${method}`, method,
+    path: "/api/rooms/{roomId}/work-claims/{claimId}/thread", parity: "mcp:room_work_claim_thread",
+    auth: "room", capability: null, scope: "room", handler: threadRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: [] })),
   Object.freeze({ id: "work-claim-close", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/close",
     auth: "room", capability: null, scope: "room", handler: closeRoute,
     schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),

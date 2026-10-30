@@ -5,6 +5,8 @@ export const OAUTH_PROVIDER_TABLES = Object.freeze([
   "oauth_provider_codes",
   "oauth_provider_access_tokens",
   "oauth_provider_refresh_tokens",
+  "oauth_invite_clients", "oauth_invite_codes", "oauth_invite_access_tokens", "oauth_invite_refresh_tokens",
+  "oauth_invite_grants", "oauth_invite_pending",
 ]);
 
 const SCHEMA = `
@@ -82,6 +84,10 @@ export function ensureOAuthProviderSchema(db) {
   // the table, and the column is nullable so old rows stay valid.
   const columns = db.prepare("PRAGMA table_info(oauth_provider_codes)").all().map(column => column.name);
   if (!columns.includes("family_id")) db.exec("ALTER TABLE oauth_provider_codes ADD COLUMN family_id TEXT");
+  for (const table of ["oauth_provider_codes", "oauth_provider_access_tokens", "oauth_provider_refresh_tokens"]) {
+    const fields = db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+    if (!fields.includes("binding_json")) db.exec(`ALTER TABLE ${table} ADD COLUMN binding_json TEXT`);
+  }
   ready.add(db);
 }
 
@@ -90,6 +96,9 @@ const PRUNE = Object.freeze([
   ["oauth_provider_codes", "code_hash"],
   ["oauth_provider_access_tokens", "token_hash"],
   ["oauth_provider_refresh_tokens", "token_hash"],
+  ["oauth_invite_clients", "client_id"], ["oauth_invite_codes", "code_hash"],
+  ["oauth_invite_access_tokens", "token_hash"], ["oauth_invite_refresh_tokens", "token_hash"],
+  ["oauth_invite_grants", "id"], ["oauth_invite_pending", "nonce_hash"],
 ]);
 
 // Bounded delete of expired rows. Does not create the tables: a cron tick
@@ -98,9 +107,11 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
   if (!Number.isSafeInteger(now) || !Number.isSafeInteger(limit) || limit < 1) {
     throw new TypeError("pruneOAuthProvider requires a timestamp and a positive limit");
   }
-  if (!oauthProviderTablesPresent(db)) return { pruned: 0 };
+  // Invitation-only runtimes need not have mounted the account provider.
+  if (!OAUTH_PROVIDER_TABLES.some(table => db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))) return { pruned: 0 };
   let pruned = 0;
   for (const [table, key] of PRUNE) {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
     const result = db.prepare(
       `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE expires_at <= ? LIMIT ?)`
     ).run(now, limit);
@@ -129,23 +140,23 @@ export function createOAuthProviderSqlite(db) {
        name=excluded.name, redirect_uris_json=excluded.redirect_uris_json, expires_at=excluded.expires_at`
   ).run(row.clientId, row.name, JSON.stringify(row.redirectUris), row.expiresAt);
   const saveCode = row => db.prepare(
-    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id,binding_json)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(code_hash) DO UPDATE SET used=excluded.used, family_id=excluded.family_id`
   ).run(row.codeHash, row.clientId, row.userId, row.redirectUri, JSON.stringify(row.scopes),
-    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used), row.familyId ?? null);
+    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used), row.familyId ?? null, JSON.stringify(row.binding ?? null));
   const saveAccess = row => db.prepare(
-    `INSERT INTO oauth_provider_access_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,ip,user_agent)
-     VALUES(?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_access_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,ip,user_agent,binding_json)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(token_hash) DO UPDATE SET revoked=excluded.revoked`
   ).run(row.tokenHash, row.clientId, row.userId, JSON.stringify(row.scopes), row.familyId,
-    row.createdAt, row.expiresAt, flag(row.revoked), row.ip ?? null, row.userAgent ?? null);
+    row.createdAt, row.expiresAt, flag(row.revoked), row.ip ?? null, row.userAgent ?? null, JSON.stringify(row.binding ?? null));
   const saveRefresh = row => db.prepare(
-    `INSERT INTO oauth_provider_refresh_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,rotated_by,ip,user_agent)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    `INSERT INTO oauth_provider_refresh_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,rotated_by,ip,user_agent,binding_json)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(token_hash) DO UPDATE SET revoked=excluded.revoked, rotated_by=excluded.rotated_by`
   ).run(row.tokenHash, row.clientId, row.userId, JSON.stringify(row.scopes), row.familyId,
-    row.createdAt, row.expiresAt, flag(row.revoked), row.rotatedBy ?? null, row.ip ?? null, row.userAgent ?? null);
+    row.createdAt, row.expiresAt, flag(row.revoked), row.rotatedBy ?? null, row.ip ?? null, row.userAgent ?? null, JSON.stringify(row.binding ?? null));
 
   const clients = {
     get(clientId) {
@@ -165,6 +176,7 @@ export function createOAuthProviderSqlite(db) {
       const row = db.prepare("SELECT * FROM oauth_provider_codes WHERE code_hash=?").get(codeHash);
       if (!row) return undefined;
       return watch({
+        binding: row.binding_json ? JSON.parse(row.binding_json) : null,
         codeHash: row.code_hash, clientId: row.client_id, userId: row.user_id, redirectUri: row.redirect_uri,
         scopes: scopesOf(row.scopes_json), codeChallenge: row.code_challenge, createdAt: row.created_at,
         expiresAt: row.expires_at, used: row.used === 1, familyId: row.family_id ?? null
@@ -179,6 +191,7 @@ export function createOAuthProviderSqlite(db) {
       const row = db.prepare("SELECT * FROM oauth_provider_access_tokens WHERE token_hash=?").get(tokenHash);
       if (!row) return undefined;
       return watch({
+        binding: row.binding_json ? JSON.parse(row.binding_json) : null,
         tokenHash: row.token_hash, clientId: row.client_id, userId: row.user_id, scopes: scopesOf(row.scopes_json),
         familyId: row.family_id, createdAt: row.created_at, expiresAt: row.expires_at, revoked: row.revoked === 1,
         ip: row.ip ?? null, userAgent: row.user_agent ?? null
@@ -198,6 +211,7 @@ export function createOAuthProviderSqlite(db) {
       const row = db.prepare("SELECT * FROM oauth_provider_refresh_tokens WHERE token_hash=?").get(tokenHash);
       if (!row) return undefined;
       return watch({
+        binding: row.binding_json ? JSON.parse(row.binding_json) : null,
         tokenHash: row.token_hash, clientId: row.client_id, userId: row.user_id, scopes: scopesOf(row.scopes_json),
         familyId: row.family_id, createdAt: row.created_at, expiresAt: row.expires_at, revoked: row.revoked === 1,
         rotatedBy: row.rotated_by ?? null, ip: row.ip ?? null, userAgent: row.user_agent ?? null

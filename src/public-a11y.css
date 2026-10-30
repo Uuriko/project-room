@@ -47,3 +47,6 @@ h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-we
    keyboard card navigation (src/board-keyboard.mjs). Keep the ring visible
    so keyboard users can see where focus landed. */
 .claim-card h4:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: .3rem; }
+
+/* Keep the permissions disclosure tappable beside the browser join action. */
+.join-permissions-details > summary { min-height: 24px; }

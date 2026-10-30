@@ -134,7 +134,8 @@ async function axe(page) {
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   const serious = result.violations.filter(item => item.impact === "serious" || item.impact === "critical");
-  assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), []);
+  assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), [],
+    JSON.stringify(serious.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), null, 2));
 }
 
 test("board columns, keyboard claim, linked work returns, chat line, 390px, and axe", { timeout: 120000 }, async t => {
@@ -1340,9 +1341,9 @@ test("criteria delivery, send-back, redelivery and owner verification work from 
   await form.locator('[name="artifactSha256"]').fill("a".repeat(64));
   await form.locator('[name="checkName"]').fill("Result checked");
   await form.locator('button[type="submit"]').click();
-  await card.getByRole("button", { name: "Send back", exact: true }).waitFor();
+  await card.getByRole("button", { name: "Send back — Reviewable result", exact: true }).waitFor();
   assert.equal(fixture.store.workClaims.get("commons", "lifecycle").state, "delivered");
-  await card.getByRole("button", { name: "Send back", exact: true }).click();
+  await card.getByRole("button", { name: "Send back — Reviewable result", exact: true }).click();
   await form.waitFor();
   const sentBack = fixture.store.workClaims.get("commons", "lifecycle");
   assert.equal(sentBack.state, "in_progress");
@@ -1351,9 +1352,9 @@ test("criteria delivery, send-back, redelivery and owner verification work from 
   // The form retains the previous bundle. A new delivery creates a new
   // review generation even when the artifact bytes are unchanged.
   await form.locator('button[type="submit"]').click();
-  await card.getByRole("button", { name: "Verify", exact: true }).waitFor();
+  await card.getByRole("button", { name: "Verify — Reviewable result", exact: true }).waitFor();
   assert.equal(fixture.store.workClaims.get("commons", "lifecycle").deliveryGeneration, 2);
-  await card.getByRole("button", { name: "Verify", exact: true }).click();
+  await card.getByRole("button", { name: "Verify — Reviewable result", exact: true }).click();
   await page.locator('[aria-labelledby="board-col-landed"] article[data-claim-id="lifecycle"]').waitFor();
   assert.equal(fixture.store.workClaims.get("commons", "lifecycle").verification.state, "self_attested");
 });

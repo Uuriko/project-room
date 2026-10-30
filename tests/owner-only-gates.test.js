@@ -35,12 +35,12 @@ function refuses(fn, status, code) {
   assert.throws(fn, error => error.status === status && error.code === code, `expected ${status} ${code}`);
 }
 
-test("a non-owner member is refused by each owner-only store gate", t => {
+test("a non-owner member cannot administer others or sponsor permissions they lack", t => {
   const f = setup(t);
   const keyHash = createHash("sha256").update(randomBytes(32)).digest("hex");
   refuses(() => linkWithProof(f.store, f.plainKey, "commons", f.identity, { permissions: ["accept_work"] }), 403, "access_denied");
   refuses(() => f.store.agentConnections.apply(f.plainSession.token, "commons", { action: "create", requestId: randomUUID(), memberId: "agent-x",
-    displayName: "X", access: "contribute", keyHash, expiresAt: Date.now() + 86400000, expectedOwnerRevision: 0 }, f.plainSession.session.sessionBinding), 403, "owner_required");
+    displayName: "X", access: "contribute", keyHash, expiresAt: Date.now() + 86400000, expectedOwnerRevision: 0 }, f.plainSession.session.sessionBinding), 403, "sponsor_scope_exceeded");
   refuses(() => f.store.guestAgentLinks.owner(f.plainKey, "commons", null), 403, "owner_required");
   refuses(() => f.store.invites.create(f.plainKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null), 403, "access_denied");
   refuses(() => f.store.wakeQueue.pause(f.plainKey, "commons", { requestId: randomUUID(), reason: null }, null, { memberId: "victim" }), 403, "wake_pause_not_permitted");

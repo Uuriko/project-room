@@ -46,12 +46,26 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   const copied = await page.evaluate(() => window.growthCopied);
   assert.match(copied, /People and agents work in the same room/);
   assert.match(copied, new RegExp(inviteUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  await page.locator("#growth-copy-agent").click();
+  assert.match(await page.locator('#growth-copy-link').getAttribute('class'), /secondary/);
+  await page.getByRole('button', { name: 'Copy link', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.growthCopied), inviteUrl);
+  const agentCreate = page.getByRole('button', { name: 'Create invitation for an agent', exact: true });
+  assert.match(await agentCreate.getAttribute('class'), /primary/);
+  await page.locator('#share-link-access').selectOption('guest');
+  await agentCreate.click();
+  assert.equal(await page.locator('#agent-invite-profile').inputValue(), 'guest', 'Guest selection does not turn into Member access');
+  await page.locator('#agent-invite-mint').click();
+  await page.getByRole('button', { name: 'Copy invitation for an agent', exact: true }).click();
   const agentInstructions = await page.evaluate(() => window.growthCopied);
-  assert.ok(agentInstructions.includes(inviteUrl));
-  assert.match(agentInstructions, /Reuse your saved identity/);
-  assert.match(agentInstructions, /Do not claim to be listening/);
-  assert.equal(await page.locator("#growth-kit-status").isVisible(), true);
+  const nativeUrl = await page.locator('#agent-invite-link').getAttribute('href');
+  assert.match(nativeUrl, /\/join\/RM-[A-Z0-9]{16}$/);
+  assert.deepEqual(fixture.store.invites.preview(new URL(nativeUrl).pathname.split('/').at(-1)).permissions, []);
+  assert.equal(agentInstructions.split(nativeUrl).length - 1, 1);
+  assert.ok(!agentInstructions.includes(inviteUrl), 'native invitation is distinct from reusable people link');
+  assert.match(agentInstructions, /room_check_access/);
+  assert.match(agentInstructions, /read the shared brief/);
+  assert.match(agentInstructions, /keep this invitation unused/);
+  assert.equal(fixture.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null);
   mkdirSync("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/growth-invite-kit.png" });
 
@@ -63,6 +77,13 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   await landing.locator("#join-link-dialog").waitFor({ state: "visible" });
   await landing.locator("#join-inviter-line").waitFor({ state: "visible" });
   assert.match(await landing.locator("#join-inviter-line").innerText(), /invited you\./);
+  await landing.locator('#shared-agent-details > summary').click();
+  const recipientInstructions = await landing.locator('#shared-agent-instructions').inputValue();
+  assert.match(recipientInstructions, /supports shared invitation links/);
+  assert.match(recipientInstructions, /Native OAuth needs a fresh RM invitation/);
+  assert.match(recipientInstructions, /explain the exact next step and wait/);
+  assert.match(recipientInstructions, /read the shared brief/);
+  assert.doesNotMatch(recipientInstructions, /npx|agent-inbox/);
   await landing.screenshot({ path: "test-results/growth-invite-landing.png" });
   await guest.close();
 

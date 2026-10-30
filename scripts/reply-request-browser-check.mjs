@@ -1,5 +1,6 @@
 import { openComposerOptions } from "./room-chrome.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
+import { revealRecord } from "./reveal-record.mjs";
 import { join } from "node:path";
 import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import { hostReplyBody } from "../client/host-result.mjs";
@@ -34,13 +35,13 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
   const request = (id, toMemberId = "guest") => send("owner", "message.posted", { messageId: id, body: `Question ${id}?`, toMemberId, requestKind: "reply" });
   return { ...fixture, origin: `http://127.0.0.1:${server.address().port}`, login, errors, send, request, state: () => fixture.store.room("commons").state };
 }
-const record = (page, id) => page.locator(`[data-message-record-id="${id}"]`);
+const record = revealRecord;
 const input = page => page.locator("#message-input");
 const idle = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled);
 const failed = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
 const saved = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#request-mode-bar").hidden);
 async function mode(page, id, kind) {
-  await record(page, id).locator(`[data-message-action="request-${kind}"]`).click();
+  await (await record(page, id)).locator(`[data-message-action="request-${kind}"]`).click();
   await page.waitForFunction(() => !document.querySelector("#request-mode-bar").hidden && !document.querySelector("#message-input").disabled);
   assert.equal(await page.locator("#composer-status").textContent(), "");
 }
@@ -56,16 +57,16 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   assert.equal(await input(owner).inputValue(), "Keep my ordinary draft");
   const id = Object.keys(f.state().replyRequests)[0];
   assert.equal(f.state().replyRequests[id].recipientId, "guest");
-  const clarify = record(guest, id).getByRole("button", { name: "Clarify", exact: true });
+  const clarify = (await record(guest, id)).getByRole("button", { name: "Clarify", exact: true });
   assert.equal(await clarify.getAttribute("title"), "Reply without closing this request");
-  assert.equal(await record(owner, id).getByRole("button", { name: "Reply", exact: true }).count(), 1);
+  assert.equal(await (await record(owner, id)).getByRole("button", { name: "Reply", exact: true }).count(), 1);
   await clarify.focus(); await guest.keyboard.press("Enter");
   await input(guest).fill("Should it include the review?"); await input(guest).press("Enter");
   await guest.waitForFunction(() => !document.querySelector("#message-input").disabled && !document.querySelector("#message-input").value);
   assert.equal(f.state().replyRequests[id].status, "open");
   const clarification = f.state().messages.find(message => message.body === "Should it include the review?");
-  assert.equal(await record(guest, clarification.id).getByRole("button", { name: "Reply", exact: true }).count(), 1);
-  await record(guest, id).getByRole("button", { name: "Answer request", exact: true }).click();
+  assert.equal(await (await record(guest, clarification.id)).getByRole("button", { name: "Reply", exact: true }).count(), 1);
+  await (await record(guest, id)).getByRole("button", { name: "Answer request", exact: true }).click();
   await guest.getByRole("button", { name: "Send answer", exact: true }).waitFor();
   await idle(guest);
   assert.equal(await guest.locator("#request-refresh").isVisible(), false, "unchanged context needs no refresh control");
@@ -91,7 +92,7 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   assert.equal(await guest.locator("#ask-room").count(), 0, "no separate assistant action returns after the answer");
   assert.equal(f.state().replyRequests[id].status, "answered");
   assert.deepEqual(f.state().workItems, before);
-  await record(owner, id).locator(".request-state").filter({ hasText: "Answered" }).waitFor();
+  await (await record(owner, id)).locator(".request-state").filter({ hasText: "Answered" }).waitFor();
   assert.deepEqual(f.errors, []);
 });
 
@@ -179,7 +180,7 @@ test("original conversation shows host progress and recovery without changing th
   const input = { requestMessageId, attemptId: "visible-host", action: "claim",
     expectedRequestRevision: request.revision, contextEventId: request.contextEventId };
   f.store.requestRuns.apply(f.keys.producer, "commons", input);
-  const owner = await f.login("owner"), row = record(owner, requestMessageId);
+  const owner = await f.login("owner"), row = (await record(owner, requestMessageId));
   await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Agent working", requestMessageId);
   assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
   f.store.requestRuns.apply(f.keys.producer, "commons", { ...input, action: "needs_attention" });
@@ -200,13 +201,13 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
     files: ["parser.js"], checks: [{ command: "node --test", outcome: "passed" }]
   } });
   f.send("producer", "message.posted", { messageId: "inspect-result", replyToId: "inspect-code", toMemberId: "owner", body });
-  await record(owner, "inspect-code").locator('[data-message-action="reply"]').click();
-  const content = record(owner, "inspect-result").locator(".message-body");
+  await (await record(owner, "inspect-code")).locator('[data-message-action="reply"]').click();
+  const content = (await record(owner, "inspect-result")).locator(".message-body");
   await content.waitFor();
   await content.locator('.message-expansion > summary').click();
   await content.locator('.message-full').waitFor({ state: 'visible' });
   assert.equal(await content.locator('.message-full').textContent(), body, "expanded code result preserves exact original bytes");
-  assert.match(await record(owner, "inspect-result").locator(".audience-chip").textContent(), /private/);
+  assert.match(await (await record(owner, "inspect-result")).locator(".audience-chip").textContent(), /private/);
   assert.equal(await content.locator("img").count(), 0);
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
@@ -219,6 +220,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       expectedRequestRevision: 0, responseOutcome: "answered", contextEventId: first.event.id, contextSequence: first.sequence,
       replyToId: "follow-original", toMemberId: "owner", workItemId: null });
     const page = await f.login("owner");
+    await record(page, "follow-original"); // the ordinary draft belongs to the direct conversation
     await input(page).fill("Keep my normal draft");
     await mode(page, "follow-original", "follow-up");
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
@@ -227,7 +229,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     assert.match(await page.locator("#thread-context").textContent(), /includes private messages/);
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.doesNotMatch(await page.locator("#message-form").innerText(), /Visible to everyone here/);
-    assert.equal(await record(page, "follow-answer").locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");
+    assert.equal(await (await record(page, "follow-answer")).locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");
     await input(page).fill("Add keyboard support");
     await page.screenshot({ path: `test-results/request-follow-up-${viewport.width}.png`, fullPage: true });
     await page.locator("#request-exit").click();
@@ -282,13 +284,13 @@ test("host answer survives closing the requester and returning in an independent
   assert.equal(result.status, "delivered");
   const answer = f.state().messages.find(message => message.id === f.state().replyRequests[id].responseMessageId);
   assert.ok(answer);
-  await record(owner, id).locator('[data-message-action="reply"]').click();
-  await record(owner, answer.id).waitFor();
+  await (await record(owner, id)).locator('[data-message-action="reply"]').click();
+  await (await record(owner, answer.id)).waitFor();
   await owner.context().close();
   const returning = await f.login("owner");
-  await record(returning, id).locator('[data-message-action="reply"]').click();
-  await record(returning, answer.id).waitFor();
-  assert.match(await record(returning, answer.id).textContent(), /One shared answer survives return/);
+  await (await record(returning, id)).locator('[data-message-action="reply"]').click();
+  await (await record(returning, answer.id)).waitFor();
+  assert.match(await (await record(returning, answer.id)).textContent(), /One shared answer survives return/);
   assert.equal(f.state().replyRequests[id].status, "answered");
   const retry = await runRequestOnce(args);
   assert.equal(retry.hostExecuted, false);

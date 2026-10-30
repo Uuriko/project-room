@@ -1,4 +1,5 @@
 import { openComposerOptions, openSearch } from "./room-chrome.mjs";
+import { openChannel, revealRecord } from "./reveal-record.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
@@ -115,11 +116,11 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     responseToRequestId: data.messageId, responseOutcome: "answered", toMemberId: "reviewer", workItemId: workId,
     body: "The outside author reports writing the draft with AI editing assistance. This is their account, not identity proof." })).result.structuredContent;
   assert.equal(answer.status, "recorded");
-  await page.locator('[data-message-record-id="' + data.messageId + '"] .request-state').filter({ hasText: "Answered" }).waitFor();
+  await (await revealRecord(page, data.messageId)).locator('.request-state').filter({ hasText: "Answered" }).waitFor();
   await page.screenshot({ path: join(directory, "answered.png") });
   assert.deepEqual(f.store.room("commons").state.workItems, before);
   assert.deepEqual(f.store.room("commons").state.members, beforeMembers);
-  await page.locator("#thread-back").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
+  await openChannel(page); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
   page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor();
   assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v3")), null);

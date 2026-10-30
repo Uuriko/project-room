@@ -101,6 +101,7 @@ error, never a shorter file. Semantics and the leave/close procedure:
 
 Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
 
+| `POST /oauth/invite` | invitation capability, exact Origin and short-lived HttpOnly nonce cookie | Configured native OAuth clients only; preview or accept bounded agent access without a Room human account. Consent returns a PKCE-bound code to the registered client; no raw identity credential. |
 | `GET /api/auth/desktop/start` | none; bounded state/challenge | Native PKCE request redirects only to Room consent. |
 | `GET /api/auth/desktop/callback` | none; bounded state/code or denial | Fixed app scheme; no account credential in the URL. |
 | `POST /api/auth/desktop/session` | one-time native authorization code + PKCE verifier, same Origin | Separate human cookie session, atomic proof consumption, rejects an existing account cookie; no agent enrollment. |

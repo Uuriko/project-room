@@ -13,6 +13,9 @@ import { applicationTables } from "../server/writer-fence.mjs";
 // Empty in the recovery fixture: cron tables, and update marks that exist only
 // after a member reads, finishes, or clears an item. Same exceptions as the recovery audit.
 const EMPTY_UNTIL_CRON = new Set([
+  // Only muse-room can enable development access. This fixture deliberately
+  // contains ordinary rooms; the populated table is audited in muse-development-access.test.js.
+  "development_co_owner_links",
   "message_replay_snapshots", // Staging is empty outside an unfinished replay.
   "membership_delegation_pending",
   "room_access_auto_approve",

@@ -59,7 +59,7 @@ signed evidence or checks (§4.4).
 ## 2. Census — every live reader and writer
 
 Method: full-text scan for `workItems` over the shipped tree at the Step 0
-base, pinned file-by-file in the Step 0 census test (55 files under
+base, pinned file-by-file in the Step 0 census test (61 files under
 `server/` + `src/`; outside those trees: `client/` 2, `machine/` 1,
 `cloudflare/` 4 check/fixture files, `scripts/` ≈60 operational and
 browser-check scripts that consume the client/store shapes).
@@ -104,7 +104,7 @@ last three carry state with no board field (§4.5).
   `server/return-brief.mjs`, `src/reminders.js`, `src/reply-requests.js`.
 - **Work surfaces (server):** `server/work-context.mjs`,
   `server/work-discussion.mjs`, `server/work-help.mjs`,
-  `server/work-wakes.mjs`, `server/mcp-room-profile.mjs`,
+  `server/work-wakes.mjs`, `server/mcp-events-runtime.mjs`, `server/mcp-room-profile.mjs`,
   `server/project-offers.mjs`, `server/public-work-reviews.mjs`,
   `server/spend-allowance.mjs`, `server/text-results.mjs`,
   `server/usage-summary.mjs`, `server/agent-fleet.mjs`,
@@ -117,7 +117,7 @@ last three carry state with no board field (§4.5).
 
 Direct `state.workItems` reads concentrate in `server/store.mjs` (≈42
 sites: validation, search, sessions, integrity) and `src/app.js` (≈40: the
-human work surface). Reader migration is therefore not 55 equal jobs: the
+human work surface). Reader migration is therefore not 61 equal jobs: the
 long tail reads one or two fields (usually lifecycle state, receipt, or
 help), and the two hubs read everything.
 
@@ -371,3 +371,7 @@ orientation projection maps the existing room work items through
 `orientationRecord`; it does not write work or alter board synchronization.
 This reader was present in source but omitted from the census. Recording it
 does not close reader-migration debt: it still enumerates the room's work items.
+
+2026-10-30 native Events amendment: `server/mcp-events-runtime.mjs` reads
+current work item revision and next-step ownership before webhook delivery,
+suppressing stale work notifications. It introduces no work item writer.

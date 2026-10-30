@@ -55,6 +55,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_list_files", focus: ["work", "review"] },
   { name: "room_get_file", focus: ["work", "review"] },
   { name: "room_work_claim_provenance", focus: ["work"] },
+  { name: "room_work_claim_thread", focus: ["work", "review"] },
   { name: "wake_register", alias: "wake.register", focus: ["automation"] },
   { name: "wake_clear", alias: "wake.clear", focus: ["automation"] },
   { name: "heartbeat_set", alias: "heartbeat.set", focus: ["automation"] },

@@ -1,5 +1,6 @@
 // Known ACP agents, in detection order. Commands verified Oct 29, 2026 against
 // each agent's docs and the ACP registry. `--agent-cmd` overrides when they drift.
+// Codex downloads use the 2.5.0 adapter qualified with a no-prompt session.
 import { spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { existsSync } from "node:fs";
@@ -7,7 +8,7 @@ import { createPeer } from "./jsonrpc.mjs";
 
 export const KNOWN_AGENTS = Object.freeze([
   Object.freeze({ id: "claude", label: "Claude Code", bin: "claude-agent-acp", args: [], npx: ["-y", "@agentclientprotocol/claude-agent-acp"] }),
-  Object.freeze({ id: "codex", label: "Codex", bin: "codex-acp", args: [], npx: ["-y", "@agentclientprotocol/codex-acp"] }),
+  Object.freeze({ id: "codex", label: "Codex", bin: "codex-acp", args: [], npx: ["-y", "@agentclientprotocol/codex-acp@2.5.0"] }),
   Object.freeze({ id: "goose", label: "Goose", bin: "goose", args: ["acp"], npx: null }),
   Object.freeze({ id: "gemini", label: "Gemini CLI", bin: "gemini", args: ["--acp"], npx: null }),
 ]);
@@ -62,8 +63,9 @@ export function spawnAgent(candidate, { cwd = process.cwd(), env = process.env, 
 
 export async function initialize(peer, { timeoutMs = 5000 } = {}) {
   const result = await peer.request("initialize", { protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: CLIENT_CAPABILITIES, clientInfo: { name: "room-acp", version: "0.0.0" } }, { timeoutMs });
+  if (result?.protocolVersion !== ACP_PROTOCOL_VERSION) throw new Error(`Unsupported ACP protocol version: expected ${ACP_PROTOCOL_VERSION}`);
   return {
-    protocolVersion: result?.protocolVersion ?? null,
+    protocolVersion: result.protocolVersion,
     loadSession: result?.agentCapabilities?.loadSession === true,
     promptCapabilities: result?.agentCapabilities?.promptCapabilities ?? {},
     authMethods: Array.isArray(result?.authMethods) ? result.authMethods.map(method => method?.id ?? method?.name).filter(Boolean) : [],
@@ -71,10 +73,23 @@ export async function initialize(peer, { timeoutMs = 5000 } = {}) {
   };
 }
 
-// Probe one candidate: spawn, initialize, kill. Never throws.
+// Probe one candidate without a model prompt. Doctor checks initialization;
+// invitation selection also opens a session through the actual host helper.
+// The temporary session is never saved to the Room session map.
 export async function probe(candidate, options = {}) {
-  let spawned;
+  let spawned, host;
   try {
+    if (options.executionReady) {
+      const { AgentHost } = await import("./agent-host.mjs");
+      let permissionRequested = false;
+      host = new AgentHost({ candidate, cwd: options.cwd, env: options.env,
+        onPermission: async () => { permissionRequested = true; return { outcome: { outcome: "cancelled" } }; },
+      });
+      const capabilities = await host.start({ timeoutMs: options.timeoutMs ?? 30000 });
+      await host.session("room-preflight", { timeoutMs: options.sessionTimeoutMs ?? 60000 });
+      if (permissionRequested) throw new Error("Session readiness required a permission request; preflight denied it");
+      return { ...candidate, ok: true, executionReady: true, capabilities };
+    }
     spawned = spawnAgent(candidate, options);
     const exited = new Promise(resolve => spawned.child.once("error", error => resolve({ error })).once("exit", code => resolve({ error: new Error(`exited with code ${code}`) })));
     const capabilities = await Promise.race([initialize(spawned.peer, options), exited.then(({ error }) => { throw error; })]);
@@ -82,6 +97,7 @@ export async function probe(candidate, options = {}) {
   } catch (error) {
     return { ...candidate, ok: false, error: String(error.message ?? error) };
   } finally {
+    host?.stop();
     if (spawned) { spawned.peer.close(); spawned.child.kill(); }
   }
 }

@@ -1,4 +1,4 @@
-import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
+import { canInviteCoOwners } from "../src/room-administration.js";
 // One-time agent invite codes: the self-serve half of the plug-in loop.
 //
 // An owner mints a short single-use code bound to a room with an explicit
@@ -26,7 +26,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, memberOwnerId, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -39,6 +39,14 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const hash = text => createHash("sha256").update(text).digest("hex");
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// memberOwnerId also returns an agent room owner when no human exists. Only
+// stamp a proven human here; omission preserves the established agent-owned
+// room grouping. The event actor/referral still records the actual grantor.
+const humanSponsorData = (state, actorId) => {
+  const id = memberOwnerId(state, actorId);
+  return id && Object.hasOwn(state.members, id) && state.members[id].kind === "human"
+    ? { accountableHumanId: id } : {};
+};
 
 const CODE_PREFIX = "RM-";
 // v2 codes: 16 symbols from a 32-symbol alphabet = 80 bits of entropy.
@@ -342,12 +350,11 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
-    // "owner" names full access. Muse development co-owners default to full
-    // access; other rooms default to Member.
+    // "owner" names full access. An invite with no scope is Member in every
+    // room, including Muse development; owner-level must be asked for.
     if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
     if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) {
-      if (roomId === "muse-room" && museDevelopmentAccess(this.store.room(roomId).state) && !auth.delegate && canInviteCoOwners(this.store.room(roomId).state, auth.member.id)) ownerEquivalent = true;
-      else profile = "member";
+      profile = "member";
     }
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
@@ -559,6 +566,7 @@ export class AgentInvites {
           kind: "agent",
           permissions,
           identityId: identity.identityId,
+          ...humanSponsorData(room.state, row.created_by),
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           ...(ownerLevel ? { ownerEquivalent: true } : {}),
           // Referral attribution: the invite minter is the referrer. The
@@ -578,7 +586,7 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
-      // Muse development agents hear the room; ordinary rooms retain owner scope.
+      // Every new agent starts with an explicit owner-scoped talk policy.
       seedNewAgentPolicy(this.db, row.room_id, memberId, now, state);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
@@ -651,6 +659,7 @@ export class AgentInvites {
       const incoming = event({ id: eventId, idempotencyKey: eventId, roomId, actorId,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
           identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions,
+          ...humanSponsorData(room.state, actorId),
           // A guest link admits the agent as a link guest: it reads from its join
           // under the room's default history setting, like a human link guest.
           ...(historyGuest ? { historyGuest: true } : {}),
@@ -662,6 +671,7 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, identity.identityId, now);
+      seedNewAgentPolicy(this.db, roomId, identity.identityId, now, state);
       return { roomId, identityId: identity.identityId, memberId: identity.identityId, permissions, duplicate: false };
     });
   }

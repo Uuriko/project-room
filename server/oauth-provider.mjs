@@ -54,7 +54,31 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive } = {}) {
+// Resource grants are deliberately explicit: a human account is not an agent.
+// Only a trusted consent handler may supply a binding after checking ownership.
+const validateBinding = binding => {
+  if (binding === undefined || binding === null) return null; // legacy desktop grant
+  const fields = binding?.principalType === "invited-agent"
+    ? ["resource", "roomId", "identityId", "memberId", "principalType", "invitationGrantId", "identityEpoch"]
+    : ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch"];
+  check(binding && typeof binding === "object" && !Array.isArray(binding)
+    && Object.keys(binding).length === fields.length
+    && fields.every(key => typeof binding[key] === "string" && binding[key].length > 0 && binding[key].length <= 512),
+  "complete resource and agent binding required");
+  let url;
+  try { url = new URL(binding.resource); } catch { fail("invalid_request", "resource must be an absolute HTTPS URL"); }
+  check(url.protocol === "https:" && !url.username && !url.password && !url.hash && !url.search
+    && url.href === binding.resource, "resource must be an exact HTTPS URL without query or fragment");
+  return Object.freeze({ ...binding });
+};
+const checkResource = (record, resource) => {
+  if (record.binding ? resource !== record.binding.resource : resource !== undefined)
+    fail("invalid_target", "resource does not match this grant");
+};
+
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, isBindingActive, tokenKind = "account" } = {}) {
+  check(["account", "invite"].includes(tokenKind), "unsupported principal type");
+  const prefix = tokenKind === "invite" ? { code: "iac", access: "iat", refresh: "iar" } : { code: "oac", access: "oat", refresh: "oar" };
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -67,6 +91,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     "onSecurityEvent must be a function if given");
   check(isAccountActive === undefined || typeof isAccountActive === "function",
     "isAccountActive must be a function if given");
+
+  check(isBindingActive === undefined || typeof isBindingActive === "function", "isBindingActive must be a function");
+  const bindingActive = record => !record.binding || !isBindingActive || isBindingActive(record.userId, record.binding);
 
   const sqlite = db ? createOAuthProviderSqlite(db) : null;
   const clientStore = clients ?? sqlite?.clients ?? new Map();
@@ -147,13 +174,25 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   };
 
   // Step 2: after the user approves, issue an authorization code.
-  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge }) => {
+  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge, binding, codeIdempotencyKey }) => {
     check(typeof userId === "string" && userId.length > 0 && userId.length <= 128,
       "userId must be a non-empty string up to 128 chars");
     const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge });
-    const code = `oac_${newSecret(24)}`;
+    const grantBinding = validateBinding(binding);
+    if (!bindingActive({ userId, binding: grantBinding })) fail("invalid_grant", "agent connection is no longer active");
+    check(codeIdempotencyKey === undefined || /^[A-Za-z0-9_-]{43}$/.test(codeIdempotencyKey), "invalid authorization transaction");
+    const code = `${prefix.code}_${codeIdempotencyKey ? sha256(`code:${codeIdempotencyKey}:${clientId}:${userId}`) : newSecret(24)}`;
+    const prior = codeStore.get(sha256(code));
+    if (prior) {
+      if (prior.used || isExpired(prior, now)) fail("invalid_grant", "authorization transaction already completed or expired");
+      check(prior.clientId === clientId && prior.userId === userId && prior.redirectUri === redirectUri
+        && prior.codeChallenge === codeChallenge && JSON.stringify(prior.scopes) === JSON.stringify(validated.scopes)
+        && JSON.stringify(prior.binding) === JSON.stringify(grantBinding), "authorization transaction changed");
+      return Object.freeze({ code, expiresAt: prior.expiresAt });
+    }
     const record = {
       codeHash: sha256(code),
+      binding: grantBinding,
       clientId: validated.client.clientId,
       userId,
       redirectUri: validated.redirectUri,
@@ -172,7 +211,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   };
 
   // Step 3: exchange an authorization code for tokens. Verifies PKCE.
-  const exchangeCode = ({ code, clientId, redirectUri, codeVerifier, session }) => {
+  const exchangeCode = ({ code, clientId, redirectUri, codeVerifier, session, resource }) => {
     check(typeof code === "string" && code.length > 0, "code is required");
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     check(typeof redirectUri === "string" && redirectUri.length > 0, "redirect_uri is required");
@@ -202,6 +241,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (isExpired(record, now)) { codeStore.delete(record.codeHash); fail("invalid_request", "authorization code expired"); }
     check(record.clientId === clientId, "client_id mismatch");
     check(record.redirectUri === redirectUri, "redirect_uri mismatch");
+    checkResource(record, resource);
+    if (!bindingActive(record)) fail("invalid_grant", "agent connection is no longer active");
+    if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     // PKCE S256 verification.
     const expected = base64url(createHash("sha256").update(codeVerifier).digest());
     const a = Buffer.from(expected);
@@ -213,7 +255,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     record.familyId = familyId;
     record.used = true;
 
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session });
+    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], familyId, session, binding: record.binding });
   };
 
   // Session metadata attached at issuance (F-02): the IP and User-Agent
@@ -231,21 +273,21 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // Every access+refresh pair minted from one grant shares a familyId.
   // Rotation carries the familyId forward; reuse of a rotated refresh token
   // (record.rotatedBy set) then revokes the whole family (F-01).
-  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session } = {}) => {
+  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session, binding } = {}) => {
     const validScopes = validateScopes(scopes);
-    const accessToken = `oat_${newSecret()}`;
-    const refreshToken = `oar_${newSecret()}`;
+    const accessToken = `${prefix.access}_${newSecret()}`;
+    const refreshToken = `${prefix.refresh}_${newSecret()}`;
     const at = now();
     const meta = normalizeSessionMeta(session);
     accessStore.set(sha256(accessToken), {
       tokenHash: sha256(accessToken),
-      clientId, userId, scopes: validScopes, familyId,
+      clientId, userId, scopes: validScopes, familyId, binding,
       createdAt: at, expiresAt: at + ACCESS_TOKEN_TTL_MS, revoked: false,
       ip: meta.ip, userAgent: meta.userAgent,
     });
     refreshStore.set(sha256(refreshToken), {
       tokenHash: sha256(refreshToken),
-      clientId, userId, scopes: validScopes, familyId,
+      clientId, userId, scopes: validScopes, familyId, binding,
       createdAt: at, expiresAt: at + REFRESH_TOKEN_TTL_MS, revoked: false,
       rotatedBy: null, // hash of the refresh token that superseded this one
       ip: meta.ip, userAgent: meta.userAgent,
@@ -276,7 +318,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // (OAuth Security BCP §4.12 / RFC 6749 §6): the whole token family is
   // revoked and the caller gets a distinct invalid_grant so the legitimate
   // user sees a theft signal instead of a silent "revoked".
-  const refresh = ({ refreshToken, clientId, session }) => {
+  const refresh = ({ refreshToken, clientId, session, resource }) => {
     check(typeof refreshToken === "string" && refreshToken.length > 0, "refresh_token is required");
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     const record = refreshStore.get(sha256(refreshToken));
@@ -297,6 +339,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_request", "refresh token expired"); }
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     check(record.clientId === clientId, "client_id mismatch");
+    checkResource(record, resource);
+    if (!bindingActive(record)) fail("invalid_grant", "agent connection is no longer active");
     // Issue the replacement pair BEFORE revoking the old token (#2944).
     // issueTokenPair can still throw (validateScopes, or
     // normalizeSessionMeta for a non-object session); revoking first would
@@ -307,7 +351,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     // both refresh tokens live in between.
     const next = issueTokenPair({
       clientId: record.clientId, userId: record.userId,
-      scopes: [...record.scopes], familyId: record.familyId, session,
+      scopes: [...record.scopes], familyId: record.familyId, session, binding: record.binding,
     });
     record.revoked = true; // rotation: old refresh token is single-use
     record.rotatedBy = sha256(next.refreshToken);
@@ -315,20 +359,23 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   };
 
   // Verify a bearer access token. Returns { userId, clientId, scopes } or null.
-  const verifyAccessToken = token => {
+  const verifyAccessToken = (token, { resource } = {}) => {
     check(typeof token === "string" && token.length > 0, "token must be a non-empty string");
     const digest = sha256(token);
     const record = accessStore.get(digest);
     if (!record) return null;
     if (isExpired(record, now)) { accessStore.delete(digest); return null; }
-    if (record.revoked) return null;
+    if (record.revoked || !bindingActive(record)) return null;
+    if (record.binding ? resource !== record.binding.resource : resource !== undefined) return null;
     // Deleted/deactivated accounts lose API access immediately, even if a
     // token row somehow survived the deletion purge.
     if (isAccountActive && !isAccountActive(record.userId)) return null;
     return Object.freeze({
       userId: record.userId,
       clientId: record.clientId,
+      ...(record.binding ? { binding: Object.freeze({ ...record.binding }) } : {}),
       scopes: Object.freeze([...record.scopes]),
+      familyId: record.familyId,
     });
   };
 
@@ -423,6 +470,21 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     return count;
   };
 
+  // Nonsecret event subscriptions reference a grant family, not a bearer.
+  // A rotated-out refresh row is never authority; current revocation,
+  // resource, account and binding checks are identical to access verification.
+  const verifyGrantFamily = (familyId, { resource } = {}) => {
+    if (typeof familyId !== "string" || familyId.length > 128) return null;
+    for (const record of refreshStore.values()) {
+      if (record.familyId !== familyId || record.revoked || isExpired(record, now)
+        || !bindingActive(record) || (isAccountActive && !isAccountActive(record.userId))
+        || (record.binding ? resource !== record.binding.resource : resource !== undefined)) continue;
+      return Object.freeze({ userId: record.userId, clientId: record.clientId, familyId,
+        scopes: Object.freeze([...record.scopes]), ...(record.binding ? { binding: Object.freeze({ ...record.binding }) } : {}) });
+    }
+    return null;
+  };
+
   // Scope check with prefix wildcards ("chat:*"), mirroring token-scopes.
   const grants = (token, requiredScope) => {
     const auth = verifyAccessToken(token);
@@ -442,6 +504,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     exchangeCode,
     refresh,
     verifyAccessToken,
+    verifyGrantFamily,
     revoke,
     revokeAllForUser,
     listSessions,

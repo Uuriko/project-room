@@ -1,5 +1,6 @@
 import { openSearch } from "./room-chrome.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
+import { openChannel } from "./reveal-record.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -125,6 +126,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await page.locator("#thread-back").click();
     assert.equal(await page.locator('#emoji-list, #reaction-sheet, [data-message-action="add-reaction"], [data-reaction]').count(), 0);
+    // The restored room draft still addresses Maya; a public post goes to Everyone (addressed posts are private, DM-first).
+    await page.locator("#message-to-select").evaluate(el => { el.value = ""; el.dispatchEvent(new Event("change", { bubbles: true })); });
     await input.fill(':fire:');
     await input.press('Control+Enter');
     await page.waitForFunction(() => document.querySelector('#message-input').value === '');
@@ -143,8 +146,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#topbar-search-toggle").click();
     await page.locator("#message-search").fill("paperback edition");
     await page.locator(`#search-list [data-open-message="${posted[0].id}"]`).click();
-    assert.equal(await page.locator("#thread-bar").isVisible(), true);
-    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
+    // The reply is addressed to the agent, so it opens in that direct conversation (DM-first), not the public thread.
+    await page.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, posted[0].id);
     await page.locator("#clear-search").click();
     // Per-message actions live in the "⋯" overflow menu (UI calming #2): the
     // work affordance is hidden until the menu opens, then one click away.
@@ -173,6 +176,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
 
     // Literal markup is text, and long text still reflows at this viewport.
+    // The source reply was private, so return to the public thread first.
+    await openChannel(page); await page.locator('[data-message-record-id="book-club"] [data-message-action="thread"]').click();
+    await page.locator("#message-to-select").evaluate(el => { el.value = ""; el.dispatchEvent(new Event("change", { bubbles: true })); });
     send(human, T.MESSAGE_POSTED, { body: "<strong>Literal text</strong> " + "longword".repeat(35), replyToId: "book-club" });
     await page.getByText(/<strong>Literal text<\/strong>/).waitFor();
     assert.equal(await page.locator(".message-content .message-body strong").count(), 0);
@@ -181,6 +187,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // The leave-page warning still fires. This tab keeps the unsent text across reload.
     await input.fill("Reload keeps this unsent thought");
+    // The address still names the private reply opened from the work; reloading it would reveal that
+    // direct conversation (DM-first) instead of this public thread, so reload the plain room address.
+    await page.evaluate(() => history.replaceState(history.state, "", location.pathname + location.search));
     let warned = false;
     page.once("dialog", async dialog => { warned = dialog.type() === "beforeunload"; await dialog.accept(); });
     await page.reload();

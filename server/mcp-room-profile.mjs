@@ -1,3 +1,4 @@
+import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed, mcpOAuthPrincipalDescriptor, authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
 import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
@@ -26,6 +27,7 @@ import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
+import { claimThread } from "./claim-thread.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -213,14 +215,15 @@ function validRoomArgs(name, args) {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
   }
-  if (name === "room_work_claim_provenance") {
+  if (name === "room_work_claim_provenance" || name === "room_work_claim_thread") {
     return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
   }
   if (name === "room_post_message") {
     const idOk = args.id === undefined || validId(args.id);
     const messageOk = args.messageId === undefined || validId(args.messageId);
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
-    return idOk && messageOk && replyOk
+    const workOk = args.workItemId === undefined || validId(args.workItemId);
+    return idOk && messageOk && replyOk && workOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
   if (name === "room_list_work") {
@@ -615,6 +618,13 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
       compact: args.compact === true
     }), store.redactionMessages(roomId)), auth.member.id);
   }
+  if (name === "room_work_claim_thread") {
+    // #5378: same data as GET /api/rooms/:roomId/work-claims/:claimId/thread.
+    store.authenticate(secret, roomId);
+    const item = store.workClaims.get(roomId, args.claimId);
+    if (!item) throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
+    return claimThread(store, roomId, item);
+  }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
     // /api/rooms/:roomId/work-claims/:claimId/provenance, read over the
@@ -633,7 +643,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();
     const messageId = args.messageId ?? id;
-    const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
+    const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
+      ...(args.workItemId === undefined ? {} : { workItemId: args.workItemId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);
@@ -919,7 +930,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -947,12 +958,17 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
-        instructions: AUTH_INSTRUCTIONS
+        instructions: oauthPrincipal
+          ? "You are connected as the approved agent in one room. Use room_check_access, then room_activation_pack for the room purpose and useful work when your read scopes permit it; otherwise use available scoped reads. The default tool catalog includes your authorized conversation and work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
+          : AUTH_INSTRUCTIONS
       }
     };
   }
   if (message.method === "tools/list") {
     const selection = listSelection(message, searchParams);
+    // Native hosts generally discover tools without Room-specific profile params.
+    // Give OAuth agents their complete scoped catalog; legacy bearer core stays small.
+    if (oauthPrincipal && !selection.error && !message.params?.profile && !searchParams?.get("profile") && selection.focus === undefined) selection.profile = "full";
     if (selection.error === "cursor") {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }
@@ -973,7 +989,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     return { jsonrpc: "2.0", id: requestId, result: {
       profile: selection.profile,
       ...(selection.focus === undefined ? {} : { focus: selection.focus }),
-      tools: listedMcpTools(selection.profile, selection.aliases, agent, selection.focus),
+      tools: listedMcpTools(selection.profile, selection.aliases, agent, selection.focus)
+        .filter(tool => !oauthPrincipal || mcpOAuthToolAllowed(canonicalMcpToolName(tool.name), oauthPrincipal.scopes)),
       _meta: {
         discovery: MCP_DISCOVERY_BLOCK,
         ...(selection.focus === undefined ? {} : { focus: {
@@ -986,12 +1003,19 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   if (message.method === "tools/call") {
     const called = message.params?.name;
     const name = canonicalMcpToolName(called);
+    if (oauthPrincipal && !mcpOAuthToolAllowed(name, oauthPrincipal.scopes))
+      return mcpCallError(requestId, { reason: "insufficient_scope", tool: called, hint: "This action is outside the connected agent grant" });
     if (typeof name !== "string" || !SUGGESTABLE_TOOLS.includes(name)) {
       return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
     }
     if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl });
     let args = message.params?.arguments ?? {};
     const selected = HOSTED_TOOLS.find(entry => entry.name === name);
+    if (oauthPrincipal && object(args)) {
+      if (args.roomId !== undefined && args.roomId !== oauthPrincipal.roomId)
+        return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: "This connection is limited to its approved room" });
+      args = { ...args, roomId: oauthPrincipal.roomId };
+    }
     args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
@@ -1031,6 +1055,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           : validRoomArgs(name, args);
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
+      if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
@@ -1157,9 +1182,26 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+    if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
+      const token = authorization.slice(7);
+      const provider = token.startsWith("iat_") ? inviteOAuthProvider : oauthProvider;
+      const grant = provider?.verifyAccessToken(token, { resource: oauthResource });
+      const options = { store, provider, token, resource: oauthResource, roomId: grant?.binding?.roomId };
+      const principal = grant && resolveMcpOAuthPrincipal(options);
+      if (!principal) return rpcError(message, MCP_AUTH_REQUIRED, "OAuth grant no longer grants access to this agent");
+      const identity = { identityId: principal.identityId, displayName: store.room(principal.roomId).state.members[principal.memberId].displayName };
+      return runMcpOAuthRequest(options, () => {
+        if (typeof nativeHandler === "function" && typeof message?.method === "string" && message.method.startsWith("events/"))
+          return nativeHandler(message, { principal, descriptor: mcpOAuthPrincipalDescriptor(principal),
+            authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
+              inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
+        return handleAuthed(message, { store, secret: token, identity, mcpUrl,
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal });
+      });
+    }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
     // Handled before auth parsing — a presented credential is ignored and a
     // fresh anonymous identity is minted, mirroring POST /api/agent-identities.

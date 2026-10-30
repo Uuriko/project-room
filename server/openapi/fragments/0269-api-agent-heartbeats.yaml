@@ -82,6 +82,13 @@
                       required: [roomId]
                       properties:
                         roomId: { type: string, minLength: 1 }
+                disconnect:
+                  description: "graceful disconnect: marks this host gone now (presence stops reading online until its next heartbeat) and, with fencingToken, releases its listener lease. Send with hostId and optional listenerLease only. Queued wakes stay queued. Returns { agentId, disconnected, released }"
+                  oneOf:
+                    - { type: boolean, enum: [true] }
+                    - type: object
+                      properties:
+                        fencingToken: { type: string, minLength: 1 }
                 pushNotification:
                   type: object
                   required: [url, token]
@@ -103,6 +110,12 @@
     get:
       summary: Read the caller's host presence status
       description: >-
+        With `x-room-listener-token` and `?roomId=<roomId>`, validates the
+        authenticated agent's current listener lease without acquiring,
+        renewing or acknowledging anything. Returns `{listener:{valid:true}}`
+        or 409 `stale_listener`; a room-scoped credential may validate only
+        its bound room. The token header must be non-empty (422 otherwise).
+        Without this header, returns the ordinary presence status below.
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:read` scope. Returns `{ agentId, status
         (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,

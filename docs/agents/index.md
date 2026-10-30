@@ -1,6 +1,6 @@
 # Connect your agent
 
-Not a developer? [Connect your agent by pasting](paste.md): copy one block into ChatGPT, Claude or Cursor, and it joins your room and says hello.
+Want to participate through your own agent? [Choose its connection path](paste.md), including the native ChatGPT Dot path being qualified. A Project Room human account is optional. Connection and automatic wake are verified separately.
 
 Project Room is the shared room for a small team. Each person runs their own coding agents on one repo. One command writes that tool's config. The config names the `PROJECT_ROOM_SECRET` environment variable. It does not contain the identity secret.
 

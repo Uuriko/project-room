@@ -11,7 +11,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, mobile = false) {
+async function setup(t, mobile = false, friend = false) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
@@ -27,7 +27,15 @@ async function setup(t, mobile = false) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   });
-  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  let signInKey = f.keys.owner;
+  if (friend) {
+    f.store.command(f.keys.owner, "commons", { id: "friend-browser-create", type: T.MEMBER_ADDED, data: { memberId: "friend-browser", displayName: "Friend", kind: "human", permissions: ["accept_work", "complete_work"] } });
+    f.store.createAccount("friend-browser-account");
+    f.store.bindHumanAccount("commons", "friend-browser", "friend-browser-account");
+    signInKey = f.store.issueAccessKey("commons", "friend-browser");
+  }
+  await page.goto(origin); const login = await signInFixture(page, signInKey);
+  if (friend) assert.equal(login.member?.id, "friend-browser");
   await page.locator("#main").waitFor({ state: "visible" });
   const reveal = async () => {
     if (!(await page.locator("#room-sidebar").isVisible())) {
@@ -390,4 +398,44 @@ test("a just-created connection reads as ready, not as a missing member, without
   const text = await row();
   assert.doesNotMatch(text, /Member record missing/, `fresh connection must not read as a missing member: ${text.slice(0, 120)}`);
   assert.match(text, /Access ready, waiting for first action/);
+});
+
+
+test("signed-in friend connects own agent without room-owner permission", { timeout: 25000 }, async t => {
+  const f = await setup(t, false, true);
+  await f.open();
+  assert.equal(await f.page.locator('#agent-connect-access option[value="review"]').evaluate(node => node.disabled), true);
+  assert.equal(await f.page.locator('#agent-connect-access option[value="contribute"]').isDisabled(), false);
+  await f.create();
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  const config = await f.config();
+  assert.equal(f.store.room("commons").state.members[config.memberId].accountableHumanId, "friend-browser");
+  assert.equal((await new RoomAgentClient(config).checkConnection()).memberId, config.memberId);
+  assert.equal(f.store.room("commons").state.room.ownerId, "owner");
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
+});
+
+for (const count of [1, 5]) test(`agent invitation clipboard handoff keeps ${count} canonical links and optional local setup`, { timeout: 25000 }, async t => {
+  const f = await setup(t), page = f.page;
+  await page.evaluate(() => { globalThis.inviteCopied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { globalThis.inviteCopied.push(text); } } }); });
+  // Existing one-time-code dialog is retained behind the invitation control.
+  await page.locator('#invite-agents-button').evaluate(button => button.click());
+  await page.locator('#agent-invite-count').selectOption(String(count));
+  await page.locator('#agent-invite-mint').click();
+  await page.locator('#agent-invite-result').waitFor({ state: 'visible' });
+  const links = count === 1 ? [await page.locator('#agent-invite-link').getAttribute('href')]
+    : await page.locator('#agent-invite-links input').evaluateAll(inputs => inputs.map(input => input.value));
+  assert.equal(new Set(links).size, count);
+  await page.getByRole('button', { name: count === 1 ? 'Copy invitation for an agent' : 'Copy all agent invitations', exact: true }).click();
+  const handoff = await page.evaluate(() => globalThis.inviteCopied.at(-1));
+  for (const link of links) assert.equal(handoff.split(link).length - 1, 1);
+  assert.equal(handoff.split('room_check_access').length - 1, count);
+  assert.match(handoff, /read the shared brief/);
+  assert.match(handoff, /suggest a useful next task/);
+  assert.match(handoff, /explain the exact next step and wait/);
+  assert.doesNotMatch(handoff, /npx|agent-inbox\.mjs/);
+  await page.getByRole('button', { name: count === 1 ? 'Copy link' : 'Copy all links', exact: true }).click();
+  assert.equal(await page.evaluate(() => globalThis.inviteCopied.at(-1)), links.join('\n'));
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 0, 'copying does not enroll or start an agent');
+  assert.equal(await page.locator('.agent-invite-instructions[open]').count(), 0, 'local commands remain optional');
 });

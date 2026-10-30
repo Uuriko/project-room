@@ -13,6 +13,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { signInFixture } from "./auth-signin.mjs";
+import { revealRecord } from "./reveal-record.mjs";
 import { openCatchUp, closeCatchUp, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
@@ -254,9 +255,10 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
       `New discussion does not pull the reader away from the older request: ${JSON.stringify(await requestRow.evaluate((node, beforeTop) => ({ beforeTop,
         afterTop: node.getBoundingClientRect().top, list: document.querySelector('#message-list').getBoundingClientRect().toJSON(), scrollY,
         listScroll: document.querySelector('#message-list').scrollTop }), beforeTop))}`);
-    assert.equal(await page.locator('#new-messages-button').isVisible(), true);
+    // The request is read in its direct conversation; a public arrival does not raise this conversation's new-messages pill.
+    assert.equal(await page.locator('#new-messages-button').isVisible(), false);
   }
-  await page.locator(`[data-message-id="${question.requestMessageId}"][data-message-action="request-answered"]`).click();
+  await (await revealRecord(page, question.requestMessageId)).locator('[data-message-action="request-answered"]').click();
   await page.waitForFunction(() => !document.querySelector('#message-input').disabled);
   const answer = 'Two bullets. Name Room owner and end with a concrete next step.';
   await page.locator('#message-input').fill(answer);

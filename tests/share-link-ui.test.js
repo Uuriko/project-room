@@ -151,6 +151,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     assert.equal(node("#share-link-result").hidden, false);
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
     assert.match(node("#share-link-url").value, /#join\//);
+    // One link for people and agents: the result also carries the room-acp command for the same link.
+    assert.equal(node("#share-acp-command").textContent, `npx -y --allow-remote=root --package=http://localhost:52331/room-acp.tgz room-acp 'http://localhost:52331/#join/${requests[0].linkToken}'`);
     assert.doesNotMatch(node("#share-link-url").value, /#room\//);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     assert.equal(node("#share-link-create").disabled, false);

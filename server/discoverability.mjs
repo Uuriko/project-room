@@ -280,6 +280,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
       requestBodies: { POST: SESSION_CREATE_BODY } }),
   // OAuth session management for the signed-in account (QA2 2026-10-04:
   // served spec omitted it). One entry per live token family.
+  route("/oauth/invite", ["POST"], "public", "Preview or accept native agent invitation consent with same-origin browser and a short-lived nonce cookie; requires configured OAuth client.", "confirmNativeAgentInvitation"),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),

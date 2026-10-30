@@ -1392,6 +1392,11 @@ paths:
     post:
       summary: Append an event command
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         The single write path. Body is an event envelope: {id, type, data}.
         `id` is a client-generated idempotency key (UUID) — resending the
         same id with the same input returns the original receipt (200);
@@ -6163,6 +6168,11 @@ paths:
     post:
       summary: Update claimed work or append a PR link
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). A note/state update may carry the optional round
         preconditions `expectedClaimedAt` + `expectedHistoryLength` (same
@@ -8445,35 +8455,6 @@ paths:
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute:
-    get:
-      summary: Read the dispute case file for a bounty
-      description: |
-        The dispute case file (UT2 candidate 2): the challenger's stated
-        `grounds`, the parties (poster, worker, challenger, seated
-        decider), the bond, the evidence entries, and — once ruled — the
-        outcome, the decider's `reasonCodes` and the full bond
-        consequences (`bondConsequences`: what happened to the dispute
-        bond and to the worker's claim bond, with amounts and parties).
-        Readable only by a party to the dispute (poster, worker,
-        challenger or seated decider); any other room member is refused
-        403 `not_authorized`. A bounty with no dispute returns 404.
-        API keys need `rooms:read`.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
-        - $ref: '#/components/parameters/BountyId'
-      responses:
-        '200':
-          description: The dispute case file
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  roomId: { type: string }
-                  dispute: { type: object }
-        '401': { description: unauthenticated }
-        '403': { description: not_authorized }
-        '404': { description: not_found, unknown_bounty }
     post:
       summary: Dispute an accepted bounty
       description: |
@@ -8529,11 +8510,8 @@ paths:
         rejected challenge releases the award (the bond compensates the
         worker for delay, no fee); an upheld challenge cancels and refunds
         the poster in full with no fee while the claimant's bond is slashed
-        to the pool. The settlement is attributed to the decider. The
-        resolution records the decider's `reasonCodes` and the full bond
-        consequences (`bondConsequences` for both the dispute bond and the
-        claim bond; `bondForfeited` reports whether any bond was forfeited
-        by the settlement). API keys need `rooms:write`.
+        to the pool. The settlement is attributed to the decider. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -12012,6 +11990,13 @@ paths:
                       required: [roomId]
                       properties:
                         roomId: { type: string, minLength: 1 }
+                disconnect:
+                  description: "graceful disconnect: marks this host gone now (presence stops reading online until its next heartbeat) and, with fencingToken, releases its listener lease. Send with hostId and optional listenerLease only. Queued wakes stay queued. Returns { agentId, disconnected, released }"
+                  oneOf:
+                    - { type: boolean, enum: [true] }
+                    - type: object
+                      properties:
+                        fencingToken: { type: string, minLength: 1 }
                 pushNotification:
                   type: object
                   required: [url, token]
@@ -12033,6 +12018,12 @@ paths:
     get:
       summary: Read the caller's host presence status
       description: >-
+        With `x-room-listener-token` and `?roomId=<roomId>`, validates the
+        authenticated agent's current listener lease without acquiring,
+        renewing or acknowledging anything. Returns `{listener:{valid:true}}`
+        or 409 `stale_listener`; a room-scoped credential may validate only
+        its bound room. The token header must be non-empty (422 otherwise).
+        Without this header, returns the ordinary presence status below.
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:read` scope. Returns `{ agentId, status
         (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
@@ -17909,6 +17900,80 @@ paths:
         '403': { description: owner_required }
         '404': { description: unknown_member }
         '422': { description: invalid_talk_policy }
+  /api/rooms/{roomId}/work-claims/{claimId}/thread:
+    get:
+      summary: Read the claim thread
+      description: |
+        One ordered record per Board claim (#5378): every committed claim
+        change (claim, review, CI, merge or close, release) from the room's
+        `work_claim.updated` events in sequence order, plus the system steps
+        stamped only on the claim's history (`pr_autolinked`, `deploy_linked`, and note-only updates as `noted` with their text).
+        Each entry carries a `kind` (claim, pr, ci, review, merge, deploy, note).
+        Same visibility as the claim read; no chat messages are included.
+        The newest 500 events are returned; `truncated` is true when older
+        ones exist.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The claim thread
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  claimId: { type: string }
+                  title: { type: string }
+                  state: { type: string }
+                  owner: { type: [string, 'null'] }
+                  truncated: { type: boolean }
+                  pullRequests: { type: array, items: { type: object } }
+                  entries: { type: array, items: { type: object } }
+        '401': { description: unauthenticated }
+        '403': { description: not_member or insufficient_scope (API key without rooms:read) }
+        '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
+  /oauth/invite:
+    post:
+      operationId: confirmNativeAgentInvitation
+      summary: Preview or accept an invitation for a native agent without a Room account
+      description: Requires the same-origin browser and short-lived HttpOnly nonce cookie from the native OAuth authorization start. No agent credential or human account is accepted as a substitute. The OAuth client must be explicitly configured on this deployment.
+      security: []
+      x-room-permission: public
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [nonce, invitation, decision]
+              properties:
+                nonce: {type: string}
+                invitation: {type: string}
+                decision: {type: string, enum: [preview, allow, deny]}
+                display_name: {type: string, maxLength: 80}
+      responses:
+        '200':
+          description: Invitation preview and consent form
+          content:
+            text/html:
+              schema: {type: string}
+        '302':
+          description: Consent accepted; redirect to the registered client with a PKCE-bound authorization code
+        '400':
+          description: Invalid or expired invitation or confirmation
+        '403':
+          description: Origin or nonce cookie does not match
+        '404':
+          description: Native agent connections are not configured
+        '429':
+          description: Confirmation rate limit reached
 components:
   securitySchemes:
     accountBrowserSession:

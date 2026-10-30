@@ -1,3 +1,5 @@
+import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
+import { assertListenerFence } from "./listener-fence.mjs";
 import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
@@ -974,7 +976,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   if (steps.length === 0) {
     steps.push(Object.freeze({
       action: "watch-inbox",
-      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted room DMs, peer DMs from bonded agents, bond proposals, work assignments, and open @agent routing mentions.",
+      description: "Your conversation inbox is empty. Check list-my-work for current task assignments; an empty inbox does not mean there is no work. This inbox carries direct @mentions, targeted room DMs, peer DMs from bonded agents, bond proposals, collaboration assignments, and open @agent routing mentions.",
     }));
   }
   steps.push(Object.freeze({
@@ -983,6 +985,12 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
     path: `/api/rooms/${encodeURIComponent(roomId)}/reply-requests?direction=incoming&status=open`,
     nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } },
     description: "List current open formal requests addressed to you, including requests outside this recent DM window. This discovery link does not mean requests are pending. Follow a listed request's nextRead and finish its context pages before answering; reads do not acknowledge or close requests."
+  }));
+  steps.push(Object.freeze({
+    action: "list-my-work",
+    actionRole: "discovery", required: false,
+    nextRead: { tool: "room_list_work", arguments: { focus: "needs_me" } },
+    description: "Read current task steps addressed to you, including work absent from this conversation inbox and missing permissions. This link does not mean work is pending. Read selected work before acting; discovery does not accept work, grant permissions, or start an outside agent."
   }));
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
@@ -4781,6 +4789,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
+    if (typeof token === "string" && /^(oat|iat)_/.test(token)) {
+      const principal = authenticateMcpOAuthRequest(this, token, roomId);
+      if (!principal) fail(401, "unauthenticated", "OAuth grant is expired, revoked, outside its resource, or no longer owns this agent");
+      const resolved = this.identities.resolveIdentityLink(principal.identityId, roomId);
+      if (!resolved || resolved.member.id !== principal.memberId) fail(403, "no_access", "Agent membership is no longer active");
+      return { account: null, member: resolved.member, roomId, identityId: principal.identityId,
+        credentialHash: hash(token), credentialScope: "room", kind: "oauth-agent",
+        oauthScopes: principal.scopes, expiresAt: null, csrf: null, sessionBinding: null };
+    }
     // Round-2 #101: multi-room agent identities. One identity secret works in
     // every room the identity is linked to; rooms keep sovereignty via link/unlink.
     // RC-2026-09-18-012: scoped API keys ("rak_"+secret) authenticate the
@@ -4964,6 +4981,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The replyRequests slice is read from the projection directly so
   // this works for both the work projection (which does not carry it)
   // and the full room state.
+  // Members the work item itself names (proposer, accountable, verifier,
+  // decision maker, claim holder) already hold its title and definition of
+  // done; a private request on the item must not lock them out of it.
   privateWorkParties(roomId) {
     const requestSlice = this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests;
     const privatePartiesByWork = new Map();
@@ -4995,7 +5015,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const privatePartiesByWork = this.privateWorkParties(roomId);
         const workRecordForViewer = (id, item) => {
           const parties = privatePartiesByWork.get(id);
-          if (!parties || parties.has(auth.member.id)) return currentWorkRecord(item);
+          if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return currentWorkRecord(item);
           return currentWorkRecord({ ...item, title: null, definitionOfDone: null });
         };
         return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
@@ -5054,14 +5074,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const privatePartiesByWork = this.privateWorkParties(roomId);
       const workItems = room.state.workItems ? Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => {
         const parties = privatePartiesByWork.get(id);
-        if (!parties || parties.has(auth.member.id)) return [id, item];
+        if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return [id, item];
         return [id, { ...item, title: null, definitionOfDone: null }];
       })) : room.state.workItems;
       const eventLog = rawEventLog.map(event => {
         const workItemId = event?.data?.workItemId;
         if (typeof workItemId !== "string") return event;
         const parties = privatePartiesByWork.get(workItemId);
-        if (!parties || parties.has(auth.member.id)) return event;
+        if (!parties || parties.has(auth.member.id) || workRoleHolder(room.state.workItems?.[workItemId], auth.member.id)) return event;
         if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
         return { ...event, data: { ...event.data,
           ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
@@ -5742,7 +5762,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const workHits = [];
         for (const w of Object.values(room.state.workItems ?? {})) {
           const parties = privatePartiesByWork.get(w.id);
-          const isParty = !parties || parties.has(auth.member.id);
+          const isParty = !parties || parties.has(auth.member.id) || workRoleHolder(w, auth.member.id);
           const haystack = (isParty
             ? `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`
             : `${w.description ?? ""}`).toLowerCase();
@@ -6411,7 +6431,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command, expectedSessionBinding = null) {
+  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false, listenerToken } = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
     // command transaction cannot roll back, so remember the spend and refund
@@ -6421,6 +6441,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      assertListenerFence(this, auth, roomId, listenerToken);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
@@ -6609,6 +6630,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      if (agentConnectionSponsor && (!memberAuthorityEvent || auth.member.kind !== "human" || !auth.account || auth.kind !== "session"))
+        fail(403, "account_session_required", "Agent sponsorship requires your signed-in human account");
       // F-1 follow-up: stamp new pins with the DM-party policy version at
       // live admission (both the pins route and direct /commands flow through
       // here). The reducer enforces the party check only on stamped events,
@@ -6621,6 +6644,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : memberAuthorityEvent ? {
             ...command.data,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+            ...(agentConnectionSponsor ? { selfSponsorshipVersion: 1 } : {}),
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION,
@@ -6802,6 +6826,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
+        this.enqueueNativeMcpEvent?.({ roomId, identityId: incoming.data.toIdentityId,
+          messageId: incoming.data.messageId ?? incoming.id, eventId: incoming.id, actorId: auth.member.id, kind: "dm" });
         const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
@@ -7085,6 +7111,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
+      this.enqueueNativeMcpEvent?.({ roomId, memberId, messageId: data.messageId ?? eventId, eventId, actorId: senderMemberId, kind });
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
@@ -7433,4 +7460,9 @@ function dmTalkAllowed(db, state, roomId, senderId, identityId, at) {
   const memberId = talkMemberForIdentity(db, roomId, identityId, at);
   if (!memberId) return true;
   return mayWake(db, state, roomId, senderId, memberId);
+}
+
+function workRoleHolder(item, memberId) {
+  if (!item || !memberId) return false;
+  return [item.proposedById, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId, item.claim?.holderId].includes(memberId);
 }

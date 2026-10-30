@@ -352,21 +352,21 @@ test("stdio Board reads forward canonical selections through the real SDK and HT
   assert.equal(requests.slice(before).some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
-// JSON-RPC cancellation must reach the second SDK fetch and suppress its late
+// JSON-RPC cancellation must reach the canonical Board fetch and suppress its late
 // output. The delayed bytes come from the real canonical route, not a mock client.
-test("stdio Board cancellation closes the canonical HTTP read and emits no late result", async t => {
+test("stdio Board cancellation closes the canonical HTTP read and emits no late result", { timeout: 10000 }, async t => {
   const { origin, token } = await boardHttpFixture(t);
   let entered, closed, release;
   const started = new Promise(resolve => { entered = resolve; });
   const disconnected = new Promise(resolve => { closed = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
   const proxy = createServer(async (req, res) => {
-    if (req.method !== "GET" || !["/api/rooms/commons", "/api/rooms/commons/work-claims-read"].includes(req.url)) {
+    if (req.method !== "GET" || req.url !== "/api/rooms/commons/board") {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith("/work-claims-read")) {
+    if (req.url.endsWith("/board")) {
       res.on("close", closed);
       entered();
       await gate;

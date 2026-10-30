@@ -201,7 +201,14 @@ export class RoomClient {
         if (!(error instanceof SyntaxError)) throw error;
         throw this.unconfirmed(response.status);
       }
-      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
+      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code;
+        const retryAfter = response.headers?.get?.("retry-after");
+        if (retryAfter?.trim()) {
+          const seconds = Number(retryAfter);
+          const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+          if (Number.isFinite(delay) && delay >= 0) error.retryAfterMs = delay;
+        }
+        throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }

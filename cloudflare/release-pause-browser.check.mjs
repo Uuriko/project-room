@@ -53,6 +53,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await page.goto(origin); await signInFixture(page, ownerKey);
     await page.locator('#main').waitFor({ state: 'visible' });
     await clickChrome(page, '#invite-people-button');
+    await page.locator('#share-link-access').selectOption('guest');
     await page.locator('#share-link-create').click();
     await page.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await page.locator('#share-link-url').inputValue();
