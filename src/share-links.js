@@ -3,6 +3,7 @@ import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
+import { roomAcpCommand } from "./agent-invite-ui.js";
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
@@ -284,6 +285,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
+    if ($("#share-acp-command")) $("#share-acp-command").textContent = "";
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
     for (const selector of ['label[for="share-link-url"]', "#share-link-url", "#share-link-copy"]) { if ($(selector)) $(selector).hidden = false; }
     status(message); updateCopyControls();
@@ -532,6 +534,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
   });
+  $("#share-acp-copy")?.addEventListener("click", async () => {
+    const command = $("#share-acp-command")?.textContent ?? "";
+    if (!command) return;
+    try { await navigator.clipboard.writeText(command); status("Copied the room-acp command."); }
+    catch { status("Copy failed. Select the command and copy it."); }
+  });
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
   manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
@@ -564,6 +572,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const inviteUrl = publicJoinInviteHref(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "")
         || humanJoinShareUrl(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
       $("#share-link-url").value = inviteUrl;
+      // One link for people and agents: room-acp joins with this same link.
+      if ($("#share-acp-command")) $("#share-acp-command").textContent = roomAcpCommand(inviteUrl);
       if (result.link.access === "co_owner") {
         renderKit({ invite: { token: request.linkToken, status: "active", message: uiText("muse.invite.message", { url: inviteUrl }) } });
         if ($("#growth-kit")) $("#growth-kit").hidden = false;
