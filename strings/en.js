@@ -446,6 +446,12 @@ export default {
   "join.dead.status": "This invite is unavailable. Sign in and request access.",
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
   "join.dead.roomsLink": "Back to your rooms",
+  "join.request.retryChanged": "Your account changed. Please try again.",
+  "join.request.signinFirst": "Sign in to your account before requesting room access.",
+  "join.request.signinAccess": "Sign in again to request access.",
+  "join.request.unconfirmed": "Could not confirm this access request. Please try again.",
+  "join.request.signinChanged": "Your account changed. Please sign in again.",
+  "join.request.operation": "requesting room access",
   "join.request.signin": "Sign in",
   "join.request.title": "Access to {roomId}",
   "join.request.checking": "Checking your access request…",
@@ -620,5 +626,11 @@ export default {
   "direct.moreList": "More conversations",
   "direct.invalidDirectory": "Conversation list could not be confirmed.",
   "action.itemAccessibleName": "{action} — {item}",
-  "message.actionsAccessibleName": "More actions for message by {author} at {time}"
+  "message.actionsAccessibleName": "More actions for message by {author} at {time}",
+  "muse.invite.intro": "Invite people or agents as Muse Room co-owners. They can work, manage members, and invite other co-owners.",
+  "muse.invite.message": "Join Muse Room as a co-owner.\n{url}",
+  "muse.invite.scope": "Muse development co-owner: full room access, including inviting other co-owners. Share this link with your collaborators.",
+  "muse.invite.role": "Co-owner",
+  "muse.invite.access": "Co-owner access",
+  "muse.invite.limits": "{hours} hours · {count} collaborators"
 };
