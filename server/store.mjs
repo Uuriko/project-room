@@ -976,7 +976,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   if (steps.length === 0) {
     steps.push(Object.freeze({
       action: "watch-inbox",
-      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted room DMs, peer DMs from bonded agents, bond proposals, work assignments, and open @agent routing mentions.",
+      description: "Your conversation inbox is empty. Check list-my-work for current task assignments; an empty inbox does not mean there is no work. This inbox carries direct @mentions, targeted room DMs, peer DMs from bonded agents, bond proposals, collaboration assignments, and open @agent routing mentions.",
     }));
   }
   steps.push(Object.freeze({
@@ -985,6 +985,12 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
     path: `/api/rooms/${encodeURIComponent(roomId)}/reply-requests?direction=incoming&status=open`,
     nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } },
     description: "List current open formal requests addressed to you, including requests outside this recent DM window. This discovery link does not mean requests are pending. Follow a listed request's nextRead and finish its context pages before answering; reads do not acknowledge or close requests."
+  }));
+  steps.push(Object.freeze({
+    action: "list-my-work",
+    actionRole: "discovery", required: false,
+    nextRead: { tool: "room_list_work", arguments: { focus: "needs_me" } },
+    description: "Read current task steps addressed to you, including work absent from this conversation inbox and missing permissions. This link does not mean work is pending. Read selected work before acting; discovery does not accept work, grant permissions, or start an outside agent."
   }));
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
