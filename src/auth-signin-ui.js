@@ -231,12 +231,30 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     await onSignedIn(session);
   }
 
+  // A failed submit repaints the surface (innerHTML), which drops keyboard
+  // focus to <body>. Put it back on the field to retry, not the page top.
+  const focusWithin = () => {
+    const node = surface();
+    const active = typeof document === "undefined" ? null : document.activeElement;
+    return !!(node && active && active !== document.body && node.contains(active));
+  };
+  function restoreFocusAfterFailure() {
+    if (focusWithin()) return;
+    const retry = surface()?.querySelector('[name="password"]');
+    if (retry && retry.getClientRects?.().length) { retry.focus(); return; }
+    focusView();
+  }
   async function withBusy(fn) {
     if (busy) return;
+    const hadFocus = focusWithin();
+    let failed = false;
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
-    catch (error) { setStatus(failureText(error), true); }
-    finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
+    catch (error) { failed = true; setStatus(failureText(error), true); }
+    finally {
+      busy = false; onBusyChange?.(false); paintBusySurface();
+      if (failed && hadFocus) restoreFocusAfterFailure();
+    }
   }
 
   async function redeem(email, code) {
