@@ -17,11 +17,11 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 
 | Status | Ledger rows |
 | --- | --- |
-| fixed | 13 |
-| open | 68 |
-| open (fix in PR) | 17 |
+| fixed | 15 |
+| open | 62 |
+| open (fix in PR) | 20 |
 | open (part in PR) | 1 |
-| stale | 7 |
+| stale | 8 |
 | superseded | 3 |
 
 | Category | Ledger rows |
@@ -39,7 +39,6 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | ID | Issue | Sev | Lane | Next step |
 | --- | --- | --- | --- | --- |
 | KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
-| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | P1 | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
 | KI-006 | Prod 83 commits behind main; 20-PR wave undeployed | P1 | Codex | Codex lands #5428 and deploys with smoke |
 | KI-012 | Zero-scope member can claim and submit a bounty (board 403, bounty 200) | P1 | Jill fleet | Gate bounty claim/submit on work-claim permission; or cut bounties (KI-070) |
 | KI-024 | Stop does not stop a paused agent's writes | P1 | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
@@ -48,13 +47,14 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-051 | Unbounded default snapshot (474 KB agent read, muse-room 12.7 MB) | P1 | Codex | One snapshot window PR |
 | KI-052 | Projection rewritten on every write (O(n^2)) | P1 | Codex | Rebase #4842 |
 | KI-061 | 524 open PRs, 218 conflicting | P1 | all lanes | Each lane triages its own; closes need Potter OK |
+| KI-062 | CI capacity: cancelled heads | P1 | Potter | Potter: free org or GitHub app |
 
 ## Ledger
 
 | ID | Issue | Source | Status | Evidence | Category | Sev | Effort | Lane | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | Delta 23644/23712, UNFIXED #1 | open | prod /api/health/jobs 2026-10-30 2:55 PM PT: integrity failing 415; #4930 merged on main keeps genuine parity fatal | bug | P1 | S (human read) + M | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
-| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | Delta 23636, Grok 23101 | open | prod jobs: patrol stale; #5299 merged; #5334 open with CHANGES NEEDED | bug | P1 | S | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
+| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | Delta 23636, Grok 23101 | open (fix in PR) | #5334 head 3e08ddce: kind stamped on land/deploy receipts + shadow; deleted-row replay tests (stamped, legacy) fail before, pass after | bug | P1 | S | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
 | KI-003 | claim-prs job: SQLITE_CONSTRAINT in public claim writer | Grok 22968 | open | prod jobs: claim-prs stale, same error | bug | P2 | M | Jill fleet | Find the constraint row; fix writer; frozen area so keep minimal |
 | KI-004 | webhook-dispatch goes stale between 30-min crons (60s alarm not running) | Grok 22968 | open | prod jobs: webhook-dispatch stale | bug | P2 | M | Codex | Check DO alarm re-arm after code reset |
 | KI-005 | room-backup job failing (1 error per tick) | prod jobs | open | prod jobs: room-backup failing 1 | bug | P2 | S | Potter-blocked | No backup work until Potter asks; logged only |
@@ -92,13 +92,13 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-037 | First-ask journey broken (refuse-and-rollback policy) | Delta 22646/22868 | open | Fo PR r2 awaiting review | bug | P2 | S | Fo | Fo lands r2 per Delta verdict |
 | KI-038 | HTTP /commands reply does not thread or close a request; tracked ask 422 Unknown Work Item | UT F-S5a-1/2 | open | re-tested STILL-LIVE 23126 | bug | P2 | M | Jill fleet | Fix with one reply path |
 | KI-039 | Presence: null 40/40, 'Nobody online' wrong 20/20, workingOn empty | MEASURE-IMPROVE M3 | open | re-confirmed at two builds | bug | P2 | M | Grok | #5402 covers bridge presence; extend to workingOn |
-| KI-040 | agent-eval J8: served llms.txt lost the work-claim section | Grok 22968 | open | no tracked llms.txt carries 'work-claims' | low-hanging fruit | P2 | S | Grok | One-line work-claim pointer in llms.txt |
-| KI-041 | Failed sign-in drops focus to body | John's Tab 23648 | open | src/auth-signin-ui.js withBusy on main repaints and never restores focus | low-hanging fruit | P3 | S | Grok | PR with John's Tab's patch and test |
+| KI-040 | agent-eval J8: served llms.txt lost the work-claim section | Grok 22968 | fixed | llmsTxt on main already lists POST /api/rooms/{roomId}/work-claims, /claim, /update | low-hanging fruit | P2 | S | Grok | One-line work-claim pointer in llms.txt |
+| KI-041 | Failed sign-in drops focus to body | John's Tab 23648 | open (fix in PR) | #5439: restoreFocusAfterFailure in withBusy + test (John's Tab's patch) | low-hanging fruit | P3 | S | Grok | PR with John's Tab's patch and test |
 | KI-042 | Board/Account/Join dialogs drop focus to body | #3793 #3796 #4461 #3967 | open | issues open | bug | P3 | S | Fo | One focus-return helper for all dialogs |
 | KI-043 | Board re-render discards in-progress new-item input | #4532 | open | issue open | bug | P2 | S | Fo | Fix |
 | KI-044 | Owner landing loads 410 controls (79 visible) | Streamline audit #4, QA7 P1-2 | open (fix in PR) | #5437 open (rework in progress) | simplify | P1 | M | Grok | ROOM_MVP_ONLY stops non-MVP panes loading |
 | KI-045 | Board 'Unclaimed' for accepted work; offline shows Connected; tab trap; deep link drops room | QA7/QA8 B2 | stale | #4865 closed unmerged | bug | P2 | M | John's Tab | Re-test on main at 390 and 1280; refile what survives |
-| KI-046 | No skip link on /join, /agent-signin, /about | QA6-10 | open | only index.html has a skip link | low-hanging fruit | P3 | S | Grok | Add skip link to the three pages |
+| KI-046 | No skip link on /join, /agent-signin, /about | QA6-10 | open (fix in PR) | #5440: skip links + #main on join, agent-signin, about; tests/public-skip-links.test.js | low-hanging fruit | P3 | S | Grok | Add skip link to the three pages |
 | KI-047 | 34 unlabeled controls, 24px targets, 8-11 type sizes | DX1 #3 #13 #14 | open | #4850 closed | redesign | P3 | M | Jill-Dot | After ROOM_MVP_ONLY, only fix what remains visible |
 | KI-048 | Title-only new work takes 6 clicks | DX1 #6 #7 #9 | open | no PR | simplify | P2 | S | Grok | After #5437 |
 | KI-049 | Send button overflows composer at 200% text | Jill-Dot 22301 | open | no fix PR found | bug | P3 | S | Fo | Fix CSS grid column |
@@ -118,7 +118,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-063 | Coverage 45 min, unit 25 min on PRs | Streamline #10 | open (fix in PR) | #5424 open | simplify | P2 | S | Grok | Land #5424 |
 | KI-064 | Fuzz/QA jobs on every main push | MVP cut #4 | open (fix in PR) | #5406 open | cut | P2 | S | Grok | Land #5406 |
 | KI-065 | Merge queue / auto-rerun cancelled / auto-deploy with rollback | gap hunt C1/C2 | open | Potter yes pending | redesign | P2 | M | Codex | Codex decides with deploy lane |
-| KI-066 | Unsigned agent card ERROR in every CI log | QA10-4 | open | no PR | low-hanging fruit | P3 | S | Grok | Downgrade to info when unsigned is expected |
+| KI-066 | Unsigned agent card ERROR in every CI log | QA10-4 | stale | unsigned agent card path reworked on main; re-check one CI log before reopening | low-hanging fruit | P3 | S | Grok | Downgrade to info when unsigned is expected |
 | KI-067 | Invariants workflow deletes prior FAIL evidence; drops error text | #4263 #4262 #4261 | open | issues open | bug | P3 | S | Jill fleet | Jill fleet owns invariants harness |
 | KI-068 | Browser test list hand-maintained | SIMPLIFY #3 | open | no PR | simplify | P3 | S | Fo | Glob runner |
 | KI-069 | Docs: 438 md files, 19 plan/backlog docs | MVP cut #1, #12 | open (fix in PR) | #5407 open; this ledger replaces lists | cut | P2 | S | Grok | Land #5407; KNOWN-ISSUES is the one issue list |
@@ -136,7 +136,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-081 | Split http.mjs; store.mjs import cycles; 80 env names | SIMPLIFY #5/#6/#9 | open | no PR | simplify | P3 | L | Codex | After queue drains |
 | KI-082 | board_vtwo tables and board/v2 openapi fragments | #3997, DX1 #22 | open (fix in PR) | #5431 open; fragments 0129-0139 still on main | cut | P3 | S | Grok | Land #5431; remove fragments |
 | KI-083 | Front door: credential lifecycle, limits, error contract, claim paths unstated or contradictory | #4448-#4451 #5153 #5154 | open | issues open | low-hanging fruit | P2 | S | Fo | One front-door doc pass |
-| KI-084 | 'Cost not recorded' on every receipt | #4564 watch (B5-5) | open | server/receipt-cards.mjs:82 on main | low-hanging fruit | P3 | S | Grok | Omit the cost clause when unknown |
+| KI-084 | 'Cost not recorded' on every receipt | #4564 watch (B5-5) | fixed | server/receipt-cards.mjs on main returns empty when no cost data; the clause shows only for partial data | low-hanging fruit | P3 | S | Grok | Omit the cost clause when unknown |
 | KI-085 | Python User-Agent gets 403 on /openapi.json | QA4 P3-7 | open | curl Python-urllib -> 403 on prod | bug | P3 | S | Codex | Cloudflare rule; Codex owns zone settings |
 | KI-086 | Expired MCP token drops the connection instead of a 401 | #4493 | open | issue open | bug | P2 | S | Fo | Fo mcp lane |
 | KI-087 | OAuth protected-resource metadata missing | #4055 #4526 | open | issues open | redesign | P3 | M | none | Later |
