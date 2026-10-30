@@ -45,8 +45,11 @@ const GENERATED_AGENT_PAGE = /^docs\/agents\/[^/]+\.html$/;
 const agentDocInputs = publicAssets
   .filter(path => GENERATED_AGENT_PAGE.test(path))
   .map(path => path.replace(/\.html$/, ".md"));
+// room-acp.tgz is likewise built at deploy (scripts/build-room-acp-pack.mjs);
+// pin its build script rather than build output.
 const ASSET_FILES = [
-  ...publicAssets.filter(path => !GENERATED_AGENT_PAGE.test(path)),
+  ...publicAssets.filter(path => !GENERATED_AGENT_PAGE.test(path) && path !== "room-acp.tgz"),
+  "scripts/build-room-acp-pack.mjs",
   ...agentDocInputs,
   "docs/agents/paste.md",
   "docs/agents/START.md",

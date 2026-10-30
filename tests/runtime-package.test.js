@@ -38,7 +38,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   // a new agent page joins the exclusion (and the CF build) by being listed,
   // and a renamed one cannot silently fall out of it.
   assert.deepEqual([...generatedAgentPages].sort(),
-    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)).sort());
+    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path) || path === "room-acp.tgz").sort());
   // The package must contain exactly the allowlisted files that exist at this commit.
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
   // the import-closure test below guarantees it covers every imported module,

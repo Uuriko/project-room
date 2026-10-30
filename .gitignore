@@ -43,3 +43,4 @@ docs/agents/*.html
 
 # Generated npm pack of room-acp/, served at /room-acp.tgz
 room-acp.tgz
+__pycache__/
