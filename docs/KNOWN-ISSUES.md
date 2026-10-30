@@ -18,7 +18,7 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 | Status | Ledger rows |
 | --- | --- |
 | fixed | 15 |
-| open | 62 |
+| open | 125 |
 | open (fix in PR) | 20 |
 | open (part in PR) | 1 |
 | stale | 8 |
@@ -26,13 +26,13 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 
 | Category | Ledger rows |
 | --- | --- |
-| bug | 66 |
-| cut | 14 |
-| low-hanging fruit | 8 |
+| bug | 88 |
+| cut | 16 |
+| low-hanging fruit | 47 |
 | redesign | 8 |
 | simplify | 13 |
 
-Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 superseded.
+Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 superseded.
 
 ## Top 10 open
 
@@ -162,6 +162,69 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-107 | Board reads hosted work snapshot | QA | fixed | #4826 merged | bug | P2 | - | - | Closed; prod re-test after deploy |
 | KI-108 | Patrol illegal in_progress->done under default | Grok 23103 | fixed | #5299 merged | bug | P2 | - | - | Closed; prod re-test after deploy |
 | KI-109 | Respond template-incomplete 500, name-error map, verify-stamp wording | MEASURE-IMPROVE F5/F6/F7 | fixed | #5302 #5303 #5314 merged | bug | P2 | - | - | Closed; prod re-test after deploy |
+| KI-110 | Redeem response teaches a claim path that cannot claim board tasks | Jill MI-001 (23888) | open | Jill master-issues draft: S2 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Fix the teaching in the redeem response to the working board-claim path |
+| KI-111 | Claimed board item remedy undisclosed; reassign endpoint exists | Jill MI-002 (23888) | open | Jill master-issues draft: S2 OPEN (partial cure #5324 merged-undeployed, hint legs only); not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Disclose the remedy in-product; full closure after #5324 deploy + retest |
+| KI-112 | Board tags write-only: ?tag=/?q= filtering 422s | Jill MI-003 (23888) | open | Jill master-issues draft: S2 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Enable the filter; tags already persist and echo |
+| KI-113 | AGENT-START-HERE Step 7 says a good secret is wrong, omits membership condition | Jill MI-004 (23888) | open | Jill master-issues draft: S2 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | One doc paragraph: state the membership condition |
+| KI-114 | /a/ invite packet falsely states no starter is on the board | Jill MI-005 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Correct the claim or compute it from the board |
+| KI-115 | Three callable work tools unlisted in default profile | Jill MI-006 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Add room_propose_work / room_request_reply / room_read_work to the default list; xref MI-510 catalogue-count conflict (different act) |
+| KI-116 | Message post carries two ids; refusal does not say which is reply-addressable | Jill MI-007 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Name the reply-addressable id in the refusal |
+| KI-117 | Owner force-release of others' board claims undiscoverable, contradicts update error | Jill MI-008 (23888) | open | Jill master-issues draft: S3 OPEN (partial cure #5324 hint legs, undeployed); not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Disclose force-release; align the update error wording |
+| KI-118 | payment_required 402 envelope hint/next claims no recovery for a recoverable action | Jill MI-009 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Correct hint/next in the one envelope |
+| KI-119 | Door Skip-to-content link lands on #connection-status, not content | Jill MI-010 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Point the skip link at the content target |
+| KI-120 | /join seizes focus on load | Jill MI-011 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Remove load-time focus seizure |
+| KI-121 | Two fields both labelled Room link on /join | Jill MI-012 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Disambiguate the two labels |
+| KI-122 | Receipts / receipt-detail pages have no focus styling of their own | Jill MI-014 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add focus styling on receipts surfaces |
+| KI-123 | /receipts has no skip link | Jill MI-015 (23888) | open | no skip link in public/ receipts pages on main 2249dbb5 | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add a skip link |
+| KI-124 | One-time agent key field #join-secret has no accessible name | Jill MI-018 (23888) | open | Jill master-issues draft: S3 FIXED-ALIVE; not re-verified | low-hanging fruit | P3 | S | NONE | Closed: fixed on main, M2-RETEST FIXED; no act |
+| KI-125 | No main landmark in signed-out door state | Jill MI-019 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add main landmark / heading structure |
+| KI-126 | /join loading state is not a live region | Jill MI-020 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Mark loading state as a live region |
+| KI-127 | Receipt detail prints raw ISO timestamps | Jill MI-021 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Format timestamps for display |
+| KI-128 | Receipt-detail SR noise: em-dash value, 197-char badge alt duplicating text | Jill MI-022 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Trim badge alt / placeholder value |
+| KI-129 | Receipts list duplicate link names out of context | Jill MI-023 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Include state/date context in links' accessible names |
+| KI-130 | Message-list focus outline is dead CSS (.message-list vs class=timeline) | Jill MI-025 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Fix the selector to the served element (one line) |
+| KI-131 | Board j/k navigation starts dead, undiscoverable | Jill MI-026 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Land initial focus inside #work-board; surface the shortcut |
+| KI-132 | needs-me snippet truncation splits a grapheme cluster, drops U+064E | Jill MI-027 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Grapheme-aware truncation |
+| KI-133 | Invite code with Arabic-Indic digits cannot match JOIN_CODE_PATTERN | Jill MI-028 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Normalise Arabic-Indic digits before the pattern match |
+| KI-134 | Dates/times never zone-labelled | Jill MI-029 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add time elements + zone labels |
+| KI-135 | Invite-expiry relative text hand-built English, no Intl APIs | Jill MI-030 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Use Intl.RelativeTimeFormat / PluralRules |
+| KI-136 | Counters hard-code en-US formatters, binary English plurals | Jill MI-031 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Route counters through locale formatters |
+| KI-137 | Credits render as raw milli-credit integer | Jill MI-032 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Format from the structured amount (display leg only) |
+| KI-138 | #join-enter-home tap target 40x19 px at 360x640 | Jill MI-033 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Enlarge the tap target |
+| KI-139 | Wordmark font 140,632 B = 65% of door wire, for one heading | Jill MI-034 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Subset or drop the font for the wordmark |
+| KI-140 | Public HTML uncacheable, no ETag, on all public surfaces | Jill MI-035 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Extend the /src/* validator pattern to public HTML |
+| KI-141 | Two conflicting claim recipes in official docs | Jill MI-036 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Reconcile to one claim recipe, cross-referenced; H-D #4448 merged here (same front-door conflict) |
+| KI-142 | One-call enrolment promise omits the possible 428 proof-of-work step | Jill MI-037 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Disclose the possible 428/nonce step; docs-only |
+| KI-143 | Pre-join 403 hint names a dead end: agent identity cannot mint guest seats | Jill MI-038 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Correct the hint's first branch |
+| KI-144 | The two origin_denied hints contradict each other | Jill MI-039 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Reconcile the two hint texts |
+| KI-145 | Sibling public lists paginate inconsistently (?cursor= vs ?after=) | Jill MI-040 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Accept one pagination parameter across both lists |
+| KI-146 | magic/request 422 misnames its cause | Jill MI-041 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Name the extra-field cause in the 422 |
+| KI-147 | llms-full blanket claim that unknown query params are ignored is false | Jill MI-042 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Correct llms-full; docs-only |
+| KI-148 | Reviewer queue action cannot complete a review; item stays delivered after POST /review approve | Jill MI-129 (23888) | open | Jill master-issues draft: OPEN (tree eb325a13); not re-verified | bug | P2 | S | Codex | Suggest/build the completing action (POST /update state:done) on queue surfaces; with MI-508, this is product-floor item 9 |
+| KI-149 | R1-F1: accountableHumanId defaults to the room owner, silently widening the named talk set | Jill MI-130 (23888) | open | Jill master-issues draft: OPEN (pin 9a45a451); not re-verified | bug | P2 | S | Codex | Bind sponsorship to the actual inviter; fix-state at current #5428 head UNKNOWN-AT-READ (candidate commits named in H-C §3) |
+| KI-150 | R1-F3: third talk-policy authorisation path in muse rooms contradicts its own comment | Jill MI-131 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Remove or document the museDevelopmentAccess && canInviteCoOwners path; no test covers it |
+| KI-151 | R2-F1: stale approver for the life of the bridge process | Jill MI-132 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Rebuild/re-check the PermissionBroker approver on refresh; UNKNOWN-AT-READ at current head |
+| KI-152 | R2-F2: bridge execution and posting unfenced; only the ack carries the fencingToken | Jill MI-133 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Fence execution + posting by listener lease; UNKNOWN-AT-READ at current head |
+| KI-153 | R2-F3: replayed delivery skips re-authorisation | Jill MI-134 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Re-check mayTalk/membership before re-delivering a stored reply; UNKNOWN-AT-READ at current head |
+| KI-154 | R3-F1: permission receipt posts are fire-and-forget; room record can contradict the outcome | Jill MI-135 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Make receipt posts guaranteed or fail closed; a lost corrective denial is a proof defect; UNKNOWN-AT-READ at current head |
+| KI-155 | R3-F2: plain deny silently becomes a standing rejection (reject_always fallback) | Jill MI-136 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Apply the one-time principle to denials as to allows; disclose the selection in the receipt |
+| KI-156 | R3-F3: two decisions inside one poll interval resolve to the first; immediate correction invisible | Jill MI-137 (23888) | open | Jill master-issues draft: OPEN; not re-verified | bug | P2 | S | Codex | Re-poll / sequence-check before granting; bounded to the 1500ms default window |
+| KI-157 | A11: no outcome link exists to hand a non-participant (Board route: publicId/publicUrl null, /receipts/<id> 404) | Jill MI-138 (23888) | open | Jill master-issues draft: OPEN (production + composition); not re-verified | bug | P2 | S | Codex | Build a pointable outcome link; the YC diligence-click failure, not wording |
+| KI-158 | Six MCP tools' listed schemas under-declare what their validators require | Jill MI-139 (23888) | open | Jill master-issues draft: OPEN at main 2249dbb5; not re-verified | bug | P2 | S | Codex | Express conditional requirements in schema or relax validators; owned by SIMPLIFY ledger (INV-B D7, 2026-11-13), xref §8 |
+| KI-159 | No MCP receipt tool exists in either catalogue | Jill MI-140 (23888) | open | Jill master-issues draft: OPEN (production + composition); not re-verified | bug | P2 | S | Codex | Add an MCP receipt read; pairs with the decider-read conflict (MI-509): the MCP face lacks both outcome reads |
+| KI-160 | Issue #3270: MCP identity mint 500s for reserved role names where REST returns actionable 422 | Jill MI-142 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Align MCP mint error with the REST 422 |
+| KI-161 | Issue #3378: access-request approve silently discards the decider's note (written only on deny) | Jill MI-143 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Persist decision_note on approve as on deny |
+| KI-162 | Issue #3379: invite redeem mint-vs-link fork unsignaled in the 201 response, undisclosed in llms.txt | Jill MI-144 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Signal the fork in the response + docs; silent-duplication class |
+| KI-163 | Issue #3318: test time bomb — begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the wall clock | Jill MI-145 (23888) | open | tests/begin-scope-retry.test.js:17 hardcodes 2027-01-01 on main | low-hanging fruit | P2 | S | Grok | Make the test clock-relative before it fires |
+| KI-164 | Issue #1907: flaky/hanging — room import round-trips a large (1500-event) export never resolves | Jill MI-146 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Diagnose the hang; oldest defect-pattern item in the list |
+| KI-165 | Issue #3437: human UI has no surface for bounties or credit balances; first-owner money journey invisible to a human | Jill MI-147 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Human money surface; xref §5 sponsor-surface gate (design call is John's) |
+| KI-166 | Issue #3842: qa5-a11y-c-browser-check fails on main: #tasks-board-open never visible, 0/6 tests | Jill MI-148 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Fix the check or the board button visibility on main |
+| KI-167 | Issue #4261: unit-ci shard receipts list the deliberate fail-probe fixture as a failure | Jill MI-149 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Harness cluster MI-149..152: jointly they make CI evidence partially untrustworthy |
+| KI-168 | Issue #4262: invariants harness failure records drop error text for non-assertion throws | Jill MI-150 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Preserve error text in failure records |
+| KI-169 | Issue #4263: invariants workflow destroys failing evidence: comment replacement deletes prior FAIL tables | Jill MI-151 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Append, never replace, FAIL evidence |
+| KI-170 | Issue #4264: acceptance fixture generated-module write race on cold checkout + invariants spawn storm | Jill MI-152 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Fix the race / storm |
+| KI-171 | Bounty evidenceUrl field: required, never checked, carries nothing | Jill MI-502 (23888) | open | server/bounty-escrow-routes.mjs:371 requires evidenceUrl; never fetched or checked | cut | P2 | S | Codex (proposed) | DECISION-PENDING: delete the requirement, or start checking the field — the one outcome ruled out is the current required-but-dead state |
+| KI-172 | /api/opportunities.json: a live-looking dead feed — 200, generatedAt advances, opportunities always empty, referenced nowhere | Jill MI-503 (23888) | open | route still served; docs list it; issue #1609 open | cut | P2 | S | Codex (proposed) | DECISION-PENDING: remove the feed surface; claimable work exists elsewhere and nothing references this feed |
 
 ## Blocked on Potter
 
@@ -170,6 +233,10 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 - KI-070: keep or delete bounties, escrow and spend.
 - KI-026: an npm login for publishing room-acp (the served tarball in #5415 works without it).
 - KI-005: backups stay untouched until Potter asks.
+
+## Merged from Jill's master-issues draft
+
+Jill's draft (seq 23888, 550 items, branch evidence/master-issues-2026-10-30 at c6a056eb) was merged on Oct 30. Added as KI-110 onward: the open product low-hanging items (MI-001 to MI-046), the audit-proved open items (MI-129 to MI-140), named GitHub defects with no PR (MI-142 to MI-152) and two dead surfaces (MI-502, MI-503); 63 rows. Folded as duplicates: MI-013 into KI-046, MI-044 into KI-040, MI-141 into KI-007, MI-153 into KI-083. Skipped as already fixed (alive or merged, awaiting deploy): MI-016, MI-017, MI-024, MI-043, MI-045, MI-046. Spot-checked on main: MI-015, MI-145, MI-502, MI-503 confirmed. The other rows carry Jill's state and are marked not re-verified. The remaining ~470 items (fleet process, gates, positioning decisions, redesign programmes, PR and issue populations) stay in Jill's draft by reference; they are policy and process, not code defects.
 
 ## Agent feedback (Oct 30 follow-up)
 
@@ -213,7 +280,7 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#4450](https://github.com/Uuriko/project-room/issues/4450) | 2026-10-21 | Front door states no credential lifecycle: 30-day mcpToken expiry with no renewal, rotation, or revocation stated in llms.txt / llms-full.txt / AGENT-START-HERE | stale (unverified since filing) | bug |
 | [#4449](https://github.com/Uuriko/project-room/issues/4449) | 2026-10-21 | Front-door error contract drift: llms.txt gives a bare 409 and a truncated example; the operative public-work error codes exist only in AGENT-START-HERE | superseded (frozen cut area) | cut |
 | [#4448](https://github.com/Uuriko/project-room/issues/4448) | 2026-10-21 | Front door teaches two different public-work claim paths (match autoClaim vs direct /claim) and never reconciles them | see ledger | - |
-| [#4264](https://github.com/Uuriko/project-room/issues/4264) | 2026-10-19 | acceptance fixture: generated-module write race on cold checkout + invariants spawn storm | stale (unverified since filing) | bug |
+| [#4264](https://github.com/Uuriko/project-room/issues/4264) | 2026-10-19 | acceptance fixture: generated-module write race on cold checkout + invariants spawn storm | see ledger | - |
 | [#4263](https://github.com/Uuriko/project-room/issues/4263) | 2026-10-19 | invariants workflow destroys failing evidence: comment replacement deletes prior FAIL tables; uploaded artifact vanished unchecked | see ledger | - |
 | [#4262](https://github.com/Uuriko/project-room/issues/4262) | 2026-10-19 | invariants harness: failure records drop the error text for non-assertion throws (bare testCodeFailure) | see ledger | - |
 | [#4261](https://github.com/Uuriko/project-room/issues/4261) | 2026-10-19 | unit-ci shard receipts list the deliberate fail-probe fixture as a failure | see ledger | - |
@@ -256,7 +323,7 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#3892](https://github.com/Uuriko/project-room/issues/3892) | 2026-10-17 | [Medium] Claim-record deep-link path (revealClaimRecord) swallows reveal failure; the click path does not | stale (unverified since filing) | bug |
 | [#3891](https://github.com/Uuriko/project-room/issues/3891) | 2026-10-17 | [Medium] Owner Cockpit renders the spend 'adjust' action as a Deny button POSTing an empty body to spend-allowance | see ledger | - |
 | [#3890](https://github.com/Uuriko/project-room/issues/3890) | 2026-10-17 | [Medium] Owner Cockpit decision facts lack board_review entirely (age, consequence, label, sort); spend items share the invisible age | see ledger | - |
-| [#3842](https://github.com/Uuriko/project-room/issues/3842) | 2026-10-17 | qa5-a11y-c-browser-check fails on main: #tasks-board-open (Board button) never visible, 0/6 tests | stale (unverified since filing) | bug |
+| [#3842](https://github.com/Uuriko/project-room/issues/3842) | 2026-10-17 | qa5-a11y-c-browser-check fails on main: #tasks-board-open (Board button) never visible, 0/6 tests | see ledger | - |
 | [#3837](https://github.com/Uuriko/project-room/issues/3837) | 2026-10-17 | manual-owner-exercise-check fails on main: 'Save as result' action never visible in the return stage | stale (unverified since filing) | bug |
 | [#3796](https://github.com/Uuriko/project-room/issues/3796) | 2026-10-16 | Join dialog stays open after a successful account creation — focus dropped to <body>, room reachable only after manually dismissing it | see ledger | - |
 | [#3793](https://github.com/Uuriko/project-room/issues/3793) | 2026-10-16 | Board dialog drops focus to <body> on close (button and Escape) and on a refused claim; Account view opens with focus on <body> | see ledger | - |
@@ -346,13 +413,13 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#3523](https://github.com/Uuriko/project-room/issues/3523) | 2026-10-15 | Receipt replay front-end: render receipts as a readable work timeline | superseded (frozen cut area) | cut |
 | [#3483](https://github.com/Uuriko/project-room/issues/3483) | 2026-10-14 | auditRecovery content digest canonicalizes BLOB cells byte-by-byte (~5.3s per MiB) — restore verification cost scales with attachment bytes | stale (unverified since filing) | bug |
 | [#3460](https://github.com/Uuriko/project-room/issues/3460) | 2026-10-14 | [Low][docs] llms.txt work-claim board omits the claimed -> in_progress -> done ordering — a literal first close 422s | stale (unverified since filing) | bug |
-| [#3437](https://github.com/Uuriko/project-room/issues/3437) | 2026-10-14 | Human UI has no surface for bounties or credit balances: the first-owner money journey is invisible to a human owner (H-J1 FAIL) | superseded (frozen cut area) | cut |
+| [#3437](https://github.com/Uuriko/project-room/issues/3437) | 2026-10-14 | Human UI has no surface for bounties or credit balances: the first-owner money journey is invisible to a human owner (H-J1 FAIL) | see ledger | - |
 | [#3413](https://github.com/Uuriko/project-room/issues/3413) | 2026-10-14 | [Perf][Medium] Room/board reads are O(board) per request: 2,000-item board work view ~0.5 s median idle (10x small room), activation pack ~0.4 s | stale (unverified since filing) | bug |
 | [#3408](https://github.com/Uuriko/project-room/issues/3408) | 2026-10-14 | [Perf] applyEvent deep-clones the entire room state per event: history replay (import / projection rebuild) is quadratic, and every live write gets slower as the room grows | stale (unverified since filing) | bug |
 | [#3406](https://github.com/Uuriko/project-room/issues/3406) | 2026-10-14 | Double-served route: GET /api/rooms/{roomId}/access-requests legacy branch is shadowed by the route-table row | stale (unverified since filing) | bug |
 | [#3401](https://github.com/Uuriko/project-room/issues/3401) | 2026-10-14 | Test/CI scratch leaks fill the 512 MB /tmp tmpfs on shared dev VMs (ENOSPC class) | stale (unverified since filing) | bug |
-| [#3379](https://github.com/Uuriko/project-room/issues/3379) | 2026-10-14 | Invite redeem: mint-vs-link fork is unsignaled in the 201 response and undisclosed in llms.txt (silent duplicate identity) | stale (unverified since filing) | bug |
-| [#3378](https://github.com/Uuriko/project-room/issues/3378) | 2026-10-14 | Access-request approve silently discards the decider's note (decision_note written only on deny) | stale (unverified since filing) | bug |
+| [#3379](https://github.com/Uuriko/project-room/issues/3379) | 2026-10-14 | Invite redeem: mint-vs-link fork is unsignaled in the 201 response and undisclosed in llms.txt (silent duplicate identity) | see ledger | - |
+| [#3378](https://github.com/Uuriko/project-room/issues/3378) | 2026-10-14 | Access-request approve silently discards the decider's note (decision_note written only on deny) | see ledger | - |
 | [#3375](https://github.com/Uuriko/project-room/issues/3375) | 2026-10-14 | [Outfitter] App Store: curated catalog -> self-serve -> metered | stale (unverified since filing) | bug |
 | [#3374](https://github.com/Uuriko/project-room/issues/3374) | 2026-10-14 | [Outfitter v0] Receipts: tools_used[] capture + 'Made with' rail | superseded (frozen cut area) | cut |
 | [#3373](https://github.com/Uuriko/project-room/issues/3373) | 2026-10-14 | [Outfitter v0] Syndication freshness for seed listings | superseded (frozen cut area) | cut |
@@ -366,11 +433,11 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#3344](https://github.com/Uuriko/project-room/issues/3344) | 2026-10-14 | Owner Cockpit slice 3: receipt drill-down with in-UI verification, and the Morning Brief | superseded (frozen cut area) | cut |
 | [#3323](https://github.com/Uuriko/project-room/issues/3323) | 2026-10-14 | Generated budget stop/pause is not atomic: failures are swallowed, partial writes commit, and the 409 falsely reports the session stopped | stale (unverified since filing) | bug |
 | [#3322](https://github.com/Uuriko/project-room/issues/3322) | 2026-10-14 | Budget trip-wire has no attempt binding: a stale over-budget report force-stops the newer attempt | stale (unverified since filing) | bug |
-| [#3318](https://github.com/Uuriko/project-room/issues/3318) | 2026-10-14 | Test time bomb: begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the real wall clock | stale (unverified since filing) | bug |
+| [#3318](https://github.com/Uuriko/project-room/issues/3318) | 2026-10-14 | Test time bomb: begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the real wall clock | see ledger | - |
 | [#3308](https://github.com/Uuriko/project-room/issues/3308) | 2026-10-13 | claim_released pays +1 reputation with no velocity or re-claim guard: zero-cost serial claim-release cycling farms standing | stale (unverified since filing) | bug |
 | [#3299](https://github.com/Uuriko/project-room/issues/3299) | 2026-10-13 | Agent coordination log — Jill (Muse) ⇄ Codex ⇄ other fleets | stale (unverified since filing) | bug |
 | [#3294](https://github.com/Uuriko/project-room/issues/3294) | 2026-10-13 | PERF-1: signed-out / page weight — execute the approved budget (D5-5) | stale (unverified since filing) | bug |
-| [#3270](https://github.com/Uuriko/project-room/issues/3270) | 2026-10-13 | MCP identity mint returns 500 'internal' for reserved role names where REST returns the actionable 422 | stale (unverified since filing) | bug |
+| [#3270](https://github.com/Uuriko/project-room/issues/3270) | 2026-10-13 | MCP identity mint returns 500 'internal' for reserved role names where REST returns the actionable 422 | see ledger | - |
 | [#3264](https://github.com/Uuriko/project-room/issues/3264) | 2026-10-13 | REST wake ack has no batch cap (55 ids accepted); MCP and both clients cap at 50 | stale (unverified since filing) | bug |
 | [#3224](https://github.com/Uuriko/project-room/issues/3224) | 2026-10-13 | [tracking] Finish raw members[...] migration behind ownMember/requireMember and add the lint ban | stale (unverified since filing) | bug |
 | [#3221](https://github.com/Uuriko/project-room/issues/3221) | 2026-10-13 | [simplification] E6 work-stack merges: mirror cut, trial-tasks merge, workItems migration, Demigod park, offers rename | stale (unverified since filing) | bug |
@@ -378,9 +445,9 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#3212](https://github.com/Uuriko/project-room/issues/3212) | 2026-10-13 | Hosted MCP: room_join hidden behind undiscoverable tools/list profile parameter — guided join path lands on a catalog with no join tool | stale (unverified since filing) | bug |
 | [#3209](https://github.com/Uuriko/project-room/issues/3209) | 2026-10-13 | llms.txt under-specifies three contracts it names: access-request join path, wants-work capabilities enum, full-profile-only heartbeat/wake tools | stale (unverified since filing) | bug |
 | [#2009](https://github.com/Uuriko/project-room/issues/2009) | 2026-10-08 | herdr-migrate force-release doesn't pre-validate operator authority (V168 follow-up) | superseded (frozen cut area) | cut |
-| [#1907](https://github.com/Uuriko/project-room/issues/1907) | 2026-10-07 | Flaky/hanging: 'room import round-trips a large (1500-event) export' never resolves | stale (unverified since filing) | bug |
+| [#1907](https://github.com/Uuriko/project-room/issues/1907) | 2026-10-07 | Flaky/hanging: 'room import round-trips a large (1500-event) export' never resolves | see ledger | - |
 | [#1905](https://github.com/Uuriko/project-room/issues/1905) | 2026-10-07 | Load: concurrent write throughput collapses (6.5/s, p95 5.4s at 16 writers) | stale (unverified since filing) | bug |
-| [#1609](https://github.com/Uuriko/project-room/issues/1609) | 2026-10-06 | Discovery gap: /api/opportunities.json is empty and never points at the public-work pool | superseded (frozen cut area) | cut |
+| [#1609](https://github.com/Uuriko/project-room/issues/1609) | 2026-10-06 | Discovery gap: /api/opportunities.json is empty and never points at the public-work pool | see ledger | - |
 | [#1566](https://github.com/Uuriko/project-room/issues/1566) | 2026-10-06 | MCP room_create omits `starter`, breaking its 'Same call as POST /api/agent-rooms' contract | stale (unverified since filing) | bug |
 | [#942](https://github.com/Uuriko/project-room/issues/942) | 2026-09-24 | Follow-up to #931: require identity-holder proof at agent enrollment; scope peer-DM reads by room | stale (unverified since filing) | bug |
 | [#941](https://github.com/Uuriko/project-room/issues/941) | 2026-09-24 | Security deep pass 1: guest-link credentials + cross-review patterns (P1-P5) | stale (unverified since filing) | bug |
