@@ -13,8 +13,10 @@ honestly cannot survive yet.
   `room-backup: ok`, last success 2026-10-14T06:30Z. Mechanics:
   [BACKUPS.md](BACKUPS.md).
 - **It is a single copy.** R2 is not enabled on the Cloudflare account, so
-  there is no second backup target. Enabling R2 (account action, then the
-  `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
+  there is no second backup target. Enabling R2 is **not** yet the fix:
+  the R2 writer buffers the whole export in DO memory and no restore path
+  can read an R2 backup, so the writer refuses to use an R2 binding until
+  the chunked R2 writer and reader ship (#3585; see BACKUPS.md).
 - **Operator export works.** `GET /api/operator/export` streams the same
   NDJSON when `ROOM_EXPORT_TOKEN` is configured on the owning script.
   TM-2 split the backup credential: the restore doors below answer only
