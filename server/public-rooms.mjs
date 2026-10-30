@@ -14,6 +14,7 @@ import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
+import { recordedReceiptsSetting } from "./public-visibility.mjs";
 import { excludeHiddenReceipts } from "./receipts-live.mjs";
 
 const SETUP_COPY_SCRIPT = `(() => {
@@ -115,6 +116,22 @@ function visibleRoomReceipts(store, slug, receiptsEnabled) {
   return receipts;
 }
 
+// The receipts gate for the room page, its proof link, and the
+// sitemap's proof entry: the owner's recorded public-receipts setting,
+// read from the authoritative record at read time
+// (recordedReceiptsSetting, the same read the cured lot path uses) —
+// never the write-time mirror public_rooms.receipts_enabled, whose
+// drift hid opted-in rooms' receipts and advertised opted-out ones
+// (INV-E DETAIL 8). Where the store carries no rooms table at all (a
+// predating/partial store) the authoritative record cannot exist, so
+// the mirrored column is the only record that can decide, exactly as
+// the lot read falls back to its mirror there. Never-recorded reads
+// as enabled=null and stays private (#3594).
+function authoritativeReceiptsEnabled(store, room) {
+  const recorded = recordedReceiptsSetting(store.db, room.slug);
+  return recorded.status === "unavailable" ? room.receiptsEnabled === true : recorded.enabled === 1;
+}
+
 function requestHref(slug, ref) {
   return withRef(`/?request=${encodeURIComponent(slug)}`, ref);
 }
@@ -126,7 +143,8 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } =
   const join = room.joinMode === "link" && room.joinToken
     ? { mode: "link", href: withRef(`/#join/${room.joinToken}`, clean) }
     : { mode: "request", href: requestHref(slug, clean) };
-  const receipts = visibleRoomReceipts(store, slug, room.receiptsEnabled);
+  const receiptsEnabled = authoritativeReceiptsEnabled(store, room);
+  const receipts = visibleRoomReceipts(store, slug, receiptsEnabled);
   const document = {
     schema: "project-room-public-room/1",
     contentTrust: CONTENT_TRUST,
@@ -138,7 +156,7 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } =
     names: room.names,
     tasks: room.tasks,
     receipts,
-    proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
+    proofHref: receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
     agentJoin: {
       packet: "/llms.txt",
@@ -185,7 +203,7 @@ ${nameLine}
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
-${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
+${receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
 <footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
@@ -391,7 +409,7 @@ export function publicSitemapEntries(store) {
   for (const room of listPublicRoomSitemap(store)) {
     const lastmod = typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD;
     entries.push({ path: `/r/${room.slug}`, lastmod });
-    if (room.receiptsEnabled) entries.push({ path: `/r/${room.slug}/proof`, lastmod });
+    if (authoritativeReceiptsEnabled(store, room)) entries.push({ path: `/r/${room.slug}/proof`, lastmod });
   }
   return entries;
 }
