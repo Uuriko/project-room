@@ -17,7 +17,7 @@
 // This module owns the column and its data only — never PRAGMA user_version.
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, roomMode, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
-import { requestedRoomMode } from "./room-mode.mjs";
+import { requestedRoomMode, roomModeEnv } from "./room-mode.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
 import { seedStarterForNewAccount, starterTitleForIntent } from "./starter-room.mjs";
@@ -101,7 +101,10 @@ export function createAccountRoom(store, token, binding, request) {
   // Mode is creation-only and lab is gated on ROOM_LAB_MODE_ENABLED
   // (server/room-mode.mjs): off, requesting lab is a 422 refusal, never a
   // silent coerce to production. Absent mode resolves to "production".
-  const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined);
+  // The arm reads through the store's featureEnv bag when it carries one
+  // (roomModeEnv — the Worker's bindings), and a lab request also needs
+  // this room's id to carry the lab- prefix (both enforced in the resolver).
+  const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined, roomModeEnv(store), roomId);
   // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
   // keep the existing two-step onboarding. ACT-1b is what sends these fields.
   let intent = null;
