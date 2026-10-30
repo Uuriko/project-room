@@ -47,7 +47,7 @@ function assetsFor(files) {
   return assets;
 }
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
-  ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
+  ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
   ...["room-agent", "assignment-watcher", "watch-journal"].map(name => `client/${name}.mjs`),
   ...["backup-room", "provision", "audit-invitations", "agent-inbox", "agent-watch"].map(name => `scripts/${name}.mjs`),
@@ -72,7 +72,6 @@ optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bo
 optional.push("server/public-agent-page.mjs", "server/routes/public-agent-page.mjs"); // public agent page (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/download-page.mjs"); // public /download status (imported by server/routes/table.mjs)
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
-optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/journal.mjs"); // shared per-kind journal (imported by server/store.mjs and the other journal callers)
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
 optional.push("server/door-funnel.mjs", "server/routes/door-funnel.mjs"); // DOOR-FUNNEL-READ: public door funnel aggregates (route module imported by server/routes/table.mjs)
@@ -121,7 +120,6 @@ optional.push("server/push-subscriptions.mjs", "server/web-push.mjs"); // browse
 optional.push("src/human-push.js", "src/human-push-display.js", "push-sw.js"); // human push button, lock-screen text, and service worker
 optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiring (imported by server/inbox.mjs; pure, imports inbox-spam.mjs and notify-prefs.mjs)
 optional.push("server/spam-shadow.mjs"); // shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs; pure, imports inbox-spam.mjs)
-optional.push("server/spam-quarantine-journal.mjs"); // spam-guard quarantine journal (imported by server/store.mjs; imports ServiceError from store.mjs)
 optional.push("server/quarantine-thread-splits.mjs"); // quarantine review thread-split journal (imported by server/store.mjs and server/inbox.mjs)
 optional.push("server/quarantine-review-coverage.mjs"); // per-signal review-coverage dashboard (imported by server/inbox.mjs; pure, no imports of its own)
 // NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
@@ -132,15 +130,13 @@ optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/v
 optional.push("server/jev-admission.mjs"); // Jev-harness admission gate (imported by server/http.mjs; pure, no imports of its own)
 optional.push("server/jev-receipts.mjs"); // Jev-harness receipt gate (imported by server/work-claim-routes.mjs; pure, no imports of its own)
 optional.push("server/required-reading.mjs"); // W012: per-lane required reading (imported by server/work-claim-routes.mjs; pure, imports server/work-claims.mjs)
-optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (imported by server/store.mjs; imports ServiceError from server/service-error.mjs)
-optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
+optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/journal.mjs; pure, no imports of its own)
 optional.push("server/run-once.mjs"); // runOnce idempotency primitive (imported by server/attention.mjs and server/buyer-signoff.mjs; imports ServiceError and src/events.js validId)
 optional.push("server/csv-export.mjs"); // structured CSV/JSON export (imported by server/inbox-outbox.mjs for the send-journal audit export; pure, no imports of its own)
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
 optional.push("server/graph-fixture-sync.mjs");
 optional.push("server/graph-reply-draft.mjs");
-optional.push("server/graph-reply-journal.mjs");
 optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/room-roster.js");
 optional.push("deploy/public-assets.mjs", "deploy/public-search.mjs", "server/public-assets.mjs", "server/public-search.mjs"); // Shared live manifest; historical packages predate it. The library modules moved deploy/ -> server/ (2026-10); the deploy/ registrations stay so genuine historical packages remain packagable and verifiable.
@@ -208,15 +204,13 @@ optional.push("server/owner-overview.mjs"); // #3342: cross-room owner overview 
 optional.push("server/mention-lifecycle.mjs"); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs");
-optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
+optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs");
 optional.push("server/channel-live-status.mjs"); // Task 10: durable Telegram live-delivery/send facts (imported by server/store.mjs)
 optional.push("server/delivery-tracing.mjs"); // R1: opt-in OTel delivery-path tracing (pure, no store.mjs imports)
 optional.push("server/channel-send-budgets.mjs"); // Task 41: per-connection send budgets (imported by server/http.mjs; imports token-bucket.mjs and store.mjs)
 optional.push("server/token-bucket.mjs"); // token-bucket limiter (imported by server/channel-send-budgets.mjs; pure, no imports)
-optional.push("server/spam-quarantine-journal.mjs"); // Durable spam-guard quarantine journal (imported by server/store.mjs)
 optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending_channel_updates (imported by server.mjs)
 optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (imported by server/inbox.mjs)
-optional.push("server/sla-breach-journal.mjs"); // Task 26: durable in-app sink for SLA-breach deliver (imported by server/store.mjs)
 optional.push("server/sla-dashboard.mjs"); // Task 26: SLA dashboard aggregator (imported by server/inbox.mjs)
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
 optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)

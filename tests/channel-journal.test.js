@@ -11,7 +11,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { RoomStore, ServiceError } from "../server/store.mjs";
 import { ChannelWebhookInbox, syncTelegramConnection, channelSyncLimits } from "../server/channel-import.mjs";
-import { channelJournalLimits } from "../server/channel-journal.mjs";
+import { channelJournalLimits } from "../server/journal.mjs";
 import { applicationTables } from "../server/writer-fence.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 

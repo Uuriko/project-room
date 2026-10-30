@@ -11,7 +11,7 @@ import net from "node:net";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { ChannelWebhookInbox, channelSyncLimits, syncTelegramConnection } from "../server/channel-import.mjs";
-import { channelJournalLimits } from "../server/channel-journal.mjs";
+import { channelJournalLimits } from "../server/journal.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
 const secrets = ["fixture-webhook-secret-0123456789", "second-webhook-secret-9876543210"];
