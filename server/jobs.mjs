@@ -331,7 +331,23 @@ export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
   return null;
 }
 
+function nativeMcpEventDueAt(store) {
+  return read(store, "SELECT MIN(CASE WHEN state='leased' THEN lease_until ELSE next_at END) AS due FROM mcp_event_outbox WHERE state IN ('pending','leased')")?.due ?? null;
+}
+
 export const JOBS = Object.freeze([
+  defineJob({
+    name: "native-mcp-events",
+    cadenceMs: 1000,
+    heartbeatCadenceMs: MINUTE_MS, // A bounded network attempt may take ten seconds.
+    budgetMs: 11000,
+    singleRuntimeReason: "Node uses its bounded Events runtime timer; Workers require durable alarms across isolate eviction.",
+    runtimes: Object.freeze(["worker"]),
+    enabled(_env, store) { return store?.nativeMcpEventsEnabled === true && nativeMcpEventDueAt(store) != null; },
+    disabledReason: () => "No native event delivery is waiting",
+    nextDueAt: store => nativeMcpEventDueAt(store),
+    async run(_store, ctx) { return ctx.room.drainMcpEvents(); }
+  }),
   defineJob({
     name: "gmail-sync",
     cadenceMs: MINUTE_MS,

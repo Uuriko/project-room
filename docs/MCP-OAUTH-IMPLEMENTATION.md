@@ -42,8 +42,8 @@ adds Room permissions. No surrogate identity secret is minted or exposed.
 - Configure verified native-host client/callback information, or implement a
   separately reviewed standard client registration path. Do not guess callbacks.
 - Qualify an actual Dot installation, receive/reply, useful task result and
-  review. Native Events currently require the Node deployment; Workers does not
-  advertise Events without a vetted callback transport.
+  review. Native Events on Workers require an explicitly configured trusted
+  callback origin and a successful live subscription/delivery qualification.
 - Background receiving/event subscriptions are a separate capability and require
   observed delivery, resume and duplicate handling evidence.
 
@@ -128,3 +128,37 @@ validate; full native package acceptance still requires the real portal.
 Native mixed reads require all constituent scopes: inbox and work listings/discussions need chat:read plus work:read; selected request/work preparation and activation pack also need rooms:read. The activation pack provides the existing room purpose, member-visible pins, current work and viewer orientation. Narrow grants retain independent message and Board/result reads. Tool discovery and dispatch enforce the same conjunctions; membership and history visibility still apply.
 
 Recovery: token refresh keeps an active invitation grant usable only within its original 30-day lifetime. Expiry, revocation or identity rotation does not silently renew that grant. Ask the sponsor for a fresh invitation and reconnect; this creates a new Room agent seat, not continuity of the old seat. Before confirmation, Cancel returns access_denied to the registered callback without consuming the invitation. An interrupted confirmation may be retried in the same unexpired browser transaction; restarting after approval needs a fresh invitation. These accountless seat-recovery limits are current Room design choices. Host-controlled installation/consent and whether the host displays recovery details still require real ChatGPT qualification.
+
+## Native Events on Workers
+
+Workers uses the existing SQLite outbox and durable job alarm, draining one
+notification per tick. Pending retries and expired delivery leases survive
+isolate eviction; the existing 30-minute cron recovers a crash between the
+outbox commit and alarm registration. Delivery continues to recheck consent,
+membership, expiry, pause and conversation policy. A webhook receipt proves
+receipt, not that the Dot completed work.
+
+`ROOM_MCP_EVENT_CALLBACK_ORIGINS` is an optional JSON array of exact HTTPS
+origins on port 443. Missing configuration keeps Events unavailable. An explicit
+`[]` enables discovery but refuses every subscription callback before DNS or
+HTTP, returning `-32015` with `data.reason: callback_origin_not_allowed` and only
+`data.origin`. This lets an authorized host report its callback origin without
+logging its path or signing secret. Independently verify that origin belongs to
+the intended host before adding it through the normal deployment lane. Never
+copy an arbitrary subscriber-provided origin into configuration, use wildcard
+origins, or treat the failed subscription as a working connection. Rescan the
+plugin after enabling Events, then ask the host to subscribe again.
+
+The restricted Workers fetch adapter trusts operator-approved exact origins;
+it **does not provide arbitrary callback DNS pinning**. Public-address DNS checks
+remain a defense, but fetch resolves again. This differs from the general pinned
+transport described in the OpenAI Events guide. It is suitable only when the
+operator trusts the approved provider's DNS and HTTPS endpoint. Redirects are
+never followed, response bodies are bounded, and timeouts abort requests. The
+unsupported socket `expectedServerHostname` override is not used. Node retains
+its existing DNS-pinned transport for arbitrary public callback destinations.
+
+Before claiming automatic wake: observe the real host's successful signed
+challenge, stored subscription, matching permitted request, acknowledged
+webhook, and the Dot's subsequent Room read/reply; test stop-monitoring and
+revocation. Discovery alone is not wake qualification.

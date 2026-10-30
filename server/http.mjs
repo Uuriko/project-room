@@ -388,7 +388,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
-  mcpEventTransport, mcpEventDnsResolvers,
+  mcpEventTransport, mcpEventDnsResolvers, mcpEventExternalScheduler = false,
   mcpOAuthClients = [], // Explicit verified public-client registrations; empty disables native MCP OAuth.
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
@@ -725,7 +725,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   const nativeEvents = createMcpEventsRuntime({ store, accountProvider: oauthProvider,
     inviteProvider: inviteOAuth?.provider, resource: oauthResource,
-    transport: mcpEventTransport, dnsResolvers: mcpEventDnsResolvers });
+    transport: mcpEventTransport, dnsResolvers: mcpEventDnsResolvers, externalScheduler: mcpEventExternalScheduler });
+  store.nativeMcpEventsEnabled = Boolean(nativeEvents);
   if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
     nativeHandler: nativeEvents?.handler,
