@@ -362,3 +362,17 @@ test("a request with no credential is refused before any inbox read", () => {
     store: { authenticateAccountSession() { throw error; } },
   }), refused => refused.code === "unauthenticated" && refused.status === 401);
 });
+
+test("read path: collectVerdictInbox assembles rooms through the store surface; absent CD-06 module reads follow as null", () => {
+  const state = { members, room: { ownerId: "oona" } };
+  const store = {
+    room: () => ({ state }),
+    db: { prepare: () => ({ get: () => undefined }) },
+    workClaims: { list: () => [], configFor: () => null },
+  };
+  const out = collectVerdictInbox(store, { memberByRoom: new Map([["r1", "hana"]]), surface: "human", nowMs: NOW });
+  assert.deepEqual(out.roomErrors, []);
+  assert.equal(out.viewerId, "hana");
+  assert.equal(out.follow, null, "no claim-follows module and no store provider: follow is null, never invented zeroes");
+  assert.equal(out.totals.total, 0);
+});
