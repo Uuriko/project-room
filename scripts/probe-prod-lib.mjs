@@ -18,6 +18,58 @@ export const MATRIX = [
   ["jobs-canary", "/api/health/jobs", "canary"]
 ];
 
+const JOB_STATUS = new Set(["ok", "failing", "stale", "degraded", "disabled"]);
+const DIAGNOSTIC_TOKEN = /^[a-z][a-z0-9_]{0,63}$/i;
+const MAX_JOB_DIAGNOSTICS = 64;
+const MAX_SUMMARY_KEYS = 12;
+
+function timestamp(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? value : null;
+}
+
+function jobDiagnostic(job) {
+  const out = { name: job.name, status: JOB_STATUS.has(job.status) ? job.status : null };
+  for (const key of ["lastRunAt", "lastSuccessAt", "lastErrorAt", "lastSummaryAt"]) out[key] = timestamp(job[key]);
+  for (const key of ["periodSeconds", "staleAfterSeconds", "secondsSinceSuccess", "consecutiveFailures", "lastDurationMs"]) {
+    out[key] = Number.isFinite(job[key]) && job[key] >= 0 ? job[key] : null;
+  }
+  for (const key of ["lastErrorCurrent", "required"]) out[key] = typeof job[key] === "boolean" ? job[key] : null;
+  for (const key of ["lastErrorCode", "lastErrorSubcheck", "lastErrorClass", "lastErrorRecordClass", "degraded"]) {
+    out[key] = typeof job[key] === "string" && DIAGNOSTIC_TOKEN.test(job[key]) ? job[key] : null;
+  }
+  // Match the heartbeat's compactSummary contract without importing the job
+  // runners into this zero-dependency observer. Never copy arbitrary error
+  // text, room ids, nested objects or string values into public Actions logs.
+  const summary = {};
+  if (job.lastSummary && typeof job.lastSummary === "object") {
+    for (const [key, value] of Object.entries(job.lastSummary)) {
+      if (Object.keys(summary).length >= MAX_SUMMARY_KEYS) break;
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key)) continue;
+      if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) summary[key] = value;
+    }
+  }
+  out.lastSummary = Object.keys(summary).length ? summary : null;
+  return out;
+}
+
+// Keep the legacy status/name rollup, plus bounded diagnostic evidence from
+// that same response. A receipt must distinguish a current failed outcome
+// from a historical error, and label an older summary with its own timestamp.
+// Include healthy/disabled jobs too: omitting them cannot prove a required
+// job completed. Missing metadata stays unknown, never inferred successful.
+function summarizeJobHealth(value) {
+  const jobs = Array.isArray(value?.jobs) ? value.jobs : [];
+  return {
+    status: value?.status ?? null,
+    failing: jobs.filter(j => j && typeof j.name === "string" && j.status !== "ok" && j.status !== "disabled").map(j => j.name),
+    generatedAt: timestamp(value?.generatedAt),
+    jobs: jobs.filter(j => j && typeof j.name === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(j.name))
+      .slice(0, MAX_JOB_DIAGNOSTICS).map(jobDiagnostic)
+  };
+}
+
 async function probe(base, path) {
   const started = performance.now();
   try {
@@ -87,12 +139,7 @@ export async function probeProd(base) {
       try { value = JSON.parse(r.body); } catch {}
       r.canaryAnswered = value?.schema === "room.job-health/1" && Array.isArray(value?.jobs);
       if (r.canaryAnswered) {
-        jobsHealth = {
-          status: value.status ?? null,
-          failing: value.jobs
-            .filter(j => j && typeof j.name === "string" && j.status !== "ok" && j.status !== "disabled")
-            .map(j => j.name)
-        };
+        jobsHealth = summarizeJobHealth(value);
         if (r.status === 200) r.ok = true;
       } else if (r.status === 200) {
         r.ok = false;
