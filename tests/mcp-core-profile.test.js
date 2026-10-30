@@ -66,8 +66,9 @@ test("default tools/list is the short core profile and every listed name is lega
   const names = namesOf(body);
   assert.equal(body.result.profile, "core");
   assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
-  // Core still names bond_propose; the rest of the bond lifecycle is
-  // advertised from the conversation focus (see the focus test below).
+  // Core is trimmed to conversation for hosted/cloud agents: create, files,
+  // land queue, wake and bond tools move to focus/full profiles.
+  for (const moved of ["room_create", "room_put_file", "add_land_item", "wake_pause", "bond_propose"]) assert.equal(names.includes(moved), false, moved);
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
@@ -88,7 +89,7 @@ test("default tools/list is the short core profile and every listed name is lega
   // profile stays small for cold agents, with headroom for one more flag.
   assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
 
-  const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
+  const aliased = await rpc(origin, "tools/list", { aliases: 1, profile: "full" }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");

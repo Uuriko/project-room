@@ -1175,6 +1175,14 @@ paths:
         changing or removing it yields mode=reset. Without channelId, the existing
         viewer-scoped room/DM selection is unchanged. Storage still reads the projection;
         this selector does not complete the indexed-message migration.
+        Optional `peerMemberId` instead selects only messages between the caller and
+        that peer, filtered before pagination. It cannot be combined with channelId.
+        Responses and encrypted continuations bind the selected peer; switching peers
+        or dropping the selector resets the continuation. Unknown peers return an empty
+        page and do not reveal other members' private relationships.
+        Private-pair continuations can survive a proven public-only append of at most
+        100 events, preserving the private page being read. Any other intervening
+        event, changed storage domain, or longer gap retains conservative invalidation.
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
@@ -1182,6 +1190,7 @@ paths:
         - { name: since, in: query, schema: { type: string } }
         - { name: messageId, in: query, schema: { type: string } }
         - { name: channelId, in: query, schema: { type: string }, description: Public channel selection; excludes DMs and binds continuations }
+        - { name: peerMemberId, in: query, schema: { type: string }, description: Private conversation with the caller; mutually exclusive with channelId }
       responses:
         '200':
           description: Viewer-bound version 1 response with mode, sequence, messages, nextCursor and checkpoint; not_modified omits messages
@@ -1189,6 +1198,28 @@ paths:
         '403': { description: Current membership or rooms read scope required }
         '404': { description: Channel absent, or requested message absent or not visible in the selected scope }
         '413': { description: One current message exceeds the bounded read byte limit }
+        '422': { description: Invalid selection }
+  /api/rooms/{roomId}/conversations:
+    get:
+      summary: List the caller's private conversation partners
+      description: |
+        Bounded metadata directory independent of the loaded conversation window.
+        Returns memberId and lastMessageAt only, never message bodies or other
+        members' private relationships. Caller visibility and history floors apply
+        before grouping and pagination. Partners are ordered by member ID.
+        Encrypted cursors bind the viewer, credential, session, limit and room head.
+        A changed head or invalid cursor returns mode=reset with an empty list;
+        restart without the cursor. Restarted services invalidate old cursors.
+        Maximum 100 entries per page. This bounds returned metadata, not SQL scan
+        cost: uncertified legacy rooms still inspect their projection in SQLite.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Viewer-bound directoryVersion 1 with mode, sequence, peers and nextCursor }
+        '401': { description: Credential expired or revoked }
+        '403': { description: Current membership or rooms read scope required }
         '422': { description: Invalid selection }
   /api/inbox/setup:
     get:
@@ -2907,11 +2938,12 @@ paths:
         Live facts for the /about front door, no login. The counters
         are computed per request from the same public sources the hero
         links to: the public receipts (issued, and verified = carrying
-        a merged pull request) and the public work board (claimable
-        count). latestReceipt is the newest public receipt, or null
+        both mergedAt and pullRequest, counted per receipt, not per distinct PR) and the public work board (claimable
+        count). computedAt is the request computation time, not publication time
+        or an immutable acceptance event. provenance defines each count unit
+        and its public source. latestReceipt is the newest eligible non-QA public receipt, or null
         when none is published. Never cached (Cache-Control no-store),
-        so the numbers always match the records a visitor can open
-        from the page itself.
+        and later reads may differ after publication or work changes.
       security: []
       responses:
         '200':
@@ -2920,9 +2952,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [schema, counters, latestReceipt]
+                required: [schema, computedAt, provenance, counters, latestReceipt]
                 properties:
                   schema: { type: string, enum: ['project-room-front-door/1'] }
+                  computedAt: { type: string, format: date-time }
+                  provenance:
+                    type: object
+                    required: [kind, population, counters]
+                    properties:
+                      kind: { type: string, enum: [request-snapshot] }
+                      population: { type: string }
+                      counters:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          required: [unit, source, definition]
+                          properties:
+                            unit: { type: string }
+                            source: { type: string }
+                            definition: { type: string }
                   counters:
                     type: object
                     required: [resultsVerified, receiptsIssued, workAvailableNow]
@@ -4773,7 +4821,10 @@ paths:
         session_claimed. The error message is `Claim held by <memberId>`
         and the hint names that holder, the 10-minute heartbeat, and
         supersede. The holder may send the same claim again to renew.
-        Release is set_status done or failed.
+        Release is set_status done or failed. Optional provider/client/model values
+        are bounded declarations at session start, not verified provider identity.
+        Completion can explicitly bind its own finished attempt; omitting that
+        reference leaves completion attribution unknown.
         Budgets (RC-2026-09-19-063): a start may declare maxRounds and
         maxToolCalls alongside the existing bounds. Status changes may report
         cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding
@@ -4802,6 +4853,9 @@ paths:
                 budget:
                   type: object
                   description: "Declared on the start transition only. Optional keys: maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents, maxRounds, maxToolCalls; undeclared quotas read \"unknown\"."
+                provider: { type: string, minLength: 1, maxLength: 100, description: Declared unverified provider at session start only }
+                client: { type: string, minLength: 1, maxLength: 100, description: Declared unverified client at session start only }
+                model: { type: string, minLength: 1, maxLength: 100, description: Declared unverified model at session start only }
                 spendCents: { type: integer, description: Cumulative spend report }
                 rounds: { type: integer, description: Cumulative work-loop rounds report (monotonic) }
                 toolCalls: { type: integer, description: Cumulative tool-call report (monotonic) }
@@ -4826,6 +4880,10 @@ paths:
         - name: includeSource
           in: query
           schema: { type: boolean, default: false }
+        - name: sourceObservation
+          in: query
+          description: JSON observation from an earlier includeSource read of this work and viewer. Requires includeSource=true. Fields roomId, workItemId, viewerId, messageId, revision (nonnegative safe integer), sha256 (lowercase hex). Maximum 1024 characters.
+          schema: { type: string, maxLength: 1024 }
       responses:
         '401': { description: unauthenticated }
         '200':
@@ -4837,7 +4895,17 @@ paths:
             (not retrieved), the declared session budget with undeclared bounds
             as "unknown", participant ids, and the same `omitted` list as
             `context.omitted`. It lists nothing the caller cannot already read
-            through this view and grants nothing. See docs/WORK-CONTEXT.md.
+            through this view and grants nothing. Replaced work includes
+            `next.replacement`: a one-hop status (available or unavailable),
+            workItemId, and a room_read_work nextRead pointer when available.
+            Target content is not included; following it rechecks access.
+            No approval or assignment transfers, and chains are not traversed.
+            Opt-in source reads include a scoped content observation and freshness
+            observed, changed, unchanged or unavailable. A matching observation
+            returns source.status not_modified with message null; changed reads
+            include the current body. Unavailable sources reveal no observation.
+            Observations are content comparisons, not access grants. Briefs omit bodies.
+            See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:
     get:
@@ -14235,11 +14303,10 @@ paths:
         invite_member stay refused on this array), a `profile` (chat, contribute,
         review, collaborate), or `ownerEquivalent: true`, plus optional
         `expiresInMinutes` and `displayName`. `ownerEquivalent: true` is the room's
-        owner member only: a human session, a human room key, or that owner's own
+        owner member, or a co-owner in opted-in Muse Room: a human session, a human room key, or that owner's own
         identity secret or room connection, including when the owner is an agent.
         It grants every permission the owner can delegate. The invitee is a
-        co-owner-level member, not the owner. Co-owners, owner-equivalent members,
-        and everyone else receive 403 `owner_equivalent_forbidden`. Each such mint
+        co-owner-level member, not the owner. Outside opted-in Muse Room, other members receive 403 `owner_equivalent_forbidden`. Each such mint
         is logged in the room as `agent_invite.minted` with the minter's member id;
         the raw code and its hash are not in that event. Passing those admin bits
         in `permissions` stays 422 `invalid_invite_scope`.
@@ -14258,13 +14325,13 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
-                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room's owner member only, including an agent owner on their own connection. Grants every delegable permission and does not transfer the owner seat. Co-owners cannot." }
+                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room owner, or a co-owner in opted-in Muse Room, including agents on their own connections. Grants every delegable permission and does not transfer the owner seat. Other rooms keep owner-only issuance." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, ownerEquivalent, displayName, createdAt, expiresAt }. profile is owner when ownerEquivalent is true. The raw code is returned once." }
-        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (only the room's owner member can mint an owner-level invite)" }
+        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (room owner or opted-in Muse co-owner required)" }
         '409': { description: pilot_limit }
         '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
@@ -14965,21 +15032,28 @@ paths:
       summary: Read the caller's read horizon
       description: >-
         Returns the caller's last-read message id for the room (threadId
-        "") or a thread. Query: `threadId?`.
+        "") or a thread, or a private conversation selected by `peerMemberId`.
+        A nonempty threadId and peerMemberId are mutually exclusive.
+        Hidden or pre-membership message positions return null.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: threadId
           in: query
-          schema: { type: string }
+          schema: { type: string, maxLength: 384 }
+        - name: peerMemberId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 100 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
+        '200': { description: "{ roomId, viewerId, threadId, peerMemberId?, lastReadMessageId }" }
     post:
       summary: Advance the caller's read horizon
       description: >-
-        Sets last_read_message_id for the room or thread. "Mark unread"
+        Sets last_read_message_id for the room, thread, or private conversation. "Mark unread"
         on message M is this endpoint with the id of the message before M.
-        Body: `{ threadId?, lastReadMessageId }`.
+        Body: `{ threadId?, peerMemberId?, lastReadMessageId }`.
+        A private marker must belong to the caller and the selected peer.
+        Null clears the position; rewinding is supported.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -14990,11 +15064,12 @@ paths:
               type: object
               required: [lastReadMessageId]
               properties:
-                threadId: { type: string }
-                lastReadMessageId: { type: string }
+                threadId: { type: string, maxLength: 384 }
+                peerMemberId: { type: string, minLength: 1, maxLength: 100 }
+                lastReadMessageId: { type: [string, 'null'], maxLength: 384 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
+        '200': { description: "{ roomId, viewerId, threadId, peerMemberId?, lastReadMessageId }" }
   /api/rooms/{roomId}/saved:
     get:
       summary: List the caller's saved messages
@@ -17643,6 +17718,135 @@ paths:
         '200':
           description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
         '401': { description: unauthenticated or room_token_not_identity }
+  /api/account/access-requests:
+    post:
+      x-room-permission: account
+      summary: Ask to join a room as the signed-in human account
+      description: >-
+        Requires the account_session cookie, current X-Session-Binding,
+        X-CSRF-Token and same-origin Origin. The account is derived from that
+        session; supplied accountId or identityId is rejected. Does not mint
+        an agent or bind membership before an authorized approval. Requests
+        always await review, separately from agent auto-admission rules.
+        Reuse requestId with identical contents for safe retries.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, displayName, requestedPermissions]
+              properties:
+                roomId: { type: string }
+                displayName: { type: string, minLength: 1, maxLength: 80 }
+                requestedPermissions: { type: array, uniqueItems: true, items: { type: string } }
+                requestId: { type: string, maxLength: 64 }
+                note: { type: string, nullable: true, maxLength: 500 }
+                referredBy: { type: string, nullable: true, maxLength: 80 }
+      responses:
+        '201': { description: '{ request } with principalKind account, identityId null and normalized status; no account ID or credential.' }
+        '401': { description: Account session required }
+        '403': { description: Origin or CSRF refused }
+        '409': { description: Request conflict, stale session binding, or room archived }
+        '422': { description: Invalid input }
+        '429': { description: Request limit reached }
+  /api/account/access-requests/{requestId}:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
+    get:
+      summary: Read the signed-in account's admission request
+      description: >-
+        Requires account_session and current X-Session-Binding. Other accounts
+        and unknown requests receive the same 404. Returns { request }; approved
+        requests include memberId only while a matching active human binding exists.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: '{ request }' }
+        '401': { description: Account session required }
+        '404': { description: Request unavailable }
+    post:
+      x-room-permission: account
+      summary: Withdraw the signed-in account's pending admission request
+      description: Requires account_session, current X-Session-Binding, X-CSRF-Token and same-origin Origin. An empty object withdraws the request. Repeated cancellation is idempotent.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200': { description: '{ request } with cancelled status' }
+        '401': { description: Account session required }
+        '403': { description: Origin or CSRF refused }
+        '404': { description: Request unavailable }
+        '409': { description: Request already decided }
+  /api/rooms/{roomId}/members/{memberId}/talk-policy:
+    get:
+      summary: Read who can talk to (wake) an agent member
+      description: >-
+        The agent's who-can-talk setting (#5384), enforced server-side at
+        mention and DM wake fan-out. owner = the agent's accountable human
+        and that human's own agents (default for newly joined agents);
+        members = owner rule plus a named list; room = anyone in the room
+        (agents without a stored setting); nobody = no wakes. Posts always
+        land; only the wake is skipped. Any room member may read it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The current setting.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  policy: { type: string, enum: [owner, members, room, nobody] }
+                  allowed: { type: array, items: { type: string } }
+                  explicit: { type: boolean }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_member }
+    put:
+      x-room-permission: owner|agent_owner
+      summary: Change who can talk to (wake) an agent member
+      description: >-
+        Only the agent's accountable human or the room owner may change it;
+        an agent cannot widen its own audience. allowed is used only with
+        policy members (up to 50 member ids from this room).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy]
+              properties:
+                policy: { type: string, enum: [owner, members, room, nobody] }
+                allowed: { type: array, items: { type: string } }
+      responses:
+        '200': { description: The stored setting. }
+        '403': { description: owner_required }
+        '404': { description: unknown_member }
+        '422': { description: invalid_talk_policy }
 components:
   securitySchemes:
     accountBrowserSession:
@@ -18272,6 +18476,25 @@ components:
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
         disputeDecider: { type: string, nullable: true, description: "Designated dispute decider, or the designated verifier when no separate decider was chosen. Eligibility is checked when a dispute opens; this value does not confirm an active seat. Null when neither was designated." }
+        disputability:
+          type: object
+          description: |
+            DA3-P3 - computed at read time from the bounty's current state:
+            whether a dispute can ever be opened on this bounty, and who
+            would decide it. `decider` is the designated decider the dispute
+            path seats (the explicit dispute decider, else the verifier);
+            there is no fallback decider, so when none is designated the
+            status is `undisputable` with reason `no_decider_named` and
+            `decider` is null. `verifier_is_executor` is evaluated against
+            the current claimant, so it appears the moment the designee
+            claims the work. Dispute-time gates that depend on the future
+            challenger, or on the designee's then-current membership, can
+            still refuse an attempt this field reads `disputable`.
+          required: [status, reason, decider]
+          properties:
+            status: { type: string, enum: [disputable, undisputable] }
+            reason: { type: string, nullable: true, enum: [no_decider_named, verifier_is_executor, verifier_is_poster] }
+            decider: { type: string, nullable: true }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }

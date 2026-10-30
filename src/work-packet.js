@@ -4,6 +4,12 @@ import { workContinuity } from "./work-item-session.js";
 const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
 const revision = value => Number.isSafeInteger(value) && value >= 0;
+// Content observation scoped to the selected room/work/viewer, never an access grant.
+export function validSourceObservation(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === 6 && ["roomId", "workItemId", "viewerId", "messageId"].every(key => id(value[key]))
+    && revision(value.revision) && typeof value.sha256 === "string" && /^[a-f0-9]{64}$/.test(value.sha256);
+}
 const prefix = "ROOM-RETURN ";
 const referenceFields = ["version", "roomId", "workItemId", "packetId", "basisRevision"];
 const invalid = message => { throw new Error(message); };

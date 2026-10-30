@@ -421,27 +421,48 @@ export function markActivityReadAll(store, token, roomId, data = {}, expectedSes
 
 // --- read horizons ------------------------------------------------------------
 
+function horizonScope(params) {
+  const threadId = params?.threadId ?? "";
+  const peerMemberId = params?.peerMemberId;
+  if (typeof threadId !== "string" || threadId.length > 384 || threadId.startsWith('["direct",')) {
+    fail(422, "invalid_horizon", "threadId must be a short thread identifier");
+  }
+  if (peerMemberId !== undefined && (threadId || typeof peerMemberId !== "string" || !peerMemberId.trim() || peerMemberId.length > 100)) {
+    fail(422, "invalid_horizon", "Choose a thread or a private conversation");
+  }
+  return { threadId, peerMemberId, key: peerMemberId === undefined ? threadId : JSON.stringify(["direct", peerMemberId]) };
+}
+function inPrivateConversation(message, viewerId, peerMemberId) {
+  return Boolean(message && (message.authorId === viewerId && message.toMemberId === peerMemberId
+    || message.authorId === peerMemberId && message.toMemberId === viewerId));
+}
+
 export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
   const auth = authed(store, token, roomId, expectedSessionBinding);
   const member = auth.member;
-  const threadId = params?.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
+  const { threadId, peerMemberId, key } = horizonScope(params);
   return store.readTransaction(() => {
     const row = store.db.prepare(
       "SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
-      .get(roomId, member.id, threadId);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId: row?.last_read_message_id ?? null };
+      .get(roomId, member.id, key);
+    let lastReadMessageId = row?.last_read_message_id ?? null;
+    if (lastReadMessageId !== null) {
+      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      if (!message || !dmVisible(message, member.id)
+        || peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)
+        || !messageInHistory(message, store.historyFloor(roomId, member.id))) lastReadMessageId = null;
+    }
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
   });
 }
 
 export function setReadHorizon(store, token, roomId, data, expectedSessionBinding = null) {
   if (!data || typeof data !== "object" || Array.isArray(data)) fail(422, "invalid_horizon", "Supply threadId and lastReadMessageId");
   const keys = Object.keys(data);
-  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "lastReadMessageId"].includes(key))) {
+  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "peerMemberId", "lastReadMessageId"].includes(key))) {
     fail(422, "invalid_horizon", "Supply lastReadMessageId; threadId is optional");
   }
-  const threadId = data.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
+  const { threadId, peerMemberId, key } = horizonScope(data);
   const lastReadMessageId = data.lastReadMessageId;
   if (lastReadMessageId !== null && (typeof lastReadMessageId !== "string" || !lastReadMessageId.trim() || lastReadMessageId.length > 384)) {
     fail(422, "invalid_horizon", "lastReadMessageId must be a message id or null");
@@ -456,13 +477,16 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
       if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
         fail(404, "message_not_found", "No such message in this room");
       }
+      if (peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)) {
+        fail(404, "message_not_found", "No such message in this conversation");
+      }
     }
     const now = store.now();
     store.db.prepare(
       `INSERT INTO read_horizons (room_id,member_id,thread_id,last_read_message_id,updated_at) VALUES(?,?,?,?,?)
        ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at`)
-      .run(roomId, member.id, threadId, lastReadMessageId, now);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId };
+      .run(roomId, member.id, key, lastReadMessageId, now);
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
   });
 }
 
@@ -527,4 +551,3 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
     return { ...viewerEnvelope(auth, roomId), messageId: data.messageId, saved: data.saved };
   });
 }
-

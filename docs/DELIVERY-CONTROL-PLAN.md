@@ -5,7 +5,7 @@ Project Room owning its development and maintenance workflow. It complements
 [the product architecture plan](ARCHITECTURE-EXECUTION-PLAN.md); it does not
 replace that backlog or make its unfinished work complete.
 
-Read the [latest recorded release](#verified-release-20261029-2023),
+Read the [latest recorded release](#verified-release-20261029-2045),
 [active priorities](FOCUSED-DELIVERY-PLAN.md), or
 [retained checkpoint history](#retained-checkpoint-history).
 Use [Room coordination](ROOM-COORDINATION.md) for live ownership; dated assignments
@@ -19,6 +19,73 @@ useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
 ### Evidence checkpoint: 2026-10-29 UTC
+
+<a id="verified-release-20261029-2045"></a>
+
+### Verified release checkpoint — 2026-10-29, 20:45 UTC
+
+The last verified production revision is
+`1528c5774a09caf0686776454f0092c82b2c4d6c` (PR #5318, including #5315/#5317).
+[Deployment 40950714117](https://github.com/Uuriko/project-room/actions/runs/40950714117)
+passed strict smoke, live smoke and runtime publication. Each Worker was uploaded
+once. Earlier independent reads saw new Workers with the older room service;
+those failed convergence observations remain retained. At 20:44:06 UTC, all four
+version doors matched before and after authenticated checks: both bootstrap reads
+and selected participant reads returned 200, with 182 participant requests and
+zero nonparticipant requests exposed. This is a bounded privacy check, not an
+exhaustive authorization audit. A fresh cleanup read at 21:42 UTC again matched
+all four doors before/after, with 183 participant requests and no nonparticipant
+requests in either bootstrap. Read serving versions for current live state.
+
+The [verified runtime](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-1528c57)
+contains 635 files, 3,345,888 bytes, SHA-256
+`3c42ba7b6fb68ad8d2de104008edfa7d5ac4c30b27cd1e3703720b623b5ccc8e`.
+A separate release read confirmed latest promotion. Matching Graphify publication
+and three REST plus three fresh MCP reads passed with digest
+`9770e519d7f5cf2fe9bb793cb112913ec313b2c60b6f390446c28785a0ce59f2`.
+The compact edge keys preserve normalized graph contents; coverage remains
+server-only and truncated. The deployment role was released and read back unclaimed.
+
+This release adds selected-run indexed lookup with a Workerd regression, compact
+Graphify export, bounded operator patrol diagnostics, and `.test.mjs` lint discovery.
+Historical patrol findings are observations, not proof of current corruption;
+sequence 806 remains unclassified without authorized operator detail. No repair
+was executed. Synthetic query-cost improvements do not establish productivity lift.
+
+### Integrated cleanup checkpoint — 2026-10-29, 22:01 UTC
+
+Main `580b380ad3416b23810fbe3544b10c9ae0f1aa85` includes #5319–#5322,
+#5329, #5331 and #5332. These changes are **merged, not deployed** in the
+verified release above. They cover receipt qualification and privacy, agent
+setup guidance, reader-driven history, private conversations, preview-image
+asset loading and failure caching, and the collaboration measurement protocol.
+
+Private conversations merged through #5322 at `b4ef7a5d`. Candidate
+`e2ce9efb5dcb95cf1066122852814c807cdf056e` passed all scheduled jobs in
+[run 40960732330](https://github.com/Uuriko/project-room/actions/runs/40960732330),
+including six browser shards. Skipped coverage is not passing coverage. Earlier
+passing candidate `cad9c55b` still failed an independent 261-message history test;
+the corrected candidate passes that test and retains the failing old-cap control.
+Private history is fetched in explicit 50-message pages; exhaustion removes the
+pager. The public timeline retains its separate display window.
+
+The OG asset composition `e0cdf21a` passed 53 focused checks and all eight
+exact-source runtime-package checks before #5332 merged. The other laptop
+independently checked all 167 committed manifest hashes at `580b380a`, with no
+mismatches, and found the frontend and DM implementation unchanged from the
+qualified candidate. That integrity comparison is not execution of the whole
+composed runtime. Production deployment and installed native adoption remain
+separate observations. Release was deferred during the ecosystem cleanup pass.
+
+Peer handoff `local-catalog-content-refresh-1030` (Room sequence 23267) supplies
+these scoped observations and four portable excerpts. Full laptop artifact bodies
+were not transferred; local inventory counts remain pinned to their older source.
+
+## Retained checkpoint history
+
+The dated observations below are retained as evidence. Words such as “current,”
+“pending,” and “owns” describe their recorded time, not today's release or live
+ownership. They do not override the latest checkpoint or active priorities above.
 
 <a id="verified-release-20261029-2023"></a>
 
@@ -49,12 +116,6 @@ DM navigation and selected-run performance experiments remain separate candidate
 Real screen-reader use, physical sleep/wake and universal first-attempt Google
 sign-in reliability remain unverified. The full deployment-record/signing project
 is not completed by these narrower reporting improvements.
-
-## Retained checkpoint history
-
-The dated observations below are retained as evidence. Words such as “current,”
-“pending,” and “owns” describe their recorded time, not today's release or live
-ownership. They do not override the latest checkpoint or active priorities above.
 
 ### Verified release checkpoint — 2026-10-29, 20:04 UTC
 

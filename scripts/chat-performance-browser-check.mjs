@@ -171,10 +171,11 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/request-runs')) runReads++; });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await signInFixture(page, f.keys.owner);
   const initialRuns = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/request-runs'));
-  await page.locator('[data-message-record-id="first-question"]').waitFor();
+  await signInFixture(page, f.keys.owner);
   await initialRuns;
+  await page.locator('[data-message-record-id="history-0"]').waitFor();
+  assert.equal(await page.locator('[data-message-record-id="first-question"]').count(), 0, 'private request is not shown in public chat');
   await page.waitForTimeout(200);
   await page.evaluate(() => {
     const stable = document.querySelector('[data-message-record-id="history-0"]');
@@ -197,8 +198,8 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   assert.equal(runReads, before, 'unrelated chat must not re-read run state');
   const newRuns = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/request-runs'));
   const questionReceipt = post('owner', 'second-question', { toMemberId: 'producer', requestKind: 'reply' });
-  await page.locator('[data-message-record-id="second-question"]').waitFor();
   await newRuns;
+  assert.equal(await page.locator('[data-message-record-id="second-question"]').count(), 0, 'new private request does not enter the public timeline');
   assert.equal(runReads, before + 1, 'new request immediately refreshes run labels');
   await openSettings(page, 'record-panel');
   await page.locator(`#event-list [data-event-record-id="${questionReceipt.event.id}"]`).waitFor({ state: 'visible' });
