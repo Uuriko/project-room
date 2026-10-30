@@ -95,6 +95,22 @@ jobs:
   # the regression gate dies quietly. This job fails the run when the marker
   # is present on main; on branches the marker stays legal (the refresh flow
   # commits it there to capture CI-canonical baselines).
+  friend-agent-e2e:
+    # The MVP journey: owner mints an invite, a friend's room-acp joins, a
+    # chat mention gets a threaded reply, and an assigned Board claim's
+    # result lands in the claim thread. In-process Room, no network.
+    needs: [changes]
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Friend's-agent journey
+        run: node scripts/qa-friend-agent-e2e.mjs --local
   visual-refresh-guard:
     needs: [changes]
     # A docs-only diff cannot add the refresh marker. Drafts skip it. Push and
@@ -515,7 +531,7 @@ jobs:
           if [ "$lint" -ne 0 ] || [ "$stories" -ne 0 ]; then exit 1; fi
           node scripts/ci-affected.mjs --run-page-weight
   test:
-    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage, safety-net]
+    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, friend-agent-e2e, coverage, safety-net]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -528,13 +544,14 @@ jobs:
           BROWSER: ${{ needs.browser.result }}
           CLOUDFLARE: ${{ needs.cloudflare.result }}
           VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
+          FRIEND_AGENT_E2E: ${{ needs.friend-agent-e2e.result }}
           COVERAGE: ${{ needs.coverage.result }}
           SAFETY_NET: ${{ needs.safety-net.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE" "safety-net:$SAFETY_NET"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "friend-agent-e2e:$FRIEND_AGENT_E2E" "coverage:$COVERAGE" "safety-net:$SAFETY_NET"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
@@ -558,7 +575,7 @@ jobs:
             fi
             # Docs-only diffs skip unit and the refresh-marker guard. The
             # required names above still ran and passed.
-            if [ "$DOCS_ONLY" = "true" ] && [ "$result" = "skipped" ] && { [ "$name" = "unit" ] || [ "$name" = "visual-refresh-guard" ]; }; then
+            if [ "$DOCS_ONLY" = "true" ] && [ "$result" = "skipped" ] && { [ "$name" = "unit" ] || [ "$name" = "visual-refresh-guard" ] || [ "$name" = "friend-agent-e2e" ]; }; then
               continue
             fi
             # browser=success already covers an intentional shard skip.

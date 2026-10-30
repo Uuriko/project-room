@@ -213,9 +213,12 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
 // a failed runtime suite cannot be hidden by later browser success.
 test("required merge-gate jobs stay present and the unit suite is one job", () => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
-  for (const id of ["test", "contract", "lint", "browser", "cloudflare"]) {
+  for (const id of ["test", "contract", "lint", "browser", "cloudflare", "friend-agent-e2e"]) {
     assert.ok(workflow.jobs[id], `required check job ${id} is missing`);
   }
+  // The friend's-agent journey is part of the landing gate.
+  assert.ok(workflow.jobs.test.needs.includes("friend-agent-e2e"));
+  assert.match(workflow.jobs["friend-agent-e2e"].steps.map(step => step.run).filter(Boolean).join("\n"), /qa-friend-agent-e2e\.mjs --local/);
   assert.equal(workflow.jobs["unit-shards"], undefined);
   assert.equal(workflow.jobs.unit.strategy, undefined);
   const runs = workflow.jobs.unit.steps.map(step => step.run).filter(Boolean).join("\n");
