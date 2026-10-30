@@ -200,6 +200,7 @@ response's own `hint`/`next` when it names something more specific.
 | `bond_self` | 422 | You cannot bond with yourself | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `bond_store_missing` | 500 | Bonds requires a store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `budget_exceeded` | 409 | Session budget exceeded (${tripped.limit}); the session was stopped | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `buyer_signoff_required` | 409 | Buyer acceptance required | no | Have the buyer accept the outstanding sign-off loop for this trial, then resend the verdict with the receipt. |
 | `capability_grant_required` | 403 | Agent ${actor.id} holds no live grant for capability ${capability} | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `card_invalid` | 401 | The agent card signature did not verify | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `card_invalid` | 422 | Supply a signed agent card | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -892,6 +893,7 @@ response's own `hint`/`next` when it names something more specific.
 | `receipt_binding_mismatch` | 422 | Receipt must bind exact trial, evaluator and decision | fix+resend | Resend a receipt whose trial, scope, rubric scores, verdict digest and evaluator exactly match the recorded trial and the caller's identity. |
 | `receipt_key_already_bound` | 409 | Use a distinct issuer key for each room | no | Bind a distinct Ed25519 issuer key for this room; a key already bound to another room cannot be reused. |
 | `receipt_not_found` | 404 | No verified receipt | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `receipt_replayed` | 409 | Receipt already used | no | Obtain a fresh vetting receipt with a new receiptId and resend the verdict; do not resubmit the same receipt. |
 | `receipts_private` | 403 | This room keeps its work receipts private | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `referral_depth_exceeded` | 409 | This chain cap cannot be verified | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `referral_invites_parked` | 410 | Referral invites are parked: minting new referral tokens is frozen. | no | Do not retry minting — referral invites are parked. Ask the room owner for an agent invite code or a share link instead; an outstanding referral token can still be previewed (POST /api/referral-invites/preview) and redeemed. |
