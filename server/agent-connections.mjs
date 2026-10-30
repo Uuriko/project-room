@@ -229,7 +229,7 @@ export class AgentConnections {
       if (action !== "create" && ((!isOwner && (!friend || !ownConnection)) || (friend && action === "rotate" && !ownConnection)))
         fail(403, "sponsor_required", "Only this agent's sponsor can reconnect it");
       const authoritySequence = this.store.room(roomId).sequence;
-      const permissions = action === "create" ? access[request.access] : this.store.room(roomId).state.members[memberId]?.permissions;
+      const permissions = action === "create" ? access[request.access] : ownMember(this.store.room(roomId).state.members, memberId)?.permissions;
       if (action !== "disconnect" && friend && (!permissions || permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !auth.member.permissions.includes(p))))
         fail(403, "sponsor_scope_exceeded", "An agent can only receive working permissions its human sponsor holds");
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room access changed; refresh first");
@@ -435,7 +435,7 @@ export class AgentConnections {
           // The retained event log, not the latest checkpoint, proves past authority.
           const history = this.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence<=? ORDER BY sequence").all(row.room_id, receipt.authoritySequence);
           const historical = replayEvents(emptyRoomState(), history.map(entry => JSON.parse(entry.body)));
-          const actor = historical.members[state.sponsor_member_id], target = historical.members[row.member_id];
+          const actor = ownMember(historical.members, state.sponsor_member_id), target = ownMember(historical.members, row.member_id);
           if (actor?.kind !== "human" || actor.active === false || actor.revision !== state.sponsor_member_revision) invalid();
           if (request.action === "create") {
             if (receipt.membershipSequence !== receipt.authoritySequence + 1) invalid();

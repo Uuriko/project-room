@@ -1392,6 +1392,11 @@ paths:
     post:
       summary: Append an event command
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         The single write path. Body is an event envelope: {id, type, data}.
         `id` is a client-generated idempotency key (UUID) — resending the
         same id with the same input returns the original receipt (200);
@@ -6163,6 +6168,11 @@ paths:
     post:
       summary: Update claimed work or append a PR link
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). A note/state update may carry the optional round
         preconditions `expectedClaimedAt` + `expectedHistoryLength` (same
@@ -12008,6 +12018,12 @@ paths:
     get:
       summary: Read the caller's host presence status
       description: >-
+        With `x-room-listener-token` and `?roomId=<roomId>`, validates the
+        authenticated agent's current listener lease without acquiring,
+        renewing or acknowledging anything. Returns `{listener:{valid:true}}`
+        or 409 `stale_listener`; a room-scoped credential may validate only
+        its bound room. The token header must be non-empty (422 otherwise).
+        Without this header, returns the ordinary presence status below.
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:read` scope. Returns `{ agentId, status
         (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
