@@ -4,8 +4,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const helper = fileURLToPath(new URL("../scripts/deploy-live.py", import.meta.url));
+// macOS may expose a developer-tools stub as python3. Select a real runtime
+// explicitly without installing a system toolchain or skipping deployment proof.
+const python = process.env.ROOM_TEST_PYTHON || "python3";
 const wireMetadata = script => {
-  const result = spawnSync("python3", ["-B", "-c", `
+  const result = spawnSync(python, ["-B", "-c", `
 import contextlib, importlib.util, io, json, pathlib, sys, tempfile, types, urllib.request
 # No surrogate credential or network can be used by this fixture.
 def forbidden(*args, **kwargs): raise AssertionError("unexpected credential/network call")
@@ -31,8 +34,8 @@ with tempfile.TemporaryDirectory() as directory:
     with contextlib.redirect_stdout(io.StringIO()): m.main()
 assert len(captured) == 1
 print(json.dumps(captured[0]))
-`, helper, script], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stderr);
+`, helper, script], { encoding: "utf8", timeout: 15000 });
+  assert.equal(result.status, 0, `${result.error?.message ?? result.stderr}\nSet ROOM_TEST_PYTHON to a working Python 3 executable if python3 is unavailable.`);
   return JSON.parse(result.stdout);
 };
 
@@ -68,7 +71,7 @@ for (const script of ["project-room", "project-room-staging"]) {
 
 test("invalid deployment arguments fail before loading connector credentials", () => {
   for (const args of [[], ["wrong-worker", "synthetic", "missing", "missing"]]) {
-    const result = spawnSync("python3", [helper, ...args], { encoding: "utf8" });
+    const result = spawnSync(python, [helper, ...args], { encoding: "utf8", timeout: 15000 });
     assert.equal(result.status, 2);
     assert.match(result.stderr, args.length ? /unknown script name/ : /Usage:/);
     assert.doesNotMatch(result.stderr, /dynamic_credentials|ModuleNotFoundError/);
