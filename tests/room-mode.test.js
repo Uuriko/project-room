@@ -1,10 +1,20 @@
 // Room mode (ROADBLOCKS dev-mode slice 1): a room-level `mode` field —
 // "production" (default) or "lab" — set ONLY at creation and only when the
 // server env flag ROOM_LAB_MODE_ENABLED is exactly "1" (default OFF).
-// Mode is immutable after creation: no event, command or replayed create
-// can flip a room that has history. Read models expose the mode; a room
-// whose stored projection has no mode reads as "production" everywhere.
-// This slice changes NO behaviour beyond creation + read.
+// Mode is immutable after creation: no event, command, replayed create or
+// history import can flip a room that has history. Read models expose the
+// mode; a room whose stored projection has no mode reads as "production"
+// everywhere. This slice changes NO behaviour beyond creation + read.
+//
+// Critic cures (ROADBLOCKS Part 5, F1/F3/F4):
+// - F1: importEvents refuses a log whose resolved mode differs from the
+//   room's existing mode (422 invalid_import) — the import door could
+//   otherwise flip any room in either direction with no flag check.
+// - F3: a lab room's id must carry the `lab-` prefix at creation, on both
+//   creation paths (same 422 invalid_room_request refusal shape).
+// - F4: the creation paths read the arm through the store's featureEnv
+//   bag (the codebase's featureEnv(store) pattern) when the store carries
+//   one, falling back to process.env — never process.env alone.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,7 +23,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { applyEvent, emptyRoomState, event, EVENT_TYPES as T, PERMISSIONS, ROOM_MODES, roomMode } from "../src/events.js";
-import { roomLabModeEnabled, requestedRoomMode } from "../server/room-mode.mjs";
+import { roomLabModeEnabled, roomModeEnv, requestedRoomMode } from "../server/room-mode.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -25,8 +35,9 @@ const seed = (roomId, extra = {}) => [
   event({ type: T.MEMBER_ADDED, actorId: owner, roomId, data: { memberId: owner, displayName: "Room owner", kind: "human", permissions: [...PERMISSIONS] } })
 ];
 
-// Creation paths read the flag from the process env (the server's env);
-// tests flip it inside a scoped block and always restore it.
+// Creation paths read the flag from the server's env bag (the store's
+// featureEnv when it carries one, else the process env); tests flip the
+// process env inside a scoped block and always restore it.
 function withLabFlag(value, fn) {
   const before = process.env.ROOM_LAB_MODE_ENABLED;
   if (value === undefined) delete process.env.ROOM_LAB_MODE_ENABLED; else process.env.ROOM_LAB_MODE_ENABLED = value;
@@ -92,7 +103,7 @@ function accountSetup(t) {
   f.store.createAccount("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
   return { f, admin: login("admin-account") };
 }
-const accountRequest = (overrides = {}) => ({ roomId: "mode-room", title: "Mode room", purpose: "Plan the pilot", kind: "personal", displayName: "Admin", ...overrides });
+const accountRequest = (overrides = {}) => ({ roomId: "lab-mode-room", title: "Mode room", purpose: "Plan the pilot", kind: "personal", displayName: "Admin", ...overrides });
 
 test("account rooms: lab requires the flag, mode is stored and listed, and a replay cannot flip it", t => {
   const { f, admin } = accountSetup(t);
@@ -113,8 +124,8 @@ test("account rooms: lab requires the flag, mode is stored and listed, and a rep
   const created = withLabFlag("1", () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ mode: "lab" })));
   assert.equal(created.room.mode, "lab");
   assert.equal(created.duplicate, false);
-  assert.equal(f.store.room("mode-room").state.room.mode, "lab", "the projection carries the mode");
-  assert.equal(roomMode(f.store.room("mode-room").state.room), "lab");
+  assert.equal(f.store.room("lab-mode-room").state.room.mode, "lab", "the projection carries the mode");
+  assert.equal(roomMode(f.store.room("lab-mode-room").state.room), "lab");
 
   // Idempotent replay with the same mode returns the room; a replay naming
   // a different mode is the flip attempt and is refused as a conflict.
@@ -122,7 +133,7 @@ test("account rooms: lab requires the flag, mode is stored and listed, and a rep
   assert.equal(replay.duplicate, true); assert.equal(replay.room.mode, "lab");
   assert.throws(() => withLabFlag("1", () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({}))),
     { status: 409, code: "room_exists" }, "replaying the create without lab must not silently flip the room to production");
-  assert.equal(f.store.room("mode-room").state.room.mode, "lab");
+  assert.equal(f.store.room("lab-mode-room").state.room.mode, "lab");
 
   // Default create (no mode field) is production, flag on or off.
   const plain = withLabFlag(undefined, () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ roomId: "plain-room" })));
@@ -131,7 +142,7 @@ test("account rooms: lab requires the flag, mode is stored and listed, and a rep
 
   // The account read model lists the mode for every room, old rooms included.
   const listed = Object.fromEntries(f.store.accountRooms(admin.token, admin.binding).rooms.map(room => [room.id, room.mode]));
-  assert.deepEqual(listed, { commons: "production", "mode-room": "lab", "plain-room": "production" });
+  assert.deepEqual(listed, { commons: "production", "lab-mode-room": "lab", "plain-room": "production" });
 });
 
 function agentSetup(t) {
@@ -144,7 +155,7 @@ function agentSetup(t) {
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, rooms, identity };
 }
-const agentRequest = (overrides = {}) => ({ roomId: "mode-den", title: "Mode Den", purpose: "A room for mode tests.", kind: "personal", displayName: "Den Keeper", ...overrides });
+const agentRequest = (overrides = {}) => ({ roomId: "lab-mode-den", title: "Mode Den", purpose: "A room for mode tests.", kind: "personal", displayName: "Den Keeper", ...overrides });
 
 test("agent rooms: lab requires the flag, mode is stored and listed, and a replay cannot flip it", t => {
   const { store, rooms, identity } = agentSetup(t);
@@ -152,22 +163,125 @@ test("agent rooms: lab requires the flag, mode is stored and listed, and a repla
     assert.throws(() => rooms.create(identity.secret, agentRequest({ mode: "lab" })),
       { status: 422, code: "invalid_room_request" }, "flag off: requesting lab is refused, not coerced");
   });
-  assert.equal(store.db.prepare("SELECT 1 FROM rooms WHERE id='mode-den'").get(), undefined, "the refused create wrote no room");
+  assert.equal(store.db.prepare("SELECT 1 FROM rooms WHERE id='lab-mode-den'").get(), undefined, "the refused create wrote no room");
 
   const created = withLabFlag("1", () => rooms.create(identity.secret, agentRequest({ mode: "lab" })));
   assert.equal(created.mode, "lab"); assert.equal(created.duplicate, false);
-  assert.equal(store.room("mode-den").state.room.mode, "lab");
+  assert.equal(store.room("lab-mode-den").state.room.mode, "lab");
 
   const replay = withLabFlag("1", () => rooms.create(identity.secret, agentRequest({ mode: "lab" })));
   assert.equal(replay.duplicate, true); assert.equal(replay.mode, "lab");
   assert.throws(() => withLabFlag("1", () => rooms.create(identity.secret, agentRequest({}))),
     { status: 409, code: "room_exists" }, "replaying the create without lab must not flip the room to production");
-  assert.equal(store.room("mode-den").state.room.mode, "lab");
+  assert.equal(store.room("lab-mode-den").state.room.mode, "lab");
 
   const plain = withLabFlag(undefined, () => rooms.create(identity.secret, agentRequest({ roomId: "plain-den" })));
   assert.equal(plain.mode, "production");
 
   const listed = Object.fromEntries(rooms.list(identity.secret).rooms.map(room => [room.roomId, room.mode]));
-  assert.equal(listed["mode-den"], "lab");
+  assert.equal(listed["lab-mode-den"], "lab");
   assert.equal(listed["plain-den"], "production");
+});
+
+test("lab prefix (F3): a lab room id must start with lab- on both creation paths", t => {
+  const { f, admin } = accountSetup(t);
+  const roomsBefore = f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n;
+  withLabFlag("1", () => {
+    assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ roomId: "unmarked-room", mode: "lab" })),
+      { status: 422, code: "invalid_room_request" }, "account path: lab under an unmarked id is refused even with the flag on");
+  });
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n, roomsBefore, "the refused create wrote no room");
+  const marked = withLabFlag("1", () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ roomId: "lab-marked-room", mode: "lab" })));
+  assert.equal(marked.room.mode, "lab", "account path: a lab- id creates the lab room");
+
+  const agent = agentSetup(t);
+  withLabFlag("1", () => {
+    assert.throws(() => agent.rooms.create(agent.identity.secret, agentRequest({ roomId: "unmarked-den", mode: "lab" })),
+      { status: 422, code: "invalid_room_request" }, "agent path: lab under an unmarked id is refused even with the flag on");
+    // A lab request that lets the server slug the id from the title is
+    // refused the same way: the derived id carries no lab- prefix.
+    const { roomId, ...noId } = agentRequest({ mode: "lab" });
+    assert.throws(() => agent.rooms.create(agent.identity.secret, noId),
+      { status: 422, code: "invalid_room_request" }, "agent path: a server-derived id cannot be a lab id");
+  });
+  assert.equal(agent.store.db.prepare("SELECT 1 FROM rooms WHERE id='unmarked-den'").get(), undefined, "the refused create wrote no room");
+  const markedDen = withLabFlag("1", () => agent.rooms.create(agent.identity.secret, agentRequest({ roomId: "lab-marked-den", mode: "lab" })));
+  assert.equal(markedDen.mode, "lab", "agent path: a lab- id creates the lab room");
+
+  // The resolver itself pins the rule when an id is supplied.
+  assert.throws(() => requestedRoomMode("lab", { ROOM_LAB_MODE_ENABLED: "1" }, "unmarked"),
+    { status: 422, code: "invalid_room_request" });
+  assert.equal(requestedRoomMode("lab", { ROOM_LAB_MODE_ENABLED: "1" }, "lab-marked"), "lab");
+  assert.equal(requestedRoomMode("production", {}, "unmarked"), "production", "the prefix binds lab requests only");
+});
+
+test("featureEnv (F4): the creation paths read the arm through the store's featureEnv bag", t => {
+  // Helper semantics mirror featureEnv(store) in project-map-store.mjs:
+  // an own object featureEnv is the bag; anything else falls back to
+  // process.env (roomModeEnv({}) === process.env is that fallback).
+  assert.equal(roomModeEnv({}), process.env);
+  assert.equal(roomModeEnv({ featureEnv: null }), process.env);
+  const bag = { ROOM_LAB_MODE_ENABLED: "1" };
+  assert.equal(roomModeEnv({ featureEnv: bag }), bag);
+
+  const { f, admin } = accountSetup(t);
+  f.store.featureEnv = { ROOM_LAB_MODE_ENABLED: "1" };
+  const viaBag = withLabFlag(undefined, () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ roomId: "lab-bag-room", mode: "lab" })));
+  assert.equal(viaBag.room.mode, "lab", "account path: armed by the featureEnv bag with process.env unset (the Worker arming route)");
+  f.store.featureEnv = {};
+  assert.throws(() => withLabFlag("1", () => f.store.createAccountRoom(admin.token, admin.binding, accountRequest({ roomId: "lab-bag-two", mode: "lab" }))),
+    { status: 422, code: "invalid_room_request" }, "account path: a featureEnv bag without the flag wins over process.env — the bag replaces, not merges");
+  delete f.store.featureEnv;
+
+  const agent = agentSetup(t);
+  agent.store.featureEnv = { ROOM_LAB_MODE_ENABLED: "1" };
+  const viaBagDen = withLabFlag(undefined, () => agent.rooms.create(agent.identity.secret, agentRequest({ roomId: "lab-bag-den", mode: "lab" })));
+  assert.equal(viaBagDen.mode, "lab", "agent path: armed by the featureEnv bag with process.env unset");
+  agent.store.featureEnv = {};
+  assert.throws(() => withLabFlag("1", () => agent.rooms.create(agent.identity.secret, agentRequest({ roomId: "lab-bag-den-two", mode: "lab" }))),
+    { status: 422, code: "invalid_room_request" }, "agent path: a featureEnv bag without the flag wins over process.env");
+  delete agent.store.featureEnv;
+});
+
+test("import (F1): a history import cannot flip a room's mode in either direction, and a mode-identical import still works", t => {
+  const { store } = agentSetup(t);
+  store.initialize(seed("prod-direct"));
+  store.initialize(seed("lab-direct", { mode: "lab" }));
+  const prodKey = store.issueAccessKey("prod-direct", owner);
+  const labKey = store.issueAccessKey("lab-direct", owner);
+  const cloneLines = (token, roomId) => [...store.exportEvents(token, roomId)]
+    .map(line => ({ sequence: line.sequence, event: structuredClone(line.event) }));
+  const withCreatedMode = (lines, mode) => lines.map(line => {
+    if (line.event.type !== T.ROOM_CREATED) return line;
+    const data = { ...line.event.data };
+    if (mode === undefined) delete data.mode; else data.mode = mode;
+    return { sequence: line.sequence, event: { ...line.event, data } };
+  });
+
+  // Mode-identical imports replay cleanly in both rooms.
+  const prodLines = cloneLines(prodKey, "prod-direct");
+  assert.equal(store.importEvents(prodKey, "prod-direct", prodLines).imported, prodLines.length);
+  assert.equal(roomMode(store.room("prod-direct").state.room), "production");
+  const labLines = cloneLines(labKey, "lab-direct");
+  assert.equal(store.importEvents(labKey, "lab-direct", labLines).imported, labLines.length);
+  assert.equal(store.room("lab-direct").state.room.mode, "lab");
+
+  // Production -> lab: a crafted log whose room.created carries mode lab
+  // is refused with the import path's existing conflict shape, and the
+  // room's history and mode are untouched.
+  assert.throws(() => store.importEvents(prodKey, "prod-direct", withCreatedMode(prodLines, "lab")),
+    { status: 422, code: "invalid_import" }, "absent -> lab import flip is refused");
+  assert.equal(roomMode(store.room("prod-direct").state.room), "production");
+  assert.deepEqual(cloneLines(prodKey, "prod-direct").map(line => line.event.id), prodLines.map(line => line.event.id),
+    "the refused import left the production room's history intact");
+
+  // Lab -> production: a crafted log whose room.created drops the mode is
+  // refused the same way; a lab room cannot be laundered by import.
+  assert.throws(() => store.importEvents(labKey, "lab-direct", withCreatedMode(labLines, undefined)),
+    { status: 422, code: "invalid_import" }, "lab -> absent (production) import flip is refused");
+  assert.throws(() => store.importEvents(labKey, "lab-direct", withCreatedMode(labLines, "production")),
+    { status: 422, code: "invalid_import" }, "lab -> production import flip is refused");
+  assert.equal(store.room("lab-direct").state.room.mode, "lab");
+  assert.deepEqual(cloneLines(labKey, "lab-direct").map(line => line.event.id), labLines.map(line => line.event.id),
+    "the refused imports left the lab room's history intact");
 });
