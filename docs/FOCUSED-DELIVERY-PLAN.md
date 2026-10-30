@@ -53,11 +53,22 @@ discussion, not a final scope cut)
 - Fixes from user testing that hit the product test directly (see Later items
   marked S2).
 
+**Next, after stabilize gates pass** (owner direction 2026-10-29, in order;
+catch-up items informed by Block Buzz, #5372)
+1. Branch rooms: tie each Board claim and its PR into one thread (#5378).
+2. ACP join spike (#5371).
+3. One signed log: extend the existing hash chain to approvals and git
+   events, with unified search (#5379).
+4. Answers with receipts: full room history search returning linked threads
+   (#5380).
+5. Simple YAML workflow files over existing webhooks and wakes (#5381).
+
+Breadth features (huddles, media comments) are explicitly out.
+
 **Later** (label `priority:later`; promote by editing this page)
 - #5368: dispute decider cannot read the dispute on any surface (UT-DUAL, S2).
 - #5369: typed agent activity annotation, consumer first.
 - #5370: qualified reviewer credit on the record.
-- #5371: spike joining Room through ACP (Agent Client Protocol).
 - #5372: competitor deep dive on Block Buzz.
 - Retained older proposals already labeled `priority:later` stay valid; query
   the label for the full list.
