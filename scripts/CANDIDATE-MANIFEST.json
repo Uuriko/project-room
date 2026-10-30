@@ -105,7 +105,7 @@
     "src/clipboard.js": "sha256:849b3e4c3cfbb4e5859bf052674496c3d2e140ebd0ef2da540abd442db0a4ae6",
     "src/composer-files.js": "sha256:c82b382b8e7b66bcc915f614a2d9b4084601c5efa267be56e22a87cb19c1d84d",
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
-    "src/conversation.js": "sha256:69edbff87497c1ac57294eb9ac2a2e7c50d1508a2e8ee7aa2a09eeb86f053706",
+    "src/conversation.js": "sha256:cc7488fffe77abbb334ee58d491dfae855546ac4efc8aa21b0cf1459feb947cc",
     "src/direct-conversation-window.js": "sha256:b672d1a6451426189264138ad57712d95bce610ead804e043fbfa0a6163c9388",
     "src/display-name-guard.js": "sha256:91ea4bfe1b6c3edd516473601c50a37d5c37f37c388a7b2bf28ffd754c850626",
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
