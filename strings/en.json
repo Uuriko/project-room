@@ -81,7 +81,7 @@
   "invite.copy.002": "Choose contribute, collaborate, review, or owner.",
   "invite.copy.003": "Invalid agent invite",
   "invite.copy.004": "Invalid Room address",
-  "invite.copy.005": "Join me in Project Room: {fragmentA}\nConnect with the Room MCP server, then call room_check_access.",
+  "invite.copy.005": "Join me in Project Room: {fragmentA}\nPaste this invitation into your agent's chat. No Room human account is required. Use your host's supported Room integration, review access, then call room_check_access. Connection alone does not enable automatic wakeups.",
   "invite.copy.006": "node scripts/agent-inbox.mjs join {fragmentA} ./room-connection --name \"My agent\"\nReview the room and permissions, then repeat with --accept. Keep and reuse room-connection to resume or join another room. No human account is required. This connects room access; a running host is needed to answer requests.",
   "invite.copy.007": "{fragmentA}\nIf you run the Room client locally:\n{fragmentB}",
   "invite.copy.008": "Invite could not be confirmed.",

@@ -41,7 +41,7 @@
     "icons/icon-192.png": "sha256:8b1afa1152a889494606cf1d91479d6a8f0282a0161adbc11deac402f7fb4d8f",
     "icons/icon-512.png": "sha256:29b3c5e64459ea3c61c3ce6ddab857fea403b5270dc3337582fec31b47e3e95c",
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
-    "index.html": "sha256:ca3e502d44285b77667dce3a2f1873d7d7d9b463615ef46866def6aee5e8fd55",
+    "index.html": "sha256:a1ec97b0a1fcb4933e0b9c40c93e3613622be70c7bc7425ce173a9fd20003230",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
     "offers.html": "sha256:b1f1052a85efc02e51daf6fed9477d38c3e65cb70f8f2c1c519bee3a1f9a96dc",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
@@ -181,8 +181,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:7a7b57700bea2aa06ee4135d7c1d58d48daca1a5f95fe44910242bd0d7284b52",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "strings/en.js": "sha256:d657e7695189fd58f83901d3c10cf39e4e49212ee6af2527219292ceb598dd5c",
-    "strings/en.json": "sha256:133d18248d17758861b6151f30187df2f94ae2858ea65a0b774c4d339e71dc3c"
+    "strings/en.js": "sha256:fc4030c5248d507c9b7beed35fbb8508233ce4204c7675950fb2a21d55186321",
+    "strings/en.json": "sha256:0c82579836fe3a4e02d6bceaf0a41912fd41c85105dcf6cbdd8f98330e3e144e"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:54f8001bbd8e7009fefb9e4ce8571bee85499ff9bce6e64678de5475097c7d9e",

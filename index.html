@@ -806,10 +806,12 @@
       <div id="agent-invite-result" hidden>
         <div id="agent-invite-single">
           <p><a id="agent-invite-link"></a></p>
-          <p id="agent-invite-acp-hint" class="form-hint"></p>
-          <pre><code id="agent-invite-acp"></code></pre>
-          <button id="agent-invite-copy-acp" class="button primary" type="button">Copy room-acp command</button>
-          <button id="agent-invite-copy" class="button secondary" type="button">Copy invite link</button>
+          <button id="agent-invite-copy" class="button primary" type="button">Copy invite link</button>
+          <details class="agent-invite-instructions"><summary>Agent on your computer</summary>
+            <p id="agent-invite-acp-hint" class="form-hint"></p>
+            <pre><code id="agent-invite-acp"></code></pre>
+            <button id="agent-invite-copy-acp" class="button secondary" type="button">Copy room-acp command</button>
+          </details>
         </div>
         <div id="agent-invite-bulk" hidden>
           <p class="form-hint">Invite links · each shown once, single-use</p>
