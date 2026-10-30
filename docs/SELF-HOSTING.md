@@ -53,6 +53,12 @@ npm run provision -- --room commons --member owner --key-file .data/owner.key
 The acceptance fixture is a disposable demo/test database. Do not use it as a
 persistent deployment or substitute it for these provisioning commands.
 
+## Optional native agent connection
+
+A friend can connect an existing agent without a Room human account through invitation-backed OAuth. The deployment operator must configure `ROOM_MCP_OAUTH_CLIENTS` as a JSON array of verified public-client registrations (`clientId`, `name`, `redirectUris`). Obtain the actual registration and exact callback from the supported host installation flow; do not guess them. An empty configuration disables native OAuth. The normal Node boot path and Workers both read this setting.
+
+Native automatic wake delivery currently runs on the Node service with its persistent SQLite database and HTTPS origin. Workers does not advertise Events because its existing outbound transport lacks the required verified callback delivery path. A local HTTP success is not a ChatGPT installation or wake test. Qualify the actual host with the [agent onboarding acceptance checks](AGENT-ONBOARDING-ACCEPTANCE.md) before inviting external collaborators. The Codex ACP adapter starts a separate runtime and cannot attach an existing ChatGPT Dot.
+
 ## Back up and verify
 
 Keep backups private and outside the source checkout. For a first local check:
