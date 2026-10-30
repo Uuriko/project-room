@@ -9,6 +9,7 @@
 //
 // The pure orchestration (build/submit) is exported for tests; callers
 // inject the client + storage.
+import { uiText } from "./strings.js";
 import { roomIdFromNext, ROOM_ID_PATTERN } from "./room-deep-link.js";
 import {
   FALLBACK_REQUEST_PERMISSIONS,
@@ -23,7 +24,7 @@ import {
 export const GENERAL_REQUEST_DEFAULT_ROOM_ID = "muse-room";
 export const GENERAL_REQUEST_ROOM_ID_MAX = 128;
 
-const humanRequestKey = (accountId, roomId) => "pr:human-access-request:" + JSON.stringify([accountId, roomId]);
+const humanRequestKey = (accountId, roomId) => `pr:human-access-request:${JSON.stringify([accountId, roomId])}`;
 export function readHumanAccessRequest(storage, accountId, roomId, authEpoch = 0) {
   const stored = storage.getItem(humanRequestKey(accountId, roomId));
   let saved;
@@ -81,15 +82,15 @@ export async function submitGeneralAccessRequest({ client, storage, roomId, disp
   // Restore before choosing a principal. A failed session read is not
   // permission to silently enroll the human as a new agent.
   const session = await client.restore();
-  if (!session) throw new Error("Your account changed. Please try again.");
+  if (!session) throw new Error(uiText("join.request.retryChanged"));
   if (requireHuman && !session.authenticated) {
-    const error = new Error("Sign in to your account before requesting room access.");
+    const error = new Error(uiText("join.request.signinFirst"));
     error.code = "account_session_required";
     error.roomId = body.roomId;
     throw error;
   }
   if (session.authenticated) {
-    if (!session.account?.id) throw new Error("Sign in again to request access.");
+    if (!session.account?.id) throw new Error(uiText("join.request.signinAccess"));
     const key = humanRequestKey(session.account.id, body.roomId);
     const authEpoch = session.account.authEpoch ?? 0;
     const saved = readHumanAccessRequest(storage, session.account.id, body.roomId, authEpoch);
@@ -100,7 +101,7 @@ export async function submitGeneralAccessRequest({ client, storage, roomId, disp
     storage.setItem(key, JSON.stringify({ requestId: request.requestId, authEpoch, payload: request }));
     const result = await client.submitAccountAccessRequest(request);
     if (!result?.request || result.request.requestId !== request.requestId || result.request.roomId !== body.roomId
-      || result.request.principalKind !== "account") throw new Error("Could not confirm this access request. Please try again.");
+      || result.request.principalKind !== "account") throw new Error(uiText("join.request.unconfirmed"));
     return { ...result.request, principalKind: "account" };
   }
   const stashed = readAccessRequest(storage, body.roomId);
@@ -143,13 +144,13 @@ export async function approvedAccountRequestRoom(client, requestId, roomId) {
   }
   const request = result?.request;
   if (!request || request.requestId !== requestId || request.roomId !== roomId || request.principalKind !== "account") {
-    throw new Error("Could not confirm this access request. Please try again.");
+    throw new Error(uiText("join.request.unconfirmed"));
   }
   if (request.status !== "approved") return { status: request.status, room: null };
   let cursor = null;
   do {
     const page = await client.rooms(cursor);
-    if (!page) throw new Error("Your account changed. Please sign in again.");
+    if (!page) throw new Error(uiText("join.request.signinChanged"));
     const room = page.rooms.find(room => room.id === roomId && room.memberId === request.memberId);
     if (room) return { status: "approved", room };
     cursor = page.nextCursor;

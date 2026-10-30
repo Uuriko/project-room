@@ -505,7 +505,9 @@ function renderRequestDoor() {
         if (statusEl) { statusEl.textContent = message; statusEl.classList.add("visible", "error"); }
         if (statusEl && error?.code === "account_session_required") {
           const link = document.createElement("a");
-          link.href = roomEntryHref(error.roomId ?? roomId);
+          const destination = new URL(roomEntryHref(error.roomId ?? roomId));
+          destination.searchParams.set("request", error.roomId ?? roomId);
+          link.href = destination.href;
           link.textContent = uiText("join.request.signin");
           statusEl.append(" ", link);
         }
