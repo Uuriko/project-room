@@ -8,7 +8,7 @@ import { join } from "../room-acp/src/join.mjs";
 import { SessionMap } from "../room-acp/src/sessions.mjs";
 import { startRoom, FAKE_AGENT } from "./room-acp-fixture.mjs";
 
-const waitFor = async (check, ms = 8000) => {
+const waitFor = async (check, ms = 20000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw new Error("timed out waiting");
@@ -17,10 +17,10 @@ const waitFor = async (check, ms = 8000) => {
 async function startBridge(t, room, mode) {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
   const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] },
-    env: { ...room.env, FAKE_ACP_MODE: mode }, waitMs: 200, restartDelayMs: 30 });
+    env: { ...room.env, FAKE_ACP_MODE: mode }, waitMs: 3000, restartDelayMs: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
   const done = bridge.run();
   t.after(async () => { bridge.stop(); await done; });
-  await waitFor(() => bridge.members);
+  await waitFor(() => bridge.members && bridge.fencingToken);
   return { bridge, connection };
 }
 const repliesTo = (room, rootId, memberId) => room.messages().filter(message => message.replyToId === rootId && message.authorId === memberId);

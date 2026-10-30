@@ -10,7 +10,7 @@ import { mayTalk, Bridge } from "../room-acp/src/bridge.mjs";
 import { join } from "../room-acp/src/join.mjs";
 import { startRoom, FAKE_AGENT } from "./room-acp-fixture.mjs";
 
-const waitFor = async (check, ms = 8000) => {
+const waitFor = async (check, ms = 20000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw new Error("timed out waiting");
@@ -59,11 +59,11 @@ test("mayTalk: owner and the owner's agents by default; anyone when opted in", (
 
 async function startBridge(t, room, { mode = "echo", respondTo = "owner" } = {}) {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
-  const env = { ...room.env, FAKE_ACP_MODE: mode, FAKE_ACP_DELAY_MS: "400" };
-  const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env, respondTo, waitMs: 200, cadenceSeconds: 30 });
+  const env = { ...room.env, FAKE_ACP_MODE: mode, FAKE_ACP_DELAY_MS: "4000" };
+  const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env, respondTo, waitMs: 3000, cadenceSeconds: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
   const done = bridge.run();
   t.after(async () => { bridge.stop(); await done; });
-  await waitFor(() => bridge.members);
+  await waitFor(() => bridge.members && bridge.fencingToken);
   return { bridge, connection, done };
 }
 
@@ -101,7 +101,7 @@ test("bridge: messages during a slow turn batch into one next turn", async t => 
   await waitFor(() => bridge.queue.active === 1);
   room.say("@Coder second", { replyToId: rootId });
   room.say("@Coder third", { replyToId: rootId });
-  const list = await waitFor(() => { const all = repliesTo(room, rootId, connection.memberId); return all.length === 2 ? all : null; }, 10000);
+  const list = await waitFor(() => { const all = repliesTo(room, rootId, connection.memberId); return all.length === 2 ? all : null; }, 20000);
   assert.match(list[1].body, /second[\s\S]*third/);
   await waitFor(() => bridge.stats.acked === 3);
 });

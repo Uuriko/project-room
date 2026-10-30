@@ -24,7 +24,7 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000 }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, credential: connection.credential, fetchImpl });
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
@@ -32,6 +32,7 @@ export class Bridge {
     this.restartDelayMs = restartDelayMs; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
+    this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0;
     this.fencingToken = null; this.seen = new Set(); this.controller = new AbortController(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
   }
 
@@ -65,8 +66,13 @@ export class Bridge {
   }
 
   async lease() {
+    // Renew the listener lease only when it is close to expiry: heartbeats
+    // are rate limited, polls are the cheap call.
+    if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    const expires = Number(value?.listener?.leaseExpiresAt);
+    this.leaseRenewAt = Math.min(Date.now() + this.cadenceSeconds * 1000 / 2, Number.isFinite(expires) ? expires - 20000 : Infinity);
     if (!this.fencingToken) this.log(`another room-acp listener holds this room's wake queue (${value?.listener?.activeListenerId ?? "unknown"}); waiting`);
     return Boolean(this.fencingToken);
   }
@@ -126,6 +132,11 @@ export class Bridge {
 
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
+    // The Room allows 30 polls a minute per identity; stay under it even
+    // when wakes arrive back to back.
+    const gap = this.lastPollAt + this.minPollIntervalMs - Date.now();
+    if (gap > 0) await sleep(gap, this.controller.signal);
+    this.lastPollAt = Date.now();
     const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: this.waitMs });
     for (const signal of value?.pendingWakes ?? []) await this.accept(signal);
   }
