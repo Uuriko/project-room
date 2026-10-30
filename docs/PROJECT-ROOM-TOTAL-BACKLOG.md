@@ -6,6 +6,51 @@ Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 e
 
 This is the full captured inventory, not a priority shortlist. Existing source requirements remain binding. A task to reconcile or qualify a capability does not assert it has never been built. Schema 41 and earlier measured gains are local qualified checkpoints; the overall architecture overhaul remains incomplete.
 
+## Subsequent reconciliation — 2026-10-29
+
+The older audit below remains bound to its original source. These narrower
+updates prevent its unresolved rows from being mistaken for current missing work:
+
+- **#5193:** incorporated through #5321 at `30367102`, including failed-page
+  gesture retry, retired-session fencing and disconnect cleanup. It was merged,
+  not deployed, at this observation. The preserved before/after evidence covers
+  80 client/history boundary checks; it is not a productivity comparison.
+- **Graphify:** exact `1528c577` map publication passed three REST and three fresh
+  MCP readbacks. Compact edge keys retain normalized contents. Coverage remains
+  server-only/truncated; this does not imply the entire codebase is mapped.
+- **#5180:** merged; current process-group cleanup retains the profile lock until
+  group absence is established. A historical full-suite descendant timing failure
+  remains unexplained: 30 serial controls and 15 focused checks did not reproduce
+  it. Do not reopen the EPERM fix as missing or mark the timing failure resolved.
+- **#5163:** registry pointers adopted in #5319; optional SEO-title change declined.
+  The old mixed PR was closed with that explicit partial disposition.
+- **#4998 and #4983:** incorporated through #5329 and #5332 respectively;
+  original PRs are marked merged through ancestry. Current main `580b380a`
+  contains recorded receipt-privacy enforcement and hosted OG asset loading,
+  including no-store render failures. These are not in production `1528c577`.
+- **#5165:** useful enrollment/replay guidance salvaged in #5331; the conflicting
+  draft was closed with an explicit partial disposition. Its duplicate unbounded
+  solver, fixed quota assumptions and cosmetic changes were not adopted.
+
+For deployed versus merged state, use the [release checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045).
+No captured inventory entry below is silently deleted or marked complete.
+
+## Current-source review of retained proposals — 2026-10-29
+
+Seven PRs were reviewed against `580b380ad3416b23810fbe3544b10c9ae0f1aa85` using exact heads and source diffs. None is wholly superseded; no closure or deployment follows from this review.
+
+| PR and reviewed head | Disposition | Remaining work |
+| --- | --- | --- |
+| [#4988](https://github.com/Uuriko/project-room/pull/4988) · `818e2a4c` | partial | Extract only retained failure-status and Retry behavior onto current native lifecycle. Recheck locks, stopping, bounded error codes and no raw stderr; compile Swift and exercise real failed-start→retry. Do not reapply old request-runner code or claim installed upgrade. |
+| [#5059](https://github.com/Uuriko/project-room/pull/5059) · `5418bae3` | unique-unfinished | Rebase only with current cancellation/supervisor semantics. Reprove locks, exact room incarnation/opening/attempt, missing-proof refusal, legacy/generic refusal, no dispatch and no runtime attempt. No automatic unresolved-journal reset. |
+| [#5080](https://github.com/Uuriko/project-room/pull/5080) · `09e17fc6` | unique-unfinished | Qualify current tool catalog and identity binding, environment/file connection mismatch, revocation on child reload, tool list/call allowlist equality and packaged imports. Test actual model use separately; preserve authentication-only mode and capability fingerprint fences. |
+| [#4958](https://github.com/Uuriko/project-room/pull/4958) · `352ee470` | deferred-unique | Compare unique durable outbox/unknown-outcome guarantees with existing tools before selecting a slice. No operational merge-train claim. Provider mutation, authorization bindings, capacity indexing/retention and Workers qualification remain separate unfinished work. |
+| [#5187](https://github.com/Uuriko/project-room/pull/5187) · `6e0a67b3` | deferred-unique | Evaluate one real client use case against existing scoped reads; retain privacy/redaction/history floors, audit view and omittedClasses contract. Require measured total work before adopting an extra endpoint. Do not represent as cold hydration repair. |
+| [#5194](https://github.com/Uuriko/project-room/pull/5194) · `34bd4e73` | deferred-unique | Reconcile current private conversations, initial work/navigation access, partial-state semantics, generation and session binding, beforeId paging and explicit lazy-history behavior. Endpoint-only synthetic wire reduction is insufficient; no broad old app.js overwrite. |
+| [#5260](https://github.com/Uuriko/project-room/pull/5260) · `f1f16a3f` | held-not-rejected | Keep held unless narrower direct/HTTP benefit is justified or telemetry interaction solved without weakening mutation/auth guarantees. Preserve same-head corruption, external writes/schema, attempted failed mutations, outer read commit and raw-adapter bypass limitations. Not the same proposal as reverted5256; no explicit rejection found. |
+
+The refresh of open GitHub metadata found 500 PRs and 191 non-PR issues in a non-atomic paginated capture. That is discovery coverage, not 691 reviewed obligations. The original October 18 counts remain historical. Review bodies, dependencies and unique behavior before consolidation; closing an old branch is not acceptance evidence.
+
 ## Bounded older-work dispositions — 2026-10-29
 
 This twelve-item audit is bound to source `c7a214cbe1452cec7d293a99a10cd400948dc8f2`.
