@@ -2,6 +2,10 @@
 // run each thread's turn on the local ACP agent, post the reply in the
 // thread, then ack the wakes. Wakes are acked only after the reply posts,
 // so a crash before posting means the Room re-delivers them.
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { join } from "node:path";
+import { configDir } from "./credentials.mjs";
 import { RoomClient, RoomError } from "./room.mjs";
 import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
@@ -31,10 +35,49 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
   return Boolean(author && author.kind === "agent" && author.active !== false && author.accountableHumanId === boss);
 }
 
+// Keep execution separate from delivery. An interrupted prompt may already have
+// changed the outside world, so an unfinished receipt requires human recovery.
+class ClaimReceipts {
+  constructor(connection, env, persist) {
+    this.scope = JSON.stringify([connection.apiBase, connection.roomId, connection.memberId]);
+    this.dir = persist ? join(configDir(env), "claim-turns") : null;
+    this.memory = new Map();
+  }
+  key(signalId) { return createHash("sha256").update(this.scope + JSON.stringify(signalId)).digest("hex"); }
+  begin(signalId) {
+    const key = this.key(signalId);
+    if (!this.dir) {
+      if (this.memory.has(key)) return { key, receipt: this.memory.get(key), fresh: false };
+      const receipt = { phase: "started", requestId: randomUUID() };
+      this.memory.set(key, receipt);
+      return { key, receipt, fresh: true };
+    }
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const path = join(this.dir, key + ".json");
+    const receipt = { phase: "started", requestId: randomUUID() };
+    try { writeFileSync(path, JSON.stringify(receipt), { flag: "wx", mode: 0o600 }); }
+    catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const existing = JSON.parse(readFileSync(path, "utf8"));
+      if (!["started", "result", "posted"].includes(existing.phase) || typeof existing.requestId !== "string" ||
+          existing.phase === "result" && typeof existing.body !== "string") throw new Error("Invalid claim execution receipt; manual recovery required");
+      return { key, receipt: existing, fresh: false };
+    }
+    return { key, receipt, fresh: true };
+  }
+  save(key, receipt) {
+    if (!this.dir) { this.memory.set(key, receipt); return; }
+    const path = join(this.dir, key + ".json"), temporary = path + "." + randomUUID() + ".tmp";
+    writeFileSync(temporary, JSON.stringify(receipt), { mode: 0o600 });
+    renameSync(temporary, path);
+  }
+}
+
 export class Bridge {
   constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
+    this.claimReceipts = new ClaimReceipts(connection, env, persistSessions);
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
@@ -134,27 +177,47 @@ export class Bridge {
   }
 
   async claimTurn(threadKey, batch) {
-    const signalIds = batch.map(item => item.signalId);
+    // Receipt identity is per wake, independent of how polling batches it.
+    for (const item of batch) await this.claimSignalTurn(threadKey, item);
+  }
+
+  async claimSignalTurn(threadKey, item) {
+    const signalIds = [item.signalId];
     const claimId = threadKey.slice(CLAIM_KEY.length);
-    let body;
     try {
-      await this.agentReady();
-      const { sessionId } = await this.host.session(threadKey);
-      const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: batch[batch.length - 1].claim, author: batch[0].author }), { sessionId });
-      body = renderTurn(recorder, { stopReason });
-      this.stats.turns++;
-    } catch (error) {
-      this.log(`claim turn failed: ${error.message}`);
-      if (this.controller.signal.aborted) return;
-      body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
-    }
-    try {
-      await this.room.claimNote(claimId, body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body);
-      this.stats.posted++;
+      const { key, receipt: saved, fresh } = this.claimReceipts.begin(item.signalId);
+      let receipt = saved;
+      if (!fresh && receipt.phase === "started") {
+        this.log(`claim ${claimId} has an interrupted execution; inspect its work before assigning a new turn`);
+        return; // Never silently repeat external actions after an ambiguous crash.
+      }
+      if (fresh) {
+        let body;
+        try {
+          await this.agentReady();
+          if (this.controller.signal.aborted) return;
+          const { sessionId } = await this.host.session(threadKey);
+          const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
+          body = renderTurn(recorder, { stopReason });
+          this.stats.turns++;
+        } catch (error) {
+          this.log(`claim turn failed: ${error.message}`);
+          if (this.controller.signal.aborted) return;
+          body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+        }
+        receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
+        this.claimReceipts.save(key, receipt);
+      }
+      if (receipt.phase === "result") {
+        await this.room.claimNote(claimId, receipt.body, receipt.requestId);
+        this.stats.posted++;
+        receipt = { phase: "posted", requestId: receipt.requestId };
+        this.claimReceipts.save(key, receipt);
+      }
       await this.ack(signalIds);
     } catch (error) {
       for (const id of signalIds) this.seen.delete(id);
-      this.log(`posting the claim note failed (${error.code ?? error.message}); will retry on re-delivery`);
+      this.log(`claim delivery failed (${error.code ?? error.message}); retrying delivery without repeating execution`);
     }
   }
 

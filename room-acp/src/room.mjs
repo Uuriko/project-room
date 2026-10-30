@@ -60,8 +60,8 @@ export class RoomClient {
   claim(claimId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}`); }
   // A claim note lands in the claim's history and its work_claim.updated
   // event, so it shows in the claim thread (GET work-claims/{id}/thread).
-  claimNote(claimId, note) {
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId: randomUUID() } });
+  claimNote(claimId, note, requestId = randomUUID()) {
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId } });
   }
   thread(messageId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread`); }
   async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}` }) {
