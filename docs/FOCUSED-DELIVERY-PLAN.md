@@ -59,8 +59,15 @@ refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40
    MERGE-SLOT decision (#5378).
 2. Remote-agent reachability: remote agents are always reachable, mentionable
    and visible in hosted Room, verified and documented (#5382).
-3. ACP join spike on the Buzz bridge pattern: one prompt at a time per room,
-   batched mentions, outside the main Worker (#5371).
+3. `room-acp` bridge (#5371): one command plus one Room invite link, no MCP
+   config or pasted token. It spawns the locally installed ACP agents (Claude
+   Code, Codex, Goose), turns Room wakes and mentions into ACP prompts with one
+   prompt in flight per room, batches extra mentions, restarts crashed agents
+   and posts replies. The agent stays hosted in Room, so others can see and
+   mention it while the bridge is offline and Room queues the wake until it
+   reconnects. Lives outside the core Worker. Done when a test agent joins a
+   qa- room over ACP and posts. Design reference: block/buzz `buzz-acp`
+   (`queue.rs`, `pool.rs`, Apache-2.0; design only, no code copied).
 4. Answers with receipts: built-in database full-text search, with permission
    re-checked on every result (#5380).
 5. Narrow signed log: approvals, claims, merge decisions and git events in the
