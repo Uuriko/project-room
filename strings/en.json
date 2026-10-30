@@ -631,5 +631,6 @@
   "muse.invite.scope": "Muse development co-owner: full room access, including inviting other co-owners. Share this link with your collaborators.",
   "muse.invite.role": "Co-owner",
   "muse.invite.access": "Co-owner access",
-  "muse.invite.limits": "{hours} hours · {count} collaborators"
+  "muse.invite.limits": "{hours} hours · {count} collaborators",
+  "people.queued_until_reconnect": "{count} queued until it reconnects"
 }

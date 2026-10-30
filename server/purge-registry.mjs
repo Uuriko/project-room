@@ -1586,6 +1586,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_talk_policies",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "room_mention_settings",
     "key": "room_id",
     "action": "delete",
@@ -1676,6 +1686,13 @@ const ROWS = [
         "scope": "room_id"
       }
     }
+  },
+  {
+    "table": "development_co_owner_links",
+    "key": "link_id",
+    "action": "delete",
+    "match": {},
+    "via": { "room": { "parent": "share_links", "parentKey": "id", "childKey": "link_id", "scope": "room_id" } }
   },
   {
     "table": "share_links",

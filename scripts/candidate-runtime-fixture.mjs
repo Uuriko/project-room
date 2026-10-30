@@ -72,6 +72,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
+  paths.add('server/agent-talk-policy.mjs'); // #5384
+  paths.add('server/routes/talk-policy.mjs'); // #5384
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
@@ -92,6 +94,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
+  paths.add("server/approval-tokens.mjs");
+
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
   paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
   paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
