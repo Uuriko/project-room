@@ -12,7 +12,7 @@ Supporting evidence: [infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-1
 [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md).
 
 Implementation packages, dependencies and exit gates are specified in the
-[build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
+[build-to-completion plan](../archive/docs/history/BUILD-TO-COMPLETION-PLAN.md).
 
 ## Vision
 

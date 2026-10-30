@@ -14,13 +14,70 @@ supported benefits over simpler alternatives, including slower or failed trials.
 | Understand current release and rejected candidates | [Delivery evidence checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Follow exact-source receipts and retained failures; do not revive a reverted optimization merely because its tests passed. |
 | Coordinate overlapping work and releases | [Room coordination](ROOM-COORDINATION.md), [AGENTS](../AGENTS.md), [deployment lane](DEPLOY-LANE.md) | Read current ownership and candidate state; dated claims below are not live leases or approval requirements. |
 | Trace an older unfinished requirement | [Total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
-| Implement a retained work/continuity boundary | [Continuity plan](CONTINUITY-BUILD-PLAN.md), [work lifecycle](WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
+| Implement a retained work/continuity boundary | [Continuity plan](CONTINUITY-BUILD-PLAN.md), [work lifecycle](../archive/docs/history/WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
 
 The product test remains: two people and an authorized agent turn a conversation
 into an accepted result, change direction, survive a disconnect, and return
 without reconstructing the project or losing control. Physical sleep/wake,
 installed-host adoption and human productivity evidence remain separate from
 protocol fixtures and synthetic measurements.
+
+## Now / Next / Later and intake (single roadmap)
+
+This page is the single roadmap. Other plan files in `docs/` are detailed
+references under it. They do not hold their own queues (see the index below).
+
+**Intake rule.** New future work is filed as a GitHub issue with the
+`priority:later` label and linked from the Later list below. A feature PR needs
+an entry on this page (Now or Next) or a linked issue that has been promoted
+here. Bug fixes for current failures need no entry. Promotion from Later to
+Next or Now is an edit to this page, so it shows up in review.
+
+**Now: stabilize before new features** (owner focus, 2026-10-29; still under
+discussion, not a final scope cut)
+- Scheduled jobs green: patrol `illegal_transition` (merged #5299, draft #5334,
+  operator findings view #5315), and messages_parity integrity (#4930, held for
+  re-qualification; Codex owns integrity). Freshness rules are not loosened to
+  make a check pass.
+- Main CI green: the lint failure on main (draft #5326) and the drifted browser
+  shards.
+- Shrink open PRs through per-PR keep, close or supersede review (Codex decides;
+  proposals carry a reason per PR). Then a per-agent limit on open PRs.
+- Land the storage and operator-custody safety work in its bound order (#4543
+  trigger-gated, #4265, #5218, #5336 then #5343) before the custody horizon.
+- One roadmap: this page. The intake rule above.
+
+**Next** (F1–F6 below remain the outcome definitions)
+- Finish the 2026-10-29 workflow follow-ups already in this plan: typed
+  activity (#5369) and reviewer credit (#5370) once a consumer is named.
+- Fixes from user testing that hit the product test directly (see Later items
+  marked S2).
+
+**Later** (label `priority:later`; promote by editing this page)
+- #5368: dispute decider cannot read the dispute on any surface (UT-DUAL, S2).
+- #5369: typed agent activity annotation, consumer first.
+- #5370: qualified reviewer credit on the record.
+- #5371: spike joining Room through ACP (Agent Client Protocol).
+- #5372: competitor deep dive on Block Buzz.
+- Retained older proposals already labeled `priority:later` stay valid; query
+  the label for the full list.
+
+### Plan document index
+
+| File | Role under this page |
+| --- | --- |
+| [DELIVERY-CONTROL-PLAN](DELIVERY-CONTROL-PLAN.md) | Active: release and candidate evidence. |
+| [RELEASE-QUALIFICATION-PLAN](RELEASE-QUALIFICATION-PLAN.md), [CROSS-PLATFORM-RELEASE-PLAN-20261018](CROSS-PLATFORM-RELEASE-PLAN-20261018.md) | Active reference for F6 release gates. |
+| [PROJECT-ROOM-TOTAL-BACKLOG](PROJECT-ROOM-TOTAL-BACKLOG.md) | Evidence index of older requirements; not a queue. |
+| [ARCHITECTURE-EXECUTION-PLAN](ARCHITECTURE-EXECUTION-PLAN.md), [ADAPTIVE-PROJECT-ROOM-MASTER-PLAN](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md), [MESSAGE-REPLAY-ISOLATION-PLAN](MESSAGE-REPLAY-ISOLATION-PLAN.md) | F1 detailed contracts; unfinished items keep their IDs. |
+| [CONTINUITY-BUILD-PLAN](CONTINUITY-BUILD-PLAN.md), [WORK-CUTOVER-PLAN](WORK-CUTOVER-PLAN.md), [WORK-INTEGRATION-PLAN](WORK-INTEGRATION-PLAN.md), [EXECUTION-PORTABILITY-PLAN-20261018](EXECUTION-PORTABILITY-PLAN-20261018.md) | F2 detailed contracts. |
+| [COLLABORATION-COMPONENTS-PLAN-20261019](COLLABORATION-COMPONENTS-PLAN-20261019.md), [FOCUSED-COLLABORATION-PLAN-20261019](FOCUSED-COLLABORATION-PLAN-20261019.md), [ENTRY-SIMPLIFICATION-PLAN-20261019](ENTRY-SIMPLIFICATION-PLAN-20261019.md) | F3/F4 detailed contracts; marked in progress in their own headers. |
+| [DEFECT-DISCOVERY-PLAN-20261020](DEFECT-DISCOVERY-PLAN-20261020.md) | Testing method reference. |
+| [STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md) | F5 research reference. |
+| [Build-to-completion plan](../archive/docs/history/BUILD-TO-COMPLETION-PLAN.md), [work lifecycle plan](../archive/docs/history/WORK-LIFECYCLE-BUILD-PLAN.md) | History: moved on 2026-10-29 (self-declared historical and superseded by the work cutover, respectively). Acceptance requirements stay traceable. |
+
+Files marked "in progress" stay in `docs/` until their owner closes or merges
+them into this page. Nothing was deleted in the consolidation.
 
 ## Agent workflow improvements — 2026-10-29
 
