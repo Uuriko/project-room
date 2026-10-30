@@ -1,3 +1,4 @@
+import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -79,8 +80,14 @@ export const shareLinkCodeSchema = `
 // administer membership or mint further invitations. Owner-only settings
 // stay owner-only. It is a room key: only the room owner can mint one. The
 // row is written with the link and can never change.
-export const LINK_ACCESS = Object.freeze(["guest", "member", "co_admin"]);
+export const LINK_ACCESS = Object.freeze(["guest", "member", "co_admin", "co_owner"]);
 export const shareLinkAccessSchema = `
+  CREATE TABLE IF NOT EXISTS development_co_owner_links (
+    link_id TEXT PRIMARY KEY REFERENCES share_links(id), created_at INTEGER NOT NULL
+  );
+  CREATE TRIGGER IF NOT EXISTS development_co_owner_links_no_update BEFORE UPDATE ON development_co_owner_links BEGIN SELECT RAISE(ABORT,'link access is immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS development_co_owner_links_no_delete BEFORE DELETE ON development_co_owner_links BEGIN SELECT RAISE(ABORT,'link access is retained'); END;
+
   CREATE TABLE IF NOT EXISTS share_link_access (
     link_id TEXT PRIMARY KEY, access TEXT NOT NULL CHECK(access IN ('member','co_admin')), created_at INTEGER NOT NULL
   );
@@ -88,13 +95,14 @@ export const shareLinkAccessSchema = `
   CREATE TRIGGER IF NOT EXISTS share_link_access_no_delete BEFORE DELETE ON share_link_access BEGIN SELECT RAISE(ABORT,'link access is retained'); END;
 `;
 function roleMatchesLink(record, access) {
-  const role = access === "co_admin" ? "moderator" : access === "member" ? "member" : "guest";
+  const role = ["co_admin", "co_owner"].includes(access) ? "moderator" : access === "member" ? "member" : "guest";
   return record?.intended_role === role && record.intended_permissions_json === JSON.stringify(INVITATION_ROLES[role]);
 }
 export function linkPermissions(access) {
-  return access === "co_admin" ? PERMISSIONS.filter(permission => !NEVER_GRANT.includes(permission)) : access === "member" ? [...INVITATION_ROLES.member] : [];
+  return access === "co_owner" ? [...PERMISSIONS] : access === "co_admin" ? PERMISSIONS.filter(permission => !NEVER_GRANT.includes(permission)) : access === "member" ? [...INVITATION_ROLES.member] : [];
 }
 const ACCESS_TEXT = Object.freeze({
+  co_owner: "Muse development co-owner: all room permissions, including inviting humans and agents as co-owners, managing members, and making decisions. This does not transfer the owner seat.",
   guest: "Read the room and its history, post messages, and react. No membership administration or work approvals.",
   member: "Read and post, take work, complete it and verify others' work. No membership administration.",
   co_admin: "Every working permission: steer, manage claims, accept, complete and verify work, and write externally. Inviting or removing members, changing member access, and room decisions are never granted by a link — they stay with the room creator and administrators. Room settings such as instructions, history visibility, export, publishing, archive and ownership stay with the room creator."
@@ -118,6 +126,7 @@ export function previewAccessText(access, roomState) {
 export class ShareLinks {
   constructor(store) { this.store = store; this.db = store.db; }
   accessOf(row) {
+    if (this.db.prepare("SELECT 1 FROM development_co_owner_links WHERE link_id=?").get(row.id)) return "co_owner";
     try { return this.db.prepare("SELECT access FROM share_link_access WHERE link_id=?").get(row.id)?.access ?? "guest"; }
     catch (error) { if (/no such table/i.test(error?.message ?? "")) return "guest"; throw error; }
   }
@@ -159,6 +168,7 @@ export class ShareLinks {
     return humans + agents;
   }
   authority(row) {
+    if (this.accessOf(row) === "co_owner" && (!museDevelopmentAccess(this.store.room(row.room_id).state) || !canInviteCoOwners(this.store.room(row.room_id).state, row.issuer_member_id))) return false;
     const members = this.store.room(row.room_id).state.members;
     // A truthy map lookup treats toString as the issuer and then throws on permissions.includes.
     const member = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : undefined;
@@ -290,7 +300,8 @@ export class ShareLinks {
       // Creating share links is a membership write: the read-only autonomy
       // tier applies even for delegated-admin agents (issue #996).
       enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "share_link_create", fail });
-      if (access !== "guest" && this.store.roomAuthority(roomId).ownerId !== auth.member.id) {
+      if (access === "co_owner" && (!museDevelopmentAccess(this.store.room(roomId).state) || auth.delegate || !canInviteCoOwners(this.store.room(roomId).state, auth.member.id))) fail(403, "link_access_denied", "Muse development co-owner access required");
+      if (access !== "guest" && access !== "co_owner" && !canInviteCoOwners(this.store.room(roomId).state, auth.member.id)) {
         fail(403, "link_access_denied", "Only the room creator can make member or co-admin links");
       }
       const fingerprint = hash(JSON.stringify(access === "guest" ? [tokenHash, expiresAt, maxJoins, expectedMemberRevision]
@@ -318,7 +329,8 @@ export class ShareLinks {
       const id = randomUUID();
       this.db.prepare(`INSERT INTO share_links(id,token_hash,room_id,issuer_account_id,issuer_member_id,issuer_auth_epoch,issuer_member_revision,request_id,fingerprint,created_at,expires_at,max_joins)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, tokenHash, roomId, auth.account?.id ?? null, auth.member.id, auth.account?.authEpoch ?? null, auth.member.revision, requestId, fingerprint, now, expiresAt, maxJoins);
-      if (access !== "guest") this.db.prepare("INSERT INTO share_link_access(link_id,access,created_at) VALUES(?,?,?)").run(id, access, now);
+      if (access === "co_owner") this.db.prepare("INSERT INTO development_co_owner_links(link_id,created_at) VALUES(?,?)").run(id, now);
+      else if (access !== "guest") this.db.prepare("INSERT INTO share_link_access(link_id,access,created_at) VALUES(?,?,?)").run(id, access, now);
       return { link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)), duplicate: false };
     });
   }
@@ -475,7 +487,7 @@ export class ShareLinks {
       assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
       if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       const access = this.accessOf(row);
-      const role = access === "co_admin" ? "moderator" : access === "member" ? "member" : "guest";
+      const role = ["co_admin", "co_owner"].includes(access) ? "moderator" : access === "member" ? "member" : "guest";
       // An elevated link is not handed to an 8-hour throwaway guest account.
       if (!auth && access !== "guest") fail(401, "sign_in_required", "Sign in or create an account, then open this link again.");
       if (!auth) {
@@ -514,9 +526,9 @@ export class ShareLinks {
       // Co-admin: the room creator, who minted the link, raises the new
       // member from moderator to the link grant (linkPermissions, capped at
       // the NEVER_GRANT ceiling) in the same transaction.
-      const grant = access === "co_admin" ? event({ id: `la_${invitationId.replaceAll("-", "")}`, idempotencyKey: `link-access:${invitationId}`,
+      const grant = ["co_admin", "co_owner"].includes(access) ? event({ id: `la_${invitationId.replaceAll("-", "")}`, idempotencyKey: `link-access:${invitationId}`,
         roomId: row.room_id, actorId: row.issuer_member_id, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
-        data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions("co_admin"), active: true,
+        data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions(access), active: true,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } }) : null;
       if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
@@ -552,10 +564,10 @@ export class ShareLinks {
     if (this.view(row).status !== "active") unavailable();
     refuseArchivedWrite(room.state);
     if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
-    const access = this.accessOf(row), role = access === "co_admin" ? "moderator" : access === "member" ? "member" : "guest";
+    const access = this.accessOf(row), role = ["co_admin", "co_owner"].includes(access) ? "moderator" : access === "member" ? "member" : "guest";
     const admission = this.admissionIssuer(row, room), now = this.store.now();
     const rejoin = event({ id: randomUUID(), idempotencyKey: `link-rejoin:${row.id}:${redemptionId}`, roomId: row.room_id, actorId: admission.memberId, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
-      data: { memberId, expectedMemberRevision: member.revision, permissions: access === "co_admin" ? linkPermissions("co_admin") : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
+      data: { memberId, expectedMemberRevision: member.revision, permissions: ["co_admin", "co_owner"].includes(access) ? linkPermissions(access) : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
     const state = { ...applyEventWithGrowth(room.state, rejoin, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");
