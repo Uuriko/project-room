@@ -171,7 +171,7 @@ function summarizeBoardClaim(item) {
 // entries the caller counted recovers the state, owner and claim round
 // they saw, and diffing that snapshot against the current item separates
 // "your read was stale" (truncated list read, or a benign append since)
-// from "the claim itself moved" (delivered, released, re-claimed,
+// and "the claim itself moved" (delivered, released, re-claimed,
 // reassigned). Replay is exact only while no entries have been dropped
 // from the front of the stored history (historyOmitted, MAX_CLAIM_HISTORY
 // in server/work-claims.mjs); past that cap the snapshot is unavailable
