@@ -3660,12 +3660,31 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [action, memberId, requestId]
               properties:
-                action: { type: string, enum: [pause, resume] }
-                memberId: { type: string }
-                requestId: { type: string }
-                reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
+                action:
+                  type: string
+                  enum: [pause, resume]
+                  description: pause stops new wake attempts. resume lifts the pause.
+                memberId:
+                  type: string
+                  description: Room member. A member may name itself. The room owner may name any member.
+                requestId:
+                  type: string
+                  description: Idempotency key. Reuse it to retry the same pause or resume.
+                reason:
+                  type: [string, "null"]
+                  maxLength: 200
+                  description: Required when action is pause. null is allowed. Omit it when action is resume. Longer than 200 characters is rejected.
+              oneOf:
+                - required: [reason]
+                  properties:
+                    action: { const: pause }
+                - not:
+                    required: [reason]
+                  properties:
+                    action: { const: resume }
       responses:
         '401': { description: unauthenticated }
         '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }

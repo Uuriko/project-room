@@ -46,7 +46,7 @@ import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS,
 import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
-import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
+import { AGENT_PAUSE_FIELDS, AGENT_RESUME_FIELDS, buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "./agent-discovery.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
@@ -5070,7 +5070,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // C6: pause or resume a member's queued wakes (own row, or owner over
         // another member). Draft class: nothing is sent, launched or spent.
         const data = await body(req);
-        const fields = data.action === "resume" ? ["action", "memberId", "requestId"] : ["action", "memberId", "requestId", "reason"];
+        const fields = data.action === "resume" ? AGENT_RESUME_FIELDS : AGENT_PAUSE_FIELDS;
         if (!["pause", "resume"].includes(data.action) || !exact(data, fields) || typeof data.memberId !== "string") reject(422, "invalid_pause_command", "Supply action (pause or resume), memberId, requestId and, for pause, reason or null");
         const target = { memberId: data.memberId };
         const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)

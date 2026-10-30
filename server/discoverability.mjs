@@ -111,6 +111,28 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
     text: { type: "string", description: "The ```room-claim block text to validate." },
   },
 } } } });
+// POST /api/rooms/{roomId}/agent-pause. server/http.mjs exact() uses these
+// lists: resume is the shared three fields, pause also requires reason
+// (null allowed; the wake queue rejects a string longer than 200). The
+// served spec below is built from the same lists.
+export const AGENT_RESUME_FIELDS = Object.freeze(["action", "memberId", "requestId"]);
+export const AGENT_PAUSE_FIELDS = Object.freeze([...AGENT_RESUME_FIELDS, "reason"]);
+const AGENT_PAUSE_PROPERTIES = Object.freeze({
+  action: { type: "string", enum: ["pause", "resume"], description: "pause stops new wake attempts. resume lifts the pause." },
+  memberId: { type: "string", description: "Room member. A member may name itself. The room owner may name any member." },
+  requestId: { type: "string", description: "Idempotency key. Reuse it to retry the same pause or resume." },
+  reason: { type: ["string", "null"], maxLength: 200, description: "Required when action is pause. null is allowed. Omit it when action is resume. Longer than 200 characters is rejected." },
+});
+const AGENT_PAUSE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object",
+  additionalProperties: false,
+  required: [...AGENT_RESUME_FIELDS],
+  properties: AGENT_PAUSE_PROPERTIES,
+  oneOf: [
+    { required: ["reason"], properties: { action: { const: "pause" } } },
+    { properties: { action: { const: "resume" } }, not: { required: ["reason"] } },
+  ],
+} } } });
 
 const queryParam = (name, schema, extra = {}) => Object.freeze({ name, in: "query", schema, ...extra });
 const ROOM_EVENTS_QUERY = Object.freeze([
@@ -271,7 +293,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
   route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
-    { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
+    { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" },
+      requestBodies: { POST: AGENT_PAUSE_BODY } }),
   // Browser session surface (QA2 2026-10-04: served spec omitted it).
   route("/api/session", ["POST", "GET", "DELETE"], "browser-session",
     "Browser sign-in and session management. POST is open: the access key in the body mints the room_session cookie (201 + session view). GET returns the current session view; DELETE signs out. GET/DELETE accept the room_session cookie or a room Bearer <redacted>; account mode (?room=<id> or X-Project-Room-Auth: account) uses the account_session cookie and refuses Bearer <redacted>",
