@@ -7,7 +7,7 @@
 //
 // Pure: no I/O, no network, injected clock. The wiring in server/http.mjs
 // computes the signals from each join path, calls evaluateAdmission(),
-// journals the decision via server/jev-shadow-journal.mjs, and admits
+// journals the decision via server/journal.mjs, and admits
 // anyway — shadow mode never enforces. Rejection thresholds are defined
 // below and documented in docs/JEV-GATES.md as proposed, NOT enforced.
 //
