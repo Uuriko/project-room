@@ -62,7 +62,6 @@
     "src/styles.css ::: .attention-hint { color: var(--muted); font-size: .85rem; }": 1,
     "src/styles.css ::: .attention-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--accent, #d97706); color: #fff; font-size: .8rem; font-weight: 700; }": 3,
     "src/styles.css ::: .attention-kind { display: inline-block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: .5rem; }": 1,
-    "src/styles.css ::: .attention-severity-action .attention-kind { color: var(--accent, #d97706); font-weight: 700; }": 1,
     "src/styles.css ::: .attention-title { font-size: .95rem; overflow-wrap: anywhere; }": 1,
     "src/styles.css ::: .audience-chip { display: inline-block; margin: 0 0 .2rem; color: #8195af; font-size: .66rem; }": 2,
     "src/styles.css ::: .audience-note { color: var(--muted); font-size: .75rem; }": 1,

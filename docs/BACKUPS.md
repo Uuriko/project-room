@@ -63,8 +63,9 @@ Isolated staging has no cron and no backup binding, so it does not write a night
 Restores go into a NEW sqlite store, never over a live room. Nothing in this path writes to Cloudflare.
 
 ```bash
-# From the nightly KV copy (uses your wrangler login; needs Workers KV read)
-node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room --audit report
+# From a nightly KV copy: replace the example date with an available backup date.
+# Uses your wrangler login; needs Workers KV read.
+node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room
 
 # From an NDJSON file (an operator export or a saved copy)
 node scripts/restore-room-backup.mjs --from room-export.ndjson --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room
@@ -72,24 +73,54 @@ node scripts/restore-room-backup.mjs --from room-export.ndjson --to /tmp/restore
 
 The script checks each part's sha256 and the whole file's sha256 against the manifest, refuses an existing destination, replays the export with the same recovery and invitation checks as `scripts/replay-room-export.mjs`, and prints counts only. `--room <id>` (repeatable) prints that room's event count, last sequence, room message count (DMs excluded) and a sha256 over `sequence, event id, messageId, body` of those messages. A member's reader can compute the same digest from `GET /api/rooms/<id>/events` to prove the restore matches live. `--save <path>` keeps the reassembled NDJSON (mode 0600); delete it when done, it holds every room. The message digest applies `message.edited` (last edit wins), because the live events API shows an edited message's current text.
 
-`--audit report` restores even when the recovery audit rejects the store, and prints `audit: { ok, error }`. The row load, foreign keys, `quick_check`, file bytes and the event count must still match. Use it for real restores: the audit replays every room with the current reducer, and production rooms written by older code can differ from that replay (for example a reaction stored as `celebrate` that today's reducer names `🎉`, or room instructions written by an agent owner) while the live room serves them fine. The default stays strict.
+Strict audit is the default. For an isolated diagnostic rehearsal, `--audit report` retains the restored store even when the recovery audit rejects it and reports `audit: { ok: false, error }`. This can help investigate differences between older stored projections and the current reducer; it does not establish that those differences are harmless. Structural and content checks still run, but `verified: true` and exit status 0 alone do **not** mean the recovery audit passed. Read `audit.ok` and `contentVerification` separately. A report-mode failure remains unresolved until its cause and any authority reconciliation are addressed; do not promote that diagnostic store merely because byte checks passed.
 
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
 
+A failed KV replay preserves its original error and reports `cleanupFailed: true`
+when removing partial rows, closing the claim-writer permit, or restoring foreign-key
+enforcement fails. Do not treat that destination as empty and retryable: inspect
+and reconcile it before another restore. Repeated abort handling preserves the
+first cleanup outcome; it does not silently turn a failed cleanup into success.
+
 ### Drill without waiting for the nightly copy
 
-The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_EXPORT_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_EXPORT_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_EXPORT_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
+For an on-demand drill, `GET /api/operator/export` provides a fresh NDJSON export. This tests the export path; it does not prove that an existing nightly KV artifact can be retrieved and restored. Use `--kv` when testing that artifact.
 
-1. the restore exits 0 with `verified: true` and the backup's total event count;
+Use the existing export-only credential if a standing pull is already configured. Do not rotate or delete it as part of a drill: that would interrupt scheduled copies. If no standing export credential exists and the operator chooses a temporary one, set `ROOM_EXPORT_TOKEN` with `wrangler secret put ROOM_EXPORT_TOKEN --env production`, then remove only that temporary credential after the drill and confirm the unconfigured route answers 404. Secret changes publish a Worker version and belong in the coordinated deployment lane; smoke `/api/version` afterwards. Neither path requires enabling `ROOM_RESTORE_TOKEN`.
+
+Keep the authorization header in a protected 0600 file and send it with curl `-H @file`, so the credential does not appear in command arguments or output. Keep the downloaded export private too. Restore with `--from`, then check:
+
+1. the restore exits 0 with `verified: true`, `audit.ok: true`, the expected `contentVerification` level and the backup's total event count; record legacy or report-mode limitations explicitly rather than calling them a full recovery pass;
 2. `--room <id>` message count and `messagesSha256` equal the live digest from `GET /api/rooms/<id>/events` up to the room's `lastSequence`;
 3. every `room_attachments` row in state `committed` or `staged` has bytes whose length and sha256 equal its `byte_length` and `sha256` columns (`deleted`, `discarded` and `expired` rows have no bytes by design), and a few live downloads (`room_get_file`) hash-equal the restored bytes;
 4. `skippedTables` names only the known set above.
 
-Delete the export, the restored store and any saved NDJSON when done: they hold every room.
+Exports and restored stores hold every room. Remove disposable drill copies when finished, but preserve a designated retained backup under the existing custody and retention plan; do not delete the only off-account copy as drill cleanup.
 
-Results of each drill are recorded in `ops/STATE.md`.
+Record drill results in `ops/STATE.md`: source artifact/key and SHA256, backup time, code revision, verification level, audit result, reconciliation still required, and where the retained copy is held. Keep raw room contents and credentials out of the report.
 
 ## Byte equality (REL-14)
+
+For local SQLite backups, `backupRoom` also records `snapshot.bytes` and
+`snapshot.sha256` for the complete standalone file, after closing its verification
+connection. `backup-verify` checks those bytes before and after its semantic reads,
+rejects a non-empty WAL, and detects file identity/size/timestamp changes during
+hashing. This catches changes outside the event and attachment tables, including
+account rows. It does not change the hosted NDJSON backup format.
+
+Verify a private, quiescent backup, never the live database. Do not open the backup
+for writes, checkpoint it, or replace it during verification. The repeated checks
+detect observed changes; they are not an atomic lock against a concurrent writer.
+Keep the watermark with the snapshot and protect both: a checksum is evidence of
+byte equality to that watermark, not authentication of whoever supplied it. An
+actor who can replace both can create a matching checksum. Authority reconciliation
+against a current reference is still a separate check.
+
+The report names its coverage: `snapshot-bytes`, `events-and-attachments` for an
+older digest watermark, or `counts-only` for the oldest format. Legacy backups
+remain readable; a legacy `ok: true` does not prove equality of every table.
+Malformed snapshot metadata fails rather than silently downgrading coverage.
 
 - `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
 - The NDJSON export (the nightly backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
