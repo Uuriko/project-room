@@ -241,3 +241,37 @@ Observed serialized JSON bytes (not compression, token counts or a timing benchm
 Discussion grew slightly because the experiment adds one relevant follow-up between sizes. The correction remained available in linked discussion at every size; selected work intentionally omitted it. Each resumed checkpoint returned exactly the newly added reply. These findings support reusing existing bounded context and retrieval APIs, not asserting that the underlying server query cost is bounded or that a whole-system rewrite is unnecessary. There is no statistically established latency win and no comparison of live-model task quality.
 
 Round-2 artifacts are in the chat workspace's `outputs/collaboration-round2`: `report.json`, `recovery.json`, `production-context.json`, screenshots, per-trial exports and traces. The local experiment server must be restarted after scorer edits because server modules are cached; refresh the browser afterward.
+
+## Selected-work handoff mechanics (2026-10-29)
+
+The maintained `scripts/qualify-work-brief.mjs` now predeclares seven synthetic
+conditions: source edited, charter changed, work replaced, access revoked,
+unrelated traffic, source omitted, and private source. Each mutates a disposable
+RoomStore through real commands, then repeats authenticated selected-work reads.
+The three explicit adapters are minimal objective/acceptance, the current brief
+without source retrieval, and a source-observation-aware brief. No fixture
+projection is cloned and edited to manufacture a change.
+
+Run with supported Node from the repository root:
+
+```sh
+node scripts/qualify-work-brief.mjs /absolute/evaluator-report.json --packets-dir /absolute/fresh-solver-directory
+```
+
+Metrics are declared before retrieval: actual in-process authenticated read calls,
+serialized response bytes, adapter payload bytes, and monotonic elapsed time for
+retrieval plus adaptation. Setup and command mutations are excluded from elapsed
+time. These are single serial samples, not HTTP latency, SQL cost, model tokens,
+a speedup estimate or human effort. Errors and unknown source freshness are
+retained. An unchanged omitted-source brief cannot establish source freshness;
+a source-content observation cannot establish permission or plan validity.
+Every later mutation still needs fresh server authorization and revision checks.
+
+The report pins Git revision/tree, dirty status, relevant source hashes and Node
+runtime. Optional solver packets have opaque case IDs and omit evaluator
+expectations and mutation labels. Exports are synthetic and frozen by per-run
+hashes; fixture-generated IDs and timestamps can vary between runs. Use the
+existing private measurement logger for formative fresh-agent trials. Give a
+solver only its assigned packet and permitted observation files, not the report,
+hidden rubric or repository. File separation alone is not an isolation boundary.
+One trial per condition cannot support a statistical productivity claim.
