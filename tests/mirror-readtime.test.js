@@ -39,6 +39,8 @@ import {
 import { publicUnpublishSchema } from "../server/legal-store.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { lotReceiptVisible, recordedReceiptsSetting } from "../server/public-visibility.mjs";
+import { roomProofView } from "../server/proof-page.mjs";
+import { publicRoomView, publicSitemapEntries } from "../server/public-rooms.mjs";
 
 function makeLot(t, tag) {
   const directory = mkdtempSync(join(tmpdir(), `project-room-mirror-${tag}-`));
@@ -173,4 +175,57 @@ test("lotReceiptVisible: the mirror decides only where no rooms table exists (le
   live.prepare("UPDATE room_public_receipts_setting SET enabled=0 WHERE room_id='live-room'").run();
   assert.equal(lotReceiptVisible(live, { id: "lot_0123456789abcdef", roomId: "live-room" }), true,
     "authoritative on beats a stale mirror-off");
+});
+
+// DETAIL 8: the proof page and the room page gate on the same
+// authoritative recorded setting, not on the second write-time mirror
+// (public_rooms.receipts_enabled). The direct DB writes below are the
+// same control-plane ablation as above — mirror desync injection —
+// applied to that second mirror; seeding is through real entry points.
+const PAGE_RECEIPT = `wcr_${"ab".repeat(16)}`;
+function seedPageReceipt(store) {
+  store.db.prepare(`INSERT INTO public_receipts
+      (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    PAGE_RECEIPT, "Page-gate receipt", "work-claim", "commons", null, "Commons",
+    JSON.stringify(["ada"]), JSON.stringify([]), null, null, JSON.stringify([]),
+    "2026-10-12T00:00:00.000Z", "https://room.trydemigod.com/?start=room");
+}
+const setPageMirror = (store, enabled) => store.db.prepare(
+  "UPDATE public_rooms SET receipts_enabled=? WHERE slug='commons'").run(enabled);
+const sitemapHasProof = store => publicSitemapEntries(store).some(entry => entry.path === "/r/commons/proof");
+
+test("DETAIL 8: authority on + public_rooms mirror stale-off — proof and room pages still serve", t => {
+  const ctx = makeLot(t, "d8on");
+  ctx.store.command(ctx.ownerKey, "commons", { id: "page-on-d8on", type: "room.public_page_set", data: { enabled: true } });
+  setSetting(ctx, "on-d8on", true);
+  seedPageReceipt(ctx.store);
+  setPageMirror(ctx.store, 0); // ablation: the mirror claims OFF, the record says ON
+  const proof = roomProofView(ctx.store, "commons");
+  assert.ok(proof, "the proof page follows the recorded opt-in, not the stale mirror");
+  assert.ok(proof.document.entries.some(entry => entry.id === PAGE_RECEIPT));
+  const room = publicRoomView(ctx.store, "commons");
+  assert.equal(room.document.proofHref, "/r/commons/proof");
+  assert.ok(room.document.receipts.some(receipt => receipt.id === PAGE_RECEIPT),
+    "the room page's origin-room receipt leg follows the recorded opt-in");
+  assert.equal(sitemapHasProof(ctx.store), true, "the sitemap's proof entry follows the recorded opt-in");
+});
+
+test("DETAIL 8: authority off + public_rooms mirror stale-on — proof and room pages stay hidden", t => {
+  const ctx = makeLot(t, "d8off");
+  ctx.store.command(ctx.ownerKey, "commons", { id: "page-on-d8off", type: "room.public_page_set", data: { enabled: true } });
+  setSetting(ctx, "on-d8off", true);
+  setSetting(ctx, "off-d8off", false);
+  // Seeded after the opt-out, modelling the restore/import shape in
+  // which a receipt row and a stale mirror outlive the recorded
+  // setting: the pages must still follow the record.
+  seedPageReceipt(ctx.store);
+  setPageMirror(ctx.store, 1); // ablation: the mirror claims ON, the record says OFF
+  assert.equal(roomProofView(ctx.store, "commons"), null,
+    "the proof page follows the recorded opt-out, not the stale mirror");
+  const room = publicRoomView(ctx.store, "commons");
+  assert.equal(room.document.proofHref, null);
+  assert.ok(!room.document.receipts.some(receipt => receipt.id === PAGE_RECEIPT),
+    "the room page's origin-room receipt leg follows the recorded opt-out");
+  assert.equal(sitemapHasProof(ctx.store), false, "the sitemap's proof entry follows the recorded opt-out");
 });
