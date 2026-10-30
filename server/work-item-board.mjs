@@ -623,6 +623,9 @@ function mergeReviews(mapped, existing) {
       continue;
     }
     seen.add(key(review));
+    // #3613 B3: a kernel review's per-criterion outcomes survive the
+    // board re-map verbatim, like the rest of the record (main's spread
+    // carries criteriaOutcomes through unchanged).
     merged.push({ ...review, url: review.url ?? null });
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));

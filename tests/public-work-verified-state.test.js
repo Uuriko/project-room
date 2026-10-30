@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkReviews, publicWorkReviewsSchema } from '../server/public-work-reviews.mjs';
+import { publicReceiptById, publicWorkReceiptOutcome } from '../server/public-read-model.mjs';
 
 const code = expected => error => error.code === expected;
 
@@ -98,4 +99,94 @@ test('tampered stored bytes block a PASS with artifact_integrity_failed; a FAIL 
   assert.equal(failed.review.verification.verdict, 'FAIL');
   assert.equal(failed.review.verification.executedChecks, undefined);
   assert.equal(f.store.publicWorkClaims.receipt(id).state, 'submitted');
+});
+
+test('#3613 B1+B4: the receipt binds the pinned criteria set and the work period', t => {
+  const f = fixture(t, { attestation: [{ criterion: 'Correct result', status: 'met' }] });
+  assert.deepEqual(f.receipt.acceptanceCriteriaWithIds, [{ criterionId: 'c1', text: 'Correct result' }]);
+  assert.match(f.receipt.criteriaHash, /^[a-f0-9]{64}$/);
+  const packet = f.store.publicWorkClaims.read('verify-task');
+  assert.deepEqual(packet.acceptanceCriteriaWithIds, f.receipt.acceptanceCriteriaWithIds);
+  assert.equal(packet.criteriaHash, f.receipt.criteriaHash);
+  // Period: claimed at the claim transition, submitted at this receipt's
+  // own createdAt — never the other way round.
+  assert.equal(f.receipt.period.submittedAt, f.receipt.createdAt);
+  assert.ok(Number.isFinite(Date.parse(f.receipt.period.claimedAt)));
+  assert.ok(Date.parse(f.receipt.period.claimedAt) <= Date.parse(f.receipt.period.submittedAt));
+  // The public face projects the same period.
+  assert.deepEqual(publicReceiptById(f.store, f.receipt.receiptId).period, f.receipt.period);
+  // The verified stamp preserves the period and the pin byte-for-byte.
+  const id = f.receipt.receiptId;
+  f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS' }));
+  f.service().decide('commons', 'owner', id, f.input('accept', 1, { decision: 'accepted' }));
+  const stamped = f.store.publicWorkClaims.receipt(id);
+  assert.equal(stamped.state, 'verified');
+  assert.deepEqual(stamped.period, f.receipt.period);
+  assert.equal(stamped.criteriaHash, f.receipt.criteriaHash);
+});
+
+test('#3613 B1: finish attestation may cite a criterion by its pinned id', t => {
+  const byId = fixture(t, { deferFinish: true });
+  const done = byId.finish({ criteriaAttestation: [{ criterionId: 'c1', status: 'met' }] });
+  // Stored in the legacy text-keyed shape; coverage executed as a pass.
+  assert.deepEqual(done.receipt.criteriaAttestation, [{ criterion: 'Correct result', status: 'met' }]);
+  assert.deepEqual(done.receipt.executedChecks.map(entry => [entry.name, entry.result]), [['criteria_coverage', 'pass']]);
+  const unknown = fixture(t, { deferFinish: true });
+  assert.throws(() => unknown.finish({ criteriaAttestation: [{ criterionId: 'c9', status: 'met' }] }),
+    error => /unknown criterionId "c9"/.test(error.message));
+  const mismatch = fixture(t, { deferFinish: true });
+  assert.throws(() => mismatch.finish({ criteriaAttestation: [{ criterionId: 'c1', criterion: 'Something else', status: 'met' }] }),
+    error => /does not match its criterionId/.test(error.message));
+});
+
+test('#3613 B2: reviewer per-criterion outcomes are validated against the pin and recorded', t => {
+  const f = fixture(t, { attestation: [{ criterion: 'Correct result', status: 'met' }] });
+  const id = f.receipt.receiptId;
+  // Unknown id, empty list and duplicate citations are refused before
+  // anything records (the bounty citations contract, mirrored).
+  assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('bad-id', 0, { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c9', verdict: 'pass' }] })),
+    code('invalid_public_review'));
+  assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('empty', 0, { verdict: 'PASS', criteriaOutcomes: [] })),
+    code('invalid_public_review'));
+  assert.throws(() => f.service().verify('commons', 'reviewer', id, f.input('dupe', 0, { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'pass' }, { criterionId: 'c1', verdict: 'fail' }] })),
+    code('invalid_public_review'));
+  const passed = f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
+  assert.deepEqual(passed.review.verification.criteriaOutcomes, [{ criterionId: 'c1', verdict: 'pass' }]);
+  assert.equal(passed.review.verification.criteriaHash, f.receipt.criteriaHash);
+  assert.equal(passed.review.verification.current, true);
+  // The public outcome face composes the outcomes beside the pinned hash.
+  const pub = publicReceiptById(f.store, id);
+  assert.deepEqual(pub.review.criteriaOutcomes, [{ criterionId: 'c1', verdict: 'pass' }]);
+  assert.equal(pub.review.criteriaHash, f.receipt.criteriaHash);
+});
+
+test('#3613 B2: a PASS with a failed criterion outcome does not count as a current pass', t => {
+  const f = fixture(t, { attestation: [{ criterion: 'Correct result', status: 'met' }] });
+  const id = f.receipt.receiptId;
+  const passed = f.service().verify('commons', 'reviewer', id, f.input('pass', 0, { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'fail' }] }));
+  assert.equal(passed.review.verification.verdict, 'PASS');
+  assert.equal(passed.review.verification.current, false);
+  // Acceptance is blocked while that PASS is the current one...
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('accept', 1, { decision: 'accepted' })), code('review_pass_required'));
+  // ...until a fresh PASS with passing outcomes replaces it.
+  f.service().verify('commons', 'reviewer', id, f.input('pass-2', 1, { verdict: 'PASS', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] }));
+  const accepted = f.service().decide('commons', 'owner', id, f.input('accept-2', 2, { decision: 'accepted' }));
+  assert.equal(accepted.review.state, 'accepted');
+});
+
+test('#3613 B2: criteriaOutcomes stays off the decide action whitelist', t => {
+  const f = fixture(t);
+  assert.throws(() => f.service().decide('commons', 'owner', f.receipt.receiptId,
+    f.input('decide', 0, { decision: 'accepted', criteriaOutcomes: [{ criterionId: 'c1', verdict: 'pass' }] })),
+    error => /Unexpected or missing review fields/.test(error.message));
+});
+
+test('#3613 B4: a legacy receipt without a period projects exactly as before', t => {
+  const f = fixture(t);
+  const id = f.receipt.receiptId;
+  const row = f.store.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(id);
+  const body = JSON.parse(row.receipt_json); delete body.period;
+  f.store.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(body), id);
+  assert.equal(Object.hasOwn(publicReceiptById(f.store, id), 'period'), false);
+  assert.equal(Object.hasOwn(publicWorkReceiptOutcome(f.store, id), 'period'), false);
 });
