@@ -66,6 +66,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
   webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
+  agent_directory_publish_card: { access: "write, any identity secret (scoped API keys need the directory:publish scope); hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-directory/cards" },
+  agent_directory_withdraw_card: { access: "write, any identity secret (scoped API keys need the directory:publish scope); hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-directory/cards/{agentId}" },
   room_map: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/map/query" }
 });
 

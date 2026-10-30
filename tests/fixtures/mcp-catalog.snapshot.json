@@ -274,6 +274,24 @@
         "openWorldHint": false
       }
     },
+    "agent_directory_publish_card": {
+      "inputSchema": "77095a91d4c45ade",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "agent_directory_withdraw_card": {
+      "inputSchema": "71d4c5c4eb95f21e",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "bond_accept": {
       "inputSchema": "ab715fdf513237f6",
       "annotations": {

@@ -50,6 +50,7 @@ import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
   hostedWakeTools as WAKE_TOOLS,
+  hostedDirectoryTools as DIRECTORY_TOOLS,
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
@@ -373,6 +374,21 @@ function validWakeArgs(name, args) {
   }
   if (name === "webhook_unsubscribe") return SUBSCRIPTION_ID_PATTERN.test(args.subscriptionId);
   return false;
+}
+
+const AGENT_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+function validDirectoryArgs(name, args) {
+  const selected = DIRECTORY_TOOLS.find(entry => entry.name === name);
+  if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
+  if (typeof args.agentId !== "string" || args.agentId.length > 120 || !AGENT_ID_PATTERN.test(args.agentId)) return false;
+  if (name === "agent_directory_withdraw_card") return true;
+  const keyOk = value => typeof value === "string" && value.length >= 1 && value.length <= 512;
+  return object(args.card)
+    && keyOk(args.publicKey) && keyOk(args.signature)
+    && (args.visibility === undefined || ["public", "room", "private"].includes(args.visibility))
+    && (args.rotationSignature === undefined || keyOk(args.rotationSignature))
+    && (args.recovery === undefined || typeof args.recovery === "boolean");
 }
 
 function workRecord(item, now) {
@@ -714,6 +730,60 @@ function callInboxTool(store, identity, name, args) {
   throw new ServiceError(500, "internal", "Request could not be completed");
 }
 
+const DIRECTORY_SIGNING_DOCS = "See docs/SIGNED-AGENT-CARDS.md for the signing guide.";
+
+// Directory-card writes over MCP (UT2 04-10): the same store calls as
+// POST /api/agent-directory/cards and DELETE /api/agent-directory/cards/:id,
+// so HTTP and MCP publishes land in one directory. Signing validation keeps
+// its code and gains the doc pointer, exactly as the HTTP translate does.
+function callDirectoryTool(store, secret, identity, name, args) {
+  enforceMcpCallVisibility(store, identity, name);
+  const identityId = identity.identityId;
+  try {
+    if (name === "agent_directory_publish_card") {
+      // recovery:true is honored only with the identity (owner) secret — a
+      // scoped API key can never waive the rotation chain (the HTTP rule in
+      // agent-plugin-routes.mjs; here the credential form is the test).
+      const ownerRecovery = args.recovery === true && !secret.startsWith(API_KEY_PREFIX);
+      if (args.recovery === true && !ownerRecovery) {
+        throw new ServiceError(403, "insufficient_scope",
+          `key recovery requires the identity (owner) secret, not a scoped API key. ${DIRECTORY_SIGNING_DOCS}`);
+      }
+      const doc = store.agentPlugin.publishCard({
+        identityId,
+        agentId: args.agentId,
+        card: args.card,
+        publicKey: args.publicKey,
+        signature: args.signature,
+        rotationSignature: args.rotationSignature ?? null,
+        ownerRecovery,
+        visibility: args.visibility ?? "public"
+      });
+      return {
+        ...doc,
+        next: Object.freeze([
+          Object.freeze({ action: "update-card", tool: "agent_directory_publish_card",
+            description: "To update the card, publish again with the same agentId and a fresh signature — it replaces the existing card." }),
+          Object.freeze({ action: "withdraw-card", tool: "agent_directory_withdraw_card",
+            description: "To take the card down, call agent_directory_withdraw_card with the same agentId." }),
+          Object.freeze({ action: "see-it-live", method: "GET", path: "/api/agent-directory",
+            description: "Confirm your card is live in the directory other agents search." })
+        ])
+      };
+    }
+    if (name === "agent_directory_withdraw_card") {
+      return store.agentPlugin.withdrawCard({ identityId, agentId: args.agentId });
+    }
+  } catch (error) {
+    const signingCode = error && (error.name === "SigningError" || error.name === "DirectoryError")
+      && (error.code === "invalid_signing_input" || error.code === "invalid_card_signature" || error.code === "invalid_directory")
+      ? error.code : null;
+    if (signingCode) throw new ServiceError(422, signingCode, `${error.message}. ${DIRECTORY_SIGNING_DOCS}`);
+    throw error;
+  }
+  throw new ServiceError(500, "internal", "Request could not be completed");
+}
+
 function commandReceipt(store, secret, roomId, command, status) {
   const result = store.command(secret, roomId, command);
   return { status: result.duplicate ? "duplicate" : status, command, ...result };
@@ -1028,7 +1098,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
         : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
-          : validRoomArgs(name, args);
+          : DIRECTORY_TOOLS.some(entry => entry.name === name) ? validDirectoryArgs(name, args)
+            : validRoomArgs(name, args);
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
       if (isHostedStdioTool(name)) {
@@ -1054,6 +1125,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
+      }
+      if (DIRECTORY_TOOLS.some(entry => entry.name === name)) {
+        // Directory writes fan out to the public directory, so hold scoped
+        // API keys to the same directory:publish scope as the HTTP routes.
+        if (!mcpKeyGrantsScope(store, secret, MCP_DIRECTORY_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_DIRECTORY_SCOPE} scope` });
+        }
+        return { jsonrpc: "2.0", id: requestId, result: toolResult(callDirectoryTool(store, secret, identity, name, args)) };
       }
       const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential);
       // A minted invite code is a one-time credential: it rides in
@@ -1085,6 +1164,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
  // wildcard rule in agent-plugin-routes.mjs.
 const MCP_INBOX_SCOPE = "mcp:inbox";
 const MCP_WAKE_SCOPE = "mcp:wake";
+const MCP_DIRECTORY_SCOPE = "directory:publish";
 const MCP_WEBHOOKS_SCOPE = "webhooks:manage";
 function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
