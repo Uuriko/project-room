@@ -15,8 +15,9 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, roomMode, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
+import { requestedRoomMode } from "./room-mode.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
@@ -70,7 +71,7 @@ export function ensureAgentRoomRequestIdColumn(db) {
     ON agent_room_ownership(identity_id, request_id) WHERE request_id IS NOT NULL`);
 }
 
-const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter", "requestId"]);
+const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter", "requestId", "mode"]);
 const AGENT_STARTER_ID = "starter";
 const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 
@@ -196,7 +197,7 @@ export class AgentRooms {
       for (let i = 0; i < seats.length; i += pageSize) {
         const slice = seats.slice(i, i + pageSize);
         roomRows.push(...this.store.db.prepare(
-          `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
+          `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title, json_extract(projection, '$.room.mode') AS mode
            FROM rooms WHERE id IN (${slice.map(() => "?").join(",")})`
         ).all(...slice.map(seat => seat.roomId)));
       }
@@ -222,7 +223,7 @@ export class AgentRooms {
           nextCursor = rooms[pageSize - 1].roomId;
           break;
         }
-        rooms.push({ roomId: seat.roomId, archivedAt: roomRow.archivedAt, title: roomRow.title, memberId });
+        rooms.push({ roomId: seat.roomId, archivedAt: roomRow.archivedAt, title: roomRow.title, mode: roomMode(roomRow), memberId });
       }
       if (nextCursor) break;
       // A short batch means the seat list is exhausted.
@@ -250,6 +251,7 @@ export class AgentRooms {
     const age = row ? this.store.now() - row.createdAt : 0;
     const next = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
+      mode: roomMode(this.store.room(roomId).state.room),
       mcpToken: null, starter: starterView(this.store, roomId),
       next, nextActions: [next] };
   }
@@ -277,6 +279,10 @@ export class AgentRooms {
     // RC-2026-09-18-021: the message is derived from ROOM_KINDS so the taught
     // vocabulary can never drift from the enforced one.
     if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
+    // Mode is creation-only and lab is gated on ROOM_LAB_MODE_ENABLED
+    // (server/room-mode.mjs): off, requesting lab is a 422 refusal, never a
+    // silent coerce to production. Absent mode resolves to "production".
+    const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined);
     const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
     if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
     // requestId is the client-generated idempotency key for creates that let
@@ -308,7 +314,7 @@ export class AgentRooms {
         if (prior) {
           const state = this.store.room(prior.room_id).state;
           const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-            && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+            && state.room.kind === kind && roomMode(state.room) === mode && ownMember(state.members, memberId)?.displayName === displayName
             && hadStarter(prior.room_id) === wantStarter;
           if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
           return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId);
@@ -318,7 +324,7 @@ export class AgentRooms {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-          && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+          && state.room.kind === kind && roomMode(state.room) === mode && ownMember(state.members, memberId)?.displayName === displayName
           && hadStarter(roomId) === wantStarter;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return this.#duplicateCreateResponse(roomId, memberId, identity.identityId);
@@ -346,7 +352,9 @@ export class AgentRooms {
       // The identity is its own founding member: member id = identity id,
       // full owner permission set (bootstrap owner path in addMember).
       this.store.initialize([
-        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
+        // Only a lab room stores the key: production is the absent-field
+        // default (roomMode), so ordinary rooms' events stay byte-identical.
+        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, ...(mode === "lab" ? { mode } : {}), historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
         event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...PERMISSIONS], identityId: identity.identityId } })
       ]);
       // Link the identity so its pri_ secret authenticates to the new room.
@@ -359,7 +367,7 @@ export class AgentRooms {
           .run(GROWTH_FUNDING, identity.identityId, roomId);
       }
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
-      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
+      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, mode, starter,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });

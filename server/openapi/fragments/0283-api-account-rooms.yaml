@@ -5,7 +5,9 @@
         Browser account-session route (account_session cookie plus
         X-Session-Binding). Bounded pages of the memberships the account holds
         right now; a left or revoked membership is gone on the next read.
-        Each entry carries `kind` (personal or organization) and
+        Each entry carries `kind` (personal or organization), `mode`
+        (production or lab; rooms created before mode shipped read as
+        production) and
         `archived` / `archivedAt`; archived rooms stay listed and readable.
       security:
         - accountSession: []
@@ -16,7 +18,7 @@
           schema: { type: string }
       responses:
         '200':
-          description: "{ contractVersion: 1, viewer, rooms: [{ id, title, memberId, kind, archived, archivedAt }], nextCursor }"
+          description: "{ contractVersion: 1, viewer, rooms: [{ id, title, memberId, kind, mode, archived, archivedAt }], nextCursor }"
         '401': { description: unauthenticated }
         '422': { description: invalid_room or session_binding_required }
     post:
@@ -47,8 +49,9 @@
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization] }
                 displayName: { type: string, maxLength: 80 }
+                mode: { type: string, enum: [production, lab], description: "Optional, creation-only and immutable. Defaults to production. lab is refused 422 invalid_room_request unless the server runs with ROOM_LAB_MODE_ENABLED=1." }
       responses:
-        '201': { description: "{ contractVersion: 1, viewer, room: { id, title, memberId, kind, archived, archivedAt }, duplicate: false }" }
+        '201': { description: "{ contractVersion: 1, viewer, room: { id, title, memberId, kind, mode, archived, archivedAt }, duplicate: false }" }
         '200': { description: Idempotent replay of the same request (duplicate true) }
         '403': { description: "csrf_denied, origin_denied or room_creation_denied" }
         '409': { description: room_exists or pilot_limit }

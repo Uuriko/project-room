@@ -15,8 +15,9 @@
 // in server/writer-fence.mjs, advanced by the 0→34 migration chain in
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, roomMode, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
+import { requestedRoomMode } from "./room-mode.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
 import { seedStarterForNewAccount, starterTitleForIntent } from "./starter-room.mjs";
@@ -62,9 +63,9 @@ export function refuseArchivedWrite(state) {
 
 export const archivedAtOf = state => (typeof state?.room?.archivedAt === "string" ? state.room.archivedAt : null);
 
-export const ACCOUNT_ROOM_SELECT = "SELECT id, archived_at, json_extract(projection,'$.room.title') AS title, json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?";
+export const ACCOUNT_ROOM_SELECT = "SELECT id, archived_at, json_extract(projection,'$.room.title') AS title, json_extract(projection,'$.room.kind') AS kind, json_extract(projection,'$.room.mode') AS mode FROM rooms WHERE id=?";
 export const accountRoomEntry = (row, memberId) => ({
-  id: row.id, title: row.title, memberId, kind: roomKind({ kind: row.kind }),
+  id: row.id, title: row.title, memberId, kind: roomKind({ kind: row.kind }), mode: roomMode(row),
   archived: row.archived_at !== null && row.archived_at !== undefined, archivedAt: row.archived_at ?? null
 });
 
@@ -84,7 +85,7 @@ const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug"]);
 export function createAccountRoom(store, token, binding, request) {
   if (!request || typeof request !== "object" || Array.isArray(request)
     || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))
-    || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field))) {
+    || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field) && field !== "mode")) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
@@ -97,6 +98,10 @@ export function createAccountRoom(store, token, binding, request) {
   if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
   if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
   if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
+  // Mode is creation-only and lab is gated on ROOM_LAB_MODE_ENABLED
+  // (server/room-mode.mjs): off, requesting lab is a 422 refusal, never a
+  // silent coerce to production. Absent mode resolves to "production".
+  const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined);
   // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
   // keep the existing two-step onboarding. ACT-1b is what sends these fields.
   let intent = null;
@@ -129,7 +134,7 @@ export function createAccountRoom(store, token, binding, request) {
       const bound = store.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
       const state = bound ? store.room(roomId).state : null;
       const same = state && state.room.ownerId === bound.member_id && state.room.title === title && state.room.purpose === purpose
-        && roomKind(state.room) === kind && ownMember(state.members, bound.member_id)?.displayName === displayName;
+        && roomKind(state.room) === kind && roomMode(state.room) === mode && ownMember(state.members, bound.member_id)?.displayName === displayName;
       if (!same) fail(409, "room_exists", "That room id is already in use");
       if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start });
       return view(bound.member_id, true);
@@ -166,7 +171,9 @@ export function createAccountRoom(store, token, binding, request) {
     }
     const ownerId = "owner", at = new Date(store.now()).toISOString();
     store.initialize([
-      event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
+      // Only a lab room stores the key: production is the absent-field
+      // default (roomMode), so ordinary rooms' events stay byte-identical.
+      event({ type: T.ROOM_CREATED, actorId: ownerId, roomId, at, data: { roomId, ownerId, title, purpose, kind, ...(mode === "lab" ? { mode } : {}), historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
       event({ type: T.MEMBER_ADDED, actorId: ownerId, roomId, at, data: { memberId: ownerId, displayName, kind: "human", permissions: [...PERMISSIONS] } })
     ]);
     store.ensureHumanAccountBinding(roomId, ownerId, accountId, foundedWithGrowth ? GROWTH_ROOM_ORIGIN : "account-room-create");

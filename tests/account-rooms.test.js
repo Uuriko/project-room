@@ -37,7 +37,7 @@ test("account room discovery returns only currently authorized memberships witho
   const headers = { Cookie: "account_session=" + slot.token, "X-Session-Binding": session.sessionBinding };
   let result = await fetch(origin + "/api/account-rooms", { headers }); assert.equal(result.status, 200);
   const body = await result.json(); assert.equal(body.viewer.accountId, account.id);
-  assert.deepEqual(body.rooms, [{ id: "commons", title: "Project Room — Disposable Test", memberId: "guest", kind: "personal", archived: false, archivedAt: null }]);
+  assert.deepEqual(body.rooms, [{ id: "commons", title: "Project Room — Disposable Test", memberId: "guest", kind: "personal", mode: "production", archived: false, archivedAt: null }]);
   assert.equal(body.nextCursor, null); assert.equal(JSON.stringify(body).includes("test-request"), false);
   assert.equal(result.headers.get("cache-control"), "no-store");
   result = await fetch(origin + "/api/account-rooms", { headers: { Cookie: headers.Cookie } }); assert.equal(result.status, 422);
@@ -78,7 +78,7 @@ test("an account creates a room over HTTP with CSRF, opens it through the same s
   result = await fetch(origin + "/api/account-rooms", { method: "POST", headers, body: JSON.stringify(body) });
   assert.equal(result.status, 201);
   let created = await result.json();
-  assert.deepEqual(created.room, { id: "room-http", title: "Over HTTP", memberId: "owner", kind: "personal", archived: false, archivedAt: null });
+  assert.deepEqual(created.room, { id: "room-http", title: "Over HTTP", memberId: "owner", kind: "personal", mode: "production", archived: false, archivedAt: null });
   assert.equal(created.duplicate, false); assert.equal(created.viewer.accountId, "admin-account");
   assert.equal(result.headers.get("cache-control"), "no-store");
   result = await fetch(origin + "/api/account-rooms", { method: "POST", headers, body: JSON.stringify(body) });

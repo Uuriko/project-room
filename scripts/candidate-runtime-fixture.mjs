@@ -123,6 +123,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
+  paths.add('server/room-mode.mjs'); // dev-mode slice 1: lab-mode env gate (imported by server/room-lifecycle.mjs and server/agent-rooms.mjs)
   paths.add('server/attachment-schema.mjs');
   paths.add('server/room-attachment-bytes.mjs'); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
   paths.add('server/inbox-attachment-bytes.mjs'); // identity inbox attachment bytes (imported by server/store.mjs)

@@ -34,6 +34,7 @@
                         roomId: { type: string }
                         title: { type: string }
                         memberId: { type: string }
+                        mode: { type: string, enum: [production, lab], description: "Rooms created before mode shipped read as production." }
                         archivedAt: { type: string, nullable: true }
         '401': { description: "Missing, invalid or revoked identity secret" }
         '422': { description: Invalid cursor }
@@ -72,9 +73,10 @@
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
                 displayName: { type: string, maxLength: 80, description: "Optional. Defaults to the identity display name." }
                 starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
+                mode: { type: string, enum: [production, lab], description: "Optional, creation-only and immutable. Defaults to production. lab is refused 422 invalid_room_request unless the server runs with ROOM_LAB_MODE_ENABLED=1." }
 
       responses:
-        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, mode, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists, request_conflict, or pilot_limit }

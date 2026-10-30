@@ -346,6 +346,14 @@ export function firstBlockedWakeTarget(state, actorId, targetIds) {
 // manage_members; the owner cannot leave.
 export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
 export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
+// Room mode (dev-mode slice 1): a creation-time attribute like `kind`.
+// "lab" rooms are where later slices may relax rules; this slice only
+// records and exposes the mode. Rooms created before it — and any stored
+// value outside the vocabulary — read as "production" everywhere, so a
+// room can never become lab by accident of a malformed projection. Mode
+// is immutable: createRoom is the only writer and it runs exactly once.
+export const ROOM_MODES = Object.freeze(["production", "lab"]);
+export const roomMode = room => (ROOM_MODES.includes(room?.mode) ? room.mode : "production");
 export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
 export function isLeaveRequest(state, incoming) {
   const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
@@ -851,6 +859,7 @@ function createRoom(state, incoming) {
   if (state.room) throw new Error("Room already exists");
   requireFields(incoming.data, ["roomId", "title", "purpose", "ownerId"]);
   if (incoming.data.kind !== undefined && !ROOM_KINDS.includes(incoming.data.kind)) throw new Error("Room kind must be personal or organization");
+  if (incoming.data.mode !== undefined && !ROOM_MODES.includes(incoming.data.mode)) throw new Error("Room mode must be production or lab");
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   // PRIV-2: rooms created after history visibility shipped carry version 1,
