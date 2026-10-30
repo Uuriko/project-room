@@ -128,7 +128,7 @@ export function createNeedsAttentionCard(options) {
     const choose = partial?.id === item.id;
     const partialControls = choose ? `<fieldset data-permission-selection><legend>Choose permissions to approve</legend>${permissions.map(permission => `<label><input type="checkbox" data-permission-choice value="${esc(permission)}"${partial.selected.has(permission) ? " checked" : ""}${canGrant(permission) ? "" : " disabled"}> ${esc(permissionLabel(permission))}</label>`).join("")}
       <button type="button" class="button primary attention-selected" data-unavailable="${!partial.selected.size}" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve selected", item: item.title || item.id }))}"${partial.selected.size ? "" : " disabled"}>Approve selected</button>
-      <button type="button" class="button ghost attention-cancel">Cancel</button></fieldset>`
+      <button type="button" class="button ghost attention-cancel" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Cancel", item: item.title || item.id }))}">Cancel</button></fieldset>`
       : `<button type="button" class="button ghost attention-partial" aria-label="${esc(uiText("action.itemAccessibleName", { action: "Approve partial", item: item.title || item.id }))}">Approve partial</button>`;
     return controls + partialControls + hint;
   }

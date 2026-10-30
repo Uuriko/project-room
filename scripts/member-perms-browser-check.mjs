@@ -183,7 +183,7 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
   await selection.getByRole("checkbox", { name: "Accept work", exact: true }).uncheck();
   assert.equal(await reviewAction(row, "Approve selected").isDisabled(), true);
-  await row.getByRole("button", { name: "Cancel", exact: true }).click();
+  await reviewAction(row, "Cancel").click();
   await selection.waitFor({ state: "detached" });
   assert.equal(writes, 0, "opening, selecting and cancelling sends no decision");
   assert.equal(f.store.room("commons").sequence, sequence, "cancel appends no room event");
