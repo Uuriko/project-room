@@ -17,9 +17,9 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 
 | Status | Ledger rows |
 | --- | --- |
-| fixed | 15 |
-| open | 125 |
-| open (fix in PR) | 20 |
+| fixed | 16 |
+| open | 120 |
+| open (fix in PR) | 24 |
 | open (part in PR) | 1 |
 | stale | 8 |
 | superseded | 3 |
@@ -40,7 +40,6 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | --- | --- | --- | --- | --- |
 | KI-006 | Prod 93 commits behind main; 20-PR wave undeployed | P1 | Codex | Codex lands #5428 and deploys with smoke; John's Tab verifies KI-001/KI-006 within 4h of deploy |
 | KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
-| KI-012 | Zero-scope member can claim and submit a bounty (board 403, bounty 200) | P1 | Jill fleet | Gate bounty claim/submit on work-claim permission; or cut bounties (KI-070) |
 | KI-024 | Stop does not stop a paused agent's writes | P1 | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
 | KI-026 | room-acp not on npm; recommended npx command 404s | P1 | Grok (+Potter npm login) | #5415 serves /room-acp.tgz; publish when npm login exists |
 | KI-031 | Friend journey proven only with a scripted agent, not a real model | P1 | Jill-Dot | Jill-Dot runs packaged install + real model on second laptop |
@@ -48,6 +47,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-052 | Projection rewritten on every write (O(n^2)) | P1 | Codex | Rebase #4842 |
 | KI-061 | 524 open PRs, 218 conflicting | P1 | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
 | KI-062 | CI capacity: cancelled heads | P1 | Potter | Potter: free org or GitHub app |
+| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | P1 | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
 
 ## Ledger
 
@@ -64,7 +64,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-009 | Self-heal observability (stale-permit reset count) | UNFIXED #14 | stale | waits on #4878 (merged) but no consumer asked since | simplify | P3 | S | none | Drop unless an incident needs it |
 | KI-010 | deploy-prod: cancelled run between two Worker uploads leaves a skewed pair | #3897 | open | issue open | bug | P2 | M | Codex | Codex deploy lane |
 | KI-011 | Non-participant replies into a private tracked request | UT-MIXED F-B10-1 | fixed | #5282 merged; UT-AFTER-RELEASE 23126 FIX-HOLDS on prod | bug | P1 | - | - | Closed |
-| KI-012 | Zero-scope member can claim and submit a bounty (board 403, bounty 200) | UT F-X4-1, 23126 | open | re-tested STILL-LIVE at 4fe3f518 | bug | P1 | S | Jill fleet | Gate bounty claim/submit on work-claim permission; or cut bounties (KI-070) |
+| KI-012 | Zero-scope member can claim and submit a bounty (board 403, bounty 200) | UT F-X4-1, 23126 | fixed | main 2249dbb5 server/bounty-escrow-routes.mjs mayWorkOnBounties gates claim/submit (REST and MCP); prod gets it at next deploy (KI-006); bounties also paused by #5447 | bug | P1 | S | Jill fleet | Gate bounty claim/submit on work-claim permission; or cut bounties (KI-070) |
 | KI-013 | Dispute decider invisible (null in every read) yet verifier rules | UT F-X4-2, #5368 | open | #5305 integrated via #5314 on main; not on prod | bug | P2 | S | Jill fleet | Re-test after deploy; then close |
 | KI-014 | Blank invite became owner-level; new agents talkable by anyone | Grok audit 10-30 | open (fix in PR) | #5427 open | bug | P1 | S | Codex (#5428 path) | Land #5427 inside #5428 |
 | KI-015 | Identity mint returns private key (warns, still returned) | QA6-5 | open | #4854 open, unmerged | bug | P2 | S | Codex | Rebase #4854 |
@@ -122,7 +122,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-067 | Invariants workflow deletes prior FAIL evidence; drops error text | #4263 #4262 #4261 | open | issues open | bug | P3 | S | Jill fleet | Jill fleet owns invariants harness |
 | KI-068 | Browser test list hand-maintained | SIMPLIFY #3 | open | no PR | simplify | P3 | S | Fo | Glob runner |
 | KI-069 | Docs: 438 md files, 19 plan/backlog docs | MVP cut #1, #12 | open (fix in PR) | #5407 open; this ledger replaces lists | cut | P2 | S | Grok | Land #5407; KNOWN-ISSUES is the one issue list |
-| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open | frozen; in prod use | cut | P2 | L | Potter ruling | Potter keep or delete; until then fix only P1s (KI-012) |
+| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open (fix in PR) | Potter decision Oct 30: cut. #5447 pauses new bounty work in production (REST + MCP); full removal of routes, tools, OpenAPI and docs is the follow-up | cut | P2 | L | Potter ruling | Potter keep or delete; until then fix only P1s (KI-012) |
 | KI-071 | Public volunteer work (~7.5k lines) | MVP cut #6 | open | frozen; prod claims exist | cut | P3 | M | Grok | Freeze; delete after 30-day zero writes |
 | KI-072 | Growth, referrals, SEO probes | MVP cut #5 | open (fix in PR) | #5408 open | cut | P3 | S | Grok | Land #5408 |
 | KI-073 | Machines, relay, herdr in repo (~19k lines) | MVP cut #3 | open | relay live | cut | P3 | M | Grok | Move out after room-acp on npm |
@@ -174,8 +174,8 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-119 | Door Skip-to-content link lands on #connection-status, not content | Jill MI-010 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Point the skip link at the content target |
 | KI-120 | /join seizes focus on load | Jill MI-011 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Remove load-time focus seizure |
 | KI-121 | Two fields both labelled Room link on /join | Jill MI-012 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Disambiguate the two labels |
-| KI-122 | Receipts / receipt-detail pages have no focus styling of their own | Jill MI-014 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add focus styling on receipts surfaces |
-| KI-123 | /receipts has no skip link | Jill MI-015 (23888) | open | no skip link in public/ receipts pages on main 2249dbb5 | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add a skip link |
+| KI-122 | Receipts / receipt-detail pages have no focus styling of their own | Jill MI-014 (23888) | open (fix in PR) | #5449: skip link, focusable main, focus-visible; Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Grok | Add focus styling on receipts surfaces |
+| KI-123 | /receipts has no skip link | Jill MI-015 (23888) | open (fix in PR) | #5449: skip link, focusable main, focus-visible; no skip link in public/ receipts pages on main 2249dbb5 | low-hanging fruit | P3 | S | Grok | Add a skip link |
 | KI-124 | One-time agent key field #join-secret has no accessible name | Jill MI-018 (23888) | open | Jill master-issues draft: S3 FIXED-ALIVE; not re-verified | low-hanging fruit | P3 | S | NONE | Closed: fixed on main, M2-RETEST FIXED; no act |
 | KI-125 | No main landmark in signed-out door state | Jill MI-019 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add main landmark / heading structure |
 | KI-126 | /join loading state is not a live region | Jill MI-020 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Mark loading state as a live region |
@@ -215,7 +215,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-160 | Issue #3270: MCP identity mint 500s for reserved role names where REST returns actionable 422 | Jill MI-142 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Align MCP mint error with the REST 422 |
 | KI-161 | Issue #3378: access-request approve silently discards the decider's note (written only on deny) | Jill MI-143 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Persist decision_note on approve as on deny |
 | KI-162 | Issue #3379: invite redeem mint-vs-link fork unsignaled in the 201 response, undisclosed in llms.txt | Jill MI-144 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Signal the fork in the response + docs; silent-duplication class |
-| KI-163 | Issue #3318: test time bomb — begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the wall clock | Jill MI-145 (23888) | open | tests/begin-scope-retry.test.js:17 hardcodes 2027-01-01 on main | low-hanging fruit | P2 | S | Grok | Make the test clock-relative before it fires |
+| KI-163 | Issue #3318: test time bomb — begin-scope-retry hardcodes claim scope expiry 2027-01-01 against the wall clock | Jill MI-145 (23888) | open (fix in PR) | #5448: expiry now relative to the clock; tests/begin-scope-retry.test.js:17 hardcodes 2027-01-01 on main | low-hanging fruit | P2 | S | Grok | Make the test clock-relative before it fires |
 | KI-164 | Issue #1907: flaky/hanging — room import round-trips a large (1500-event) export never resolves | Jill MI-146 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Diagnose the hang; oldest defect-pattern item in the list |
 | KI-165 | Issue #3437: human UI has no surface for bounties or credit balances; first-owner money journey invisible to a human | Jill MI-147 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Codex (proposed) | Human money surface; xref §5 sponsor-surface gate (design call is John's) |
 | KI-166 | Issue #3842: qa5-a11y-c-browser-check fails on main: #tasks-board-open never visible, 0/6 tests | Jill MI-148 (23888) | open | Jill master-issues draft: OPEN, no naming PR found; not re-verified | bug | P2 | S | Jill-fleet (proposed) | Fix the check or the board button visibility on main |
