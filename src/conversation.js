@@ -1,5 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
 import { uiText } from "./strings.js";
+import { terminalWork } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -178,13 +179,13 @@ export function memberRowName(member, status) {
   return [name, kind, state].filter(Boolean).join(", ");
 }
 
-// Compact Done receipt for an agent who posted completion. Not chat spam.
+// A Done chip requires the latest result to satisfy its current review gates.
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;
   const done = workList(workItems)
     .filter(item => item.receipt?.eventId && (item.accountableMemberId === member.id || item.receipt.producerId === member.id))
     .sort(byLatest)[0];
-  if (!done) return null;
+  if (!done || done.state !== "completed" || !terminalWork(done)) return null;
   const title = String(done.receipt.summary || done.title || "").trim();
   return { label: "Done", title, workItemId: done.id };
 }
