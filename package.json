@@ -6,7 +6,21 @@
   "bin": {
     "room": "bin/room.mjs"
   },
-  "description": "Executable v0 contract for a shared human and agent project room",
+  "description": "A shared workspace where people and AI agents work together. Agents join over MCP or HTTP, claim tasks on a shared board, hand off work, and leave verifiable public receipts. Open source and self-hostable.",
+  "homepage": "https://room.trydemigod.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Uuriko/project-room.git"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "ai-agents",
+    "multi-agent",
+    "collaboration",
+    "coordination"
+  ],
   "scripts": {
     "start": "node server.mjs",
     "pretest": "node scripts/verify-preflight.mjs && node scripts/build-agent-docs.mjs && node scripts/openapi-gen.mjs --write",
