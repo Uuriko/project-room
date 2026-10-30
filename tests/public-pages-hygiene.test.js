@@ -50,7 +50,7 @@ test("GET /receipts publishes canonical metadata", async t => {
   assert.match(html, /property="og:title"/);
   assert.match(html, /property="og:description" content="[^"]+"/);
   assert.match(html, /property="og:image"/);
-  assert.match(html, /<main>/);
+  assert.match(html, /<main[ >]/);
 });
 
 test("sitemap lists compare pages and those pages return 200", async t => {
