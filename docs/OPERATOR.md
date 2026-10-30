@@ -40,6 +40,20 @@ One plan accepts at most 20 targets and 200,000 rows to delete. Split anything l
 
 A room with more than one active human member is refused unless the plan set `allowActiveMembers: true`. The warning names the count. `invite-only-pilot` and any id in `ROOM_OPERATOR_PROTECTED_ROOMS` are refused.
 
+## Rooms by size
+
+`GET /api/operator/rooms` lists rooms by stored projection size, largest first. Its `limit` query value is 1 to 500 (default 100); the answer says `truncated: true` when capped. Each room carries `id`, `title`, `projectionBytes`, `capBytes` (the 4 MiB projection cap), `percentOfCap`, `headSeq`, `archived` and `archivedAt`, `protected` (the purge protection list: `invite-only-pilot` plus `ROOM_OPERATOR_PROTECTED_ROOMS`), active member counts by kind, and a `messagesArchived` indicator. Sizes are live reads at request time; the answer's `readAt` says when. This read writes no audit row.
+
+## Export one room
+
+`GET /api/operator/rooms/{roomId}/export` downloads that room's event log only: one `{sequence, event}` per line for JSONL, or the HTML rendering of the same walk when the `format` query value is `html`. No other room, no credentials table, no attachment bytes. The body is materialised in full before the response starts and framed by `Content-Length`; a short read is an incomplete download. The filename is `room-<id>-<yyyymmdd>-seq<headSeq>.jsonl` (or `.html`).
+
+Exporting a room that is **not** lifecycle-archived requires the `confirmRoomId` query value set to the exact room id and a `reason` query value of 1 to 200 characters (for example, reason "cap diagnosis"). A lifecycle-archived room exports with neither. Every export writes an `operator_actions` row (`room_export`, with the reason, format, event count, byte count, and `scrubbed: true`) before the body is sent.
+
+Event bodies are scrubbed on the way out for this product's own token shapes only (`pri_…`, `rak_…`, `ga1.…` become sha256 hashes, at any nesting depth). The response header `X-Room-Export-Scrub: token-shapes` and the audit row carry that marker; nothing is added to the JSONL body itself. Any other secret pasted into a room passes through verbatim: **an export is as sensitive as the room itself**. Keep it with the same care as a backup, never in a shared drive or chat, and delete it when its purpose is done.
+
+This door needs only the operator token. It does not use or arm the whole-store export door; that door and its token are unchanged.
+
 ## QA2 leftovers
 
 Find first. Do not type ids from memory into this doc. Prefixes are enough to locate the leftovers:
@@ -78,11 +92,11 @@ The table counts leave out Cloudflare's internal `_cf_*` tables. A table that re
 
 ## Console
 
-`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions. Each page load makes two operator calls (status and actions), so stay inside the 10-per-minute limit.
+`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, lists rooms by size with a per-room Export button, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions. Each page load makes three operator calls (status, rooms, and actions), so stay inside the 10-per-minute limit. There is no auto-refresh.
 
 ## Audit
 
-Every find, plan, and execute writes one row to `operator_actions`. The row holds ids, counts, and the reason you typed. It does not hold message text or secrets. `GET /api/operator/actions?limit=` lists them. Update and delete on that table are rejected.
+Every find, plan, execute, and per-room export writes one row to `operator_actions`. The row holds ids, counts, and the reason you typed. It does not hold message text or secrets. `GET /api/operator/actions` lists them (its `limit` query value is 1 to 200). Update and delete on that table are rejected.
 
 
 ## Interpreting hosted timing
