@@ -411,11 +411,46 @@ function optedInRows(store, state) {
   return rows;
 }
 
+// A room's public-work (pwr_) rows carry that room in two ways: the
+// row's origin (the resolved task room, or the claim namespace a legacy
+// receipt fell back to) and the task record behind the receipt
+// (public_work_receipts -> public_work_tasks), because an origin can be
+// a namespace rather than a room id. An opt-out deletes by either
+// attribution, so neither form survives it — the write-time parity
+// wcr_/wir_ rows already have with the recorded public-receipts
+// setting (F-3). The task-join leg is probe-guarded: a store predating
+// the public-work tables has no task records, so the origin leg alone
+// decides there, exactly as the read predicate degrades.
+function deletePublicWorkReceiptsForRoom(store, roomId) {
+  store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source='public-work'").run(roomId);
+  if (!publicWorkTablesReadable(store.db)) return;
+  store.db.prepare(`DELETE FROM public_receipts WHERE source='public-work' AND id IN (
+    SELECT pwr.receipt_id FROM public_work_receipts pwr
+    JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+    WHERE pwt.room_id=?)`).run(roomId);
+}
+
+// Whether a room's RECORDED public-receipts setting is exactly off:
+// json_extract yields 0 only for a recorded false — a room whose
+// setting was never recorded yields NULL and keeps today's behaviour,
+// and a missing room (or a store that cannot answer) is not off.
+function recordedPublicReceiptsOff(store, roomId) {
+  if (typeof roomId !== "string" || !roomId) return false;
+  try {
+    const row = store.db.prepare(
+      "SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS enabled FROM rooms WHERE id=?").get(roomId);
+    return row?.enabled === 0;
+  } catch { return false; }
+}
+
 function replaceOptedInReceipts(store, state) {
   const roomId = state?.room?.id;
   if (!roomId) return;
   store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source IN ('work-claim','work-item')").run(roomId);
-  if (publicReceipts(state).enabled !== true) return;
+  if (publicReceipts(state).enabled !== true) {
+    deletePublicWorkReceiptsForRoom(store, roomId);
+    return;
+  }
   for (const row of optedInRows(store, state)) insertReceipt(store, row);
 }
 
@@ -645,6 +680,21 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
       const task = store.db.prepare("SELECT room_id FROM public_work_tasks WHERE offer_id=?").get(body.taskId);
       if (typeof task?.room_id === "string" && task.room_id) roomId = task.room_id;
     } catch { /* no task table/row (legacy receipt): keep the namespace fallback */ }
+  }
+  // Write-time parity with the recorded public-receipts setting (F-3):
+  // a room whose recorded setting is exactly off does not gain a pwr_
+  // row, and a re-projection (a review stamp, the backfill) removes a
+  // row projected before the opt-out instead of resurrecting it. A
+  // room whose setting was never recorded is not exactly off and keeps
+  // today's behaviour exactly.
+  if (recordedPublicReceiptsOff(store, roomId)) {
+    const remove = () => {
+      store.db.prepare("DELETE FROM public_receipts WHERE id=?").run(body.receiptId);
+      if (typeof body.identityId === "string") refreshDirectoryIdentity(store, body.identityId);
+    };
+    if (store.db.isTransaction) remove();
+    else store.transaction(remove);
+    return;
   }
   const listed = roomId ? isListed(store, roomId) : false;
   let roomTitle = null;
