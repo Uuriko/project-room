@@ -134,6 +134,52 @@ Modules:
 
 Later: R6 WebSocket channel; the who-can-talk gate from #5384 enforced server-side; usage per turn.
 
+### Build status (Oct 29, 2026)
+Built as six stacked PRs, all green locally, live E2E passed in a throwaway `qa-acp-*` room:
+#5385 B1, #5386 B2, #5387 B3 (B5 rendering folded in), #5388 B4, #5389 B6, #5390 E2E plus README.
+The package lives at `room-acp/` (top level, like `relay/` and `machine/`), not `packages/room-acp`.
+
+**R1 to R5 were dropped: the Room already does what they planned.**
+- R1: redeem already returns a room-scoped credential (`mcpToken`) whose scopes include `heartbeats:report` and `heartbeats:read`; the bridge picks its own `hostId`, and the scoped key namespaces it.
+- R2: `GET /api/rooms/{id}/messages/{messageId}/thread` gives the author, `replyToId` and the replies, so wakes need no new fields.
+- R3: presence follows the bridge's heartbeat and listener lease. Queued-while-away display stays with #5382.
+- R4: owner approval runs as a thread exchange. The bridge asks "Permission needed: ... reply allow or deny", and only the agent's accountable human's reply counts. Silence or any error denies. No new event types.
+- R5: the scoped credential re-checks membership on every call, so a removed member's next poll fails and the bridge stops with access ended.
+No Room deploy is needed for room-acp.
+
+Two findings from building against the real server:
+- Poll is limited to 30 per minute per identity, so the bridge keeps at least 2.5 s between polls.
+- Heartbeats renew the lease only near expiry.
+
+## 6b. Cleanup after ACP
+Once room-acp is published (Potter approves the npm name), it becomes the one local setup. MCP stays for hosted and cloud agents that cannot run a local process.
+
+**Removed once `npx room-acp` works, because room-acp fully covers them:**
+- Per-agent local connect docs for ACP agents: `docs/agents/claude-code.md`, `docs/agents/codex.md`, `docs/agents/paste.md` (token paste).
+- Local wake and listener setup for those agents: `docs/CLAUDE-CHANNEL.md` with `scripts/agent-claude-channel.mjs`, and `docs/CODEX-ROOM-HOST.md` with `scripts/run-codex-room.mjs`, `scripts/qualify-codex-room.mjs` and `scripts/live-codex-host-check.mjs`.
+- The local-agent halves of `docs/CONNECT-WAKE.md`, `docs/CONNECT-RECEIVE.md` and `docs/AGENT-WAKE-SETUP.md`. The hosted wake contract stays documented.
+- Token-paste and MCP-config-copy steps in `docs/CONNECT-AGENT-QUICKSTART.md` and on the connect page, for agents that room-acp supports.
+
+**Kept:**
+- MCP for hosted and cloud agents and for non-ACP editors (Cursor, Cline, VS Code, Aider): `server/connect-snippets.mjs`, `scripts/room-mcp-init.mjs`, and the `docs/agents/*` pages for those clients.
+- The SDK framework pages (CrewAI, LangGraph, OpenAI Agents SDK).
+
+**MCP core tool set** (trim target; a separate PR, with a catalog snapshot diff):
+- read room and thread
+- post
+- reply
+- read work
+- claim, release and complete work
+- heartbeat, poll wakes and ack
+- whoami
+
+Everything else moves behind the HTTP API or is removed if unused (check usage metrics first).
+
+**Order:**
+1. Before publish: docs PR making room-acp the first option, from a checkout.
+2. After publish: the removal PR.
+3. Then the MCP trim PR.
+
 ## 7. Open risks
 - **Adapter drift.** Package names and flags have changed before (`claude-code-acp` became `claude-agent-acp`; Gemini's `--experimental-acp` became `--acp`). Mitigation: the `initialize` probe plus a small table that can be overridden with `--agent-cmd`.
 - **Agent auth.** Adapters may need their own login (ChatGPT or Anthropic). The bridge surfaces `authenticate` methods and tells the user to run the agent's own login once. It never handles those secrets.

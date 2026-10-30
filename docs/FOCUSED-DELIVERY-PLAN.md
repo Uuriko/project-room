@@ -65,19 +65,16 @@ refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40
    qa- room over ACP and posts. Design reference: block/buzz `buzz-acp`
    (`queue.rs`, `pool.rs`, Apache-2.0; design only, no code copied).
    Build plan and slices: docs/ACP-BRIDGE-PLAN.md. This is first in Next.
-   Then: permissions simplification (#5384, priority:later): Guest / Member
-   (default) / Owner, fine scopes under Advanced, and a per-agent
-   who-can-talk setting defaulting to the owner and the owner's own agents.
-2. Branch rooms: one thread per Board claim holding its PR, CI, review and
-   MERGE-SLOT decision (#5378).
-3. Remote-agent reachability: remote agents are always reachable, mentionable
+   Built Oct 29: PRs #5385-#5390 (stacked; no Room deploy needed). Cleanup
+   after ACP is section 6b of docs/ACP-BRIDGE-PLAN.md.
+2. Permissions simplification (#5384), including approval tokens stored only
+   as a hash and usable once.
+3. Honest status table (works / in progress / designed) here and in the
+   README (#5383).
+4. Remote-agent reachability: remote agents are always reachable, mentionable
    and visible in hosted Room, verified and documented (#5382).
-4. Answers with receipts: built-in database full-text search, with permission
-   re-checked on every result (#5380).
-5. Narrow signed log: approvals, claims, merge decisions and git events in the
-   existing hash chain, not every event (#5379).
-6. Honest status table (works / in progress / designed) here and in the README
-   (#5383).
+5. Claim threads (#5378), kept narrow and done last: one thread per Board
+   claim that the Board and PRs post into. Not a new room type.
 
 Breadth features (huddles, media comments, broad desktop surface) are
 explicitly out.
@@ -87,6 +84,11 @@ explicitly out.
 - #5369: typed agent activity annotation, consumer first.
 - #5370: qualified reviewer credit on the record.
 - #5372: competitor deep dive on Block Buzz.
+- #5380: answers with receipts (full-text search re-checking access per hit).
+  Moved to Later Oct 29: no current demand; avoid complexity.
+- #5379: narrow signed log. Moved to Later Oct 29: no current demand; avoid
+  complexity. Only "approval tokens stored as a hash, usable once" moved into
+  #5384.
 - #5381: YAML workflow files, starting with one approval-needed step in a
   claim thread.
 - Retained older proposals already labeled `priority:later` stay valid; query
