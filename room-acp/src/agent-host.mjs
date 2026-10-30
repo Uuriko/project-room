@@ -3,8 +3,8 @@ import { spawnAgent, initialize } from "./agents.mjs";
 import { TurnRecorder } from "./render.mjs";
 
 export class AgentHost {
-  constructor({ candidate, cwd = process.cwd(), env = process.env, mode = null, onPermission = null, log = () => {} }) {
-    Object.assign(this, { candidate, cwd, env, mode, onPermission, log });
+  constructor({ candidate, cwd = process.cwd(), env = process.env, mode = null, onPermission = null, log = () => {}, savedSessions = null }) {
+    Object.assign(this, { candidate, cwd, env, mode, onPermission, log, savedSessions });
     this.sessions = new Map(); // threadKey -> sessionId
     this.recorders = new Map(); // sessionId -> TurnRecorder (one turn in flight per session)
     this.threadOf = new Map(); // sessionId -> threadKey
@@ -19,7 +19,7 @@ export class AgentHost {
     });
     this.process = spawned;
     const exited = new Promise(resolve => spawned.child.once("exit", (code, signal) => resolve({ code, signal })));
-    exited.then(info => { if (this.process === spawned) { this.process = null; for (const listener of this.exitListeners) listener(info); } });
+    exited.then(info => { if (this.process === spawned) { this.process = null; this.sessions.clear(); this.threadOf.clear(); for (const listener of this.exitListeners) listener(info); } });
     spawned.child.once("error", error => this.log(`agent failed to start: ${error.message}`));
     this.capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs: 30000 }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
     return this.capabilities;
@@ -36,9 +36,23 @@ export class AgentHost {
 
   async session(threadKey) {
     if (this.sessions.has(threadKey)) return { sessionId: this.sessions.get(threadKey), created: false };
+    if (!this.process) throw new Error("agent is not running");
+    // After a restart, resume the thread's saved session when the agent can.
+    const saved = this.savedSessions?.get(threadKey);
+    if (saved && this.capabilities?.loadSession) {
+      try {
+        const recorder = { update() {} }; // replayed history is not re-posted
+        this.recorders.set(saved, recorder);
+        await this.process.peer.request("session/load", { sessionId: saved, cwd: this.cwd, mcpServers: [] }, { timeoutMs: 60000 });
+        this.recorders.delete(saved);
+        this.sessions.set(threadKey, saved); this.threadOf.set(saved, threadKey);
+        return { sessionId: saved, created: false, loaded: true };
+      } catch (error) { this.recorders.delete(saved); this.log(`could not resume the saved session (${error.message}); starting fresh`); }
+    }
     const { sessionId } = await this.process.peer.request("session/new", { cwd: this.cwd, mcpServers: [] }, { timeoutMs: 60000 });
     if (this.mode) await this.process.peer.request("session/set_mode", { sessionId, modeId: this.mode }, { timeoutMs: 15000 }).catch(error => this.log(`set_mode ${this.mode} failed: ${error.message}`));
     this.sessions.set(threadKey, sessionId); this.threadOf.set(sessionId, threadKey);
+    this.savedSessions?.set(threadKey, sessionId);
     return { sessionId, created: true };
   }
 
@@ -62,8 +76,10 @@ export class AgentHost {
 
   onExit(listener) { this.exitListeners.add(listener); return () => this.exitListeners.delete(listener); }
 
+  get running() { return Boolean(this.process); }
+
   stop() {
-    const current = this.process; this.process = null;
+    const current = this.process; this.process = null; this.stopped = true;
     if (current) { current.peer.close(); current.child.kill(); }
   }
 }

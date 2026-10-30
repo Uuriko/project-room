@@ -7,6 +7,10 @@ import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { renderTurn } from "./render.mjs";
+import { SessionMap } from "./sessions.mjs";
+
+export const CRASH_LIMIT = 3;
+export const CRASH_WINDOW_MS = 5 * 60 * 1000;
 
 const sleep = (ms, signal) => new Promise(resolve => { const timer = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true }); });
 
@@ -20,12 +24,33 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, credential: connection.credential, fetchImpl });
-    this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, onPermission: request => this.onPermission(request) });
+    this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
+    this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
+    this.restartDelayMs = restartDelayMs; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
+    this.host.onExit?.(info => this.onAgentExit(info));
     this.fencingToken = null; this.seen = new Set(); this.controller = new AbortController(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
+  }
+
+  // Agent process died: restart with backoff; CRASH_LIMIT crashes inside
+  // CRASH_WINDOW_MS pause the bridge for a window. Wakes stay queued.
+  onAgentExit(info) {
+    if (this.controller.signal.aborted) return;
+    const now = Date.now();
+    this.crashes = [...this.crashes.filter(at => now - at < CRASH_WINDOW_MS), now];
+    const paused = this.crashes.length >= CRASH_LIMIT;
+    const delay = paused ? CRASH_WINDOW_MS : this.restartDelayMs * 2 ** (this.crashes.length - 1);
+    if (paused) { this.pausedUntil = now + delay; this.crashes = []; this.log(`agent crashed ${CRASH_LIMIT} times in 5 minutes; pausing for 5 minutes`); }
+    else this.log(`agent exited (code ${info.code ?? info.signal}); restarting in ${Math.round(delay / 1000)}s`);
+    this.ready = sleep(delay, this.controller.signal).then(() => (this.controller.signal.aborted ? null : this.host.start()))
+      .then(() => { this.pausedUntil = 0; }, error => { this.log(`agent restart failed: ${error.message}`); this.onAgentExit({ code: "start-failed" }); });
+  }
+
+  async agentReady() {
+    while (!this.host.running && this.ready && !this.controller.signal.aborted) await this.ready;
   }
 
   // Overridden in B6: until then, any permission request is declined.
@@ -76,6 +101,7 @@ export class Bridge {
     const signalIds = batch.map(item => item.signalId);
     let body;
     try {
+      await this.agentReady();
       const thread = (await this.room.thread(threadKey)).thread;
       const { sessionId, created } = await this.host.session(threadKey);
       const prompt = buildPrompt({ roomTitle: this.title, thread, wakes: batch, firstTurn: created });
