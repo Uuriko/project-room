@@ -414,3 +414,28 @@ test("signed-in friend connects own agent without room-owner permission", { time
   assert.equal(f.store.room("commons").state.room.ownerId, "owner");
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
+
+for (const count of [1, 5]) test(`agent invitation clipboard handoff keeps ${count} canonical links and optional local setup`, { timeout: 25000 }, async t => {
+  const f = await setup(t), page = f.page;
+  await page.evaluate(() => { globalThis.inviteCopied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { globalThis.inviteCopied.push(text); } } }); });
+  // Existing one-time-code dialog is retained behind the invitation control.
+  await page.locator('#invite-agents-button').evaluate(button => button.click());
+  await page.locator('#agent-invite-count').selectOption(String(count));
+  await page.locator('#agent-invite-mint').click();
+  await page.locator('#agent-invite-result').waitFor({ state: 'visible' });
+  const links = count === 1 ? [await page.locator('#agent-invite-link').getAttribute('href')]
+    : await page.locator('#agent-invite-links input').evaluateAll(inputs => inputs.map(input => input.value));
+  assert.equal(new Set(links).size, count);
+  await page.getByRole('button', { name: count === 1 ? 'Copy invitation for an agent' : 'Copy all agent invitations', exact: true }).click();
+  const handoff = await page.evaluate(() => globalThis.inviteCopied.at(-1));
+  for (const link of links) assert.equal(handoff.split(link).length - 1, 1);
+  assert.equal(handoff.split('room_check_access').length - 1, count);
+  assert.match(handoff, /read the shared brief/);
+  assert.match(handoff, /suggest a useful next task/);
+  assert.match(handoff, /explain the exact next step and wait/);
+  assert.doesNotMatch(handoff, /npx|agent-inbox\.mjs/);
+  await page.getByRole('button', { name: count === 1 ? 'Copy link' : 'Copy all links', exact: true }).click();
+  assert.equal(await page.evaluate(() => globalThis.inviteCopied.at(-1)), links.join('\n'));
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 0, 'copying does not enroll or start an agent');
+  assert.equal(await page.locator('.agent-invite-instructions[open]').count(), 0, 'local commands remain optional');
+});

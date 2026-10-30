@@ -64,6 +64,10 @@ export function inviteLinksText(links) {
   return links.map(entry => entry.link).join("\n");
 }
 
+export function inviteHandoffsText(links, locationLike = globalThis.location) {
+  return links.map(entry => agentInviteHandoff(entry.code, locationLike).hosted).join("\n\n---\n\n");
+}
+
 export function installAgentInvites({ client, getState, getSession }) {
   const dialog = $("#agent-invite-dialog");
   const form = $("#agent-invite-form");
@@ -71,6 +75,10 @@ export function installAgentInvites({ client, getState, getSession }) {
   const button = $("#invite-agents-button");
   if (!dialog || !form || !button) return { sync() {}, reset() {} };
   if ($("#agent-invite-acp-hint")) $("#agent-invite-acp-hint").textContent = uiText("invite.acp.hint");
+
+  for (const [id, key] of [["agent-invite-copy", "primary"], ["agent-invite-copy-link", "link"], ["agent-invite-copy-all", "bulk"], ["agent-invite-copy-links", "links"]]) {
+    if ($(`#${id}`)) $(`#${id}`).textContent = uiText(`invite.copy.${key}`);
+  }
 
   let owner = null, generation = null, busy = false, copying = false, minted = null;
   const member = () => getState()?.members[getSession()?.member?.id];
@@ -114,6 +122,8 @@ export function installAgentInvites({ client, getState, getSession }) {
       if (!show && select?.value === "owner") select.value = "member";
     }
     if ($("#agent-invite-copy")) $("#agent-invite-copy").disabled = copying || !single;
+    if ($("#agent-invite-copy-link")) $("#agent-invite-copy-link").disabled = copying || !single;
+    if ($("#agent-invite-copy-links")) $("#agent-invite-copy-links").disabled = copying || !bulk;
     if ($("#agent-invite-copy-acp")) $("#agent-invite-copy-acp").disabled = copying || !single;
     if ($("#agent-invite-copy-all")) $("#agent-invite-copy-all").disabled = copying || !bulk;
     if ($("#agent-invite-another")) $("#agent-invite-another").disabled = busy;
@@ -244,13 +254,19 @@ export function installAgentInvites({ client, getState, getSession }) {
   dialog.addEventListener("close", () => { if (!busy) resetForm(); });
   form.addEventListener("submit", mint);
   $("#agent-invite-copy")?.addEventListener("click", () => {
-    if (minted?.length === 1) void copyText(minted[0].link, uiText("invite.copy.015"));
+    if (minted?.length === 1) void copyText(inviteHandoffsText(minted), uiText("invite.copy.015"));
+  });
+  $("#agent-invite-copy-link")?.addEventListener("click", () => {
+    if (minted?.length === 1) void copyText(minted[0].link, uiText("invite.copy.linkDone"));
+  });
+  $("#agent-invite-copy-links")?.addEventListener("click", () => {
+    if (minted?.length > 1) void copyText(inviteLinksText(minted), uiText("invite.copy.linksDone", { fragmentA: minted.length }));
   });
   $("#agent-invite-copy-acp")?.addEventListener("click", () => {
     if (minted?.length === 1) void copyText(minted[0].acp, uiText("invite.copy.acp"));
   });
   $("#agent-invite-copy-all")?.addEventListener("click", () => {
-    if (minted?.length > 1) void copyText(inviteLinksText(minted), uiText("invite.copy.016", { fragmentA: minted.length }));
+    if (minted?.length > 1) void copyText(inviteHandoffsText(minted), uiText("invite.copy.016", { fragmentA: minted.length }));
   });
   $("#agent-invite-another")?.addEventListener("click", () => { if (!busy) resetForm(); });
   render();
