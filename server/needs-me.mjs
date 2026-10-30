@@ -10,9 +10,13 @@ import { stampNeedsMe } from "./content-trust.mjs";
 // ride beside items and never move the cursor: openWork (ready Board work),
 // reviewAsks (deliveries naming me as reviewer), myWork (my claims whose
 // lease is expiring or that sit idle), myClaims (every open claim I own,
-// with its state and next lifecycle step), and actionsNeeded (my claims
+// with its state and next lifecycle step), actionsNeeded (my claims
 // whose recorded CI failed or whose current delivery drew a
-// changes-requested review). myClaims/actionsNeeded (agent-inbox v1) close
+// changes-requested review), and bountyAttention (my bounty obligations:
+// a dispute awaiting my ruling as seated decider, plus my poster/worker
+// bounty lifecycle and outcome rows — UT2 found all three roles blind
+// here because this file never consulted the escrow read model).
+// myClaims/actionsNeeded (agent-inbox v1) close
 // the last gap where a polling agent had to re-read a whole room or board
 // to answer "what is mine and what is broken": the CI rollup and reviews
 // already live on the claim record (recordCi / recordReview), so these
@@ -631,6 +635,149 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
+const BOUNTY_SHOWN = 10;
+// Terminal bounty outcomes are an outcome record, not history: they ride
+// needs-me for a week after settlement, then the bounty list read owns
+// them. Live obligations (claimed/submitted/accepted/disputed/approved)
+// have no window — they ride until the state itself moves on. The one
+// exception is the decider's row on a ruled `approved` bounty: that row
+// is an outcome record too, so it retires on this same window.
+export const BOUNTY_OUTCOME_WINDOW_MS = 7 * 24 * 3600 * 1000;
+const BOUNTY_TERMINAL_STATES = new Set(["paid", "refunded", "cancelled"]);
+
+// Mirror of canonicalLane (server/bounty-escrow.mjs), kept local so this
+// read path does not grow an import edge into the escrow module: the
+// colon and slash spellings of an agent lane name the same ledger account.
+const laneOf = value => (typeof value === "string" && value.startsWith("id:agent:")
+  ? `id:agent/${value.slice("id:agent:".length)}` : value);
+
+// One escrow list read per room, shared shape with claimBoardOf: a failed
+// read (escrow absent on a test double, schema not converged on a
+// read-only path) reads as "no data", never as an error that blanks the
+// whole inbox. The escrow lives on the same store and the same db
+// (store.bountyEscrow, server/store.mjs), so this is the same cost class
+// as the claim-board list read above — no second store dependency.
+function bountyListOf(store, roomId) {
+  try { return store.bountyEscrow?.listBounties(roomId) ?? null; } catch { return null; }
+}
+
+// Bounty attention (attention-plumbing charter, UT2-conversion): the
+// obligation rows for the three roles UT2 executed blind — the seated
+// decider during an adjudication window, the poster, and the worker with
+// money/bond at stake. Rows carry only what the bounty list read already
+// proves (state, amount, parties, ages): grounds-free by construction —
+// evidence, criteria and dispute grounds never enter this projection.
+// One row per (bounty, role); a member holding two roles on one bounty
+// carries both obligations. Standing state like myClaims: it never moves
+// the cursor, and a row clears when its obligation clears. The decider's
+// ruling obligation exists exactly while the bounty is `disputed` and
+// this member holds the seat disputeBounty resolved — disputeDecider,
+// else the designated verifier, the same seat decideDispute enforces.
+// After the ruling the decider records the outcome like the other two
+// parties (charter §6): on `approved` and on the terminal states the
+// seated decider of a disputed bounty (its disputeId is still on the
+// bounty view) carries the same outcome row as poster/worker, inside
+// the same 7-day outcome window — `approved` is a live row for
+// poster/worker, so the decider leg there retires on the window alone.
+export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowMs = Date.now()) {
+  const list = bounties ?? bountyListOf(store, roomId);
+  if (!list) return null;
+  const lane = laneOf(memberId);
+  if (typeof lane !== "string" || !lane) return null;
+  const rows = [];
+  const seen = new Set();
+  const add = row => {
+    const key = `${row.id}:${row.role}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+  const listNext = `GET /api/rooms/${encodeURIComponent(roomId)}/bounties`;
+  for (const bounty of list) {
+    if (!bounty || typeof bounty.bountyId !== "string" || !bounty.bountyId) continue;
+    const stateChangedMs = Date.parse(bounty.stateChangedAt ?? "");
+    const stateAgeMinutes = Number.isFinite(stateChangedMs)
+      ? Math.max(0, Math.round((nowMs - stateChangedMs) / 60000)) : null;
+    const base = {
+      id: bounty.bountyId,
+      title: String(bounty.title ?? bounty.bountyId).slice(0, OPEN_WORK_TITLE),
+      state: bounty.state,
+      amount: bounty.amount,
+      poster: bounty.poster ?? null,
+      claimant: bounty.claimant ?? null,
+      ...(stateAgeMinutes !== null ? { stateAgeMinutes } : {})
+    };
+    const isPoster = laneOf(bounty.poster) === lane;
+    const isWorker = bounty.claimant != null && laneOf(bounty.claimant) === lane;
+    const deciderLane = laneOf(bounty.disputeDecider ?? bounty.verifier);
+    const isDecider = Boolean(deciderLane) && deciderLane === lane;
+    // A ruling happened only if a dispute was opened on this bounty; its
+    // disputeId stays on the view through approved and the terminal
+    // states, so it is the record that this member's seat decided.
+    const ruledDispute = isDecider && typeof bounty.disputeId === "string" && bounty.disputeId.length > 0;
+    if (bounty.state === "disputed") {
+      const disputeAgeMinutes = Number.isSafeInteger(bounty.disputeOpenedMs)
+        ? Math.max(0, Math.round((nowMs - bounty.disputeOpenedMs) / 60000)) : null;
+      const dispute = {
+        disputeId: bounty.disputeId ?? null,
+        ...(disputeAgeMinutes !== null ? { disputeAgeMinutes } : {})
+      };
+      if (isDecider) {
+        add({ ...base, role: "decider", why: "dispute_awaiting_ruling", ...dispute,
+          next: `POST /api/rooms/${encodeURIComponent(roomId)}/bounties/${encodeURIComponent(bounty.bountyId)}/dispute/decide` });
+      }
+      if (isPoster) add({ ...base, role: "poster", why: "dispute_open", ...dispute, next: listNext });
+      if (isWorker) add({ ...base, role: "worker", why: "dispute_open", ...dispute, next: listNext });
+      continue;
+    }
+    if (BOUNTY_TERMINAL_STATES.has(bounty.state)) {
+      const settledMs = Number.isFinite(stateChangedMs) ? stateChangedMs : null;
+      if (settledMs === null || nowMs - settledMs > BOUNTY_OUTCOME_WINDOW_MS) continue;
+      if (isPoster) add({ ...base, role: "poster", why: `bounty_${bounty.state}`, next: listNext });
+      if (isWorker) add({ ...base, role: "worker", why: `bounty_${bounty.state}`, next: listNext });
+      if (ruledDispute) add({ ...base, role: "decider", why: `bounty_${bounty.state}`, next: listNext });
+      continue;
+    }
+    switch (bounty.state) {
+      case "claimed":
+        if (isPoster) add({ ...base, role: "poster", why: "bounty_claimed", next: listNext });
+        if (isWorker) add({ ...base, role: "worker", why: "bounty_claimed", next: listNext });
+        break;
+      case "submitted":
+        if (isPoster) add({ ...base, role: "poster", why: "submission_awaiting_review",
+          next: `POST /api/rooms/${encodeURIComponent(roomId)}/bounties/${encodeURIComponent(bounty.bountyId)}/accept` });
+        if (isWorker) add({ ...base, role: "worker", why: "submission_in_review", next: listNext });
+        break;
+      case "accepted": {
+        const challenge = bounty.challengeEnds ? { challengeEnds: bounty.challengeEnds } : {};
+        if (isPoster) add({ ...base, role: "poster", why: "accepted_challenge_window", ...challenge, next: listNext });
+        if (isWorker) add({ ...base, role: "worker", why: "accepted_challenge_window", ...challenge, next: listNext });
+        break;
+      }
+      case "approved":
+        if (isPoster) add({ ...base, role: "poster", why: "bounty_approved", next: listNext });
+        if (isWorker) add({ ...base, role: "worker", why: "bounty_approved", next: listNext });
+        // The decider's approved row is an outcome record, not a live
+        // obligation: it rides only inside the outcome window from the
+        // ruling (stateChangedAt), then retires like a terminal outcome.
+        if (ruledDispute && Number.isFinite(stateChangedMs)
+          && nowMs - stateChangedMs <= BOUNTY_OUTCOME_WINDOW_MS)
+          add({ ...base, role: "decider", why: "bounty_approved", next: listNext });
+        break;
+      default:
+        break; // proposed/funded: not yet anyone's obligation.
+    }
+  }
+  if (!rows.length) return null;
+  const rank = { dispute_awaiting_ruling: 0, submission_awaiting_review: 1, dispute_open: 2,
+    bounty_claimed: 3, submission_in_review: 3, accepted_challenge_window: 4, bounty_approved: 5,
+    bounty_paid: 6, bounty_refunded: 6, bounty_cancelled: 6 };
+  rows.sort((a, b) => (rank[a.why] ?? 9) - (rank[b.why] ?? 9)
+    || (b.stateAgeMinutes ?? -1) - (a.stateAgeMinutes ?? -1)
+    || String(a.id).localeCompare(String(b.id)) || String(a.role).localeCompare(String(b.role)));
+  return { roomId, count: rows.length, top: rows.slice(0, BOUNTY_SHOWN), next: listNext };
+}
+
 export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -676,6 +823,7 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   const myWork = [];
   const myClaims = [];
   const actionsNeeded = [];
+  const bountyAttention = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = scopedRoom === null && links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -699,6 +847,9 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
     if (needed) actionsNeeded.push(needed);
+    const bountyAttn = bountyAttentionOf(store, link.roomId, link.memberId, null,
+      typeof store.now === "function" ? store.now() : Date.now());
+    if (bountyAttn) bountyAttention.push(bountyAttn);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -772,5 +923,5 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), ...(bountyAttention.length ? { bountyAttention } : {}), cursor, hasMore });
 }
