@@ -12,11 +12,12 @@ const request = { clientId: 'test', userId: 'account', redirectUri: 'https://cli
 function setup(durable = false) {
   const db = new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE agent_identities(identity_id TEXT,secret_hash TEXT,revoked_at INTEGER); INSERT INTO agent_identities VALUES('agent','fixture',NULL);
+    CREATE TABLE credentials(hash TEXT,revoked INTEGER); INSERT INTO credentials VALUES('credential',0);
     CREATE TABLE accounts(id TEXT,active INTEGER); INSERT INTO accounts VALUES('account',1);
     CREATE TABLE member_accounts(room_id TEXT,member_id TEXT,account_id TEXT); INSERT INTO member_accounts VALUES('room','friend','account');
     CREATE TABLE identity_links(room_id TEXT,identity_id TEXT,member_id TEXT); INSERT INTO identity_links VALUES('room','agent','agent');`);
   const state = { members: { friend: { kind: 'human', active: true }, agent: { kind: 'agent', active: true, identityId: 'agent', accountableHumanId: 'friend' } } };
-  const store = { db, room: () => ({ state }) };
+  const store = { db, room: () => ({ state }), now: () => 1000, agentConnections: { row: () => ({ sponsor_account_id: 'account', sponsor_member_id: 'friend', status: 'issued', expires_at: 2000, credential_hash: 'credential' }), authority: () => true } };
   const provider = createOAuthProvider(durable ? { db } : {});
   provider.registerClient({ clientId: request.clientId, name: 'Test', redirectUris: [request.redirectUri] });
   const code = () => provider.issueCode({ ...request, binding }).code;

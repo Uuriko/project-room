@@ -46,9 +46,10 @@ export function validateMcpOAuthBinding(store, userId, binding) {
   if (human?.kind !== 'human' || human.active !== true || agent?.kind !== 'agent' || agent.active !== true
     || agent.accountableHumanId !== humanMemberId || agent.identityId !== identityId) return null;
   const connection = store.agentConnections?.row?.(roomId, memberId);
-  if (connection && (connection.status !== 'issued' || connection.expires_at <= store.now()
+  if (!connection || connection.sponsor_account_id !== userId || connection.sponsor_member_id !== humanMemberId) return null;
+  if (connection.status !== 'issued' || connection.expires_at <= store.now()
     || !store.agentConnections.authority(connection)
-    || store.db.prepare('SELECT revoked FROM credentials WHERE hash=?').get(connection.credential_hash)?.revoked !== 0)) return null;
+    || store.db.prepare('SELECT revoked FROM credentials WHERE hash=?').get(connection.credential_hash)?.revoked !== 0) return null;
   if (store.agentConnections?.identityAuthority && !store.agentConnections.identityAuthority(roomId, memberId)) return null;
   if (store.identities?.resolveIdentityLink) {
     try {
