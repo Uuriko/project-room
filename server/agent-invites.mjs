@@ -1,4 +1,4 @@
-import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
+import { canInviteCoOwners } from "../src/room-administration.js";
 // One-time agent invite codes: the self-serve half of the plug-in loop.
 //
 // An owner mints a short single-use code bound to a room with an explicit
@@ -342,12 +342,11 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
-    // "owner" names full access. Muse development co-owners default to full
-    // access; other rooms default to Member.
+    // "owner" names full access. An invite with no scope is Member in every
+    // room, including Muse development; owner-level must be asked for.
     if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
     if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) {
-      if (roomId === "muse-room" && museDevelopmentAccess(this.store.room(roomId).state) && !auth.delegate && canInviteCoOwners(this.store.room(roomId).state, auth.member.id)) ownerEquivalent = true;
-      else profile = "member";
+      profile = "member";
     }
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");

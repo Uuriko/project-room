@@ -65,7 +65,7 @@ export function mayWake(db, state, roomId, senderId, targetId) {
 // Seed the default for a newly joined agent. Never overwrites a choice.
 export function seedNewAgentPolicy(db, roomId, memberId, at, state = null) {
   db.prepare(`INSERT OR IGNORE INTO agent_talk_policies(room_id,member_id,policy,allowed_json,updated_by,updated_at)
-    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, museDevelopmentAccess(state) ? "room" : DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
+    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
 }
 
 // Validate and write a change. Only the room owner or the agent's own

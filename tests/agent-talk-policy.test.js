@@ -82,3 +82,13 @@ test("#5384 a newly joined agent defaults to owner; only its owner can change it
   const after = await call(origin, "GET", `/api/rooms/commons/members/${memberId}/talk-policy`, undefined, ownerKey);
   assert.equal(after.json.policy, "nobody");
 });
+
+test("a new agent defaults to owner even in a Muse development room", async () => {
+  const { seedNewAgentPolicy, readTalkPolicy } = await import("../server/agent-talk-policy.mjs");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { AGENT_TALK_POLICY_SCHEMA } = await import("../server/agent-talk-policy.mjs");
+  const db = new DatabaseSync(":memory:");
+  db.exec(AGENT_TALK_POLICY_SCHEMA);
+  seedNewAgentPolicy(db, "muse-room", "bot", 1, { museDevelopment: true, members: {} });
+  assert.equal(readTalkPolicy(db, "muse-room", "bot").policy, "owner");
+});
