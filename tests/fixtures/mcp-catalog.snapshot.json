@@ -120,7 +120,7 @@
       }
     },
     "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
+      "inputSchema": "31fdf1bef8949a25",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -734,7 +734,7 @@
       }
     },
     "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
+      "inputSchema": "31fdf1bef8949a25",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2528,7 +2528,7 @@
       }
     },
     "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
+      "inputSchema": "31fdf1bef8949a25",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
