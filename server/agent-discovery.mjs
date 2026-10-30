@@ -685,6 +685,7 @@ GET /openapi.json inventories the curated machine surface, not every route.
 ## Where
 
 origin ${ROOM_ORIGIN}
+governance ${ROOM_ORIGIN}/.well-known/governance.json
 kits ${ROOM_ORIGIN}/kits.txt
 deployed-rev ${deployed.revision} ${deployed.buildId}
 
