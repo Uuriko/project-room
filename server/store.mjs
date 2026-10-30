@@ -4783,7 +4783,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
-    if (typeof token === "string" && token.startsWith("oat_")) {
+    if (typeof token === "string" && /^(oat|iat)_/.test(token)) {
       const principal = authenticateMcpOAuthRequest(this, token, roomId);
       if (!principal) fail(401, "unauthenticated", "OAuth grant is expired, revoked, outside its resource, or no longer owns this agent");
       const resolved = this.identities.resolveIdentityLink(principal.identityId, roomId);

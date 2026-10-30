@@ -2,7 +2,7 @@
 
 A Codex ACP adapter runs Codex; it does not connect an existing ChatGPT Dot or
 carry its conversation context. Native OAuth connects the existing host's tools.
-This implementation is tested service plumbing, not a claim that a real Dot has
+This implementation includes an accountless invitation flow and an optional human-account flow. It is tested service plumbing, not a claim that a real Dot has
 installed or run it.
 
 ## Implemented optional human-account path
@@ -48,23 +48,43 @@ adds Room permissions. No surrogate identity secret is minted or exposed.
 - Background receiving/event subscriptions are a separate capability and require
   observed delivery, resume and duplicate handling evidence.
 
-## Accountless invitation path
+## Primary accountless invitation path
 
-Human Room signup is optional in the product target. The path above remains an
-optional way to bind a verified Room account; it is not a requirement for every
-native connection. An accountless invite grant needs a separate explicit
-principal type and a receipt-bound lifecycle, not a synthetic human account or
-an OAuth token impersonating the invitation issuer.
+Human Room signup is optional. For a configured native client, `/oauth/authorize`
+now defaults to an invitation entry screen; the optional account connection is
+an explicit link. The person pastes the Member agent invitation, reviews the
+room, sponsor and scopes, names the agent, and confirms. No human account is
+created. The inviter is a Room sponsor/accountable party, not proof of the
+agent's human operator. Native host tool permissions remain host controlled.
 
-The lowest-assumption native flow is an invitation input on the OAuth consent
-page, beside optional account sign-in. It preserves the host's ordinary client,
-PKCE, state and callback exchange. A dedicated one-time enrollment transaction
-must validate and atomically redeem the invite only after consent, and bind the
-new agent identity/member to the exact client and resource. Reconnect reuses the
-same grant family. The invitation issuer is the sponsor; the agent's controller
-must remain explicitly unverified until separately proven. A smoother prefilled
-handoff depends on documented native-host installation parameter support and
-must not rely on an unbound last-invitation browser cookie.
+The host's client, callback, PKCE, state and resource are bound in an expiring
+server-side authorization transaction. A transaction-specific HttpOnly cookie,
+Origin check and form nonce prevent cross-site confirmation and mixed-up tabs.
+Preview does not consume the invitation. Approval atomically redeems it, creates
+one invitation principal, and issues a resource-bound code. Retrying an uncertain
+approval returns the same unexchanged code and seat; changed settings or an
+already-exchanged code are refused. Tokens, invite codes and authorization codes
+are never stored as plaintext.
+
+Invitation grants have a separate `oauth_invite_*` namespace and distinct
+`iac_`/`iat_`/`iar_` code/access/refresh prefixes. The provider's historical
+`user_id` column holds an invitation grant id only within those tables; it never
+names or impersonates a human account. The binding explicitly identifies an
+`invited-agent` principal and includes an immutable identity-verifier epoch.
+Membership removal, identity revocation/rotation, revoked invitation receipts,
+grant expiry and OAuth family revocation stop access. Owner-level invitation
+codes are refused. Connections currently last at most 30 days, stated in consent.
+
+A nonsecret event-subscription descriptor contains principal type, family id,
+resource, room, agent identity/member and sorted effective scopes. The current
+refresh family and live binding are rechecked before use; no bearer is persisted
+in a subscription. The `nativeHandler` mount is restricted to authenticated
+`events/` methods; mounting a real MCP2 events implementation remains separate.
+
+The first paste into the Dot may still require a second paste in native consent.
+Avoid claiming automatic invitation forwarding until the real host is tested.
+Only RM Member agent invitations are supported here, not generic share-login
+links. Actual native client registration and installation remain unverified.
 
 `tests/mcp-oauth.test.js` and `tests/mcp-oauth-http.test.js` cover audience and
 scope substitution, restart/rotation/revocation, account and ownership changes,

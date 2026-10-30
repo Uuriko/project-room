@@ -58,7 +58,9 @@ const isExpired = (record, now) => record.expiresAt !== null && now() >= record.
 // Only a trusted consent handler may supply a binding after checking ownership.
 const validateBinding = binding => {
   if (binding === undefined || binding === null) return null; // legacy desktop grant
-  const fields = ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch"];
+  const fields = binding?.principalType === "invited-agent"
+    ? ["resource", "roomId", "identityId", "memberId", "principalType", "invitationGrantId", "identityEpoch"]
+    : ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch"];
   check(binding && typeof binding === "object" && !Array.isArray(binding)
     && Object.keys(binding).length === fields.length
     && fields.every(key => typeof binding[key] === "string" && binding[key].length > 0 && binding[key].length <= 512),
@@ -74,7 +76,9 @@ const checkResource = (record, resource) => {
     fail("invalid_target", "resource does not match this grant");
 };
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, isBindingActive } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, isBindingActive, tokenKind = "account" } = {}) {
+  check(["account", "invite"].includes(tokenKind), "unsupported principal type");
+  const prefix = tokenKind === "invite" ? { code: "iac", access: "iat", refresh: "iar" } : { code: "oac", access: "oat", refresh: "oar" };
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -170,13 +174,22 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   };
 
   // Step 2: after the user approves, issue an authorization code.
-  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge, binding }) => {
+  const issueCode = ({ clientId, userId, redirectUri, scopes, codeChallenge, binding, codeIdempotencyKey }) => {
     check(typeof userId === "string" && userId.length > 0 && userId.length <= 128,
       "userId must be a non-empty string up to 128 chars");
     const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge });
     const grantBinding = validateBinding(binding);
     if (!bindingActive({ userId, binding: grantBinding })) fail("invalid_grant", "agent connection is no longer active");
-    const code = `oac_${newSecret(24)}`;
+    check(codeIdempotencyKey === undefined || /^[A-Za-z0-9_-]{43}$/.test(codeIdempotencyKey), "invalid authorization transaction");
+    const code = `${prefix.code}_${codeIdempotencyKey ? sha256(`code:${codeIdempotencyKey}:${clientId}:${userId}`) : newSecret(24)}`;
+    const prior = codeStore.get(sha256(code));
+    if (prior) {
+      if (prior.used || isExpired(prior, now)) fail("invalid_grant", "authorization transaction already completed or expired");
+      check(prior.clientId === clientId && prior.userId === userId && prior.redirectUri === redirectUri
+        && prior.codeChallenge === codeChallenge && JSON.stringify(prior.scopes) === JSON.stringify(validated.scopes)
+        && JSON.stringify(prior.binding) === JSON.stringify(grantBinding), "authorization transaction changed");
+      return Object.freeze({ code, expiresAt: prior.expiresAt });
+    }
     const record = {
       codeHash: sha256(code),
       binding: grantBinding,
@@ -262,8 +275,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // (record.rotatedBy set) then revokes the whole family (F-01).
   const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session, binding } = {}) => {
     const validScopes = validateScopes(scopes);
-    const accessToken = `oat_${newSecret()}`;
-    const refreshToken = `oar_${newSecret()}`;
+    const accessToken = `${prefix.access}_${newSecret()}`;
+    const refreshToken = `${prefix.refresh}_${newSecret()}`;
     const at = now();
     const meta = normalizeSessionMeta(session);
     accessStore.set(sha256(accessToken), {
@@ -362,6 +375,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       clientId: record.clientId,
       ...(record.binding ? { binding: Object.freeze({ ...record.binding }) } : {}),
       scopes: Object.freeze([...record.scopes]),
+      familyId: record.familyId,
     });
   };
 
@@ -456,6 +470,21 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     return count;
   };
 
+  // Nonsecret event subscriptions reference a grant family, not a bearer.
+  // A rotated-out refresh row is never authority; current revocation,
+  // resource, account and binding checks are identical to access verification.
+  const verifyGrantFamily = (familyId, { resource } = {}) => {
+    if (typeof familyId !== "string" || familyId.length > 128) return null;
+    for (const record of refreshStore.values()) {
+      if (record.familyId !== familyId || record.revoked || isExpired(record, now)
+        || !bindingActive(record) || (isAccountActive && !isAccountActive(record.userId))
+        || (record.binding ? resource !== record.binding.resource : resource !== undefined)) continue;
+      return Object.freeze({ userId: record.userId, clientId: record.clientId, familyId,
+        scopes: Object.freeze([...record.scopes]), ...(record.binding ? { binding: Object.freeze({ ...record.binding }) } : {}) });
+    }
+    return null;
+  };
+
   // Scope check with prefix wildcards ("chat:*"), mirroring token-scopes.
   const grants = (token, requiredScope) => {
     const auth = verifyAccessToken(token);
@@ -475,6 +504,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     exchangeCode,
     refresh,
     verifyAccessToken,
+    verifyGrantFamily,
     revoke,
     revokeAllForUser,
     listSessions,

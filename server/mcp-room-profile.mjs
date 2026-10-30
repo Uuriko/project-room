@@ -1,4 +1,4 @@
-import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed } from './mcp-oauth.mjs';
+import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed, mcpOAuthPrincipalDescriptor, authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
 import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
@@ -1177,18 +1177,25 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, oauthResource } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
-    if (typeof authorization === "string" && /^bearer oat_/i.test(authorization)) {
+    if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
       const token = authorization.slice(7);
-      const grant = oauthProvider?.verifyAccessToken(token, { resource: oauthResource });
-      const options = { store, provider: oauthProvider, token, resource: oauthResource, roomId: grant?.binding?.roomId };
+      const provider = token.startsWith("iat_") ? inviteOAuthProvider : oauthProvider;
+      const grant = provider?.verifyAccessToken(token, { resource: oauthResource });
+      const options = { store, provider, token, resource: oauthResource, roomId: grant?.binding?.roomId };
       const principal = grant && resolveMcpOAuthPrincipal(options);
       if (!principal) return rpcError(message, MCP_AUTH_REQUIRED, "OAuth grant no longer grants access to this agent");
       const identity = { identityId: principal.identityId, displayName: store.room(principal.roomId).state.members[principal.memberId].displayName };
-      return runMcpOAuthRequest(options, () => handleAuthed(message, { store, secret: token, identity, mcpUrl,
-        searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal }));
+      return runMcpOAuthRequest(options, () => {
+        if (typeof nativeHandler === "function" && typeof message?.method === "string" && message.method.startsWith("events/"))
+          return nativeHandler(message, { principal, descriptor: mcpOAuthPrincipalDescriptor(principal),
+            authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
+              inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
+        return handleAuthed(message, { store, secret: token, identity, mcpUrl,
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal });
+      });
     }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
     // Handled before auth parsing — a presented credential is ignored and a

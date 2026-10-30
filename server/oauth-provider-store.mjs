@@ -5,6 +5,8 @@ export const OAUTH_PROVIDER_TABLES = Object.freeze([
   "oauth_provider_codes",
   "oauth_provider_access_tokens",
   "oauth_provider_refresh_tokens",
+  "oauth_invite_clients", "oauth_invite_codes", "oauth_invite_access_tokens", "oauth_invite_refresh_tokens",
+  "oauth_invite_grants", "oauth_invite_pending",
 ]);
 
 const SCHEMA = `
@@ -94,6 +96,9 @@ const PRUNE = Object.freeze([
   ["oauth_provider_codes", "code_hash"],
   ["oauth_provider_access_tokens", "token_hash"],
   ["oauth_provider_refresh_tokens", "token_hash"],
+  ["oauth_invite_clients", "client_id"], ["oauth_invite_codes", "code_hash"],
+  ["oauth_invite_access_tokens", "token_hash"], ["oauth_invite_refresh_tokens", "token_hash"],
+  ["oauth_invite_grants", "id"], ["oauth_invite_pending", "nonce_hash"],
 ]);
 
 // Bounded delete of expired rows. Does not create the tables: a cron tick
@@ -105,6 +110,7 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
   if (!oauthProviderTablesPresent(db)) return { pruned: 0 };
   let pruned = 0;
   for (const [table, key] of PRUNE) {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
     const result = db.prepare(
       `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE expires_at <= ? LIMIT ?)`
     ).run(now, limit);

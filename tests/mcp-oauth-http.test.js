@@ -61,7 +61,7 @@ async function setup(t) {
 }
 test('native OAuth connects an agent, reads and posts as that agent, never authenticates REST', async t => {
   const f = await setup(t);
-  const authorizeUrl = f.base + '/oauth/authorize?' + new URLSearchParams({ client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], scope: 'rooms:read', state: 'screen', code_challenge: challenge, code_challenge_method: 'S256', resource });
+  const authorizeUrl = f.base + '/oauth/authorize?' + new URLSearchParams({ client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], connection: 'account', scope: 'rooms:read', state: 'screen', code_challenge: challenge, code_challenge_method: 'S256', resource });
   const screen = await fetch(authorizeUrl, { headers: { Cookie: f.cookie } });
   assert.equal(screen.status, 200);
   assert.match(await screen.text(), /name="agent_binding"/);

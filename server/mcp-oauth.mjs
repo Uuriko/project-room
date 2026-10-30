@@ -61,13 +61,16 @@ export function validateMcpOAuthBinding(store, userId, binding) {
 // Returns a principal, NEVER a reusable pri_/rak_ secret or expanded grant.
 // Callers still run ordinary Room command authorization as this agent member.
 export function resolveMcpOAuthPrincipal({ store, provider, token, resource, roomId, requiredScopes = [] }) {
-  if (typeof token !== 'string' || !token.startsWith('oat_') || !Array.isArray(requiredScopes)
+  if (typeof token !== 'string' || !(/^(oat|iat)_/.test(token)) || !Array.isArray(requiredScopes)
     || requiredScopes.some(scope => !OAUTH_SCOPES.includes(scope))) return null;
   const grant = provider.verifyAccessToken(token, { resource });
   if (!grant?.binding || grant.binding.resource !== resource || grant.binding.roomId !== roomId
     || requiredScopes.some(scope => !grant.scopes.includes(scope))) return null;
-  const principal = validateMcpOAuthBinding(store, grant.userId, grant.binding);
-  return principal ? Object.freeze({ ...principal, clientId: grant.clientId,
+  const principal = grant.binding.principalType === "invited-agent"
+    ? validateMcpInviteOAuthBinding(store, grant.userId, grant.binding)
+    : validateMcpOAuthBinding(store, grant.userId, grant.binding);
+  return principal ? Object.freeze({ ...principal, principalType: principal.principalType ?? "account-agent",
+    familyId: grant.familyId, resource, clientId: grant.clientId,
     scopes: Object.freeze([...grant.scopes]) }) : null;
 }
 
@@ -116,4 +119,39 @@ export function mcpOAuthIdentityEpoch(store, identityId) {
   const row = store.db.prepare('SELECT secret_hash,revoked_at FROM agent_identities WHERE identity_id=?').get(identityId);
   if (!row || row.revoked_at !== null) return null;
   return createHash('sha256').update(`mcp-oauth-identity:${row.secret_hash}`).digest('hex');
+}
+
+export function validateMcpInviteOAuthBinding(store, grantId, binding) {
+  const fields = ['principalType', 'invitationGrantId', 'resource', 'roomId', 'identityId', 'memberId', 'identityEpoch'];
+  if (!binding || Object.keys(binding).length !== fields.length || binding.principalType !== 'invited-agent'
+    || fields.some(key => typeof binding[key] !== 'string' || !binding[key]) || binding.invitationGrantId !== grantId) return null;
+  const grant = store.db.prepare('SELECT * FROM oauth_invite_grants WHERE id=?').get(grantId);
+  if (!grant || grant.revoked_at !== null || grant.expires_at <= store.now()
+    || grant.room_id !== binding.roomId || grant.identity_id !== binding.identityId || grant.member_id !== binding.memberId
+    || grant.identity_epoch !== binding.identityEpoch || mcpOAuthIdentityEpoch(store, binding.identityId) !== binding.identityEpoch) return null;
+  const invite = store.db.prepare('SELECT redeemed_identity_id,revoked_at FROM agent_invite_codes WHERE code_hash=?').get(grant.invite_hash);
+  if (!invite || invite.revoked_at !== null || invite.redeemed_identity_id !== binding.identityId) return null;
+  let member;
+  try { member = store.identities.resolveIdentityLink(binding.identityId, binding.roomId)?.member; } catch { return null; }
+  if (!member || member.id !== binding.memberId || member.kind !== 'agent' || member.active !== true) return null;
+  return Object.freeze({ principalType: 'invited-agent', invitationGrantId: grantId, roomId: binding.roomId,
+    identityId: binding.identityId, memberId: binding.memberId, sponsorMemberId: grant.sponsor_member_id,
+    controllerVerification: 'invitation-capability' });
+}
+
+export function mcpOAuthPrincipalDescriptor(principal) {
+  return Object.freeze({ ...Object.fromEntries(['principalType', 'familyId', 'resource', 'roomId', 'identityId', 'memberId']
+    .map(key => [key, principal[key]])), scopes: Object.freeze([...principal.scopes].sort()) });
+}
+export function authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor, requiredScopes = ['chat:read'] }) {
+  if (!descriptor || !['account-agent', 'invited-agent'].includes(descriptor.principalType) || descriptor.resource !== resource) return null;
+  const provider = descriptor.principalType === 'invited-agent' ? inviteProvider : accountProvider;
+  const grant = provider?.verifyGrantFamily(descriptor.familyId, { resource });
+  if (!grant?.binding || requiredScopes.some(scope => !grant.scopes.includes(scope))
+    || !Array.isArray(descriptor.scopes) || JSON.stringify(descriptor.scopes) !== JSON.stringify([...grant.scopes].sort())) return null;
+  const principal = descriptor.principalType === 'invited-agent'
+    ? validateMcpInviteOAuthBinding(store, grant.userId, grant.binding)
+    : validateMcpOAuthBinding(store, grant.userId, grant.binding);
+  if (!principal || ['roomId', 'identityId', 'memberId'].some(key => principal[key] !== descriptor[key])) return null;
+  return Object.freeze({ ...principal, ...descriptor, clientId: grant.clientId, scopes: grant.scopes });
 }

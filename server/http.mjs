@@ -1,3 +1,4 @@
+import { createMcpInviteOAuth, inviteOAuthPage } from './mcp-invite-oauth.mjs';
 import { mcpOAuthResourceMetadata, listMcpOAuthAgents, validateMcpOAuthBinding } from './mcp-oauth.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
@@ -564,6 +565,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   for (const c of [...connectorClients, ...mcpOAuthClients]) {
     oauthProvider.registerClient(c);
   }
+  const inviteOAuth = oauthResource ? createMcpInviteOAuth({ store, clients: mcpOAuthClients, resource: oauthResource }) : null;
   // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
   // tombstone at github:<id> / google:<sub>, and its login methods are gone, so
   // a returning person reaches the provision step below. Take the next free
@@ -719,7 +721,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     });
   }
   const hostedRoomMcp = createHostedRoomMcp(store, {
-    agentRooms, oauthProvider: oauthResource ? oauthProvider : null, oauthResource,
+    agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
@@ -1722,6 +1724,43 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           verdict_polling: { url_template: `${origin}/api/rooms/{roomId}/feedback/{feedback_id}`, method: "GET" },
         }, req.method === "HEAD");
       }
+      // Native invitation consent is the default; a Room account is optional.
+      const invitePage = (view, request) => {
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        res.setHeader("Content-Security-Policy", `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' ${new URL(request.redirectUri).origin}`);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end(inviteOAuthPage(view));
+      };
+      if (url.pathname === "/oauth/authorize" && req.method === "GET" && inviteOAuth
+        && mcpClientIds.has(url.searchParams.get("client_id")) && url.searchParams.get("connection") !== "account") {
+        rate(`oauth-invite-start:${remoteAddress}`, 30);
+        try {
+          const started = inviteOAuth.begin(url.searchParams);
+          setCookie(res, `oauth_invite_${started.nonce.slice(0, 16)}`, started.nonce, 600, "Lax");
+          const account = new URL(url, expectedOrigin());
+          account.searchParams.set("connection", "account");
+          return invitePage({ ...started, accountUrl: account.pathname + account.search }, started.request);
+        } catch (error) { return json(res, 400, { error: "invalid_request", error_description: error.message }); }
+      }
+      if (url.pathname === "/oauth/invite" && req.method === "POST" && inviteOAuth) {
+        rate(`oauth-invite-confirm:${remoteAddress}`, 30);
+        checkOrigin(req, true);
+        const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+        const data = Object.fromEntries(new URLSearchParams(text));
+        const nonce = typeof data.nonce === "string" && /^[A-Za-z0-9_-]{43}$/.test(data.nonce) ? data.nonce : null;
+        const cookieNonce = nonce ? cookie(req, `oauth_invite_${nonce.slice(0, 16)}`) : null;
+        if (!nonce || cookieNonce !== nonce) return json(res, 403, { error: "csrf_denied" });
+        try {
+          if (data.decision === "allow") {
+            const redirect = inviteOAuth.approve(nonce, data.invitation, data.display_name);
+            res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+            return res.end();
+          }
+          const viewed = inviteOAuth.preview(nonce, data.invitation);
+          return invitePage({ nonce, ...viewed }, viewed.request);
+        } catch (error) { return json(res, 400, { error: "invitation_connection_failed", error_description: error.message }); }
+      }
       // GET /oauth/authorize — validate the request and show the consent screen.
       // The user must be logged in (account session cookie); otherwise redirect
       // to the login page with a return URL.
@@ -1901,8 +1940,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         try {
           let tokens;
+          const invitationToken = (grantType === "authorization_code" ? data.code : data.refresh_token);
+          const tokenProvider = typeof invitationToken === "string" && /^(iac|iar)_/.test(invitationToken) ? inviteOAuth?.provider : oauthProvider;
+          if (!tokenProvider) return json(res, 400, { error: "invalid_grant" });
           if (grantType === "authorization_code") {
-            tokens = oauthProvider.exchangeCode({
+            tokens = tokenProvider.exchangeCode({
               code: data.code,
               clientId: data.client_id,
               redirectUri: data.redirect_uri,
@@ -1910,7 +1952,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               session: sessionMeta, resource: data.resource,
             });
           } else if (grantType === "refresh_token") {
-            tokens = oauthProvider.refresh({
+            tokens = tokenProvider.refresh({
               refreshToken: data.refresh_token,
               clientId: data.client_id,
               session: sessionMeta, resource: data.resource,
@@ -1937,8 +1979,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // stays surgical — only that token dies.
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
         rate(`oauth-revoke:${remoteAddress}`, 60);
-        const data = await body(req);
-        oauthProvider.revoke(data.token);
+        const form = /^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(req.headers["content-type"] || "");
+        const data = form ? Object.fromEntries(new URLSearchParams(await readText(req, JSON_BODY_BYTES,
+          () => new ServiceError(413, "too_large", "Request is too large")))) : await body(req);
+        (typeof data.token === "string" && /^(iat|iar)_/.test(data.token) ? inviteOAuth?.provider : oauthProvider)?.revoke(data.token);
         return json(res, 200, {});
       }
       // GET /api/oauth/sessions — list the signed-in account's active OAuth
