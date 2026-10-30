@@ -8,8 +8,9 @@
 //
 //   node scripts/qa-friend-agent-e2e.mjs --local
 //       in-process Room (CI, no network)
-//   ROOM_QA_ORIGIN=https://room.trydemigod.com ROOM_QA_ROOM=qa-... ROOM_QA_OWNER_KEY=... \
-//     node scripts/qa-friend-agent-e2e.mjs
+//   node scripts/qa-friend-agent-e2e.mjs   (against a qa- room)
+//       env: ROOM_QA_ORIGIN (e.g. the prod origin), ROOM_QA_ROOM (a qa- room id),
+//       ROOM_QA_OWNER_KEY (that room's owner key)
 //       a real throwaway qa- room. Refuses any room id not starting with qa-.
 // Never prints the owner key, invite codes or the agent credential.
 import { randomUUID } from "node:crypto";
