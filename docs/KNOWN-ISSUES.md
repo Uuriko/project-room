@@ -18,8 +18,8 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 | Status | Ledger rows |
 | --- | --- |
 | fixed | 16 |
-| open | 120 |
-| open (fix in PR) | 24 |
+| open | 117 |
+| open (fix in PR) | 27 |
 | open (part in PR) | 1 |
 | stale | 8 |
 | superseded | 3 |
@@ -172,14 +172,14 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-117 | Owner force-release of others' board claims undiscoverable, contradicts update error | Jill MI-008 (23888) | open | Jill master-issues draft: S3 OPEN (partial cure #5324 hint legs, undeployed); not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Disclose force-release; align the update error wording |
 | KI-118 | payment_required 402 envelope hint/next claims no recovery for a recoverable action | Jill MI-009 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Correct hint/next in the one envelope |
 | KI-119 | Door Skip-to-content link lands on #connection-status, not content | Jill MI-010 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Point the skip link at the content target |
-| KI-120 | /join seizes focus on load | Jill MI-011 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Remove load-time focus seizure |
-| KI-121 | Two fields both labelled Room link on /join | Jill MI-012 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Disambiguate the two labels |
+| KI-120 | /join seizes focus on load | Jill MI-011 (23888) | open (fix in PR) | #5452: load focus removed; re-verified on main (renderEnter focused the field) | low-hanging fruit | P3 | S | Grok | Remove load-time focus seizure |
+| KI-121 | Two fields both labelled Room link on /join | Jill MI-012 (23888) | open (fix in PR) | #5451: request field relabelled; re-verified on main (two 'Room link' labels) | low-hanging fruit | P3 | S | Grok | Disambiguate the two labels |
 | KI-122 | Receipts / receipt-detail pages have no focus styling of their own | Jill MI-014 (23888) | open (fix in PR) | #5449: skip link, focusable main, focus-visible; Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Grok | Add focus styling on receipts surfaces |
 | KI-123 | /receipts has no skip link | Jill MI-015 (23888) | open (fix in PR) | #5449: skip link, focusable main, focus-visible; no skip link in public/ receipts pages on main 2249dbb5 | low-hanging fruit | P3 | S | Grok | Add a skip link |
 | KI-124 | One-time agent key field #join-secret has no accessible name | Jill MI-018 (23888) | open | Jill master-issues draft: S3 FIXED-ALIVE; not re-verified | low-hanging fruit | P3 | S | NONE | Closed: fixed on main, M2-RETEST FIXED; no act |
 | KI-125 | No main landmark in signed-out door state | Jill MI-019 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add main landmark / heading structure |
 | KI-126 | /join loading state is not a live region | Jill MI-020 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Mark loading state as a live region |
-| KI-127 | Receipt detail prints raw ISO timestamps | Jill MI-021 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Format timestamps for display |
+| KI-127 | Receipt detail prints raw ISO timestamps | Jill MI-021 (23888) | open (fix in PR) | #5450: readable UTC times; re-verified on main 2249dbb5 (raw ISO in Recorded/Merged) | low-hanging fruit | P3 | S | Grok | Format timestamps for display |
 | KI-128 | Receipt-detail SR noise: em-dash value, 197-char badge alt duplicating text | Jill MI-022 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Trim badge alt / placeholder value |
 | KI-129 | Receipts list duplicate link names out of context | Jill MI-023 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Include state/date context in links' accessible names |
 | KI-130 | Message-list focus outline is dead CSS (.message-list vs class=timeline) | Jill MI-025 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Fix the selector to the served element (one line) |
