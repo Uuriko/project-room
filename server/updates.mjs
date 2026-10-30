@@ -364,8 +364,9 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   if (member.permissions?.includes("manage_members") && !needsMeOnly) {
     try {
       const rows = store.db.prepare(
-        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt, identity_id AS actor
-         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade')`
+        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt,
+           CASE WHEN status='pending_account' THEN NULL ELSE identity_id END AS actor
+         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade', 'pending_account')`
       ).all(roomId);
       for (const row of rows) {
         const at = iso(row.createdAt);

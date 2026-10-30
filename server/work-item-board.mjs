@@ -546,10 +546,10 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     files: scope.files,
     fileBlocks: scope.fileBlocks,
     blobs,
-    // Dependencies are board-native structure (or lineage from a phantom
-    // card this item grew into): the work item cannot express them, so
-    // an existing row's list is preserved verbatim.
-    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [],
+    // A proposal seeds dependencies on its first Board card. Thereafter the
+    // Board owns the list, including lineage and explicit deletion waivers;
+    // replaying the original declaration must not restore waived edges.
+    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [...(item.dependsOn ?? [])],
     parentClaimId: existing?.parentClaimId ?? null,
     evidenceRefs,
     premiseFlag: null,

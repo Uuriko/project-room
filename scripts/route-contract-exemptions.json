@@ -2,6 +2,26 @@
   "note": "Route contract classification of record (W2). Every served (method, template) is either in docs/openapi.yaml, in the served spec (server/discoverability.mjs), or exempted here with a class and a reason. tests/route-contract-coverage.test.js enforces it: new routes fail until documented or classified, and stale entries fail too. Initially derived mechanically by scripts/route-contract-census.mjs (W2 census, 2026-10-13); maintained by hand afterwards, like scripts/openapi-served-exclusions.json. HEAD inherits the classification of the same template's GET (repo convention for public reads).",
   "templates": [
     {
+      "template": "/.well-known/agent-skills",
+      "class": "discovery-doc",
+      "reason": "Bare Agent Skills discovery prefix (both slash spellings; the census normalises the trailing slash): serves the same index bytes as /.well-known/agent-skills/index.json, whose contract is inventoried in the served spec; it is a document alias, not a REST operation."
+    },
+    {
+      "template": "/.well-known/agent-skills/connect/SKILL.md",
+      "class": "discovery-doc",
+      "reason": "Legacy connect alias under the Agent Skills prefix (specced 2026-10-19): serves the same bytes as /SKILL.md; the contract lives on the inventoried per-skill template, so this alias is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/agent-skills/index.json",
+      "class": "discovery-doc",
+      "reason": "Prefix-preserving door twin of /.well-known/agent-skills/index.json: the edge serves the same index bytes at both prefixes; the contract lives on the root template in the served spec."
+    },
+    {
+      "template": "/room/.well-known/agent-skills/index.json",
+      "class": "discovery-doc",
+      "reason": "Prefix-preserving door twin of /.well-known/agent-skills/index.json: the edge serves the same index bytes at both prefixes; the contract lives on the root template in the served spec."
+    },
+    {
       "template": "/.well-known/agent-plugin-manifest.json",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."

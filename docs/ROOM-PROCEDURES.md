@@ -75,6 +75,29 @@ wrong or stale decisions, and maintenance effort, including failed and abandoned
 attempts. A shorter document or smaller prompt alone does not establish a
 productivity improvement.
 
+### Reconcile the ecosystem without creating another handbook
+
+Use the existing source register and preservation catalog for maintainer-local
+material; expose maintained guidance through this index, not private filesystem
+paths. For each source distinguish discovered, enumerated, content reviewed,
+obligations extracted and reconciled. Name inaccessible roots and unread content.
+An inventory count, a supplied hash or a received excerpt does not establish
+possession or review of the whole file.
+
+Each useful item needs a canonical home and a disposition: retain, connect,
+consolidate, finish, defer, archive or remove. Link its existing backlog ID when
+available, original source, successor, remaining acceptance conditions and
+incorporation evidence. A proposed disposition is not a completed action. Keep
+code, generated outputs, private operations and immutable evidence in their
+appropriate homes; cohesion does not require one giant file or directory.
+
+Refresh GitHub metadata separately from reviewing bodies and diffs. A closed PR,
+an absent open-list entry, byte equality or a similar filename cannot establish
+that unique behavior or requirements were incorporated. Preserve restoration
+references and check callers before removing obsolete material. Historical
+observations stay dated; later evidence refines them without silently rewriting
+what was observed.
+
 ## Historical coordination channels
 
 The September 2026 version of this page directed claims and merge receipts to

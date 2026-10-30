@@ -32,6 +32,22 @@ Room need not win every task class. Start with a formative pilot to estimate
 variance and logging cost, then size a held-out comparison. A handful of successful
 trials is not evidence of universal superiority.
 
+### Extending beyond development tasks
+
+The first continuation pilot remains bounded as described above. Before applying
+its conclusions to general consumer work, run held-out writing or analysis tasks
+with their own acceptance rubric, using the same A/B/C comparison and accounting
+for setup and review effort. The historical synthetic writing/analysis fixtures
+below establish scorer mechanics, not that real users understand or value the
+results.
+
+For that extension, check whether a returning person can identify the current
+result, its author, unresolved changes and the next permitted action without
+coaching. Record wrong-version decisions and clarification needs alongside task
+quality; a passing execution or review record does not prove comprehension.
+These observations serve the existing UI-15 and MET-07 backlog obligations, not a
+new launch gate or a requirement for independent review on every product task.
+
 ### Measures and definitions
 
 One unit is a predeclared user-valued task, not a message, tool call, commit, PR,
@@ -225,3 +241,37 @@ Observed serialized JSON bytes (not compression, token counts or a timing benchm
 Discussion grew slightly because the experiment adds one relevant follow-up between sizes. The correction remained available in linked discussion at every size; selected work intentionally omitted it. Each resumed checkpoint returned exactly the newly added reply. These findings support reusing existing bounded context and retrieval APIs, not asserting that the underlying server query cost is bounded or that a whole-system rewrite is unnecessary. There is no statistically established latency win and no comparison of live-model task quality.
 
 Round-2 artifacts are in the chat workspace's `outputs/collaboration-round2`: `report.json`, `recovery.json`, `production-context.json`, screenshots, per-trial exports and traces. The local experiment server must be restarted after scorer edits because server modules are cached; refresh the browser afterward.
+
+## Selected-work handoff mechanics (2026-10-29)
+
+The maintained `scripts/qualify-work-brief.mjs` now predeclares seven synthetic
+conditions: source edited, charter changed, work replaced, access revoked,
+unrelated traffic, source omitted, and private source. Each mutates a disposable
+RoomStore through real commands, then repeats authenticated selected-work reads.
+The three explicit adapters are minimal objective/acceptance, the current brief
+without source retrieval, and a source-observation-aware brief. No fixture
+projection is cloned and edited to manufacture a change.
+
+Run with supported Node from the repository root:
+
+```sh
+node scripts/qualify-work-brief.mjs /absolute/evaluator-report.json --packets-dir /absolute/fresh-solver-directory
+```
+
+Metrics are declared before retrieval: actual in-process authenticated read calls,
+serialized response bytes, adapter payload bytes, and monotonic elapsed time for
+retrieval plus adaptation. Setup and command mutations are excluded from elapsed
+time. These are single serial samples, not HTTP latency, SQL cost, model tokens,
+a speedup estimate or human effort. Errors and unknown source freshness are
+retained. An unchanged omitted-source brief cannot establish source freshness;
+a source-content observation cannot establish permission or plan validity.
+Every later mutation still needs fresh server authorization and revision checks.
+
+The report pins Git revision/tree, dirty status, relevant source hashes and Node
+runtime. Optional solver packets have opaque case IDs and omit evaluator
+expectations and mutation labels. Exports are synthetic and frozen by per-run
+hashes; fixture-generated IDs and timestamps can vary between runs. Use the
+existing private measurement logger for formative fresh-agent trials. Give a
+solver only its assigned packet and permitted observation files, not the report,
+hidden rubric or repository. File separation alone is not an isolation boundary.
+One trial per condition cannot support a statistical productivity claim.

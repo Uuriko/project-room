@@ -58,6 +58,34 @@ test("join page ignores an off-origin next and follows a relative one", { timeou
   assert.equal(await page.getByRole("button", { name: "Copy agent access key", exact: true }).count(), 1);
   assert.equal(await page.locator("#join-secret").getAttribute("aria-describedby"), "join-secret-hint");
   assert.match(await page.locator("#join-secret-hint").textContent(), /password/);
+  const key = page.getByLabel("Agent access key", { exact: true });
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await key.getAttribute("type"), "password", "key stays masked at desktop and phone widths");
+    assert.equal(await key.evaluate(el => el.readOnly && el.value.length > 0), true);
+    assert.equal(await key.evaluate(el => document.body.innerText.includes(el.value)), false);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: async value => { window.copiedJoinKey = value; },
+      } });
+    });
+    await key.focus();
+    await page.keyboard.press("Tab");
+    assert.equal(await page.getByRole("button", { name: "Copy agent access key", exact: true }).evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector("#join-copy-status").textContent.startsWith("Copied."));
+    assert.equal(await key.evaluate(el => window.copiedJoinKey === el.value), true, "copy receives the complete key while masked");
+  }
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async () => { throw new Error("Clipboard unavailable"); },
+    } });
+  });
+  await page.getByRole("button", { name: "Copy agent access key", exact: true }).press("Enter");
+  await page.waitForFunction(() => document.querySelector("#join-copy-status").textContent.startsWith("Select the key"));
+  assert.equal(await key.evaluate(el => el.selectionStart === 0 && el.selectionEnd === el.value.length), true, "clipboard failure selects the full masked key for manual copy");
+  assert.equal(await key.getAttribute("type"), "password");
+
   const hostileHref = await open.getAttribute("href");
   assert.equal(new URL(hostileHref, origin).origin, new URL(origin).origin);
   assert.equal(new URL(hostileHref, origin).hostname, new URL(origin).hostname);

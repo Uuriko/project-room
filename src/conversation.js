@@ -452,6 +452,19 @@ export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext
 export function channelDraftKey(channelId = "general") {
   return channelId === "general" ? null : JSON.stringify(["channel", channelId]);
 }
+export function directDraftKey(memberId) { return JSON.stringify(["direct", memberId]); }
+export function directDraftPeer(key) {
+  try {
+    const value = JSON.parse(key);
+    return Array.isArray(value) && value.length === 2 && value[0] === "direct"
+      && typeof value[1] === "string" && value[1] ? value[1] : null;
+  } catch { return null; }
+}
+export function directMessagePeer(message, viewerId) {
+  if (!message?.toMemberId || !viewerId) return null;
+  if (message.authorId === viewerId) return message.toMemberId;
+  return message.toMemberId === viewerId ? message.authorId : null;
+}
 function isChannelDraftKey(key) {
   try { const value = JSON.parse(key); return Array.isArray(value) && value.length === 2 && value[0] === "channel" && typeof value[1] === "string"; }
   catch { return false; }
@@ -459,7 +472,7 @@ function isChannelDraftKey(key) {
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: directDraftPeer(threadId) ?? "", replyToId: isChannelDraftKey(threadId) || directDraftPeer(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }
@@ -567,15 +580,25 @@ export class DraftRecovery {
           assistantDraft = { action: input.action, runId: input.runId, sourceMessageId: source.id,
             expectedRevision: input.expectedRevision, ...(input.action === 'contribute' ? { conflict: input.conflict } : {}) };
         }
+        const directPeer = directDraftPeer(id);
+        if (directPeer && d.toMemberId !== directPeer) continue;
         const channelRoot = id === null || isChannelDraftKey(id);
-        const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
-        if (isChannelDraftKey(id) && id !== draftId) continue;
+        const draftId = channelRoot ? (d.toMemberId ? directDraftKey(d.toMemberId) : channelDraftKey(channelId ?? "general")) : id;
+        if (isChannelDraftKey(id) && id !== channelDraftKey(channelId ?? "general")) continue;
         if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
-        if (!channelRoot && !assistantDraft && !index.threads.has(id)) continue;
+        if (!channelRoot && !directPeer && !assistantDraft && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
-        if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !assistantDraft && index.rootById.get(d.replyToId) !== id
+        if (d.toMemberId && (!Object.hasOwn(state.members ?? {}, d.toMemberId) || !state.members[d.toMemberId] || state.members[d.toMemberId].active === false || state.members[d.toMemberId].identityRevoked === true)) continue;
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !directPeer && !assistantDraft && index.rootById.get(d.replyToId) !== id
           || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
+        // A private draft may only reply within its own pair. Public messages
+        // and another pair must not become reply targets after recovery.
+        const recoveredPeer = directDraftPeer(draftId);
+        if (recoveredPeer && d.replyToId !== null) {
+          const reply = index.byId.get(d.replyToId);
+          if (!reply?.toMemberId || reply.deletedAt
+            || reply.authorId !== recoveredPeer && reply.toMemberId !== recoveredPeer) continue;
+        }
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
         // Older saved commands without a messageId keep their original payload.
@@ -591,6 +614,15 @@ export class DraftRecovery {
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // An empty selected conversation has no draft entry. Recover navigation
+      // only for a current member; never revive a rejected private payload.
+      const selectedPeer = directDraftPeer(saved.activeKey);
+      if (activeKey === null && selectedPeer && !saved.entries.some(([id]) => id === saved.activeKey)
+        && Object.hasOwn(state.members ?? {}, selectedPeer) && state.members[selectedPeer]
+        && state.members[selectedPeer].active !== false && state.members[selectedPeer].identityRevoked !== true) {
+        drafts.save(saved.activeKey, { body: "", toMemberId: selectedPeer, replyToId: null, channelId: "general", pending: null });
+        activeKey = saved.activeKey;
+      }
       // Keep empty-thread navigation separate from recoverable draft text.
       // Never turn a rejected private draft into a fresh public reply.
       if (activeKey === null && typeof saved.threadId === "string"
@@ -607,7 +639,8 @@ export class DraftRecovery {
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
       return { drafts, activeKey, channelId: selected?.channelId ?? "general",
-        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
+        directMemberId: directDraftPeer(activeKey),
+        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) || directDraftPeer(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
 }

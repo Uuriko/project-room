@@ -1,3 +1,4 @@
+import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 // Work claims (B006/B007). A pure work-item state machine for agent
 // coordination: work starts unclaimed; an agent claims it (claimed), starts
 // it (in_progress), and finishes it (done) or marks it blocked. Only the
@@ -164,16 +165,9 @@ export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_DEPENDS = 16;
 const dependsOnOf = (value, selfId) => {
-  check(Array.isArray(value), "dependsOn must be an array");
-  check(value.length <= MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
-  const ids = value.map(id => {
-    check(typeof id === "string" && DEPENDS_PATTERN.test(id), "each dependsOn entry must be a claim id");
-    check(id !== selfId, "a claim cannot depend on itself");
-    return id;
-  });
-  return Object.freeze([...new Set(ids)].sort());
+  try { return normalizeWorkDependencies(value, selfId); }
+  catch (error) { check(false, error.message); }
 };
 // Provenance (orch-provenance-rollback): parentClaimId names the claim whose
 // output or premise this claim builds on — the edge the provenance walk

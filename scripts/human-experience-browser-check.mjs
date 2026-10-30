@@ -719,7 +719,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     if (width === 390) {
       await page.locator('#composer-options > summary').click();
       await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
-      await page.locator('#message-to-select').selectOption('producer');
+      await page.locator('#new-direct-people [data-direct-member="producer"]').click();
+      await page.locator('#message-input').fill('Keep a separate private draft.');
     }
     await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
     await page.locator('#human-advanced').check(); await closeSettings(page);
@@ -755,7 +756,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     assert.equal(added.replyToId, 'shared-ask');
     assert.equal(added.toMemberId, null);
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the existing design thread draft.');
-    assert.equal(await page.locator('#message-to-select').inputValue(), width === 390 ? 'producer' : '');
+    assert.equal(await page.locator('#message-to-select').inputValue(), '', 'shared thread remains public despite a separate private draft');
     assert.equal(await page.locator('#reply-bar').isVisible(), false, 'the restored thread draft still replies to its original root');
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click();
@@ -773,6 +774,13 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     assert.equal((await api('producer')).runs.length, 1, 'leaving context mode does not turn ordinary chat into a new ask');
     await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Unsent additional context.');
+    if (width === 390) {
+      await page.locator('#composer-options > summary').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
+      await page.locator('#new-direct-people [data-direct-member="producer"]').click();
+      assert.equal(await page.locator('#message-input').inputValue(), 'Keep a separate private draft.');
+      assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+    }
     assert.deepEqual(errors, []);
   });
 }

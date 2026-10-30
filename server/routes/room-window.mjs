@@ -1,3 +1,4 @@
+import { readDirectConversations } from "../conversation-sync.mjs";
 // Windowed room open and older-message page. Same authorization chain as
 // the legacy room read: room credential, session fence, bearer room scope,
 // read rate, rooms:read for API keys.
@@ -53,9 +54,28 @@ export function readRoomMessages(ctx) {
   }));
 }
 
+export function readRoomConversations(ctx) {
+  const { selected, fence, roomId } = authorizeRoomRead(ctx);
+  const params = ctx.url.searchParams;
+  if (singleQuery(params, ["limit", "cursor", "auth"])
+    || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) ctx.reject(422, "invalid_conversation_selection", "Choose a bounded conversation list");
+  return ctx.json(ctx.res, 200, readDirectConversations(ctx.store, selected.token, roomId, {
+    limit: params.has("limit") ? Number(params.get("limit")) : 50,
+    cursor: params.get("cursor"), expectedSessionBinding: fence
+  }));
+}
+
 const roomIdParam = { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } };
 
 export const ROOM_WINDOW_ROUTES = Object.freeze([
+  Object.freeze({
+    id: "room-conversations", method: "GET", path: "/api/rooms/{roomId}/conversations",
+    parity: "exempt:private conversation navigation metadata",
+    auth: "room", capability: null, scope: "room", handler: readRoomConversations,
+    schema: { params: roomIdParam, query: { type: "object", properties: {
+      limit: { type: "integer", minimum: 1, maximum: 100 }, cursor: { type: "string" }
+    } }, response: { type: "object" } }, events: []
+  }),
   Object.freeze({
     id: "room-bootstrap", method: "GET", path: "/api/rooms/{roomId}/bootstrap",
     parity: "mcp:room_read_bootstrap",
