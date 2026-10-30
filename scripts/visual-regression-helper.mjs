@@ -1,3 +1,4 @@
+/* global document, getComputedStyle, matchMedia */
 // Q003: shared screenshot-diff helper for the visual regression browser checks.
 //
 // The gate: committed baseline PNGs under scripts/visual-regression-baselines/
@@ -158,4 +159,25 @@ export async function assertScreenshotMatches(page, name, { mask = [], element =
   const target = element ?? page;
   const shot = await target.screenshot({ mask, animations: "disabled", caret: "hide", type: "png" });
   return compareScreenshotBuffer(shot, name, { maxDiffPixelRatio });
+}
+
+// Optional gallery evidence from existing real browser journeys. Never updates
+// baselines; normal test runs do not capture or run additional axe checks.
+export async function captureDesignEvidence(page, { id, title, fixture, testName, component = "page" }) {
+  const directory = process.env.ROOM_DESIGN_EVIDENCE_DIR;
+  if (!directory) return;
+  if (!/^[a-z0-9-]+$/.test(id)) throw new Error("Invalid design evidence id");
+  const viewport = page.viewportSize(), name = `${id}-${viewport.width}`;
+  await settleForScreenshot(page);
+  const { axeSerious } = await import("./a11y-axe-helper.mjs");
+  const accessibility = await axeSerious(page);
+  const browserVersion = page.context().browser()?.version() ?? "unknown";
+  const theme = await page.evaluate(() => ({ declared: document.documentElement.getAttribute("data-theme"), colorScheme: getComputedStyle(document.documentElement).colorScheme, prefersDark: matchMedia("(prefers-color-scheme: dark)").matches, prefersContrast: matchMedia("(prefers-contrast: more)").matches }));
+  const png = await page.screenshot({ animations: "disabled", caret: "hide", fullPage: true, type: "png" });
+  const { createHash } = await import("node:crypto");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, name + ".png"), png, { flag: "wx" });
+  writeFileSync(join(directory, name + ".json"), JSON.stringify({ id: name, title, fixture, testName, component,
+    viewport, screenshot: name + ".png", sha256: createHash("sha256").update(png).digest("hex"),
+    accessibility, browserVersion, theme, capturedAt: new Date().toISOString() }, null, 2), { flag: "wx" });
 }
