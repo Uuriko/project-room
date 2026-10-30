@@ -15,7 +15,7 @@
               properties:
                 nonce: {type: string}
                 invitation: {type: string}
-                decision: {type: string, enum: [preview, allow]}
+                decision: {type: string, enum: [preview, allow, deny]}
                 display_name: {type: string, maxLength: 80}
       responses:
         '200':

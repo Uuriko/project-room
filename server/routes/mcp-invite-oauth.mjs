@@ -1,5 +1,5 @@
 import { ServiceError } from "../store.mjs";
-import { inviteOAuthPage } from "../mcp-invite-oauth.mjs";
+import { inviteOAuthPage, MCP_INVITE_RECOVERY } from "../mcp-invite-oauth.mjs";
 
 export function renderInviteOAuthPage(res, view, request) {
   res.setHeader("Cache-Control", "no-store");
@@ -21,14 +21,14 @@ async function handleInviteConsent(ctx) {
   const cookieNonce = nonce ? cookie(req, `oauth_invite_${nonce.slice(0, 16)}`) : null;
   if (!nonce || cookieNonce !== nonce) return json(res, 403, { error: "csrf_denied" });
   try {
-    if (data.decision === "allow") {
-      const redirect = inviteOAuth.approve(nonce, data.invitation, data.display_name);
+    if (data.decision === "allow" || data.decision === "deny") {
+      const redirect = data.decision === "deny" ? inviteOAuth.cancel(nonce) : inviteOAuth.approve(nonce, data.invitation, data.display_name);
       res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
       return res.end();
     }
     const viewed = inviteOAuth.preview(nonce, data.invitation);
     return renderInviteOAuthPage(res, { nonce, ...viewed }, viewed.request);
-  } catch (error) { return json(res, 400, { error: "invitation_connection_failed", error_description: error.message }); }
+  } catch (error) { return json(res, 400, { error: "invitation_connection_failed", error_description: error.message, recovery: MCP_INVITE_RECOVERY }); }
 }
 export const MCP_INVITE_OAUTH_ROUTES = [{
   id: "mcp.invite.consent", method: "POST", path: "/oauth/invite", auth: "none",

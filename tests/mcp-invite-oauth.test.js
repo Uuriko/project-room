@@ -109,7 +109,9 @@ for (const mutation of ['identity-revoked', 'identity-rotated', 'grant-expired',
   if (mutation === 'grant-expired') f.store.db.prepare('UPDATE oauth_invite_grants SET expires_at=0').run();
   if (mutation === 'invite-revoked') f.store.db.prepare('UPDATE agent_invite_codes SET revoked_at=?').run(Date.now());
   assert.equal((await f.rpc(tokens.access_token)).status, 401);
-  assert.equal((await f.exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).status, 400);
+  const rejected = await f.exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+  assert.equal(rejected.status, 400);
+  assert.match((await rejected.json()).recovery, /fresh agent invitation/);
 });
 
 test('a fresh accountless Member invite can deliver its first read task without manual promotion', async t => {
@@ -153,4 +155,32 @@ test('a fresh accountless Member invite can deliver its first read task without 
   const malformed = await f.rpc(tokens.access_token, 'room_post_message', { body: 'Do not save', workItemId: '../other-room' });
   assert.equal(malformed.body.error?.code, -32602);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n, f.accountsBefore);
+});
+
+test('native consent cancellation is CSRF-bound, preserves the invitation and returns no credentials', async t => {
+  const f = await setup(t);
+  assert.equal((await f.submit('deny', {}, '')).status, 403);
+  const cancelled = await f.submit('deny'); assert.equal(cancelled.status, 302);
+  const redirect = new URL(cancelled.headers.get('location'));
+  assert.equal(redirect.origin, 'https://client.example');
+  assert.equal(redirect.searchParams.get('error'), 'access_denied');
+  assert.equal(redirect.searchParams.get('state'), 'native-state');
+  assert.equal(redirect.searchParams.has('code'), false);
+  assert.equal(f.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n, 0);
+  const retry = await f.submit('allow'); assert.equal(retry.status, 400);
+  assert.match((await retry.json()).error_description, /Restart plugin connection/);
+});
+
+test('expired or already-confirmed consent gives actionable recovery without making another seat', async t => {
+  const f = await setup(t);
+  assert.equal((await f.submit('allow')).status, 302);
+  const cancelled = await f.submit('deny'); assert.equal(cancelled.status, 400);
+  assert.match((await cancelled.json()).error_description, /already confirmed/);
+  f.store.db.prepare('UPDATE oauth_invite_pending SET expires_at=0').run();
+  const expired = await f.submit('allow'); assert.equal(expired.status, 400);
+  const error = await expired.json();
+  assert.match(error.error_description, /fresh agent invitation/);
+  assert.match(error.recovery, /new agent seat/);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n, 1);
 });

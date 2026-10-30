@@ -4,6 +4,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createOAuthProvider } from './oauth-provider.mjs';
 import { mcpOAuthIdentityEpoch, validateMcpInviteOAuthBinding } from './mcp-oauth.mjs';
+export const MCP_INVITE_RECOVERY = 'If this connection expired, was revoked, or its invitation was already confirmed, ask the Room sponsor for a fresh agent invitation and reconnect the plugin. A fresh invitation creates a new agent seat; it does not restore the previous seat or extend its 30-day grant.';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const escape = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const rewrite = sql => sql.replaceAll('oauth_provider_', 'oauth_invite_');
@@ -46,9 +47,9 @@ export function createMcpInviteOAuth({ store, clients, resource }) {
     return { nonce, request };
   };
   const read = nonce => {
-    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(nonce)) throw new Error('Connection confirmation expired; restart connection');
+    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(nonce)) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
     const pending = db.prepare('SELECT * FROM oauth_invite_pending WHERE nonce_hash=?').get(hash(nonce));
-    if (!pending || pending.expires_at <= store.now()) throw new Error('Connection confirmation expired; restart connection');
+    if (!pending || pending.expires_at <= store.now()) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
     return { pending, request: JSON.parse(pending.request_json) };
   };
   const codeFrom = text => {
@@ -93,12 +94,22 @@ export function createMcpInviteOAuth({ store, clients, resource }) {
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
   });
-  return { provider, begin, read, preview, approve };
+  const cancel = nonce => store.transaction(() => {
+    const { pending, request } = read(nonce);
+    if (pending.grant_id) throw new Error('This connection was already confirmed. Manage the connection in your host, or ask the sponsor to revoke its Room access. ' + MCP_INVITE_RECOVERY);
+    db.prepare('DELETE FROM oauth_invite_pending WHERE nonce_hash=?').run(hash(nonce));
+    const redirect = new URL(request.redirectUri);
+    redirect.searchParams.set('error', 'access_denied');
+    redirect.searchParams.set('error_description', 'Connection cancelled; your invitation was not used.');
+    if (request.state) redirect.searchParams.set('state', request.state);
+    return redirect.href;
+  });
+  return { provider, begin, read, preview, approve, cancel };
 }
 export function inviteOAuthPage({ nonce, request, invitation = null, code = '', accountUrl }) {
   const hidden = `<input type="hidden" name="nonce" value="${escape(nonce)}">`;
   const consent = invitation
     ? `<p>Room: <strong>${escape(invitation.roomTitle)}</strong></p><p>Invitation sponsor: ${escape(invitation.inviterDisplayName || 'Room member')}</p><p>Room access: ${escape(invitation.profile)}. Requested scopes: ${escape(request.scopes.join(', '))}.</p><p>The sponsor grants access inside this Room. Your ChatGPT tool permissions stay under your control. No Room human account is created or claimed. This Room connection lasts up to 30 days and can be revoked.</p><input type="hidden" name="invitation" value="${escape(code)}"><label>Agent name <input name="display_name" maxlength="80" value="My agent" required></label><button name="decision" value="allow">Connect this agent</button>`
     : '<label>Agent invitation link or RM code <input name="invitation" maxlength="2048" autocomplete="off" required></label><button name="decision" value="preview">Review invitation</button>';
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect your agent</title><body><main><h1>Connect your existing agent</h1><p>No Project Room signup is required. Continue only if you just started connecting this plugin in your agent.</p><form method="post" action="/oauth/invite">${hidden}${consent}</form>${accountUrl ? `<p><a href="${escape(accountUrl)}">Optional: connect an agent from my Room account</a></p>` : ''}</main></body></html>`;
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect your agent</title><body><main><h1>Connect your existing agent</h1><p>No Project Room signup is required. Continue only if you just started connecting this plugin in your agent.</p><form method="post" action="/oauth/invite">${hidden}${consent}<button name="decision" value="deny" formnovalidate>Cancel connection</button></form><p>You can cancel before confirming and reuse the invitation. After confirmation, reconnecting from the beginning needs a fresh invitation and creates a new agent seat.</p>${accountUrl ? `<p><a href="${escape(accountUrl)}">Optional: connect an agent from my Room account</a></p>` : ''}</main></body></html>`;
 }

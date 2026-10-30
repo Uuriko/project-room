@@ -1,5 +1,5 @@
 import { renderInviteOAuthPage } from "./routes/mcp-invite-oauth.mjs";
-import { createMcpInviteOAuth } from "./mcp-invite-oauth.mjs";
+import { createMcpInviteOAuth, MCP_INVITE_RECOVERY } from "./mcp-invite-oauth.mjs";
 import { createMcpEventsRuntime } from "./mcp-events-runtime.mjs";
 import { mcpOAuthResourceMetadata, listMcpOAuthAgents, validateMcpOAuthBinding } from './mcp-oauth.mjs';
 import { messageRepository } from "./message-repository.mjs";
@@ -1954,7 +1954,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           });
         } catch (error) {
           const code = error.code === "invalid_request" ? "invalid_request" : "invalid_grant";
-          return json(res, 400, { error: code, error_description: error.message });
+          const nativeInvitation = /^(iac|iar)_/.test(String(data.code ?? data.refresh_token ?? ""));
+          return json(res, 400, { error: code, error_description: nativeInvitation ? `${error.message}. ${MCP_INVITE_RECOVERY}` : error.message,
+            ...(nativeInvitation ? { recovery: MCP_INVITE_RECOVERY } : {}) });
         }
       }
       // POST /oauth/revoke — revoke an access or refresh token (RFC 7009).
