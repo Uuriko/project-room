@@ -54,11 +54,21 @@ const withRef = (path, ref) => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
+// Focus + target sizing mirror the product's own public standard: the app
+// (src/styles.css) and the receipts template in this family use a solid
+// 2px outline in the product blue (#a9b9ff) at a 2px offset, and the
+// receipts template gives coarse-pointer links the 44px floor
+// (min-height: var(--control-min-target-coarse), 2.75rem). Without these
+// rules these pages fell back to the thin UA-default outline and their
+// action links rendered 23px tall on touch devices (UT wave-2 lanes
+// 10-01 F2 / 10-03 F5).
 const pageStyle = () => `:root{color-scheme:dark}
 body{margin:0;background:#10141a;color:#e8eef6;font:17px/1.55 system-ui,sans-serif}
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:#8eb6ff}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid #a9b9ff;outline-offset:2px}
+@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:44px}}
 .card{border-top:1px solid #2a3340;padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .meta{color:#9aa6b2;font-size:.9rem}
 .tags{display:flex;flex-wrap:wrap;gap:.35rem;margin:.5rem 0;padding:0;list-style:none}
