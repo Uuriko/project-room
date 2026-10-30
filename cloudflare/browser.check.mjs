@@ -50,6 +50,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     await signInFixture(owner, ownerKey);
     await owner.locator('#main').waitFor({ state: 'visible' });
     await clickChrome(owner, '#invite-people-button');
+    await owner.locator('#share-link-access').selectOption('guest');
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();

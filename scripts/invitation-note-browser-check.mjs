@@ -209,6 +209,7 @@ for (const change of ['collapse', 'focus move']) test(`invitation copy failure a
 
 for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'desktop'}: human arrival and copyable agent connection`, { timeout: 45000 }, async t => {
   const { page, fixture, origin, errors } = await setup(t, touch);
+  await page.locator('#share-link-access').selectOption('guest');
   const url = await create(page);
   await page.locator('#share-link-close').click();
   await page.goto(url);

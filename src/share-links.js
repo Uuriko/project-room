@@ -576,11 +576,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         renderKit({ invite: { token: request.linkToken, status: "active", message: uiText("muse.invite.message", { url: inviteUrl }) } });
         if ($("#growth-kit")) $("#growth-kit").hidden = false;
       }
-      $("#share-purpose-note").hidden = !purposeItem;
-      if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
-      if (result.link.access === "co_owner") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = uiText("muse.invite.scope"); }
-      else if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
-      else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
+      const scope = result.link.access === "co_owner" ? uiText("muse.invite.scope")
+        : result.link.access === "co_admin" ? uiText("share.scopeCoAdmin")
+        : result.link.access === "member" ? uiText("share.scopeMember") : uiText("share.scopeGuest");
+      $("#share-purpose-note").hidden = !purposeItem && !["co_owner", "co_admin", "member"].includes(result.link.access);
+      $("#share-purpose-note").textContent = [purposeItem ? uiText("share.purposeOpening", { title: purposeItem.title }) : "", scope].filter(Boolean).join(" ");
       $("#share-link-url").dataset.linkId = result.link.id;
       // #3794: the growth-kit field at the top of this dialog still showed
       // a pre-existing (guest) link after a create — the only URL many

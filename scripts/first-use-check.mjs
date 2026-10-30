@@ -57,6 +57,7 @@ for (const touch of [false, true]) {
     await owner.locator('#message-input').fill('Keep this first draft');
     await owner.screenshot({ path: `test-results/first-minute-quiet-${touch ? 'touch' : 'desktop'}.png` });
     await clickChrome(owner, "#invite-people-button");
+    await owner.locator('#share-link-access').selectOption('guest');
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();
