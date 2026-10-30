@@ -58,7 +58,7 @@ const isExpired = (record, now) => record.expiresAt !== null && now() >= record.
 // Only a trusted consent handler may supply a binding after checking ownership.
 const validateBinding = binding => {
   if (binding === undefined || binding === null) return null; // legacy desktop grant
-  const fields = ["resource", "roomId", "identityId", "memberId", "humanMemberId"];
+  const fields = ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch"];
   check(binding && typeof binding === "object" && !Array.isArray(binding)
     && Object.keys(binding).length === fields.length
     && fields.every(key => typeof binding[key] === "string" && binding[key].length > 0 && binding[key].length <= 512),

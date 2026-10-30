@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { mcpOAuthIdentityEpoch } from '../server/mcp-oauth.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { request } from 'node:http';
 const fetch = (url, options = {}) => new Promise((resolve, reject) => {
@@ -34,7 +35,7 @@ async function setup(t) {
   store.agentConnections.apply(ownerSession.token, 'commons', { action: 'create', requestId: randomUUID(), memberId: 'friend-dot', displayName: 'Friend Dot', access: 'collaborate',
     expectedOwnerRevision: 0, expiresAt: store.now() + 3600000, keyHash: createHash('sha256').update(randomUUID()).digest('hex'), identityId: identity.identityId, identityLinkCode: linkCode }, ownerSession.session.sessionBinding);
   setTier(store.db, 'commons', 'friend-dot', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
-  const binding = { resource, roomId: 'commons', memberId: 'friend-dot', identityId: identity.identityId, humanMemberId: 'owner' };
+  const binding = { resource, roomId: 'commons', memberId: 'friend-dot', identityId: identity.identityId, humanMemberId: 'owner', identityEpoch: mcpOAuthIdentityEpoch(store, identity.identityId) };
   const server = createRoomServer({ store, origin, mcpOAuthClients: [CLIENT] });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
@@ -56,7 +57,7 @@ async function setup(t) {
       body: JSON.stringify({ jsonrpc: '2.0', id: 'test', method, params }) });
     return { response, body: await response.json() };
   };
-  return { store, ownerKey, binding, base, consent, exchange, tokens, rpc, cookie: `__Host-account_session=${slot.token}` };
+  return { store, ownerKey, identity, binding, base, consent, exchange, tokens, rpc, cookie: `__Host-account_session=${slot.token}` };
 }
 test('native OAuth connects an agent, reads and posts as that agent, never authenticates REST', async t => {
   const f = await setup(t);
@@ -144,4 +145,12 @@ test('an OAuth agent accepts, starts and submits a concrete read-task result', a
   assert.equal(result.body.error, undefined, JSON.stringify(result.body));
   assert.notEqual(result.body.result?.isError, true, JSON.stringify(result.body));
   assert.equal(f.store.room('commons').state.workItems['dot-task'].state, 'completed');
+});
+
+for (const action of ['revoke', 'rotate']) test(`identity ${action} fences issued OAuth access and refresh`, async t => {
+  const f = await setup(t);
+  f.store.identities[action](f.identity.identityId, f.identity.secret);
+  assert.equal((await f.rpc('tools/list')).response.status, 401);
+  const refreshed = await f.exchange({ grant_type: 'refresh_token', refresh_token: f.tokens.refresh_token, client_id: CLIENT.clientId, resource });
+  assert.equal(refreshed.status, 400);
 });

@@ -5,13 +5,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { createOAuthProvider } from '../server/oauth-provider.mjs';
 import { mcpOAuthResourceMetadata, mcpOAuthChallenge, resolveMcpOAuthPrincipal } from '../server/mcp-oauth.mjs';
 const resource = 'https://room.example/mcp';
-const binding = { resource, roomId: 'room', identityId: 'agent', memberId: 'agent', humanMemberId: 'friend' };
+const binding = { resource, roomId: 'room', identityId: 'agent', memberId: 'agent', humanMemberId: 'friend', identityEpoch: createHash('sha256').update('mcp-oauth-identity:fixture').digest('hex') };
 const verifier = 'v'.repeat(43);
 const request = { clientId: 'test', userId: 'account', redirectUri: 'https://client.example/callback',
   scopes: ['chat:read'], codeChallenge: createHash('sha256').update(verifier).digest('base64url') };
 function setup(durable = false) {
   const db = new DatabaseSync(':memory:');
-  db.exec(`CREATE TABLE accounts(id TEXT,active INTEGER); INSERT INTO accounts VALUES('account',1);
+  db.exec(`CREATE TABLE agent_identities(identity_id TEXT,secret_hash TEXT,revoked_at INTEGER); INSERT INTO agent_identities VALUES('agent','fixture',NULL);
+    CREATE TABLE accounts(id TEXT,active INTEGER); INSERT INTO accounts VALUES('account',1);
     CREATE TABLE member_accounts(room_id TEXT,member_id TEXT,account_id TEXT); INSERT INTO member_accounts VALUES('room','friend','account');
     CREATE TABLE identity_links(room_id TEXT,identity_id TEXT,member_id TEXT); INSERT INTO identity_links VALUES('room','agent','agent');`);
   const state = { members: { friend: { kind: 'human', active: true }, agent: { kind: 'agent', active: true, identityId: 'agent', accountableHumanId: 'friend' } } };

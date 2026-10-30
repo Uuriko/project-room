@@ -1,6 +1,7 @@
 // OAuth resource and principal validation. This module does not mint agent
 // identities or grant room membership. Wire it only after an explicit human
 // consent flow selects an agent already sponsored by that human.
+import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { OAUTH_SCOPES } from './oauth-provider.mjs';
 
@@ -27,9 +28,11 @@ export function mcpOAuthChallenge(metadataUrl) {
 // here so a provider built without isAccountActive cannot bypass it.
 export function validateMcpOAuthBinding(store, userId, binding) {
   if (!binding || !userId) return null;
-  const fields = ['resource', 'roomId', 'identityId', 'memberId', 'humanMemberId'];
+  const fields = ['resource', 'roomId', 'identityId', 'memberId', 'humanMemberId', 'identityEpoch'];
   if (Object.keys(binding).length !== fields.length || fields.some(key => typeof binding[key] !== 'string' || !binding[key] || binding[key].length > 512)) return null;
   const { roomId, identityId, memberId, humanMemberId } = binding;
+  const currentEpoch = mcpOAuthIdentityEpoch(store, identityId);
+  if (!currentEpoch || binding.identityEpoch !== currentEpoch) return null;
   const account = store.db.prepare('SELECT active FROM accounts WHERE id=?').get(userId);
   if (account?.active !== 1) return null;
   const humanLink = store.db.prepare('SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?').get(roomId, humanMemberId);
@@ -99,10 +102,18 @@ export function listMcpOAuthAgents(store, userId, resource) {
     try { state = store.room(human.room_id).state; } catch { continue; }
     for (const member of Object.values(state.members ?? {})) {
       if (member.kind !== 'agent' || member.accountableHumanId !== human.member_id || !member.identityId) continue;
-      const binding = { resource, roomId: human.room_id, identityId: member.identityId, memberId: member.id, humanMemberId: human.member_id };
+      const binding = { resource, roomId: human.room_id, identityId: member.identityId, memberId: member.id, humanMemberId: human.member_id, identityEpoch: mcpOAuthIdentityEpoch(store, member.identityId) };
       if (validateMcpOAuthBinding(store, userId, binding)) result.push({ binding,
         label: `${member.displayName || member.id} — ${state.room?.title || human.room_id}` });
     }
   }
   return result;
+}
+
+// An opaque verifier fingerprint fences grants after identity rotation without
+// putting the secret verifier itself in browser consent or OAuth records.
+export function mcpOAuthIdentityEpoch(store, identityId) {
+  const row = store.db.prepare('SELECT secret_hash,revoked_at FROM agent_identities WHERE identity_id=?').get(identityId);
+  if (!row || row.revoked_at !== null) return null;
+  return createHash('sha256').update(`mcp-oauth-identity:${row.secret_hash}`).digest('hex');
 }
