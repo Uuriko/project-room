@@ -81,7 +81,7 @@
     "room-acp/src/run.mjs": "sha256:0b826d8a00fbabfc4433495188121e9ea2c1417791dc643e19472071450df705",
     "room-acp/src/sessions.mjs": "sha256:5d2bf0c6d7f410abb53f86779e44fe84ae74fb0775cd5cae20feedc5c202dde8",
     "scripts/build-agent-docs.mjs": "sha256:d59c5bf8371e98e2f6a12ff7dc2cc28c4d9183d1efa0cd4d0982ed0ca110763a",
-    "scripts/build-room-acp-pack.mjs": "sha256:da20c5f02bf5a39f0677a41fbf8bc71fabcd28e496a6252b02fda22b074f2155",
+    "scripts/build-room-acp-pack.mjs": "sha256:8789b07c0140cc082f6a23ee69b58e8417a38a652ff0f204d1a87948f807eac5",
     "scripts/install.sh": "sha256:60c5c2c00587efd2c0ba6cde42ced715bd7d445d6ec5143691ee8415a856c74b",
     "server/connect-snippets.mjs": "sha256:f410492dbce80b22683e1dbddb9a88b1a8a6a03be5b790ecf8d2d72a6ba2b49f",
     "skills/project-room-setup/SKILL.md": "sha256:44d201c16af5d71c7c453b94ea00ec7690e7e2051b4087442aaf9920b25ced12",

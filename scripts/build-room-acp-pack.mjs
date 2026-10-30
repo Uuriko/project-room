@@ -1,7 +1,7 @@
 // Stage explicit source inputs only: local credentials, caches, tests and
 // untracked files must never enter the public npx archive.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdirSync, renameSync, rmSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, renameSync, rmSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -22,7 +22,12 @@ export function buildRoomAcpPack(root) {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, target);
     }
-    const [{ filename }] = JSON.parse(execFileSync('npm', ['pack', staging, '--ignore-scripts', '--json', '--pack-destination', out], { encoding: 'utf8' }));
+    // npm versions differ in their JSON result shape. Inspect the artifact in
+    // our private, initially empty destination instead of depending on metadata.
+    execFileSync('npm', ['pack', staging, '--ignore-scripts', '--json', '--pack-destination', out], { encoding: 'utf8' });
+    const archives = readdirSync(out).filter(file => file.endsWith('.tgz'));
+    if (archives.length !== 1 || !lstatSync(join(out, archives[0])).isFile()) throw new Error('npm pack did not produce exactly one archive');
+    const filename = archives[0];
     renameSync(join(out, filename), join(root, 'room-acp.tgz'));
     return join(root, 'room-acp.tgz');
   } finally {
