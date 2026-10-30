@@ -31,16 +31,22 @@ dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
 
-function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "", jsonHref = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
   const ogImageAlt = ogAlt ? `
 <meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
 <meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
+  // A detail page names its JSON twin (#3700): the record also lives at
+  // /receipts/<id>.json behind the same visibility predicate, and this
+  // alternate link is how a machine reader finds it without guessing
+  // the suffix. Root-relative, like the icon link above external ones.
+  const jsonAlternate = jsonHref ? `
+<link rel="alternate" type="application/json" href="${escapeHtml(jsonHref)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
-<link rel="canonical" href="${escapeHtml(canonical)}">
+<link rel="canonical" href="${escapeHtml(canonical)}">${jsonAlternate}
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${escapeHtml(canonical)}">
@@ -326,6 +332,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     title: receipt.title,
     description,
     path: `/receipts/${receipt.id}`,
+    jsonHref: `/receipts/${receipt.id}.json`,
     jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
     ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
     ogAlt: verdictLine,
