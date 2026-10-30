@@ -18476,6 +18476,25 @@ components:
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
         disputeDecider: { type: string, nullable: true, description: "Designated dispute decider, or the designated verifier when no separate decider was chosen. Eligibility is checked when a dispute opens; this value does not confirm an active seat. Null when neither was designated." }
+        disputability:
+          type: object
+          description: |
+            DA3-P3 - computed at read time from the bounty's current state:
+            whether a dispute can ever be opened on this bounty, and who
+            would decide it. `decider` is the designated decider the dispute
+            path seats (the explicit dispute decider, else the verifier);
+            there is no fallback decider, so when none is designated the
+            status is `undisputable` with reason `no_decider_named` and
+            `decider` is null. `verifier_is_executor` is evaluated against
+            the current claimant, so it appears the moment the designee
+            claims the work. Dispute-time gates that depend on the future
+            challenger, or on the designee's then-current membership, can
+            still refuse an attempt this field reads `disputable`.
+          required: [status, reason, decider]
+          properties:
+            status: { type: string, enum: [disputable, undisputable] }
+            reason: { type: string, nullable: true, enum: [no_decider_named, verifier_is_executor, verifier_is_poster] }
+            decider: { type: string, nullable: true }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
