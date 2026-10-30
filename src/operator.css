@@ -33,3 +33,5 @@ code { overflow-wrap: anywhere; }
 #op-message:empty { display: none; }
 #op-message { padding: 8px; border: 1px solid var(--op-line); border-radius: 6px; }
 .op-visually-hidden, .op-inline label.op-visually-hidden { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.op-bar { width: 120px; height: 8px; border: 1px solid var(--op-line); border-radius: 4px; overflow: hidden; margin-bottom: 2px; }
+.op-bar-fill { height: 100%; background: var(--op-accent); }

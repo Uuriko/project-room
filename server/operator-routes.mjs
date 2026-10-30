@@ -9,9 +9,15 @@ import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
 import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
+import { listOperatorRooms, operatorRoomExport } from "./operator-rooms.mjs";
 
 const POST = "POST";
 const GET = "GET";
+// MGMT-PANEL Slice 1 route rows (scope annotations for the H1 read/write
+// split): GET /api/operator/rooms — scope: read;
+// GET /api/operator/rooms/{roomId}/export — scope: read.
+const ROOM_EXPORT_ROUTE = "/api/operator/rooms/{roomId}/export";
+const ROOM_EXPORT_PATH = /^\/api\/operator\/rooms\/([^/]+)\/export$/;
 const ROUTES = Object.freeze({
   "/api/operator/purge/plan": POST,
   "/api/operator/purge/find": POST,
@@ -21,7 +27,9 @@ const ROUTES = Object.freeze({
   "/api/operator/projection/execute": POST,
   "/api/operator/actions": GET,
   "/api/operator/status": GET,
-  "/api/operator/drift": GET
+  "/api/operator/drift": GET,
+  "/api/operator/rooms": GET,
+  [ROOM_EXPORT_ROUTE]: GET
 });
 
 export function createOperatorRoutes({ store, json, reject, body, rate }) {
@@ -49,10 +57,38 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
         : roomPurge.execute(roomId, data, requestId));
       return true;
     }
-    const expected = ROUTES[path];
+    // Minimal pattern extension for the one parameterised panel route; the
+    // exact-match routes above are consulted first by construction (their
+    // paths never match the export pattern, and vice versa).
+    const exportMatch = ROOM_EXPORT_PATH.exec(path);
+    const routeKey = exportMatch ? ROOM_EXPORT_ROUTE : path;
+    const expected = ROUTES[routeKey];
     if (!expected) reject(404, "not_found", "Not found");
     if (req.method !== expected) reject(405, "method_not_allowed", "Method not allowed");
     res.setHeader("Cache-Control", "no-store");
+    if (routeKey === "/api/operator/rooms") {
+      json(res, 200, listOperatorRooms(store, url.searchParams.get("limit")));
+      return true;
+    }
+    if (routeKey === ROOM_EXPORT_ROUTE) {
+      let roomId = exportMatch[1];
+      try { roomId = decodeURIComponent(roomId); } catch { reject(422, "invalid_room_id", "roomId must be a room id"); }
+      if (url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
+      const result = operatorRoomExport(store, roomId, {
+        format: url.searchParams.get("format") ?? "jsonl",
+        confirmRoomId: url.searchParams.get("confirmRoomId"),
+        reason: url.searchParams.get("reason")
+      }, requestId);
+      res.writeHead(200, {
+        "Content-Type": result.contentType,
+        "Content-Length": result.body.length,
+        "Content-Disposition": `attachment; filename="${result.filename}"`,
+        "Cache-Control": "no-store",
+        ...result.headers
+      });
+      res.end(result.body);
+      return true;
+    }
     if (path === "/api/operator/purge/plan") {
       json(res, 200, purge.plan(await body(req), requestId));
       return true;

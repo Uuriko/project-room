@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // MEMBER-PERMS PR2: simulated browser journeys against a disposable real server.
 // Authoring gate: these own UI wiring, selection, retry and session lifecycle.
 // Credible regressions are posting admission instead of an authenticated upgrade,
@@ -137,10 +138,17 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   assert.match(await row.locator(".attention-detail").textContent(), /Accept work/);
   assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
   assert.equal(await attentionRow(owner, "Ordinary Joiner").locator(".attention-kind").textContent(), "Join request");
+  await captureDesignEvidence(owner, { id: "owner-join-request", title: "Owner reviews agent join and permission requests", fixture: "real AccessRequests identity; not human-account admission", testName: t.name, component: "decision controls" });
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "review controls fit the viewport");
   await decide(owner, "Approve");
   await row.waitFor({ state: "detached" });
   await page.locator("#message-list").getByText(new RegExp(`Approved permission request ${request.requestId}`)).waitFor();
+  const joinRow = attentionRow(owner, "Ordinary Joiner");
+  await reviewAction(joinRow, "Approve").click();
+  await joinRow.waitFor({ state: "detached" });
+  assert.equal(f.pending().length, 0, "owner approved both distinct requests");
+  assert.ok(Object.values(f.store.roomAuthority("commons").members).some(member => member.displayName === "Ordinary Joiner"), "join approval adds the identity as a member");
+  await captureDesignEvidence(owner, { id: "owner-join-approved", title: "Owner has approved join and permission requests", fixture: "Real identity admission and separate human-member permission upgrade", testName: t.name, component: "decision success" });
   assert.deepEqual(f.permissions("requester"), ["accept_work", "complete_work"]);
   await ownRow(page).locator("[data-permission-request-status]").filter({ hasText: "You can take work now." }).waitFor();
   await page.keyboard.press("Control+k");

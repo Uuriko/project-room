@@ -34,13 +34,13 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.7.0",
+  version: "1.8.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
     + "stitch data, inbox handoff packets, SLA breach alerts, channel update journals, account setup answers, "
     + "terms-of-service acceptance, "
-    + "and profile data. Owner and membership delegation grants issued by the account are revoked in every "
+    + "account admission request records, and profile data. Owner and membership delegation grants issued by the account are revoked in every "
     + "room, and any member permission a grant conferred is stripped. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
@@ -53,6 +53,7 @@ export const RETENTION_POLICY = Object.freeze({
     + "not rewritten. A shared room with other members and no other owner "
     + "blocks deletion until ownership is transferred.",
   purged: Object.freeze([
+    Object.freeze({ category: "account_admission_requests", description: "Account-bound admission request rows, including private account linkage and request notes, are deleted. Request events already shared with room members follow the existing room-history retention policy." }),
     Object.freeze({ category: "personal_room_content", description: "Messages and files in personal rooms this account solely owns are purged, and those rooms are archived." }),
     Object.freeze({ category: "credentials", description: "Account access keys (account_credentials) are deleted; outstanding keys stop working immediately." }),
     Object.freeze({ category: "sessions", description: "Browser account-session slots (account_session_slots) are deleted; every signed-in browser session ends." }),
@@ -420,6 +421,11 @@ function disposeOwnedRooms(store, plan) {
   return removed;
 }
 
+// The typed account principal is private request metadata. Agent requests and
+// room-owned event history are not account-owned rows and remain untouched.
+const accountAdmissionPredicate = `json_extract(CASE WHEN json_valid(requested_permissions) THEN requested_permissions ELSE '{}' END,'$.kind')='account-admission'
+  AND json_extract(CASE WHEN json_valid(requested_permissions) THEN requested_permissions ELSE '{}' END,'$.accountId')=?`;
+
 // Build the planner inventory from the live store. Audit rows are legal
 // hold (retained, never purged); everything else purges. Sessions purge
 // before credentials: account_session_slots.parent_credential_hash is a
@@ -431,6 +437,7 @@ export function inventoryFromStore(store, accountId, rooms = null) {
   const owned = rooms ?? classifyOwnedRooms(store, accountId);
   const roomWork = owned.archive.length + owned.transfer.length + owned.blocked.length;
   const inventory = {
+    account_admission_requests: { itemCount: store.db.prepare(`SELECT count(*) AS n FROM access_requests WHERE ${accountAdmissionPredicate}`).get(accountId).n },
     sessions: { itemCount: countWhere(store, "account_session_slots", accountId), dependsOn: [] },
     credentials: { itemCount: countWhere(store, "account_credentials", accountId), dependsOn: ["sessions"] },
     login_methods: { itemCount: store.accountLogins.listMethods(accountId).length },
@@ -573,6 +580,7 @@ function deactivateBoundMembers(store, accountId) {
 // scrubs the account row and deactivates it, which also retires any
 // credential the earlier steps somehow missed via the auth-epoch check.
 const EXECUTORS = {
+  account_admission_requests: (store, accountId) => store.db.prepare(`DELETE FROM access_requests WHERE ${accountAdmissionPredicate}`).run(accountId).changes,
   credentials: (store, accountId) =>
     store.db.prepare("DELETE FROM account_credentials WHERE account_id=?").run(accountId).changes,
   // A slot that redeemed a share link is referenced by share_link_joins, which is

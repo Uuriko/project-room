@@ -3,7 +3,8 @@
 // with 409 plan_changed when the counts moved, and deletes inside one writer
 // transaction. The integrity snapshot is rewritten in that same transaction.
 
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { issueApprovalToken, consumeApprovalToken } from "./approval-tokens.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
@@ -232,29 +233,6 @@ function likePrefix(text) {
   return `${text.replace(/[\\%_]/g, char => `\\${char}`)}%`;
 }
 
-function issueToken(secret, planId, planHash, exp) {
-  const body = Buffer.from(JSON.stringify({ planId, planHash, exp })).toString("base64url");
-  const signature = createHmac("sha256", secret).update(body).digest("base64url");
-  return `${body}.${signature}`;
-}
-
-function readToken(secret, token) {
-  if (typeof token !== "string" || !token.includes(".")) return null;
-  const dot = token.indexOf(".");
-  const body = token.slice(0, dot);
-  const signature = token.slice(dot + 1);
-  const expected = createHmac("sha256", secret).update(body).digest();
-  let presented;
-  try { presented = Buffer.from(signature, "base64url"); }
-  catch { return null; }
-  if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (!claims || typeof claims.planId !== "string" || typeof claims.planHash !== "string" || typeof claims.exp !== "number") return null;
-    return claims;
-  } catch { return null; }
-}
-
 function liftDeleteGuards(db, tables) {
   const wanted = new Set(tables);
   const saved = [];
@@ -300,12 +278,11 @@ function audit(store, row) {
 }
 
 export function createOperatorPurge(store) {
-  const secret = randomBytes(32);
   const plans = new Map();
 
   function remember(plan) {
     const now = store.now();
-    for (const [id, saved] of plans) if (saved.exp <= now || saved.used) plans.delete(id);
+    for (const [id, saved] of plans) if (saved.exp <= now) plans.delete(id); // used plans stay until expiry so a replay reads "already used"
     if (plans.size >= 100) plans.delete(plans.keys().next().value);
     plans.set(plan.planId, plan);
   }
@@ -388,12 +365,14 @@ export function createOperatorPurge(store) {
         const planHash = hashPurgeCounts(counts);
         const planId = `plan_${randomBytes(9).toString("base64url")}`;
         const exp = store.now() + TOKEN_TTL_MS;
-        const saved = { planId, planHash, exp, targets, reason, allowActiveMembers, counts, used: false };
+        // #5384: the confirm token is stored only as a hash and burns on first use.
+        const { token: confirmToken, tokenHash } = issueApprovalToken();
+        const saved = { planId, planHash, exp, targets, reason, allowActiveMembers, counts, used: false, tokenHash };
         remember(saved);
         const response = {
           planId,
           planHash,
-          confirmToken: issueToken(secret, planId, planHash, exp),
+          confirmToken,
           expiresAt: exp,
           reason,
           warnings,
@@ -426,12 +405,10 @@ export function createOperatorPurge(store) {
           fail(422, "invalid_purge", "Supply the planId and confirmToken from the plan");
         }
         const saved = plans.get(body.planId);
-        const claims = readToken(secret, body.confirmToken);
-        if (!saved || !claims || claims.planId !== saved.planId || claims.planHash !== saved.planHash) {
-          fail(401, "invalid_confirmation", "That confirmation is not valid. Request a fresh plan");
-        }
-        if (claims.exp <= store.now()) fail(401, "invalid_confirmation", "That confirmation expired. Request a fresh plan");
-        if (saved.used) fail(409, "confirm_used", "That confirmation was already used");
+        const outcome = consumeApprovalToken(saved, body.confirmToken, store.now(), { burn: false }); // burned after commit below
+        if (outcome === "invalid") fail(401, "invalid_confirmation", "That confirmation is not valid. Request a fresh plan");
+        if (outcome === "expired") fail(401, "invalid_confirmation", "That confirmation expired. Request a fresh plan");
+        if (outcome === "used") fail(409, "confirm_used", "That confirmation was already used");
         const value = store.transaction(() => {
           // MF-3: guards re-run first, inside this BEGIN IMMEDIATE
           // transaction, so G-1's money/proof re-check (roomGuards recounts)

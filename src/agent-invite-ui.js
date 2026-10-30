@@ -1,3 +1,4 @@
+import { canInviteCoOwners, museDevelopmentAccess } from "./room-administration.js";
 import { uiText } from './strings.js';
 import { canInviteMembers } from "./events.js";
 import { humanJoinShareBase } from "./room-deep-link.js";
@@ -15,7 +16,7 @@ export function inviteMintBody(profile, displayName) {
   const extra = name ? { displayName: name } : {};
   if (profile === "owner") return { ownerEquivalent: true, ...extra };
   if (profile === "collaborate") return { permissions: [...COLLABORATE_PERMISSIONS], ...extra };
-  if (profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
+  if (profile === "member" || profile === "guest" || profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
   throw new Error(uiText("invite.copy.002"));
 }
 
@@ -92,7 +93,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (ownerChoice) {
       const state = getState();
       const me = member();
-      const show = Boolean(me && me.active !== false && me.id === state?.room?.ownerId);
+      const show = canInviteCoOwners(state, me?.id);
       ownerChoice.hidden = !show;
       ownerChoice.disabled = !show;
       const select = $("#agent-invite-profile");
@@ -128,7 +129,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     minted = null;
     const instructions = dialog.querySelector(".agent-invite-instructions"); if (instructions) instructions.open = false;
     form.reset();
-    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
+    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = museDevelopmentAccess(getState()) && canInviteCoOwners(getState(), member()?.id) ? "owner" : "member";
     if ($("#agent-invite-count")) $("#agent-invite-count").value = "1";
     if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = "";
     if ($("#agent-invite-share")) $("#agent-invite-share").textContent = "";

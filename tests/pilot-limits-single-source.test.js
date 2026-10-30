@@ -40,9 +40,9 @@ test("no module hard-codes the room projection cap", () => {
     || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|^\s*\/\//.test(line))), []);
 });
 
-test("room capacity policy retains 1,000,000 events and the 4 MiB application guard", () => {
+test("room capacity policy retains 1,000,000 events and the 5 MiB application guard", () => {
   assert.equal(PILOT_LIMITS.eventsPerRoom, 1_000_000);
-  assert.equal(PILOT_LIMITS.projectionBytes, 4 * 1024 * 1024);
+  assert.equal(PILOT_LIMITS.projectionBytes, 5 * 1024 * 1024);
 });
 
 test("a platform SQLITE_TOOBIG refusal surfaces as a typed 409, not a 500", () => {
