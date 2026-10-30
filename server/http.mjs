@@ -2270,6 +2270,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end GR2 ---
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
+      // A well-formed receipt id that does not resolve gets the honest
+      // scope, not a bare "Not found": the id may never have been
+      // published, or the receipt may have been unpublished or made
+      // private, and this read cannot say which (a once-listed receipt
+      // can stop resolving — UT2 07-09 F5).
+      const receiptUnavailable = "No public receipt with this id is available. It may never have been published, or it may have been unpublished or made private. This server does not say which.";
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
@@ -2284,7 +2290,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (receiptCard) {
           if (!PUBLIC_RECEIPT_ID.test(receiptCard[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptCard[1]);
-          if (!receipt) reject(404, "not_found", "Not found");
+          if (!receipt) reject(404, "not_found", receiptUnavailable);
           // The share images are the one deliberate exception to no-store:
           // a share card or embedded badge only travels if unfurlers and
           // image proxies may cache it. The TTL is minutes, the read above
@@ -2304,7 +2310,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
-          if (!receipt) reject(404, "not_found", "Not found");
+          if (!receipt) reject(404, "not_found", receiptUnavailable);
           res.setHeader("Link", publicPageLinks(url, `/receipts/${receipt.id}`));
           // Verify at read time (?verify=1, GET only): re-run the receipt's
           // checks now — source record, artifact/journal hashes, and the
