@@ -138,3 +138,65 @@ manually removing a stale lock. No automatic lock stealing occurs. New commits
 should use a new output directory; code changes during a run are refused before
 the next job. Prioritize release verification and user work over spare-capacity
 campaigns; there is no persistent service or scheduled wakeup here.
+
+### Persistent laptop worker (no model or chat dependency)
+
+The optional local worker retains a SQLite queue and seed cursor across runs.
+It first runs the existing development-loop and native HTTP/wire verification
+suites once, then explores fresh event-kernel/spend-grant seeds. These are
+local test fixtures, not proof that an actual external agent responded.
+
+```sh
+node scripts/spare-capacity-worker.mjs init /absolute/worker-data 0 2
+node scripts/spare-capacity-worker.mjs mode /absolute/worker-data spare
+node scripts/spare-capacity-worker.mjs run /absolute/worker-data 24 20
+node scripts/spare-capacity-worker.mjs status /absolute/worker-data
+```
+
+`init` captures the clean source commit, lockfile hash, Node version and platform.
+It starts paused. A second Mac uses lane1 of2 on the same source; allocation is
+operator-assigned, not a network lease. Do not use the same lane on two active
+workers. A new source/runtime needs a new directory. Installed dependency
+contents are not attested and must remain unchanged. Tests are trusted repository
+code, not sandboxed arbitrary contributions; the worker executes only its fixed
+allowlist and does not pass arbitrary environment secrets to child tests.
+
+For explicitly requested continuous operation:
+
+```sh
+node scripts/spare-capacity-worker.mjs start /absolute/worker-data
+node scripts/spare-capacity-worker.mjs mode /absolute/worker-data paused
+```
+
+`start` launches a detached local Node process, with progress in `progress.jsonl`.
+It does not require Codex, a model session, a network connection or a scheduler.
+The machine must remain awake. This does not install login/reboot startup.
+`spare` waits when one-minute system load exceeds70% of logical CPU count;
+this is a coarse admission signal, not a CPU percentage guarantee. `dedicated`
+bypasses that load check but still uses one low-priority subprocess at a time.
+Both yield between jobs when paused or when a `STOP` file exists. A current job
+has a two-minute timeout and64KiB output limit. SIGTERM interrupts it; successful
+completed jobs are retained and an interrupted job is queued for another attempt.
+
+A failure stops the worker. Repeated runs do not skip over it as a success.
+Investigate its log/seed and fix or explicitly start a new campaign. Evidence is
+limited to approximately128MiB (one job/database write can overshoot slightly);
+archive it deliberately rather than deleting failures to keep the machine busy.
+No source edits, work assignments, merges, deployments or paid model requests
+are generated automatically. `worker.lock` prevents concurrent consumers;
+after a hard crash, verify no process remains before removing a stale lock.
+Crash recovery can repeat the interrupted **disposable test**, never a production
+operation. Completed jobs and monotonically allocated seeds are persistent.
+
+```sh
+node scripts/spare-capacity-worker.mjs export /absolute/worker-data failures.json
+node scripts/spare-capacity-worker.mjs inspect /absolute/other-worker failures.json
+```
+
+Export contains local failure metadata, not credentials or full logs. Inspection
+checks source/runtime compatibility and the suite/seed allowlist, then returns
+reproduction candidates without executing them. Share via an existing authorized
+Room handoff. Exact output digests conservatively group identical failures;
+semantic deduplication, automatic cross-machine transfer, and native agent
+wakeups are not claimed. A reviewed reproduction can use
+`PROPERTY_TEST_SEED=SEED node --test ALLOWLISTED_SUITE` in the matching checkout.
