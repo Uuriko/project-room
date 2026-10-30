@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
-import { parseFailingTests } from "./failing-tests.mjs";
+import { parseFailingTests, FIXTURE_FAILURE_NAMES } from "./failing-tests.mjs";
 
 const XML_ENTITIES = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
@@ -161,6 +161,17 @@ export function runTestFiles(files, options = {}) {
   return { status, signal: result.signal, failures, fileDurationsMs };
 }
 
+/**
+ * The failures a shard receipt records: runTestFiles keeps the deliberate
+ * fail-probe fixture in its return value (tests/unit-ci-runner.test.js
+ * asserts on it), but the receipt is merge-gate evidence — a fixture that
+ * fails on purpose is not a shard failure (issue #4261, mirroring the
+ * formatFailureComment filter in scripts/failing-tests.mjs).
+ */
+export function receiptFailures(failures) {
+  return failures.filter((f) => !FIXTURE_FAILURE_NAMES.has(f));
+}
+
 function selectUnitRun(argv, plan) {
   if (argv.length === 1 && argv[0] === "--all") {
     return {
@@ -237,7 +248,7 @@ async function main() {
         planHash: selected.planHash ?? plan.planHash,
         status,
         signal,
-        failures,
+        failures: receiptFailures(failures),
         // Per-file measured runtimes from this actual hosted run (junit
         // sidecar). Backward compatible: older receipts omit this field
         // and verifyUnitShards does not require it. The single-job receipt
