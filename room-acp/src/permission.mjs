@@ -25,7 +25,7 @@ export class PermissionBroker {
 
   isPending(threadKey) { return this.pending.has(threadKey) || this.askThreads.has(threadKey); }
 
-  async request({ threadKey, toolCall, options }, signal) {
+  async request({ threadKey, toolCall, options, validateApproval }, signal) {
     const deny = pick(options, ["reject_once"]);
     // A plain Room "allow" authorizes this request only, never a persistent
     // host grant. Persistent choices require a separate explicit consent UI.
@@ -69,8 +69,9 @@ export class PermissionBroker {
             // A receipt records the owner's answer, not a promise that the
             // permission was forwarded or that the tool actually executed.
             await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Approval received: ${title}. Applies only to this request if it is still active; this is not an execution receipt.` : `Denied: ${title}` });
-            if (decision === "allow" && (signal?.aborted || Date.now() - askedAt >= this.timeoutMs)) {
-              await this.room.post({ replyToId: askThread, body: `Denied: ${title}. The permission request ended before approval could be forwarded.` }).catch(error => this.log(`permission denial receipt failed: ${error.message}`));
+            const authorityCurrent = decision !== "allow" || !validateApproval || await validateApproval();
+            if (decision === "allow" && (!authorityCurrent || signal?.aborted || Date.now() - askedAt >= this.timeoutMs)) {
+              await this.room.post({ replyToId: askThread, body: `Denied: ${title}. The permission request ended before approval could be forwarded, or its approval authority changed.` }).catch(error => this.log(`permission denial receipt failed: ${error.message}`));
               return outcome(deny);
             }
             return outcome(decision === "allow" ? allow : deny);

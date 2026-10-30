@@ -164,3 +164,16 @@ test("failed abort correction leaves a conditional receipt and logs failure", as
   assert.match(posts.find(p => p.body.startsWith("Approval received:")).body, /only to this request if it is still active; this is not an execution receipt/);
   assert.ok(logs.some(line => line.includes("denial receipt failed")));
 });
+
+
+test("changed approval authority after an answer blocks the grant", async () => {
+  const { broker } = fixture({ thread: id => ({ thread: { replies: [{ authorId: "owner", replyToId: id, body: "allow" }] } }) });
+  let validations = 0;
+  assert.equal(choice(await broker.request({ ...request(), validateApproval: async () => { validations++; return false; } })), "deny");
+  assert.equal(validations, 1);
+});
+
+test("failed authority recheck blocks the grant", async () => {
+  const { broker } = fixture({ thread: id => ({ thread: { replies: [{ authorId: "owner", replyToId: id, body: "allow" }] } }) });
+  assert.equal(choice(await broker.request({ ...request(), validateApproval: async () => { throw new Error("offline"); } })), "deny");
+});
