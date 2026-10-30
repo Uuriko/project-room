@@ -30,24 +30,8 @@
                   state: { type: string }
                   owner: { type: [string, 'null'] }
                   truncated: { type: boolean }
-                  pullRequests:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        url: { type: [string, 'null'] }
-                        outcome: { type: [string, 'null'] }
-                  entries:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        source: { type: string, enum: [event, history] }
-                        sequence: { type: [integer, 'null'] }
-                        at: { type: [string, 'null'] }
-                        actorId: { type: [string, 'null'] }
-                        kind: { type: string, enum: [claim, pr, ci, review, merge, deploy] }
-                        action: { type: string }
+                  pullRequests: { type: array, items: { type: object } }
+                  entries: { type: array, items: { type: object } }
         '401': { description: unauthenticated }
         '403': { description: not_member or insufficient_scope (API key without rooms:read) }
         '404': { description: work_claim_not_found }

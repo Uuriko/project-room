@@ -17,8 +17,6 @@
 const HISTORY_ONLY = new Set(["pr_autolinked", "deploy_linked"]);
 export const CLAIM_THREAD_LIMIT = 500;
 
-// One kind per entry so a reader can scan the PR -> CI -> review -> merge ->
-// deploy arc without parsing actions.
 export function claimThreadKind(action, data = {}) {
   if (action === "pr_autolinked") return "pr";
   if (action === "deploy_linked") return "deploy";
@@ -63,8 +61,7 @@ function historyEntry(entry) {
   };
 }
 
-// Stable merge: events keep sequence order; a history-only step goes after
-// every event at or before its own time, so ties keep the event first.
+// Events keep sequence order; a history step goes after events at or before its time.
 export function mergeClaimThread(eventEntries, historyEntries) {
   const out = [...eventEntries];
   for (const entry of historyEntries) {
