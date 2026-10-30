@@ -71,7 +71,9 @@ export function seedNewAgentPolicy(db, roomId, memberId, at, state = null) {
 }
 
 // Validate and write a change. Only the room owner or the agent's own
-// accountable human may change it; the agent cannot widen its own audience.
+// accountable human may change it. Muse development co-owners retain their
+// explicit development-room administration exception. Ordinary agents cannot
+// widen their own audience.
 export function writeTalkPolicy(db, state, { roomId, actorId, memberId, policy, allowed = [] }, at, fail) {
   const target = state?.members?.[memberId];
   if (!target || target.active === false) fail(404, "unknown_member", "No such member in this room");

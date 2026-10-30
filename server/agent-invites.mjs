@@ -26,7 +26,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, memberOwnerId, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -558,6 +558,7 @@ export class AgentInvites {
           kind: "agent",
           permissions,
           identityId: identity.identityId,
+          accountableHumanId: memberOwnerId(room.state, row.created_by),
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           ...(ownerLevel ? { ownerEquivalent: true } : {}),
           // Referral attribution: the invite minter is the referrer. The
@@ -577,7 +578,7 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
-      // Muse development agents hear the room; ordinary rooms retain owner scope.
+      // Every new agent starts with an explicit owner-scoped talk policy.
       seedNewAgentPolicy(this.db, row.room_id, memberId, now, state);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
@@ -650,6 +651,7 @@ export class AgentInvites {
       const incoming = event({ id: eventId, idempotencyKey: eventId, roomId, actorId,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
           identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions,
+          accountableHumanId: memberOwnerId(room.state, actorId),
           // A guest link admits the agent as a link guest: it reads from its join
           // under the room's default history setting, like a human link guest.
           ...(historyGuest ? { historyGuest: true } : {}),
@@ -661,6 +663,7 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, identity.identityId, now);
+      seedNewAgentPolicy(this.db, roomId, identity.identityId, now, state);
       return { roomId, identityId: identity.identityId, memberId: identity.identityId, permissions, duplicate: false };
     });
   }
