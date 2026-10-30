@@ -25,7 +25,7 @@
 import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
 import { applyPullRequestWebhook, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
+import { MAX_CLAIM_HISTORY, isLeaseExpired } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
 
 // Claim ids in the wild: plan-pr-autolink, fo-sec06-invite-race,
@@ -106,13 +106,19 @@ export function parseClaimId({ branch = "", title = "", body = "" } = {}) {
 // Match PR metadata against live claims. Returns { claim, source }, or
 // { ambiguous: ["room:id", ...] } when one token names several live claims,
 // or null. Only owned, active claims whose declared repo (when set) matches
-// the PR's repo are eligible; an ambiguous token never guesses.
-export function findClaimForPull({ branch = "", title = "", body = "", repo = "" } = {}, claims = []) {
+// the PR's repo are eligible; an ambiguous token never guesses. Lease
+// liveness matches the owner path: a claim whose lease has lapsed at
+// nowMs is not a link target (the owner's isLeaseExpired predicate,
+// shared — appendWorkPullRequest refuses the same claim with
+// claim_lease_lapsed). Callers that wrap the claim (liveClaims entries
+// carry it as .item) are read through the wrapper.
+export function findClaimForPull({ branch = "", title = "", body = "", repo = "" } = {}, claims = [], { nowMs = Date.now() } = {}) {
   const candidates = parseClaimId({ branch, title, body });
   if (!candidates.length) return null;
   const prRepo = typeof repo === "string" ? repo.toLowerCase() : "";
   const live = (claims ?? []).filter(claim =>
     claim && LIVE_CLAIM_STATES.has(claim.state) && claim.owner &&
+    !isLeaseExpired(claim.item ?? claim, nowMs) &&
     (!claim.repo || !prRepo || String(claim.repo).toLowerCase() === prRepo));
   const byId = new Map();
   for (const claim of live) {
@@ -161,6 +167,16 @@ function autoLinkShape(parsed) {
 // already-linked claims; refuses a second auto-link while an open link
 // exists (the owner can still link more by hand). Emits one
 // work_claim.updated receipt with reason pr_autolinked.
+//
+// Parity with the owner path (appendWorkPullRequest, B2-2 F1/F2): a
+// lease-lapsed claim is refused with the owner's claim_lease_lapsed
+// reason (shared isLeaseExpired predicate — the lease sweep normally
+// retires such claims first, but the webhook path runs no sweep), and a
+// successful link applies the owner's #3685 invalidation set — the CI
+// settlement and the attestations clear, so the claim cannot stay
+// closable on the previous PR's CI/review after a new, unreviewed PR
+// becomes its linked PR. The reviews stay as the record, exactly as on
+// the owner path; their basis stales through the cleared CI head.
 export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unknown" } = {}, { nowMs = Date.now() } = {}) {
   // A public-work namespace claim must never gain a pull link: the door
   // settles by receipt and escrow attach, not by PR outcome, and a link
@@ -173,6 +189,9 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
   const item = store?.workClaims?.get(roomId, claimId);
   if (!item || !LIVE_CLAIM_STATES.has(item.state) || !item.owner || item.supersededBy) {
     return { linked: false, reason: "not_active" };
+  }
+  if (isLeaseExpired(item, nowMs)) {
+    return { linked: false, reason: "claim_lease_lapsed" };
   }
   const parsed = parsePullRequestUrl(url);
   if (!parsed) return { linked: false, reason: "bad_url" };
@@ -189,6 +208,9 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
     ...item,
     pullRequests: nextLinks,
     pullRequest: open,
+    // #3685 invalidation, same set appendWorkPullRequest applies.
+    ci: null,
+    attestations: Object.freeze([]),
     ...stamped,
     updatedAt: isoOf(nowMs),
   });
@@ -272,7 +294,7 @@ export function handlePrWebhookPayload(store, payload, { nowMs = Date.now() } = 
     title: typeof pr?.title === "string" ? pr.title : "",
     body: typeof pr?.body === "string" ? pr.body : "",
     repo,
-  }, liveClaims(store));
+  }, liveClaims(store), { nowMs });
   let linked = null;
   let ambiguous = null;
   let settled = [];
@@ -354,6 +376,7 @@ export async function discoverUnlinkedPulls(store, { env = null, fetchImpl = fet
   const candidates = new Map();
   for (const entry of liveClaims(store)) {
     if (!LIVE_CLAIM_STATES.has(entry.state) || !entry.owner) continue;
+    if (isLeaseExpired(entry.item, nowMs)) continue;
     if (!entry.repo || !REPO_PATTERN.test(entry.repo)) continue;
     if (pullLinks(entry.item).length > 0) continue;
     if (!candidates.has(entry.repo)) candidates.set(entry.repo, []);
@@ -385,7 +408,7 @@ export async function discoverUnlinkedPulls(store, { env = null, fetchImpl = fet
           title: typeof pr.title === "string" ? pr.title : "",
           body: typeof pr.body === "string" ? pr.body : "",
           repo,
-        }, claims);
+        }, claims, { nowMs });
         if (!found || !found.claim) continue;
         const result = autoLinkPullRequest(store, found.claim.roomId, found.claim.id,
           { url: parsed.url, source: found.source }, { nowMs });
