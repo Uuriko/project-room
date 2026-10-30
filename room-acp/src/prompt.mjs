@@ -14,3 +14,13 @@ export function buildPrompt({ roomTitle, thread, wakes, firstTurn }) {
   for (const wake of wakes) lines.push(`${wake.author}: ${wake.body}`);
   return [{ type: "text", text: lines.join("\n").trim() }];
 }
+
+// A Board claim assigned to the agent. The reply is posted as a claim note.
+export function buildClaimPrompt({ roomTitle, claim, author }) {
+  const lines = [`You are connected to the Project Room "${roomTitle}" through room-acp. ${author ?? "Someone"} assigned you a Board claim. Do the work, then reply with a short result; it is posted as a note on the claim. Link any PR you open.`, "", `Claim ${claim.id}: ${claim.title ?? claim.id}`];
+  const created = (claim.history ?? []).find(entry => entry?.action === "created");
+  if (created?.note) lines.push("", created.note);
+  for (const item of claim.acceptanceCriteria ?? []) lines.push(`- ${typeof item === "string" ? item : item?.text ?? ""}`);
+  if (claim.repo) lines.push("", `Repo: ${claim.repo}${claim.branch ? ` (branch ${claim.branch})` : ""}`);
+  return [{ type: "text", text: lines.join("\n").trim() }];
+}

@@ -41,6 +41,13 @@ uses its own login; room-acp never sees or passes model keys.
 - If the agent crashes it is restarted with backoff; three crashes inside five
   minutes pause the bridge for five minutes.
 
+## Board claims
+
+Assign a Board claim to the agent and room-acp runs one turn for it in its own
+session (one per claim). The reply is posted as a note on the claim, so it shows
+in the claim's thread on the Board. Only claims created by someone the bridge
+answers are run; other claim wakes (CI, review, lease) are acknowledged and skipped.
+
 ## Who it answers
 
 The bridge answers active room members by default, subject to the Room's server-side talk policy. Muse development co-owners are reachable by the whole room without additional setup. `--respond-to owner` can narrow the bridge locally.
