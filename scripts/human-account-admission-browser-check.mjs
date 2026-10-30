@@ -44,12 +44,21 @@ import { writeFileSync,mkdirSync } from 'node:fs';
 for (const [label, size] of SIZES) test(`signed human approval opens room with same account (${label})`, {timeout:60000}, async t => {
   const f=await setup(t),page=await f.open(size);
   await page.goto(f.origin);
+  if (!size.isMobile) {
+    await page.goto(`${f.origin}/join`);
+    await page.locator('#join-request > summary').click();
+    await page.locator('#join-request-room').fill('commons');
+    await page.locator('#join-request-name').fill('Human admission audit');
+    await page.locator('#join-request-submit').click();
+    await page.locator('#join-request-status a').click();
+  }
   const auth=page.locator('#auth-signin-ui');
   await auth.locator('[data-password-mode="signup"]').click();
   await auth.locator('[name="email"]').fill('admission-audit@example.invalid');
   await auth.locator('[name="password"]').fill(PW);
   const signup=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/password/signup');
   await auth.locator('button[type="submit"]').click();assert.equal((await signup).status(),202);
+  if (!size.isMobile) await page.waitForURL(url => url.pathname === '/join' && url.searchParams.get('room') === 'commons');
   const signed=await f.session(page);
   const verification=f.verifyMails('admission-audit@example.invalid').at(-1);
   assert.ok(verification?.code);
@@ -101,6 +110,7 @@ for (const [label, size] of SIZES) test(`signed human approval opens room with s
   const card=owner.locator('#attention-list > li').filter({hasText:'Human admission audit'});
   await card.waitFor();
   await owner.waitForFunction(() => document.querySelector('#updates-status')?.textContent !== 'Loading updates…');
+  assert.doesNotMatch(await owner.locator('.updates-list').innerText(), /Nothing needs you/);
   await owner.screenshot({path:'test-results/human-admission/owner-decision.png',fullPage:true});
   await visualEvidence.captureDesignEvidence?.(owner, {id:`human-admission-owner-${size.isMobile ? "phone" : "desktop"}`,title:"Owner reviews human request",fixture:"Verified synthetic human account, real server admission",testName:t.name,component:"human admission"});
   const approved=owner.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname.includes('access-requests'));

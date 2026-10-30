@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { humanErrorMessage } from "./error-copy.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
@@ -267,7 +268,7 @@ export class AccountClient {
     return this.accountAccessRequestOperation("/api/account/access-requests/" + encodeURIComponent(requestId));
   }
   async accountAccessRequestOperation(path, options = {}) {
-    const session = this.currentSession("requesting room access", { authenticated: true });
+    const session = this.currentSession(uiText("join.request.operation"), { authenticated: true });
     const generation = this.generation;
     try {
       const value = await this.request(path, { ...options, session });
