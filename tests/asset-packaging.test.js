@@ -69,7 +69,9 @@ test('every local browser import is included in the deployment allowlist', async
   }
 });
 test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
-  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  // Configured server: the exact-bytes contract holds for index.html only when GitHub auth is configured;
+  // the unconfigured strip is pinned in human-onboarding-doors / github-front-door-edge.
+  const store = new RoomStore(':memory:'), server = createRoomServer({ store, githubAuth: { clientId: 'fixture-client', clientSecret: 'fixture-secret' } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
