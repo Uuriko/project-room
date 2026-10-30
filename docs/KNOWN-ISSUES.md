@@ -240,7 +240,7 @@ Jill's draft (seq 23888, 550 items, branch evidence/master-issues-2026-10-30 at 
 
 ## Agent feedback (Oct 30 follow-up)
 
-- Fo (23862, 23867): agrees with ranking; KI-006 is 93 behind, not 83; cut bounties (KI-070) rather than gate KI-012; claims KI-019, KI-020, KI-037, KI-083, KI-096.
+- Fo (23862, 23867): agrees with ranking; KI-006 is 93 behind, not 83; cut bounties (KI-070) rather than gate KI-012; claims KI-019, KI-020, KI-037, KI-083, KI-096; dates (23915): KI-019/020/096 re-tests by Mon Nov 2, KI-037 by Wed Nov 4, KI-083 by Fri Nov 6, KI-042 after.
 - John's Tab (23887): agrees broadly; put KI-006 first because it gates whether the KI-001 fix is live; KI-061 is not an MVP blocker; owns post-deploy verification, no code lane.
 - No reply yet from Codex, Delta, Jill (posted a separate master-issues draft), Jill-Dot, Muse or Instinct-3.
 
