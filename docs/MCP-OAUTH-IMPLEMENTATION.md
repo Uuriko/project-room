@@ -8,8 +8,8 @@ installed or run it.
 ## Implemented optional human-account path
 
 The person joins as a human and creates an identity-linked agent sponsored by
-that human. Native OAuth consent lists only that account's currently sponsored
-agents, with the exact room shown. It does not act as the human account or infer
+that human. Native OAuth consent lists only agents with an explicit live connection bound
+to that account and identity-holder proof, with the exact room shown. It does not act as the human account or infer
 ownership from the invitation issuer. Friend-sponsored enrollment requires the
 separate agent-connections lifecycle implementation.
 
@@ -41,10 +41,9 @@ adds Room permissions. No surrogate identity secret is minted or exposed.
 
 - Configure verified native-host client/callback information, or implement a
   separately reviewed standard client registration path. Do not guess callbacks.
-- Compose friend-sponsored enrollment and the native connection UI; test the
-  actual non-owner friend path with its ownership lifecycle.
-- Qualify Cloudflare execution and an actual Dot installation, receive/reply,
-  useful task result and review. Node HTTP tests do not establish these facts.
+- Qualify an actual Dot installation, receive/reply, useful task result and
+  review. Native Events currently require the Node deployment; Workers does not
+  advertise Events without a vetted callback transport.
 - Background receiving/event subscriptions are a separate capability and require
   observed delivery, resume and duplicate handling evidence.
 
@@ -79,7 +78,9 @@ A nonsecret event-subscription descriptor contains principal type, family id,
 resource, room, agent identity/member and sorted effective scopes. The current
 refresh family and live binding are rechecked before use; no bearer is persisted
 in a subscription. The `nativeHandler` mount is restricted to authenticated
-`events/` methods; mounting a real MCP2 events implementation remains separate.
+`events/` methods. The composed MCP2 mount supports signed, durable events with
+bounded retry, expiry and key rotation. Delivery rechecks current authority and
+wake policy, including after DNS resolution. Paused agents can still unsubscribe.
 
 The first paste into the Dot may still require a second paste in native consent.
 Avoid claiming automatic invitation forwarding until the real host is tested.

@@ -34,6 +34,8 @@ Use the actual intended host, both without a Room account and with a separate hu
 
 Instrument invite-to-join, join-to-first-successful-tool, addressed-task-to-receipt, receipt-to-start, task-to-reviewed-result, retries and human interventions. Measure distributions and failures on real trials before choosing or claiming latency targets. Avoid manufactured CPU utilization: laptops should run useful queued work, bounded verification and local adapters when available.
 
+Implementation details are recorded in [Native agent OAuth](MCP-OAUTH-IMPLEMENTATION.md).
+
 ## Native Dot connection
 
 OpenAI documents that Dots can use their account's enabled plugins. A native MCP plugin must be connected through its supported authentication path; a Codex stdio configuration is not proof of a cloud Dot installation. See [Dots: computers and apps](https://learn.chatgpt.com/docs/dots/computers-and-apps) and [plugin authentication](https://developers.openai.com/plugins/build/auth).
