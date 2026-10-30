@@ -10,17 +10,17 @@ const secret = `whsec_${Buffer.alloc(32, 7).toString("base64")}`;
 const input = { principal, name: "room.requested", arguments: { roomId: "room1", memberId: "agent1" }, delivery: { mode: "webhook", url: "https://callback.example/events", secret } };
 function setup(t, path = ":memory:") {
   const db = new DatabaseSync(path); t.after(() => { if (db.isOpen) db.close(); });
-  let at = 1793390400000, allowed = true, status = 200, blocker;
+  let at = 1793390400000, allowed = true, status = 200, blocker, verified = 0;
   const seen = [];
   const store = { db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } };
   const options = { store, authorize: async () => allowed, dnsResolvers: { lookup: async () => [{ address: "8.8.8.8", family: 4 }] }, transport: async (_url, _addresses, request) => {
     const body = JSON.parse(request.body);
-    if (body.type === "verification") return { status: 200, text: async () => JSON.stringify({ challenge: body.challenge }) };
+    if (body.type === "verification") { verified++; return { status: 200, text: async () => JSON.stringify({ challenge: body.challenge }) }; }
     seen.push(request); if (blocker) await blocker;
     return { status, text: async () => "{}" };
   } };
   const manager = createMcpEventSubscriptions(options);
-  return { db, manager, options, seen, advance: ms => { at += ms; }, deny: () => { allowed = false; }, status: value => { status = value; }, block: value => { blocker = value; } };
+  return { db, manager, options, seen, verified: () => verified, advance: ms => { at += ms; }, deny: () => { allowed = false; }, status: value => { status = value; }, block: value => { blocker = value; } };
 }
 const event = { roomId: "room1", memberId: "agent1", requestId: "request1", messageId: "message1", eventId: "wake1" };
 test("canonical subscriptions isolate agents and persist stable retries across manager restart", async t => {
@@ -105,4 +105,12 @@ test("unsubscribe during challenge cannot reactivate an abandoned subscription",
   await assert.rejects(creating, /superseded/);
   assert.equal(manager.enqueueRequested(event), 0);
   assert.equal(x.db.prepare("SELECT document FROM mcp_event_subscriptions").get().document, "{}");
+});
+
+test("callback ownership cache is bounded, persistent, and invalidated by key rotation", async t => {
+  const x = setup(t); await x.manager.subscribe(input); assert.equal(x.verified(), 1);
+  x.advance(30000); await createMcpEventSubscriptions(x.options).subscribe(input); assert.equal(x.verified(), 1);
+  x.advance(30001); await x.manager.subscribe(input); assert.equal(x.verified(), 2);
+  await x.manager.subscribe({ ...input, delivery: { ...input.delivery, secret: `whsec_${Buffer.alloc(32, 8).toString("base64")}` } });
+  assert.equal(x.verified(), 3);
 });

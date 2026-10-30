@@ -81,9 +81,15 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
     }
     db.prepare(`INSERT INTO mcp_event_subscriptions VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document,generation=excluded.generation,state=excluded.state,expires_at=excluded.expires_at`).run(id, key, JSON.stringify(document), generation, "verifying", expiresAt);
     try {
-      await verifyMcpEventCallback({ subscriptionId: id, secret: delivery.secret, url: url.href, transport, dnsResolvers, now: now() });
+      // A short persisted cache avoids repeated challenges on refresh. A new
+      // signing key always proves callback ownership again before activation.
+      const cached = old?.state === "active" && old.expires_at > now()
+        && previous.secret === delivery.secret && Number.isSafeInteger(previous.verifiedAt)
+        && previous.verifiedAt <= now() && now() - previous.verifiedAt < 60000;
+      if (!cached) await verifyMcpEventCallback({ subscriptionId: id, secret: delivery.secret, url: url.href, transport, dnsResolvers, now: now() });
+      document.verifiedAt = cached ? previous.verifiedAt : now();
       if (!await authorize(JSON.parse(key)) || now() >= expiresAt) throw new Error("Event grant expired during verification");
-      const result = db.prepare("UPDATE mcp_event_subscriptions SET state='active' WHERE id=? AND generation=? AND state='verifying'").run(id, generation);
+      const result = db.prepare("UPDATE mcp_event_subscriptions SET state='active',document=? WHERE id=? AND generation=? AND state='verifying'").run(JSON.stringify(document), id, generation);
       if (!result.changes) throw new Error("Event subscription superseded");
     } catch (error) {
       db.prepare("UPDATE mcp_event_subscriptions SET state='inactive',document='{}' WHERE id=? AND generation=?").run(id, generation);
