@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, DISPUTE_TIMEOUT_MS } from "../server/bounty-escrow.mjs";
 import { progressEscrowEpochs, escrowEpochNextDueAt } from "../server/bounty-epoch-keeper.mjs";
 import { jobByName, jobEnabled, jobIsDue, jobNextDue } from "../server/jobs.mjs";
 
@@ -325,4 +325,222 @@ test("a submitted bounty past its deadline settles through the keeper (guardian 
   const second = keeper(world);
   assert.deepEqual(second, { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
     released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// PIN-01 — KEEPER-TWINS mutation pins (Fix Programme v2, clause (c)).
+//
+// One pin per surviving due-scan mutant from the 2026-10-19 mutation sweep
+// (xray-2026-10-18/mutants.json): each test parks a fixture bounty in exactly
+// the mutated state at exactly the boundary instant and asserts the keeper
+// refrains — plus a positive-control phase proving the same fixture IS acted
+// on once genuinely due, so a pin cannot pass by the keeper never acting.
+// CAL-M01/CAL-M02 are pinned by PR #4130's hunt-coverage-keeper tests and
+// are deliberately not duplicated here.
+//
+// Method: fixtures are driven through the real escrow API, then parked at
+// exact instants by reading the stored *_ms columns and setting the fake
+// clock to the millisecond — no fixture relies on a tick landing "close".
+const rowOf = (world, bountyId, room = world.room) =>
+  world.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(room, bountyId);
+const resetClock = () => { nowMs = 1_786_000_000_000; };
+
+// Post -> fund -> claim -> submit -> accept -> dispute (challenger CODEX;
+// the post's verifierId seats INSTINCT as decider).
+function runToDisputed(world, room = world.room) {
+  const { escrow } = world;
+  const posted = escrow.postBounty(room,
+    { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(30 * DAY_MS), verifierId: INSTINCT }).bounty;
+  escrow.fundBounty(room, posted.bountyId, { funder: JILL });
+  escrow.claimBounty(room, posted.bountyId, { claimant: GROK });
+  escrow.submitWork(room, posted.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(room, posted.bountyId, { acceptor: JILL,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  escrow.disputeBounty(room, posted.bountyId, { challenger: CODEX, bond: 2.5, grounds: "looks wrong" });
+  return escrow.getBounty(room, posted.bountyId);
+}
+
+test("PIN-01 K-03: an accepted bounty with no challenge window (NULL ends) is never due", () => {
+  // Contract pin. The K-03 mutant drops `challenge_ends_ms IS NOT NULL`
+  // from the accepted clause; in SQL three-valued logic `NULL <= ?` is
+  // never true, so that mutant is behaviourally equivalent at this seam —
+  // this test pins the invariant itself (the scan and the _keeperPass twin
+  // alike), so a future rewrite of either cannot make windowless accepted
+  // bounties due. See the PIN-01 lane report for the equivalence proof.
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToAccepted(world);
+  world.db.prepare("UPDATE bounty_records SET challenge_ends_ms = NULL WHERE room_id=? AND bounty_id=?")
+    .run(room, bounty.bountyId);
+  tick(10 * DAY_MS); // far past where any 3-day window would have ended
+  const summary = keeper(world);
+  assert.equal(summary.due, 0);
+  assert.equal(summary.rooms, 0);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "accepted");
+  assert.equal(escrowEpochNextDueAt(world.store, nowMs), null,
+    "a windowless accepted bounty schedules no wake");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-04: an accepted bounty is due AT its challenge end, not one tick later", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToAccepted(world);
+  const ends = rowOf(world, bounty.bountyId).challenge_ends_ms;
+  assert.ok(Number.isFinite(ends), "fixture carries a challenge end");
+  nowMs = ends - 1; // one millisecond before the window closes
+  let summary = keeper(world);
+  assert.equal(summary.due, 0, "not due before the boundary");
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "accepted");
+  nowMs = ends; // exactly at the boundary: `challenge_ends_ms <= now` holds
+  summary = keeper(world);
+  assert.equal(summary.due, 1, "due at the exact challenge end (K-04 flips <= to <)");
+  assert.equal(summary.approved, 1);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "approved");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-05: a disputed bounty is NOT due at exactly the dispute timeout; it is due 1 ms later", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToDisputed(world);
+  const opened = rowOf(world, bounty.bountyId).dispute_opened_ms;
+  assert.ok(Number.isFinite(opened), "fixture carries a dispute open time");
+  nowMs = opened + DISPUTE_TIMEOUT_MS; // `now - opened > TIMEOUT` is false here
+  let summary = keeper(world);
+  assert.equal(summary.due, 0, "not due at the exact timeout (K-05 flips > to >=)");
+  assert.equal(summary.released, 0);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "disputed");
+  nowMs += 1; // one millisecond past: the default release fires
+  summary = keeper(world);
+  assert.equal(summary.due, 1);
+  assert.equal(summary.released, 1, "the timeout default releases the award");
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "approved");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-06: a disputed bounty whose resolution is already recorded is not re-scanned as due", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToDisputed(world);
+  // The resolution is on the record (the shape the data census found:
+  // dispute settled on the books) but the bounty row still reads disputed.
+  // The scan's `resolution_json IS NULL` conjunct keeps it out of the due
+  // set; without the conjunct it re-enters every tick (K-06).
+  world.db.prepare("UPDATE bounty_records SET resolution_json = ? WHERE room_id=? AND bounty_id=?")
+    .run(JSON.stringify({ outcome: "release", via: "pin-01-fixture" }), room, bounty.bountyId);
+  const opened = rowOf(world, bounty.bountyId).dispute_opened_ms;
+  nowMs = opened + DISPUTE_TIMEOUT_MS + 1000; // timeout long past
+  const summary = keeper(world);
+  assert.equal(summary.due, 0, "a recorded resolution keeps the bounty out of the due set");
+  assert.equal(summary.rooms, 0);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "disputed");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-06 control: the same dispute with NO recorded resolution is due past the timeout", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToDisputed(world);
+  const opened = rowOf(world, bounty.bountyId).dispute_opened_ms;
+  nowMs = opened + DISPUTE_TIMEOUT_MS + 1000;
+  const summary = keeper(world);
+  assert.equal(summary.due, 1);
+  assert.equal(summary.released, 1);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "approved");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-07: a snoozed proposal past its deadline is not due until the snooze lapses", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const posted = escrow.postBounty(room,
+    { poster: JILL, title: "T", criteria: "C", amount: 5, deadline: isoFuture(3600_000) }).bounty;
+  const deadline = rowOf(world, posted.bountyId).deadline_ms;
+  escrow.snoozeBounty(room, posted.bountyId,
+    { snoozer: JILL, until: new Date(deadline + 2 * 3600_000).toISOString() });
+  nowMs = deadline + 3600_000; // deadline passed, snooze still holds
+  let summary = keeper(world);
+  assert.equal(summary.due, 0, "snoozed proposals do not expire while snoozed (K-07 neutralises the snooze)");
+  assert.equal(summary.expired, 0);
+  assert.equal(escrow.getBounty(room, posted.bountyId).state, "proposed");
+  nowMs = deadline + 2 * 3600_000; // the snooze lapses exactly (the <= boundary)
+  summary = keeper(world);
+  assert.equal(summary.due, 1, "due the moment the snooze lapses");
+  assert.equal(summary.expired, 1);
+  assert.equal(escrow.getBounty(room, posted.bountyId).state, "cancelled");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-08: a withdrawn-terminal dispute is due immediately, not at the 14-day timeout", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room, store } = world;
+  const bounty = runToDisputed(world);
+  // Withdraw the dispute on the record: the machine row is terminal while
+  // the bounty never settled (the finalize handler must have thrown
+  // inline). The scan's TERMINAL_DISPUTE subquery is what makes this due
+  // for the keeper's retry at once; dropping 'withdrawn' from it (K-08)
+  // strands the bounty until the timeout. The settle outcome itself is
+  // the dispute surface's charter, not this pin — the pin is scan
+  // membership (due set + next-due), asserted before any settle matters.
+  const disputeId = rowOf(world, bounty.bountyId).dispute_id;
+  const bodyRow = world.db.prepare("SELECT body FROM bounty_disputes WHERE dispute_id=?").get(disputeId);
+  const body = JSON.parse(bodyRow.body);
+  if (body.data) body.data.state = "withdrawn"; else body.state = "withdrawn";
+  world.db.prepare("UPDATE bounty_disputes SET body=? WHERE dispute_id=?")
+    .run(JSON.stringify(body), disputeId);
+  // A fresh escrow instance hydrates the dispute machine from the record,
+  // exactly as a new keeper tick constructs it.
+  const fresh = new BountyEscrow(store, { now: () => nowMs, allowLegacyStringLanes: true });
+  assert.equal(escrowEpochNextDueAt(store, nowMs), nowMs,
+    "a terminal dispute schedules its retry now");
+  const summary = progressEscrowEpochs(store, { now: nowMs, escrow: fresh });
+  assert.equal(summary.due, 1, "the withdrawn-terminal dispute is in the due set immediately");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-08 control: an open (non-terminal) dispute is not due before its timeout", () => {
+  resetClock();
+  const world = makeWorld();
+  const bounty = runToDisputed(world);
+  const opened = rowOf(world, bounty.bountyId).dispute_opened_ms;
+  const summary = keeper(world);
+  assert.equal(summary.due, 0);
+  assert.equal(escrowEpochNextDueAt(world.store, nowMs), opened + DISPUTE_TIMEOUT_MS + 1,
+    "an open dispute schedules at the timeout boundary, not now");
+});
+
+test("PIN-01 K-09: an approved bounty awaiting its sweep is next-due NOW", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  const bounty = runToAccepted(world);
+  tick(4 * DAY_MS);
+  const first = keeper(world);
+  assert.equal(first.approved, 1);
+  assert.equal(escrow.getBounty(room, bounty.bountyId).state, "approved");
+  assert.equal(escrowEpochNextDueAt(world.store, nowMs), nowMs,
+    "approved rows are actionable at once (K-09 drops 'approved' from ACTIONABLE_STATES)");
+  const second = keeper(world);
+  assert.equal(second.paid, 1);
+  assert.equal(escrowEpochNextDueAt(world.store, nowMs), null,
+    "once paid, nothing in the room is waiting on time");
+  expectConserved(escrow, room);
+});
+
+test("PIN-01 K-09 control: next-due tracks a waiting proposal's deadline, not now", () => {
+  resetClock();
+  const world = makeWorld();
+  const { escrow, room } = world;
+  escrow.postBounty(room,
+    { poster: JILL, title: "T", criteria: "C", amount: 5, deadline: isoFuture(2 * 3600_000) });
+  assert.equal(escrowEpochNextDueAt(world.store, nowMs), nowMs + 2 * 3600_000);
 });

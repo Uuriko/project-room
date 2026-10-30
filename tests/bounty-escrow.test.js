@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow, bountyEscrowSchema, canonicalLane, convergeBountyDeployedSchema, toMillis, normalizeActor } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, DISPUTE_TIMEOUT_MS, bountyEscrowSchema, canonicalLane, convergeBountyDeployedSchema, toMillis, normalizeActor } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
@@ -1033,5 +1033,51 @@ test("closeEpoch keeper throw: per-bounty action applies nothing, epoch continue
   assert.equal(escrow.getBounty(ROOM, a.bountyId).state, "paid");
   assert.equal(bal(escrow, GROK).payable, 98 + (9.9 + 1) * 2);
   assert.equal(bal(escrow, "pool").payable, 0.2);
+  expectConserved(escrow);
+});
+
+// ---------------------------------------------------------------------------
+// PIN-01 — KEEPER-TWINS (escrow twin): _keeperPass boundary pins
+// (Fix Programme v2, clause (c)). The due-scan's SQL clauses have a JS twin
+// in _keeperPass; the sweep found the twins can drift apart clause by clause
+// invisibly. These pins drive closeEpoch (which snapshots and runs
+// _keeperPass per bounty) at the exact boundary instants, with a
+// one-millisecond-before control phase for each.
+
+test("PIN-01 E-13: closeEpoch approves an accepted bounty AT its challenge end, not after", () => {
+  nowMs = 1_786_000_000_000;
+  const { escrow, db } = makeEscrow();
+  const bounty = runToAccepted(escrow);
+  const ends = db.prepare("SELECT challenge_ends_ms FROM bounty_records WHERE room_id=? AND bounty_id=?")
+    .get(ROOM, bounty.bountyId).challenge_ends_ms;
+  assert.ok(Number.isFinite(ends), "fixture carries a challenge end");
+  nowMs = ends - 1;
+  let epoch = escrow.closeEpoch(ROOM).summary;
+  assert.deepEqual(epoch.approved, [], "not approved before the boundary");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "accepted");
+  nowMs = ends; // `now >= challengeEndsMs` holds exactly here
+  epoch = escrow.closeEpoch(ROOM).summary;
+  assert.deepEqual(epoch.approved, [bounty.bountyId],
+    "approved at the exact challenge end (E-13 flips >= to >)");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
+  expectConserved(escrow);
+});
+
+test("PIN-01 E-15: closeEpoch does NOT release a disputed bounty at exactly the dispute timeout", () => {
+  nowMs = 1_786_000_000_000;
+  const { escrow, db } = makeEscrow();
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "looks wrong" });
+  const opened = db.prepare("SELECT dispute_opened_ms FROM bounty_records WHERE room_id=? AND bounty_id=?")
+    .get(ROOM, bounty.bountyId).dispute_opened_ms;
+  assert.ok(Number.isFinite(opened), "fixture carries a dispute open time");
+  nowMs = opened + DISPUTE_TIMEOUT_MS; // `now - opened > TIMEOUT` is false here
+  let epoch = escrow.closeEpoch(ROOM).summary;
+  assert.deepEqual(epoch.released, [], "no default release at the exact timeout (E-15 flips > to >=)");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "disputed");
+  nowMs += 1; // one millisecond past: the timeout default fires
+  epoch = escrow.closeEpoch(ROOM).summary;
+  assert.equal(epoch.released.length, 1, "released one tick past the timeout");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
   expectConserved(escrow);
 });
