@@ -818,6 +818,14 @@ export async function handleWorkClaims(options) {
       }
       return helpers.json(res, 409, body);
     }
+    // DC4-A1 cure: the stale-round release refusal stays a THROWN refusal
+    // for direct-call consumers (the invariant DSL captures refusals as
+    // thrown errors), with its cure payload on error.body — the same
+    // shape linkWorkClaimPullRequest throws. The HTTP transport
+    // (server/http.mjs, work-claim chain) converts this one thrown
+    // body-carrying error into the returned 409 response, so the HTTP
+    // surface is unchanged. No other error site changes conversion here.
+    if (options.workClaimRoute === "release" && error?.code === "work_claim_conflict" && error.body) throw error;
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
   }

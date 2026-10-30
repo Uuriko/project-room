@@ -24,18 +24,28 @@ const helpers = {
   body: async req => req.body,
 };
 
-const call = (registry, memberId, route, id, body, query = "") => handleWorkClaims({
-  req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
-  res: {},
-  url: new URL(`https://room.example/api/rooms/room1/work-claims${query}`),
-  store: { roomAuthority: () => ({ ownerId: "owner", members: MEMBERS }), room: () => ({ state: { messages: [] } }) },
-  roomId: "room1",
-  auth: { member: { id: memberId, kind: MEMBERS[memberId].kind, permissions: MEMBERS[memberId].permissions } },
-  workClaimRoute: route,
-  workClaimId: id,
-  helpers,
-  registry,
-});
+// HTTP-level call: the transport converts a thrown body-carrying refusal
+// into the returned response, exactly as server/http.mjs does (DC4-A1 cure:
+// direct-call consumers of handleWorkClaims receive the thrown refusal).
+const call = async (registry, memberId, route, id, body, query = "") => {
+  try {
+    return await handleWorkClaims({
+      req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
+      res: {},
+      url: new URL(`https://room.example/api/rooms/room1/work-claims${query}`),
+      store: { roomAuthority: () => ({ ownerId: "owner", members: MEMBERS }), room: () => ({ state: { messages: [] } }) },
+      roomId: "room1",
+      auth: { member: { id: memberId, kind: MEMBERS[memberId].kind, permissions: MEMBERS[memberId].permissions } },
+      workClaimRoute: route,
+      workClaimId: id,
+      helpers,
+      registry,
+    });
+  } catch (error) {
+    if (Number.isInteger(error?.status) && error.body && error.code) return { status: error.status, value: error.body };
+    throw error;
+  }
+};
 
 const claimedByHolder = async registry => {
   await call(registry, "owner", "create", null, { id: "lane" });
