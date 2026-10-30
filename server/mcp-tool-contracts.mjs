@@ -18,6 +18,7 @@ const ANY_OR_ROOM = "any identity secret, or a room token (rak_) on /mcp; the RE
 const STATIC = "any caller, no secret needed";
 
 export const MCP_TOOL_CONTRACTS = Object.freeze({
+  room_work_claim_thread: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}/thread" },
   room_needs_me: { access: `read, ${ANY_OR_ROOM}`, cost: READ, rest: "GET /api/needs-me" },
   room_read_messages: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/events" },
   room_post_message: { access: `write, ${GUEST_OK}`, cost: POST, rest: `${COMMANDS} (message.posted)` },

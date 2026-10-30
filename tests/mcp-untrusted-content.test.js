@@ -167,7 +167,7 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   // assistant facade, claim provenance and agent member merge and the bootstrap read added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
   const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance",
-    "room_claim", "room_handoff", "room_read_bootstrap",
+    "room_work_claim_thread", "room_claim", "room_handoff", "room_read_bootstrap",
     "room_merge_members"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);

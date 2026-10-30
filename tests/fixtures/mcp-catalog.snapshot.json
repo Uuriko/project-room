@@ -1183,6 +1183,15 @@
         "openWorldHint": false
       }
     },
+    "room_work_claim_thread": {
+      "inputSchema": "12ee2796217b4392",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "squads_create": {
       "inputSchema": "46dbbbf2c16c4498",
       "annotations": {
@@ -1661,6 +1670,15 @@
         "idempotentHint": true,
         "openWorldHint": false
       }
+    },
+    "room_work_claim_thread": {
+      "inputSchema": "12ee2796217b4392",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
     }
   },
   "focus=conversation": {
@@ -2076,6 +2094,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_work_claim_thread": {
+      "inputSchema": "12ee2796217b4392",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
