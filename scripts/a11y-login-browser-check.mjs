@@ -8,6 +8,7 @@ import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // Both viewports a real visitor uses: desktop 1280 and mobile 390.
 // Fails on any serious or critical axe violation (wcag2a/2aa/21a/21aa/22aa).
 import test from "node:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
