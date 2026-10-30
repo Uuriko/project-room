@@ -171,7 +171,7 @@ function summarizeBoardClaim(item) {
 // entries the caller counted recovers the state, owner and claim round
 // they saw, and diffing that snapshot against the current item separates
 // "your read was stale" (truncated list read, or a benign append since)
-// from "the claim itself moved" (delivered, released, re-claimed,
+// and "the claim itself moved" (delivered, released, re-claimed,
 // reassigned). Replay is exact only while no entries have been dropped
 // from the front of the stored history (historyOmitted, MAX_CLAIM_HISTORY
 // in server/work-claims.mjs); past that cap the snapshot is unavailable
@@ -235,9 +235,9 @@ function releaseRoundConflict(item, callerRound, roomId) {
   const detail = stateChange.from === null
     ? `its current state is "${stateChange.to}"`
     : stateChange.from !== stateChange.to && stateChange.ownerChanged
-      ? `its state changed from "${stateChange.from}" to "${stateChange.to}" and its owner changed`
+      ? `its state changed from ${JSON.stringify(stateChange.from)} to ${JSON.stringify(stateChange.to)} and its owner changed`
       : stateChange.from !== stateChange.to
-        ? `its state changed from "${stateChange.from}" to "${stateChange.to}"`
+        ? `its state changed from ${JSON.stringify(stateChange.from)} to ${JSON.stringify(stateChange.to)}`
         : stateChange.ownerChanged
           ? "its owner changed"
           : "it was released and re-claimed";

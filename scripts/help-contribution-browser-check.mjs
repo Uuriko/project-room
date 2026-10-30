@@ -18,7 +18,8 @@ import { openCatchUp } from "./room-chrome.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true, dmConsent: true }), handles = new Set(), traffic = [], errors = [];
-  const server = createRoomServer({ store: f.store, streamInterval: 50 }); let browser;
+  // One owner credential drives both the page and MCP reads; lift the burst like the other journey checks.
+  const server = createRoomServer({ store: f.store, streamInterval: 50, credentialReadBurst: 600, credentialWriteBurst: 600 }); let browser;
   t.after(async () => {
     for (const handle of handles) await handle.close(); await browser?.close();
     server.closeStreams(); server.closeAllConnections();
@@ -97,10 +98,11 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await openCatchUp(page);
-  // The offer row must be in the DOM before revealMessage can focus it.
-  await page.locator(`[data-message-record-id="${question.requestMessageId}"]`).waitFor({ state: 'attached' });
+  // The offer is addressed to the owner, so since direct conversations (#5322)
+  // it renders in the owner's direct window, not the room timeline. Opening
+  // it switches there and focuses the row.
   await page.locator('#contribution-open').click();
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
+  await page.waitForFunction(id => document.activeElement?.dataset?.messageRecordId === id, question.requestMessageId);
   await page.screenshot({ path: `${prefix}-offer.png` });
   // Poll the scroll position instead of asserting it once: revealMessage scrolls
   // synchronously, but layout (content-visibility, font loading) may lag a frame.

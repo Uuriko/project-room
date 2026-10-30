@@ -4964,6 +4964,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The replyRequests slice is read from the projection directly so
   // this works for both the work projection (which does not carry it)
   // and the full room state.
+  // Members the work item itself names (proposer, accountable, verifier,
+  // decision maker, claim holder) already hold its title and definition of
+  // done; a private request on the item must not lock them out of it.
   privateWorkParties(roomId) {
     const requestSlice = this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests;
     const privatePartiesByWork = new Map();
@@ -4995,7 +4998,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const privatePartiesByWork = this.privateWorkParties(roomId);
         const workRecordForViewer = (id, item) => {
           const parties = privatePartiesByWork.get(id);
-          if (!parties || parties.has(auth.member.id)) return currentWorkRecord(item);
+          if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return currentWorkRecord(item);
           return currentWorkRecord({ ...item, title: null, definitionOfDone: null });
         };
         return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
@@ -5054,14 +5057,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const privatePartiesByWork = this.privateWorkParties(roomId);
       const workItems = room.state.workItems ? Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => {
         const parties = privatePartiesByWork.get(id);
-        if (!parties || parties.has(auth.member.id)) return [id, item];
+        if (!parties || parties.has(auth.member.id) || workRoleHolder(item, auth.member.id)) return [id, item];
         return [id, { ...item, title: null, definitionOfDone: null }];
       })) : room.state.workItems;
       const eventLog = rawEventLog.map(event => {
         const workItemId = event?.data?.workItemId;
         if (typeof workItemId !== "string") return event;
         const parties = privatePartiesByWork.get(workItemId);
-        if (!parties || parties.has(auth.member.id)) return event;
+        if (!parties || parties.has(auth.member.id) || workRoleHolder(room.state.workItems?.[workItemId], auth.member.id)) return event;
         if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
         return { ...event, data: { ...event.data,
           ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
@@ -5742,7 +5745,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const workHits = [];
         for (const w of Object.values(room.state.workItems ?? {})) {
           const parties = privatePartiesByWork.get(w.id);
-          const isParty = !parties || parties.has(auth.member.id);
+          const isParty = !parties || parties.has(auth.member.id) || workRoleHolder(w, auth.member.id);
           const haystack = (isParty
             ? `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`
             : `${w.description ?? ""}`).toLowerCase();
@@ -7433,4 +7436,9 @@ function dmTalkAllowed(db, state, roomId, senderId, identityId, at) {
   const memberId = talkMemberForIdentity(db, roomId, identityId, at);
   if (!memberId) return true;
   return mayWake(db, state, roomId, senderId, memberId);
+}
+
+function workRoleHolder(item, memberId) {
+  if (!item || !memberId) return false;
+  return [item.proposedById, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId, item.claim?.holderId].includes(memberId);
 }

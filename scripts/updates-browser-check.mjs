@@ -1,4 +1,5 @@
 // Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.
+import { openChannel } from "./reveal-record.mjs";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
@@ -110,6 +111,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#message-input").fill(replyDraft);
   await page.locator("#work-navigation-return").press("Enter");
   await page.locator("#thread-bar").waitFor({ state: "hidden" });
+  // The private reply's thread lives in the direct conversation (DM-first); the public root is in the channel.
+  await openChannel(page);
   await page.locator(`[data-message-id="${threadId}"][data-message-action="reply"]`).click();
   await page.locator("#thread-bar").waitFor({ state: "visible" });
   assert.equal(await page.locator("#message-input").inputValue(), replyDraft, "fallback leaves the reply through the normal draft-saving path");
