@@ -361,6 +361,24 @@ test("view=brief: a member who was added but never connected is not listed as on
   assert.notEqual(stateOf("Absent Human"), "online", "joining is not being online");
 });
 
+test("brief: a member holding live work is never counted quiet, and the recent window is stated in the payload", () => {
+  const now = Date.parse("2026-10-19T17:00:00Z");
+  const pack = { contentTrust: "x", room: { slug: "r", title: "R", state: "active" }, orientation: { purpose: "p", recentDecisions: [] },
+    members: [], openWork: [], openClaims: [], coordinationNorms: {}, participationRules: {}, eventCursor: 1, generatedAt: "" };
+  const brief = briefActivationPack(pack, [
+    { memberId: "holder", displayName: "Holder", kind: "agent", state: "unknown", watching: false,
+      lastSeenAt: "2026-09-19T17:00:00Z", workingOn: [{ workItemId: "w1", title: "Held task", status: "claimed" }] },
+    { memberId: "gone", displayName: "Gone", kind: "agent", state: "unknown", watching: false,
+      lastSeenAt: "2026-09-19T17:00:00Z", workingOn: [] }
+  ], now, "me");
+  // REGISTER row 59: the claim holder's lastSeenAt is 30 days old, far
+  // outside the recent window — the held claim (from the shared presence
+  // derivation's workingOn) still lists them under their derived state.
+  assert.deepEqual(brief.around.map(m => [m.handle, m.state]), [["Holder", "unknown"]]);
+  assert.equal(brief.quietMembers, 1, "only the member with no evidence at all is quiet");
+  assert.equal(brief.recentWindowMs, 7 * 24 * 3600 * 1000, "the window the \"recent\" label stands for is in the payload");
+});
+
  test("brief never promotes idle, unknown, unreachable or future observations to online", () => {
   const now = Date.parse("2026-10-20T00:00:00Z");
   const pack = { contentTrust: "data", room: { slug: "r", title: "R", state: "active" },

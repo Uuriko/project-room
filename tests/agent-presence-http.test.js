@@ -128,7 +128,10 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
     return { ...body, agent: body.members.find(m => m.memberId === "observed") };
   };
   let result = await presence();
-  assert.equal(result.agent.presence, null);
+  // REGISTER row 59: a linked agent with no registered host and no
+  // command of its own is stated as unregistered on the join basis —
+  // not dropped to null, and never asserted online.
+  assert.deepEqual(result.agent.presence, { status: "unregistered", lastSeenAt: null, basis: "member-added" });
   const command = async (secret, text) => {
     const res = await post(origin, "/api/rooms/commons/commands", {
       id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body: text },
@@ -147,6 +150,7 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   now += 6 * 60_000;
   result = await presence();
   assert.equal(result.agent.presence.status, "online", "older slow host is still inside its declared cadence despite latest fast host expiring");
+  assert.equal(result.agent.presence.basis, "host", "host-derived presence carries the host basis");
   assert.equal(result.agent.state, "listening");
   assert.ok(result.next.some(n => n.description.includes("observed")));
   now += 21 * 60_000;

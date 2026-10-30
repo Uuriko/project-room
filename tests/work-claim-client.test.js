@@ -508,9 +508,13 @@ test('discovery release instructions work with a truncated board read and reject
   await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'work_claim_conflict');
-    assert.match(error.message, /release basis does not match/);
-    assert.match(error.message, /historyOmitted/);
-    assert.doesNotMatch(error.message, /changed since it was read/);
+    // DC4-A1: the claim itself never changed — the round is stale because
+    // the list read truncated the history. The message says exactly that
+    // (and the resolved route body, pinned in
+    // tests/work-claim-release-round-refusal.test.js, carries the cure).
+    assert.match(error.message, /round is stale/);
+    assert.match(error.message, /truncated the claim history/);
+    assert.doesNotMatch(error.message, /changed since it was read|claim has moved/);
     return true;
   });
   assert.equal((await owner.workClaimGet(item.id)).owner, 'owner');

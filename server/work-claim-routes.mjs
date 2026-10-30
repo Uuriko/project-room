@@ -165,6 +165,91 @@ function summarizeBoardClaim(item) {
   return summary;
 }
 
+// DC4-A1 (register F-S4b-1): the release round check's 409 must carry its
+// own cure. A caller's round is (claimedAt, lifetime history length); the
+// history is append-only for the claim's whole lifetime, so replaying the
+// entries the caller counted recovers the state, owner and claim round
+// they saw, and diffing that snapshot against the current item separates
+// "your read was stale" (truncated list read, or a benign append since)
+// from "the claim itself moved" (delivered, released, re-claimed,
+// reassigned). Replay is exact only while no entries have been dropped
+// from the front of the stored history (historyOmitted, MAX_CLAIM_HISTORY
+// in server/work-claims.mjs); past that cap the snapshot is unavailable
+// and the claimedAt comparison plus a tail-movement scan is the fallback.
+// DC4-A1-BEGIN (pure helpers; the F1 lane harness extracts and runs these)
+function claimSnapshotAtHistoryLength(item, length) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  if ((item?.historyOmitted ?? 0) > 0 || !Number.isSafeInteger(length) || length < 0 || length > history.length) return null;
+  let state = "unclaimed", owner = null, claimRound = 0;
+  for (let i = 0; i < length; i += 1) {
+    const action = typeof history[i]?.action === "string" ? history[i].action : "";
+    if (action === "created") { state = "unclaimed"; owner = null; }
+    else if (action === "claimed") { state = "claimed"; owner = history[i].agentId ?? null; claimRound += 1; }
+    else if (action.startsWith("state:")) { state = action.slice(6); if (state === "unclaimed") owner = null; }
+    else if (action.startsWith("reassigned:")) {
+      owner = action.slice("reassigned:".length);
+      if (state === "unclaimed") { state = "claimed"; claimRound += 1; }
+      else if (state === "delivered") state = "in_progress";
+    }
+    else if (action === "lease_expired") { state = "unclaimed"; owner = null; }
+    else if (action === "closed" || action === "cancelled") { state = "closed"; owner = null; }
+  }
+  return { state, owner, claimRound };
+}
+
+const ROUND_MOVEMENT_ACTIONS = /^(state:|claimed$|reassigned:|lease_expired$|closed$|cancelled$)/;
+
+function releaseRoundConflict(item, callerRound, roomId) {
+  const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(item.id)}`;
+  const currentRound = { expectedClaimedAt: item.claimedAt ?? null,
+    expectedHistoryLength: claimHistoryLength(item) };
+  const seen = claimSnapshotAtHistoryLength(item, callerRound.expectedHistoryLength);
+  let stateChanged, stateChange;
+  if (seen) {
+    const ownerChanged = seen.owner !== (item.owner ?? null);
+    stateChanged = seen.state !== item.state || ownerChanged || seen.claimRound !== (item.claimRound ?? 0);
+    if (stateChanged) stateChange = { from: seen.state, to: item.state, ownerChanged };
+  } else {
+    // No exact snapshot (the caller's entries scrolled out of the stored
+    // history, or the length names no real read): a different claimedAt
+    // means a new ownership spell began after the caller's read, and any
+    // movement stamp in the retained tail means the claim moved. The
+    // state the caller saw is unrecoverable, so `from` is null rather
+    // than a guess.
+    const history = Array.isArray(item?.history) ? item.history : [];
+    const tail = history.slice(Math.max(0, callerRound.expectedHistoryLength - (item?.historyOmitted ?? 0)));
+    const tailMoved = tail.some(entry => ROUND_MOVEMENT_ACTIONS.test(typeof entry?.action === "string" ? entry.action : ""));
+    stateChanged = (item.claimedAt ?? null) !== callerRound.expectedClaimedAt || tailMoved;
+    if (stateChanged) stateChange = { from: null, to: item.state,
+      ownerChanged: tail.some(entry => /^(claimed$|reassigned:)/.test(typeof entry?.action === "string" ? entry.action : "")) };
+  }
+  const claim = { id: item.id, state: item.state, owner: item.owner ?? null, claimRound: item.claimRound ?? 0 };
+  if (!stateChanged) {
+    return {
+      subcode: "round_stale", claim, callerRound, currentRound, stateChanged: false, retryable: true,
+      message: `Release round is stale — the claim itself has not changed. Your read may have truncated the claim history (list reads return only the last 3 entries). Retry with currentRound below.`,
+      hint: `currentRound is the full current round for "${item.id}" (claimedAt + full history length). Resend the release with it — no re-read is needed.`,
+      next: [{ action: "release", method: "POST", path: `${href}/release`, body: { ...currentRound } }],
+    };
+  }
+  const detail = stateChange.from === null
+    ? `its current state is "${stateChange.to}"`
+    : stateChange.from !== stateChange.to && stateChange.ownerChanged
+      ? `its state changed from "${stateChange.from}" to "${stateChange.to}" and its owner changed`
+      : stateChange.from !== stateChange.to
+        ? `its state changed from "${stateChange.from}" to "${stateChange.to}"`
+        : stateChange.ownerChanged
+          ? "its owner changed"
+          : "it was released and re-claimed";
+  return {
+    subcode: "round_and_state_changed", claim, callerRound, currentRound, stateChanged: true, stateChange, retryable: false,
+    message: `Release round is stale and the claim has moved since your read: ${detail}. Re-read the claim and decide whether to release it.`,
+    hint: `The claim you read is not the claim as it stands, so no retry is prefilled — releasing the moved claim may not be what you intend. Read the current claim first.`,
+    next: [{ path: href }, { command: `Read the current claim (GET ${href}) and decide whether to release it in its current state.` }],
+  };
+}
+// DC4-A1-END
+
 function resolveWorkClaimAccess(store, roomId, auth) {
   let authority = null;
   if (typeof store?.roomAuthority === "function") {
@@ -733,6 +818,14 @@ export async function handleWorkClaims(options) {
       }
       return helpers.json(res, 409, body);
     }
+    // DC4-A1 cure: the stale-round release refusal stays a THROWN refusal
+    // for direct-call consumers (the invariant DSL captures refusals as
+    // thrown errors), with its cure payload on error.body — the same
+    // shape linkWorkClaimPullRequest throws. The HTTP transport
+    // (server/http.mjs, work-claim chain) converts this one thrown
+    // body-carrying error into the returned 409 response, so the HTTP
+    // surface is unchanged. No other error site changes conversion here.
+    if (options.workClaimRoute === "release" && error?.code === "work_claim_conflict" && error.body) throw error;
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
   }
@@ -1487,9 +1580,27 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       });
     } catch (error) {
       // runPure's mapping, plus 409 for a stale round (same as the update
-      // route's round precondition).
+      // route's round precondition). DC4-A1 (register F-S4b-1): the 409
+      // carries its own cure — subcode, the caller's round, the full
+      // current round, and whether the claim itself also moved — with a
+      // prefilled verbatim retry only when nothing but the round is
+      // stale. Status and code are unchanged; release semantics are
+      // unchanged (the pure releaseWork refusal is only re-dressed here,
+      // after the ownership gate above has already passed).
       if (error instanceof ClaimError && error.code === "work_claim_conflict") {
-        reject(409, error.code, "The release basis does not match the current claim. Use claimedAt and history.length + (historyOmitted ?? 0) from the same fresh read; review the current owner before retrying.");
+        const conflict = releaseRoundConflict(item, {
+          expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        }, roomId);
+        const refusal = new ServiceError(409, error.code, conflict.message);
+        refusal.body = { ...agentErrorBody({ httpStatus: 409, code: error.code, message: conflict.message, roomId, workItemId: item.id }),
+          error: { code: error.code, message: conflict.message, subcode: conflict.subcode },
+          hint: conflict.hint, next: conflict.next,
+          subcode: conflict.subcode,
+          claim: conflict.claim, callerRound: conflict.callerRound, currentRound: conflict.currentRound,
+          stateChanged: conflict.stateChanged,
+          ...(conflict.stateChange ? { stateChange: conflict.stateChange } : {}),
+          retryable: conflict.retryable };
+        throw refusal;
       }
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;

@@ -162,7 +162,7 @@ const PUBLIC_BLOCK_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips", "verifiedRooms", "blockedFailures", "blockedSince"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   for (const key of ["blockReason", "blockComponent"]) {
@@ -442,10 +442,21 @@ export const JOBS = Object.freeze([
     disabledReason: () => null,
     async run(store, ctx) {
       let integrity;
+      // Whether the scan result itself carried the outstanding-failure
+      // list, and how many of its records the partition below rode as
+      // parked. The real scan always carries the list (every return
+      // shape has `failures`); a result without one never isolated its
+      // parked rooms into per-room records this tick, so the
+      // durable-count guard after the scan remains that park's only —
+      // and therefore failing — signal.
+      let scanReportedFailures = false;
+      let scanParkedCount = 0;
+      let scanParkedRooms = new Set();
       try {
         integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        scanReportedFailures = Array.isArray(integrity?.failures ?? integrity?.deferred?.failures);
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
@@ -458,29 +469,182 @@ export const JOBS = Object.freeze([
         // reachable from the operator surfaces, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
-          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
-            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
-          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
-          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
-          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
-            failure.recordId = first.recordId;
+          // Per-room isolation at the summary level, NARROWED at the
+          // C6 reconcile. A room parked by the messages backfill on a
+          // stored EVENT (its durable block carries the event's id) is
+          // UNSCANNABLE, not a failed verification: it is recorded
+          // durably by name, every later sweep skips it, and failing
+          // the whole tick for it zeroed the fleet's integrity signal
+          // for exactly as long as a park lasted. Such records never
+          // fail the tick on their own; they ride the summary as their
+          // own numbers (blockedFailures here, blockedRooms below,
+          // blockedSince = the oldest parked record's first sighting)
+          // beside verifiedRooms, the count of rooms that stand
+          // verified at head. A parked room still reads blocked — its
+          // record stays outstanding and is re-reported every tick —
+          // it is never laundered into a pass for the room itself.
+          //
+          // A LOG-GAP park is carved out and stays FATAL. The log
+          // ending before the room's head is data loss, and main's
+          // post-#4758 contract (the block-health fixture; the
+          // observation comment below) is that it still fails the
+          // tick. A gap record is recognisable two ways, either
+          // sufficient: its stored message is the allowlisted
+          // backfill-stop line, or its block row carries event_id
+          // NULL — the blocks table's own encoding of a head the log
+          // does not reach. Partitioning requires positive
+          // corroboration from the block map (see
+          // isCorroboratedEventPark below): if the map cannot be read,
+          // or carries no same-room row with a non-null event_id, the
+          // record stays fatal — the partition fails closed.
+          //
+          // Every other failure keeps the tick failing, with the
+          // detail chosen from the fatal set only: a parked room must
+          // never mask a real failure behind its name.
+          let blocksByRoom = null;
+          let validatedBlocks = null;
+          try {
+            blocksByRoom = new Map(store.db.prepare(
+              "SELECT room_id, event_id, sequence FROM messages_backfill_blocks WHERE skipped=0"
+            ).all().map(row => [row.room_id, row.event_id]));
+            // Vc ruling (b) (room seq 23428): the validated set — the
+            // blocks whose (room_id, event_id, sequence) exactly
+            // matches a stored event row for that room. The join is
+            // the validation: a block naming a nonexistent event, an
+            // event stored under another room, or an event at a
+            // different sequence produces no row here and so can
+            // never corroborate. Either read failing leaves both maps
+            // null and the partition fails closed, exactly as a
+            // missing block map does.
+            validatedBlocks = new Map(store.db.prepare(
+              `SELECT b.room_id AS room_id, b.event_id AS event_id, b.sequence AS sequence
+               FROM messages_backfill_blocks b
+               JOIN events e ON e.room_id = b.room_id AND e.id = b.event_id AND e.sequence = b.sequence
+               WHERE b.skipped = 0`
+            ).all().map(row => [row.room_id, { eventId: row.event_id, sequence: row.sequence }]));
+          } catch { blocksByRoom = null; validatedBlocks = null; }
+          const isLogGapPark = failure => {
+            if (typeof failure.message === "string" && failure.message.startsWith("messages backfill stopped at ")) return true;
+            return blocksByRoom !== null && blocksByRoom.has(failure.recordId)
+              && blocksByRoom.get(failure.recordId) === null;
+          };
+          // #4930 cure (independent review, room seqs 23355/23365/
+          // 23366): a failure is downgraded to parked ONLY on positive
+          // corroboration — the block map was read, it carries a row
+          // for THIS room, and that row's event_id is non-null (a
+          // stored event). A missing row, an unreadable map
+          // (blocksByRoom === null), or a row for a different room
+          // leaves the failure FATAL. The partition this replaces
+          // parked every non-gap failure on no evidence at all, so an
+          // empty block table, a failed map read, and a wrong-room
+          // block each produced a false healthy summary.
+          //
+          // Vc ruling (b) strengthens the corroboration (room seq
+          // 23428, ruling integrity-4930-vc-ruling-02): a non-null
+          // event_id is not enough — at the first cured head a seeded
+          // same-room block naming "ev-UNRELATED-999", an event that
+          // does not exist, still parked an unrelated failure. The
+          // block must now appear in validatedBlocks (its room, event
+          // id and sequence all match a real stored event), and when
+          // the failure record itself carries the structured event
+          // identity threaded from runMessagesBackfill through
+          // runIntegrityBackfillStep (failure.eventId /
+          // failure.eventSequence — never parsed out of diagnostic
+          // strings), that identity must match the validated block.
+          // A record carrying no identity (written before the
+          // threading, or by a direct record call) is judged on the
+          // validated block alone, so genuine parks keep parking.
+          const isCorroboratedEventPark = failure => {
+            if (validatedBlocks === null || !validatedBlocks.has(failure.recordId)) return false;
+            const block = validatedBlocks.get(failure.recordId);
+            if (typeof failure.eventId === "string" && failure.eventId !== "" && failure.eventId !== block.eventId) return false;
+            if (Number.isInteger(failure.eventSequence) && failure.eventSequence !== block.sequence) return false;
+            return true;
+          };
+          // Recovery leg (regression found at re-qualification, room
+          // seq 23565): an operator repair lifts a park — the import
+          // repair deletes the room's block row and cursor — but the
+          // durable failure record stays outstanding until the rotating
+          // backfill step next visits the room and clears it (its
+          // cleanup retires records whose park is gone). The narrowed
+          // partition corroborated only via a standing block, so every
+          // tick in that window went fatal and the parked-summary
+          // recovery case ("no tick fails during recovery", passing
+          // 5/5 at pre-cure 87188ace) failed at both cured heads. The
+          // window is corroborated on positive evidence, never on the
+          // block's absence alone: the block map was read and carries
+          // NO standing block for this room (the park is lifted — a
+          // standing block is judged by the block leg above, so an
+          // unvalidated standing block cannot be bypassed here), and
+          // the record carries the threaded identity that
+          // runIntegrityBackfillStep wrote from the standing block
+          // while the park stood, and that identity still validates
+          // against a real stored event for this room at that
+          // sequence — the same join the block leg requires, applied
+          // to the record's own structured identity (never parsed
+          // from diagnostic strings). An identity-less record, an
+          // identity naming a nonexistent or wrong-sequence event, or
+          // an unreadable event log corroborates nothing: the failure
+          // stays FATAL, exactly as the empty-block specimen requires.
+          // The window is bounded by construction: the next backfill
+          // visit either clears the record (repair held) or re-parks
+          // the room under a fresh validated block (it did not).
+          const isRecoveryCorroboratedPark = failure => {
+            if (blocksByRoom === null || validatedBlocks === null) return false;
+            if (blocksByRoom.has(failure.recordId)) return false;
+            if (typeof failure.eventId !== "string" || failure.eventId === "") return false;
+            if (!Number.isInteger(failure.eventSequence)) return false;
+            try {
+              return Boolean(store.db.prepare(
+                "SELECT 1 AS found FROM events WHERE room_id=? AND id=? AND sequence=?"
+              ).get(failure.recordId, failure.eventId, failure.eventSequence));
+            } catch { return false; }
+          };
+          const parked = [];
+          const fatal = [];
+          for (const failure of failures) {
+            if (failure.step === "messages_backfill" && typeof failure.recordId === "string"
+              && failure.recordId !== "" && !isLogGapPark(failure)
+              && (isCorroboratedEventPark(failure) || isRecoveryCorroboratedPark(failure))) parked.push(failure);
+            else fatal.push(failure);
           }
-          // The operator line carries the allowlisted fields only —
-          // sub-check, record id, stable code, class, count. The stored
-          // failure message is a diagnostic for the record's owner, not
-          // log text: re-emitting it here every tick would republish
-          // whatever a record's error once contained.
-          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          scanParkedCount = parked.length;
+          scanParkedRooms = new Set(parked.map(failure => failure.recordId));
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips", "verifiedRooms", "budgetExceeded"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          integrity = {
-            ...summary,
-            errors: failures.length,
-            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-            failureDetail: failure
-          };
+          if (parked.length) {
+            summary.blockedFailures = parked.length;
+            const firstSeen = parked.reduce((oldest, failure) => Number.isFinite(failure.firstSeenAt) ? Math.min(oldest, failure.firstSeenAt) : oldest, Infinity);
+            if (Number.isFinite(firstSeen)) summary.blockedSince = firstSeen;
+          }
+          if (fatal.length) {
+            const first = fatal.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+              && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? fatal[0];
+            const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+            if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+            if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+              failure.recordId = first.recordId;
+            }
+            // The operator line carries the allowlisted fields only —
+            // sub-check, record id, stable code, class, count. The
+            // stored failure message is a diagnostic for the record's
+            // owner, not log text: re-emitting it here every tick
+            // would republish whatever a record's error once
+            // contained.
+            console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${fatal.length} outstanding)`);
+            integrity = {
+              ...summary,
+              errors: fatal.length,
+              scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+              failureDetail: failure
+            };
+          } else {
+            const names = parked.map(failure => failure.recordId).filter(id => SAFE_RECORD_ID.test(id));
+            console.error(`[integrity] ${parked.length} room(s) parked in messages backfill${names.length === parked.length ? ` (${names.join(", ")})` : ""}; every scannable room verified`);
+            integrity = summary;
+          }
         }
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
@@ -501,6 +665,7 @@ export const JOBS = Object.freeze([
         try { healBackfillQuarantines(store); } catch { /* the read below reports an unreadable table */ }
         const observed = store.db.prepare(`SELECT
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0) AS n,
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0 AND event_id IS NULL) AS gapBlocks,
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=1) AS quarantined,
           (SELECT reason FROM messages_backfill_blocks WHERE skipped=0 AND reason<>'' LIMIT 1) AS blockReason,
           (SELECT component FROM messages_backfill_blocks WHERE skipped=0 AND component<>'' LIMIT 1) AS blockComponent,
@@ -520,7 +685,50 @@ export const JOBS = Object.freeze([
         integrity = { ...integrity, ...extra };
         const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
           || integrity?.failureDetail?.code === "messages_backfill_failed";
-        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+        // The #3855 force-fail stands for any standing block the scan
+        // did not itself account: a log-gap block (gapBlocks > 0 — a
+        // gap's record is fatal in the partition, so a gap block under
+        // a non-failing summary means its record has not been written
+        // yet), or a block recorded after the scan read its list. The
+        // guard is suppressed only when the scan carried its list and
+        // every standing skipped=0 block is one of the event parks
+        // the partition just rode as blockedFailures: those rooms are
+        // already named in the summary, and failing the tick for them
+        // would re-zero the signal the partition exists to save.
+        // #4930 cure: the coverage check above is an identity check,
+        // never a count. The suppression this replaces compared
+        // scanParkedCount === blockedRooms, so a standing block for a
+        // DIFFERENT room satisfied it whenever the counts happened to
+        // match (seq 23366). Suppression now requires the standing
+        // skipped=0 room set, read here, to equal the set of rooms the
+        // partition just parked — and the parked count to equal that
+        // set's size, so duplicate records for one room cannot cover
+        // a second room either. An unreadable standing set never
+        // suppresses: the guard fails closed.
+        let standingBlockRooms = null;
+        try {
+          standingBlockRooms = new Set(store.db.prepare(
+            "SELECT room_id FROM messages_backfill_blocks WHERE skipped=0"
+          ).all().map(row => row.room_id));
+        } catch { standingBlockRooms = null; }
+        // Recovery-leg amendment (seq 23565 regression): coverage is
+        // standing ⊆ parked, not set equality. A recovery park (above)
+        // is positively corroborated yet has no standing block — its
+        // park was lifted — so the parked set may legitimately exceed
+        // the standing set by exactly those rooms. What suppression
+        // still requires is that every standing block is one of the
+        // parks the partition just rode: a standing block for a room
+        // the scan did not park (the seq 23366 shape) is never
+        // covered, and the count pin still bars duplicate records
+        // from inflating the parked set.
+        const guardCoveredByScan = scanReportedFailures
+          && Number(observed?.gapBlocks) === 0
+          && standingBlockRooms !== null
+          && scanParkedCount === scanParkedRooms.size
+          && standingBlockRooms.size <= scanParkedRooms.size
+          && [...standingBlockRooms].every(roomId => scanParkedRooms.has(roomId));
+        if (blockedRooms > 0 && !summaryFailed(integrity)
+          && !guardCoveredByScan) {
           const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
           if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
           if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
