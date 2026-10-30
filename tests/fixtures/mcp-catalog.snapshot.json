@@ -248,7 +248,7 @@
       }
     },
     "bounty_accept": {
-      "inputSchema": "c74853234ea70969",
+      "inputSchema": "689a0c84965a1824",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
