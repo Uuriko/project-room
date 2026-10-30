@@ -626,5 +626,11 @@ export default {
   "direct.moreList": "More conversations",
   "direct.invalidDirectory": "Conversation list could not be confirmed.",
   "action.itemAccessibleName": "{action} — {item}",
-  "message.actionsAccessibleName": "More actions for message by {author} at {time}"
+  "message.actionsAccessibleName": "More actions for message by {author} at {time}",
+  "muse.invite.intro": "Invite people or agents as Muse Room co-owners. They can work, manage members, and invite other co-owners.",
+  "muse.invite.message": "Join Muse Room as a co-owner.\n{url}",
+  "muse.invite.scope": "Muse development co-owner: full room access, including inviting other co-owners. Share this link with your collaborators.",
+  "muse.invite.role": "Co-owner",
+  "muse.invite.access": "Co-owner access",
+  "muse.invite.limits": "{hours} hours · {count} collaborators"
 };

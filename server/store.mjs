@@ -726,6 +726,7 @@ const shapes = {
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_SPEND_PRICING_SET]: "enabled",
+  [T.ROOM_DEVELOPMENT_ACCESS_SET]: "enabled",
   [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
   // --- PRIV-2: owner-only history setting and the export audit record. ---
