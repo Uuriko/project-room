@@ -67,6 +67,7 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(body.result.profile, "core");
   // A joined member does not get the four join helpers in its default list.
   assert.deepEqual(names, [...CORE_MCP_TOOLS]);
+  assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
   // Core is trimmed to conversation for hosted/cloud agents: create, files,
   // land queue, wake and bond tools move to focus/full profiles.
   for (const moved of ["room_create", "room_put_file", "add_land_item", "wake_pause", "bond_propose"]) assert.equal(names.includes(moved), false, moved);
