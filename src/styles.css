@@ -190,6 +190,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .mention-option.active, .mention-option:hover { background: #1d2734; }
 .composer > label { display: block; margin-bottom: .45rem; }
 .form-hint { margin: .45rem 0 0; color: var(--muted); font-size: .69rem; }
+/* MI-033: the /join "Log in" link was a 40x19 px tap target. */
+#join-enter-home { display: inline-block; min-width: 44px; min-height: 44px; padding: .75rem .25rem; box-sizing: border-box; text-align: center; }
 #human-push-button { margin-top: .45rem; }
 .check input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }
 /* "Also send to channel" sits above the composer row, thread views only. */
