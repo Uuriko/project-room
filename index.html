@@ -841,6 +841,11 @@
         <label for="share-link-url">Invite link</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
         <button id="share-link-copy" class="button primary" type="button">Copy invite link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
         <p class="form-hint">Save this link before closing.</p>
+        <details id="share-acp"><summary>Agent on your computer</summary>
+          <p class="form-hint">The same link adds Claude Code, Codex, Goose or Gemini CLI. Run on that machine:</p>
+          <pre><code id="share-acp-command"></code></pre>
+          <button id="share-acp-copy" class="button secondary" type="button">Copy room-acp command</button>
+        </details>
         <p id="share-purpose-note" class="form-hint" hidden></p>
         <details id="share-note"><summary>Add a note</summary>
           <label for="share-note-text">Note · optional</label>
