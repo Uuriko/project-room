@@ -290,6 +290,7 @@ optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credenti
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/sleeper-wake.mjs"); // hostless DM and mention wakes (imported by server/store.mjs and server/jobs.mjs; imports outbound-webhooks.mjs)
 optional.push("server/wake-metrics.mjs"); // #3345: wake-reliability accounting — emission-attempt outcomes + loss-class journal (imported by server/agent-heartbeats.mjs, server/store.mjs, server/work-wakes.mjs, server/work-claim-events.mjs, server/inbox-collab-routes.mjs; pure, no imports)
+optional.push("server/wake-transaction.mjs"); // Isolated transaction runner registry for wake accounting (imported by server/store.mjs and server/wake-metrics.mjs; pure, no imports)
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware identity->seats enumeration for read surfaces (imported by server/needs-me.mjs, server/agent-rooms.mjs and server/capability-visibility.mjs; pure, no imports)
