@@ -57,7 +57,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "buyer_signoff_requests", "collab_approvals", "collab_assignments", "collab_draft_locks",
   "collab_notes", "collab_routing_events", "credentials", "cursors", "demigod_contract_requests",
   "demigod_contracts", "demigod_offer_profiles", "demigod_offer_requests", "direct_channel_sends",
-  "dm_consents", "gmail_linked_mailboxes", "gmail_mailboxes", "gmail_operations", "gmail_pending",
+  "development_co_owner_links", "dm_consents", "gmail_linked_mailboxes", "gmail_mailboxes", "gmail_operations", "gmail_pending",
   "guest_invite_authority", "guest_invites", "guest_link_exchanges", "guest_members",
   "guest_selfserve", "guest_selfserve_idem", "handoff_envelopes", "human_push_preferences",
   "human_push_subscriptions", "identity_link_codes", "identity_links", "inbox_attachment_bytes",

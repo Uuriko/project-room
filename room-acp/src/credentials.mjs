@@ -22,7 +22,7 @@ export function saveConnection(connection, env = process.env) {
 
 export function listConnections(env = process.env) {
   let names = [];
-  try { names = readdirSync(configDir(env)).filter(name => name.endsWith(".json")); } catch { return []; }
+  try { names = readdirSync(configDir(env)).filter(name => name.endsWith(".json") && !name.startsWith("sessions-")); } catch { return []; }
   return names.map(name => {
     const path = join(configDir(env), name);
     if (process.platform !== "win32" && (statSync(path).mode & 0o077)) throw new Error(`${path} is readable by other users; run chmod 600 on it`);

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { TALK_POLICY_ROUTES } from "../server/routes/talk-policy.mjs";
 import { talkAllowed } from "../server/agent-talk-policy.mjs";
 
 const state = {
@@ -57,7 +58,8 @@ test("#5384 a newly joined agent defaults to owner; only its owner can change it
   assert.equal(joined.status, 201, JSON.stringify(joined.json));
   const memberId = joined.json.memberId;
   const agentKey = joined.json.mcpToken?.credential ?? joined.json.token;
-  const read = await call(origin, "GET", `/api/rooms/commons/members/${memberId}/talk-policy`, undefined, ownerKey);
+  const readRoute = TALK_POLICY_ROUTES.find(route => route.id === "talk-policy-read");
+  const read = await call(origin, readRoute.method, readRoute.path.replace("{roomId}", "commons").replace("{memberId}", memberId), undefined, ownerKey);
   assert.equal(read.status, 200, JSON.stringify(read.json));
   assert.equal(read.json.policy, "owner");
   const legacy = await call(origin, "GET", "/api/rooms/commons/members/owner/talk-policy", undefined, ownerKey);

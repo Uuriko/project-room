@@ -10,6 +10,7 @@
 //           row keep it, so existing agents' reachability does not change)
 //   nobody  no mention or DM wakes it
 // The post itself always lands; only the wake is skipped.
+import { museDevelopmentAccess, canInviteCoOwners } from "../src/room-administration.js";
 import { memberOwnerId } from "../src/events.js";
 
 export const TALK_POLICIES = Object.freeze(["owner", "members", "room", "nobody"]);
@@ -62,9 +63,9 @@ export function mayWake(db, state, roomId, senderId, targetId) {
 }
 
 // Seed the default for a newly joined agent. Never overwrites a choice.
-export function seedNewAgentPolicy(db, roomId, memberId, at) {
+export function seedNewAgentPolicy(db, roomId, memberId, at, state = null) {
   db.prepare(`INSERT OR IGNORE INTO agent_talk_policies(room_id,member_id,policy,allowed_json,updated_by,updated_at)
-    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
+    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, museDevelopmentAccess(state) ? "room" : DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
 }
 
 // Validate and write a change. Only the room owner or the agent's own
@@ -75,7 +76,7 @@ export function writeTalkPolicy(db, state, { roomId, actorId, memberId, policy, 
   if (target.kind !== "agent") fail(422, "invalid_talk_policy", "Who-can-talk applies to agents only");
   const isRoomOwner = actorId === state.room?.ownerId;
   const isAgentOwner = target.accountableHumanId && actorId === target.accountableHumanId;
-  if (!isRoomOwner && !isAgentOwner) fail(403, "owner_required", "Only the agent's owner or the room owner can change who can talk to it");
+  if (!isRoomOwner && !isAgentOwner && !(museDevelopmentAccess(state) && canInviteCoOwners(state, actorId))) fail(403, "owner_required", "Only the agent's owner or the room owner can change who can talk to it");
   if (!TALK_POLICIES.includes(policy)) fail(422, "invalid_talk_policy", `policy must be one of: ${TALK_POLICIES.join(", ")}`);
   if (!Array.isArray(allowed) || allowed.length > MAX_ALLOWED || allowed.some(id => typeof id !== "string" || !ID.test(id) || !state.members[id]))
     fail(422, "invalid_talk_policy", `allowed must be up to ${MAX_ALLOWED} member ids from this room`);

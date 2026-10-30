@@ -88,6 +88,7 @@ test("bridge: an owner mention gets one threaded reply, then the wake is acked",
 test("bridge: a guest's mention is ignored by default and acked", async t => {
   const room = await startRoom(t);
   const { bridge, connection } = await startBridge(t, room);
+  room.f.store.setTalkPolicy(room.ownerKey, "commons", connection.memberId, { policy: "room" });
   const guestKey = room.f.store.issueAccessKey("commons", "guest");
   room.f.store.command(guestKey, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: "g1", body: "@Coder do something" } });
   await waitFor(() => bridge.stats.skipped === 1);

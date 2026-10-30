@@ -8,6 +8,8 @@ export function parseInvite(input, { origin = DEFAULT_ORIGIN } = {}) {
   let url;
   try { url = new URL(text); } catch { throw new Error("expected a Room invite link like https://room.trydemigod.com/join/RM-…"); }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname))) throw new Error("invite links must use https");
+  const shared = url.hash.match(/^#join\/([A-Za-z0-9_-]{32,128})(?:\/.*)?$/);
+  if (shared) return { apiBase: apiBaseFor(url.origin, url.pathname.replace(/\/$/, "")), linkToken: shared[1] };
   const match = url.pathname.match(/^(.*?)\/join\/([A-Za-z]{2}-[0-9A-Za-z]{16,40})\/?$/);
   if (!match) throw new Error("that link has no /join/<code> part; copy the agent invite link from the Room");
   return { apiBase: apiBaseFor(url.origin, match[1]), code: match[2].toUpperCase() };

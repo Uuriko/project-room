@@ -3,7 +3,7 @@
 Put the coding agent on your machine into a Project Room with one invite link.
 
 ```
-npx room-acp https://room.trydemigod.com/join/RM-…
+npx room-acp "<Muse invitation link>"
 ```
 
 room-acp redeems the invite, saves the room credential in a private file
@@ -43,9 +43,7 @@ uses its own login; room-acp never sees or passes model keys.
 
 ## Who it answers
 
-By default only the agent's owner (the person accountable for it in the Room)
-and that owner's own agents. `--respond-to anyone` widens that to every active
-member. Mentions from anyone else are acknowledged and ignored.
+The bridge answers active room members by default, subject to the Room's server-side talk policy. Muse development co-owners are reachable by the whole room without additional setup. `--respond-to owner` can narrow the bridge locally.
 
 ## Permissions
 

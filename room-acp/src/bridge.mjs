@@ -17,7 +17,7 @@ const sleep = (ms, signal) => new Promise(resolve => { const timer = setTimeout(
 
 export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
   if (!authorId || authorId === me?.id) return false;
-  if (respondTo === "anyone") return Boolean(members[authorId]?.active !== false);
+  if (respondTo === "anyone") return Boolean(members[authorId] && members[authorId].active !== false);
   const boss = me?.accountableHumanId ?? ownerId;
   if (authorId === boss) return true;
   const author = members[authorId];
@@ -25,9 +25,9 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "owner", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
-    this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, credential: connection.credential, fetchImpl });
+    this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
@@ -67,7 +67,7 @@ export class Bridge {
     this.ownerId = value?.state?.room?.ownerId ?? null;
     this.title = value?.state?.room?.title ?? this.connection.roomId;
     this.me = this.members[this.connection.memberId] ?? { id: this.connection.memberId };
-    this.permissions = new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
+    this.permissions ??= new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
   }
 
   async lease() {
@@ -98,16 +98,18 @@ export class Bridge {
   async accept(signal) {
     if (this.seen.has(signal.signalId)) return;
     this.seen.add(signal.signalId);
-    if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
-    const message = (await this.room.thread(signal.messageId)).thread;
-    if (!mayTalk({ authorId: message.authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo })) {
+    try {
+      if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
+      const message = (await this.room.thread(signal.messageId)).thread;
+      if (!mayTalk({ authorId: message.authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo })) {
       this.log(`ignored a ${signal.kind} from ${message.author ?? message.authorId} (respond-to ${this.respondTo})`);
       await this.ack([signal.signalId]); this.stats.skipped++; return;
     }
-    const root = message.replyToId ? await this.threadRoot(message.replyToId) : message;
-    // An "@agent allow" answer to a pending permission ask is not a new turn.
-    if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
-    this.queue.push(root.id, { signalId: signal.signalId, messageId: message.id, author: message.author ?? message.authorId, body: message.body });
+      const root = message.replyToId ? await this.threadRoot(message.replyToId) : message;
+      // An "@agent allow" answer to a pending permission ask is not a new turn.
+      if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
+      this.queue.push(root.id, { signalId: signal.signalId, messageId: message.id, author: message.author ?? message.authorId, body: message.body });
+    } catch (error) { this.seen.delete(signal.signalId); throw error; }
   }
 
   async turn(threadKey, batch) {
@@ -145,6 +147,7 @@ export class Bridge {
     if (gap > 0) await sleep(gap, this.controller.signal);
     this.lastPollAt = Date.now();
     const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: this.waitMs });
+    if (value?.pendingWakes?.length) await this.refreshRoom();
     for (const signal of value?.pendingWakes ?? []) await this.accept(signal);
   }
 

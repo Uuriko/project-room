@@ -11,7 +11,7 @@ Options:
   --cwd <dir>                           working directory for the agent (default: here)
   --mode <id>                           ACP session mode to set (default: agent's own)
   --max-sessions <n>                    concurrent agent sessions (default 4)
-  --respond-to <owner|anyone>           whose mentions start a turn (default owner)
+  --respond-to <owner|anyone>           whose mentions start a turn (default anyone; Room policy still applies)
   --name <display name>                 display name when joining
   --room <roomId>                       pick a saved room when several are saved
   -h, --help                            show this help`;
@@ -19,7 +19,7 @@ Options:
 const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room"]);
 
 export function parseArgs(argv) {
-  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "owner", name: null, origin: null, room: null, help: false };
+  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "anyone", name: null, origin: null, room: null, help: false };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

@@ -1,4 +1,4 @@
-import { canInviteCoOwners } from "../src/room-administration.js";
+import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administration.js";
 // One-time agent invite codes: the self-serve half of the plug-in loop.
 //
 // An owner mints a short single-use code bound to a room with an explicit
@@ -342,9 +342,13 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
-    // #5384: "owner" is the Owner level by name; no scope at all means Member.
+    // "owner" names full access. Muse development co-owners default to full
+    // access; other rooms default to Member.
     if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
-    if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) profile = "member";
+    if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) {
+      if (roomId === "muse-room" && museDevelopmentAccess(this.store.room(roomId).state) && !auth.delegate && canInviteCoOwners(this.store.room(roomId).state, auth.member.id)) ownerEquivalent = true;
+      else profile = "member";
+    }
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
     if (ownerLevel) {
@@ -574,8 +578,8 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
-      // #5384: a newly joined agent hears its owner and the owner's agents by default.
-      seedNewAgentPolicy(this.db, row.room_id, memberId, now);
+      // Muse development agents hear the room; ordinary rooms retain owner scope.
+      seedNewAgentPolicy(this.db, row.room_id, memberId, now, state);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);

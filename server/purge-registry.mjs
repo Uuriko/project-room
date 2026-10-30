@@ -1688,6 +1688,13 @@ const ROWS = [
     }
   },
   {
+    "table": "development_co_owner_links",
+    "key": "link_id",
+    "action": "delete",
+    "match": {},
+    "via": { "room": { "parent": "share_links", "parentKey": "id", "childKey": "link_id", "scope": "room_id" } }
+  },
+  {
     "table": "share_links",
     "key": "room_id",
     "action": "delete",

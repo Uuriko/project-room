@@ -35,6 +35,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       print(`Joined room ${connection.roomId} as ${connection.displayName}. Credential saved privately; it is never printed.`);
       if (io.joinOnly) return 0;
       options.command = "run";
+      options.room = connection.roomId;
     }
     if (options.command === "status") {
       const connection = loadConnection({ roomId: options.room }, env);

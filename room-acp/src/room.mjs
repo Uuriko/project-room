@@ -8,8 +8,8 @@ export class RoomError extends Error {
 
 export class RoomClient {
   #token; #fetch;
-  constructor({ apiBase, roomId = null, credential = null, fetchImpl = fetch }) {
-    this.apiBase = apiBase; this.roomId = roomId; this.#token = credential; this.#fetch = fetchImpl;
+  constructor({ apiBase, roomId = null, memberId = null, credential = null, fetchImpl = fetch }) {
+    this.apiBase = apiBase; this.roomId = roomId; this.memberId = memberId; this.#token = credential; this.#fetch = fetchImpl;
   }
 
   async request(path, { body, timeoutMs = 15000, auth = true } = {}) {
@@ -54,8 +54,10 @@ export class RoomClient {
   }
   room() { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}`); }
   thread(messageId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread`); }
-  post({ body, replyToId = null, messageId = `acp-${randomUUID()}` }) {
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: randomUUID(), type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}) } } })
+  async post({ body, replyToId = null, messageId = `acp-${randomUUID()}` }) {
+    const parent = replyToId ? (await this.thread(replyToId)).thread : null;
+    const toMemberId = parent?.toMemberId ? (parent.authorId === this.memberId ? parent.toMemberId : parent.authorId) : null;
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: randomUUID(), type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}) } } })
       .then(() => ({ messageId }));
   }
 }
