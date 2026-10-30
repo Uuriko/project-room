@@ -1080,11 +1080,18 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // the same derivation the member-gated credits history uses (one lot is
 // one zero-sum journal movement; server/bounty-escrow.mjs history()). No
 // lot rows are stored in public_receipts: the journal is the record, and
-// a stored copy could drift from it. A lot becomes a public receipt only
-// once its bounty carries a recorded settlement verdict (paid out,
-// failed, unverified, or split — every terminal path stamps one via
-// _recordSettlement). Before settlement, and for journal lots that are
-// not bounty movements (transfers carry no bounty_id), the id is a 404.
+// a stored copy could drift from it. A lot becomes a public receipt once
+// its bounty carries a recorded settlement verdict (paid out, failed,
+// unverified, or split — every terminal path stamps one via
+// _recordSettlement) — or, since the post-acceptance fix, once its bounty
+// has been ACCEPTED: acceptance is the outcome a reader is shown, and a
+// receipt that 404s for the whole challenge window cannot be the proof
+// link a demo (or a poster) hands out at the moment of acceptance. A
+// post-acceptance lot composes with settlement: null and a pending block
+// naming the open challenge window (or the open dispute), so no face
+// presents the outcome as final before settlement. Before acceptance,
+// and for journal lots that are not bounty movements (transfers carry no
+// bounty_id), the id is a 404.
 // The owner's consent gates it like every other shape, through the
 // switches that can apply to a row-less record — the lot rule of the
 // one visibility definition (server/public-visibility.mjs): operator
@@ -1114,8 +1121,30 @@ export function publicLotReceiptById(store, id) {
   if (!bounty || bounty.room_id !== roomId) return null;
   let resolution = null;
   try { resolution = bounty.resolution_json ? JSON.parse(bounty.resolution_json) : null; } catch { resolution = null; }
-  const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
-  if (!settlement || typeof settlement !== "object") return null;
+  const settlement = resolution && typeof resolution === "object"
+    && resolution.settlement && typeof resolution.settlement === "object"
+    ? resolution.settlement : null;
+  // Post-acceptance: no settlement is recorded until the challenge window
+  // closes (or a dispute decides), but the acceptance itself is a
+  // recorded, provable outcome. Compose the lot with a pending block
+  // rather than a settlement, and only for the two post-acceptance
+  // states — every earlier state (proposed, funded, claimed, submitted)
+  // still 404s, as do non-bounty lots above. The visibility gate below
+  // applies unchanged: only a recorded opt-in serves a pending lot.
+  let pending = null;
+  if (!settlement) {
+    if (bounty.state !== "accepted" && bounty.state !== "disputed") return null;
+    let extra = null;
+    try {
+      extra = store.db.prepare("SELECT challenge_ends_ms, dispute_id FROM bounty_records WHERE bounty_id=?")
+        .get(bountyId);
+    } catch { extra = null; } // a store predating the columns has no window to name; the state still gates
+    pending = {
+      state: bounty.state,
+      challengeEnds: iso(extra?.challenge_ends_ms ?? null),
+      disputeId: bounty.state === "disputed" ? cleanText(extra?.dispute_id, 256) : null,
+    };
+  }
   // The lot gate is the visibility definition's lot rule
   // (server/public-visibility.mjs): operator unpublish, the recorded
   // opt-in consulted at read time from the authoritative room record
@@ -1135,7 +1164,7 @@ export function publicLotReceiptById(store, id) {
   const credit = entries.find(entry => entry.amount > 0) ?? null;
   const principal = credit ?? first;
   const amountMillis = Math.abs(principal.amount);
-  const settledBy = settlement.settledBy && typeof settlement.settledBy === "object"
+  const settledBy = settlement && settlement.settledBy && typeof settlement.settledBy === "object"
     ? { kind: cleanText(settlement.settledBy.kind, 32), id: cleanText(settlement.settledBy.id, 256) }
     : null;
   return {
@@ -1170,7 +1199,7 @@ export function publicLotReceiptById(store, id) {
       rubricHash: HEX64.test(bounty.rubric_hash ?? "") ? bounty.rubric_hash : null,
       rubricVersion: Number.isInteger(bounty.rubric_version) ? bounty.rubric_version : null,
       submissionHash: HEX64.test(bounty.submission_hash ?? "") ? bounty.submission_hash : null,
-      settlement: {
+      settlement: settlement ? {
         kind: cleanText(settlement.kind, 32),
         workerMillis: Number.isSafeInteger(settlement.workerMillis) ? settlement.workerMillis : null,
         workerCredits: finiteNumber(settlement.workerCredits),
@@ -1179,7 +1208,8 @@ export function publicLotReceiptById(store, id) {
         reason: cleanText(settlement.reason, 500),
         settledAt: iso(settlement.settledAt),
         settledBy: settledBy && settledBy.id ? settledBy : null,
-      },
+      } : null,
+      pending,
       movements: entries.map(entry => ({
         entryId: entry.entry_id,
         kind: entry.kind,

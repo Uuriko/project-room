@@ -90,9 +90,14 @@ export function proofLabelOf(receipt) {
 export function verdictLineOf(receipt) {
   if (isLot(receipt)) {
     const kind = receipt.lot.settlement?.kind;
-    return kind
-      ? `Ledger-recorded movement — settlement verdict “${kind}”, recorded in the room's credit ledger`
-      : "Ledger-recorded movement — recorded in the room's credit ledger";
+    if (kind)
+      return `Ledger-recorded movement — settlement verdict “${kind}”, recorded in the room's credit ledger`;
+    const pending = receipt.lot.pending;
+    if (pending?.state === "disputed")
+      return "Ledger-recorded movement — accepted, then disputed; not final and not settled, recorded in the room's credit ledger";
+    if (pending)
+      return `Ledger-recorded movement — accepted; challenge window open${pending.challengeEnds ? ` until ${pending.challengeEnds}` : ""}, not yet settled, recorded in the room's credit ledger`;
+    return "Ledger-recorded movement — recorded in the room's credit ledger";
   }
   const level = proofLevelOf(receipt);
   const outcome = deliveryOutcomeOf(receipt);
@@ -102,6 +107,8 @@ export function verdictLineOf(receipt) {
 // What this record proves, no more. Moved verbatim from receipts-page so
 // the page and the JSON-LD description state the same facts.
 export function receiptProvenNote(receipt) {
+  if (receipt.source === "bounty-lot" && receipt.lot?.pending)
+    return "What this record proves: the room's credit ledger recorded this movement and the acceptance shown. No settlement verdict has been recorded yet, so this outcome is not final. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   if (receipt.source === "bounty-lot")
     return "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   if (receipt.mergedAt && receipt.pullRequest)
