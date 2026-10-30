@@ -57,7 +57,7 @@ import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLO
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
-import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer, visibleSequenceHorizon } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -4890,6 +4890,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const state = hydrateWorkItems(this.db, roomId, { room, members, workItems, agentHalts: agentHalts ?? {} });
     return { sequence: row.sequence, state: deepFreeze(state) };
   }
+  // F-S8a-5: map each work item that carries a reply request to the set
+  // of members who are party to any of its requests (requester or
+  // recipient). An item present in this map is private to its parties:
+  // every other member gets its title and definition-of-done redacted
+  // on viewer-scoped reads. Items absent from the map are untouched.
+  // The replyRequests slice is read from the projection directly so
+  // this works for both the work projection (which does not carry it)
+  // and the full room state.
+  privateWorkParties(roomId) {
+    const requestSlice = this.db.prepare("SELECT json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId)?.requests;
+    const privatePartiesByWork = new Map();
+    for (const request of Object.values(requestSlice ? JSON.parse(requestSlice) : {})) {
+      if (!request?.workItemId) continue;
+      if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
+      privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
+    }
+    return privatePartiesByWork;
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -4899,15 +4917,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
       const room = this.withIdentityRevoked(roomId, view === "work" ? this.workProjection(roomId) : this.room(roomId));
-      if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
+      if (view === "work") {
+        // F-S8a-5 (register #47): a work item carrying a private tracked
+        // request exposes no title or definition-of-done to members who
+        // are not parties to that request. The work projection does not
+        // carry replyRequests, so read just that slice here; a member
+        // who is party to any request on an item keeps its full record,
+        // and items with no private request are untouched. This snapshot
+        // is the read listWork, the board read and the HTTP work view
+        // serialise from.
+        const privatePartiesByWork = this.privateWorkParties(roomId);
+        const workRecordForViewer = (id, item) => {
+          const parties = privatePartiesByWork.get(id);
+          if (!parties || parties.has(auth.member.id)) return currentWorkRecord(item);
+          return currentWorkRecord({ ...item, title: null, definitionOfDone: null });
+        };
+        return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, workRecordForViewer(id, item)])),
           // The board projection needs halts. The HTTP work view strips this
           // before it is sent; it is not part of that response's state keys.
           agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      }
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
       let messages = room.state.messages, pins = room.state.pins, messagesWindow;
       if (messageLimit !== null || room.state.messagesArchive) {
@@ -4931,11 +4965,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Message bodies already travel in the projection; the complete audit
       // tail remains the default and is requested when Record opens.
       const events = rows.reverse().map(r => JSON.parse(r.body));
-      const eventLog = auditView === "activity" ? events.filter(event => event.type === "decision.recorded"
+      const rawEventLog = auditView === "activity" ? events.filter(event => event.type === "decision.recorded"
         || /^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(event.type)
         || event.data?.workItemId !== undefined) : events;
+      // F-S8a-5, full view: the same party redaction as the work view
+      // must apply here too — buildRoomBootstrap and the HTTP room read
+      // serialise workItems from this snapshot (view:"full"), so a
+      // non-party would otherwise receive the private item's title and
+      // definition-of-done in clear, and the audit tail's work.proposed
+      // entry carries the same fields. A member who is party to any
+      // request on an item keeps its full record and its events.
+      const privatePartiesByWork = this.privateWorkParties(roomId);
+      const workItems = room.state.workItems ? Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => {
+        const parties = privatePartiesByWork.get(id);
+        if (!parties || parties.has(auth.member.id)) return [id, item];
+        return [id, { ...item, title: null, definitionOfDone: null }];
+      })) : room.state.workItems;
+      const eventLog = rawEventLog.map(event => {
+        const workItemId = event?.data?.workItemId;
+        if (typeof workItemId !== "string") return event;
+        const parties = privatePartiesByWork.get(workItemId);
+        if (!parties || parties.has(auth.member.id)) return event;
+        if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
+        return { ...event, data: { ...event.data,
+          ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
+          ...(Object.hasOwn(event.data, "definitionOfDone") ? { definitionOfDone: null } : {}) } };
+      });
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, workItems, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 
@@ -5213,9 +5270,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!working.has(worker)) working.set(worker, []);
       working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
     }
+    // F-S6c-3: presence is a shared, viewer-less picture, so a private
+    // act must not advance a member's stamp at all — a targeted
+    // message.posted (or a follow-up event targeting one) is excluded
+    // from the last-activity derivation for every actor. Otherwise the
+    // stamp equals the hidden event's exact timestamp and any member
+    // can time the private act. The member's last room-visible act
+    // (or their enrollment, via addedAt below) is what remains.
     const lastCommandAt = new Map(this.db.prepare(
-      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-       FROM events WHERE room_id=? GROUP BY actor`
+      `SELECT json_extract(e.body,'$.actorId') AS actor, max(json_extract(e.body,'$.at')) AS at
+       FROM events e WHERE e.room_id=?
+         AND NOT (
+           (json_extract(e.body,'$.type')='message.posted'
+             AND COALESCE(json_extract(e.body,'$.data.toMemberId'),'')<>'')
+           OR (json_extract(e.body,'$.type') IN ('message.edited','message.deleted','message.redacted','poll.voted','message.pinned','message.unpinned')
+             AND EXISTS (SELECT 1 FROM events p WHERE p.room_id=e.room_id
+               AND json_extract(p.body,'$.type')='message.posted'
+               AND COALESCE(json_extract(p.body,'$.data.toMemberId'),'')<>''
+               AND (json_extract(p.body,'$.data.messageId')=json_extract(e.body,'$.data.messageId')
+                 OR p.id=json_extract(e.body,'$.data.messageId'))))
+         )
+       GROUP BY actor`
     ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
     const addedAt = new Map(this.db.prepare(
       `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
@@ -5528,12 +5603,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
       }
       if (kind === "all" || kind === "work") {
+        // F-S8a-5: a work item carrying a private tracked request must
+        // not be matched on, or return, its title/definition-of-done
+        // to a non-party — otherwise search is a confirm-oracle for
+        // the private text and returns the title in clear, like the
+        // targeted-DM filter above for messages. Non-parties may still
+        // match on the item's other (non-private) description text,
+        // and any such hit carries title:null, mirroring the snapshot.
+        // A member party to any request on the item searches in full.
+        const privatePartiesByWork = this.privateWorkParties(roomId);
         const workHits = [];
         for (const w of Object.values(room.state.workItems ?? {})) {
-          const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
+          const parties = privatePartiesByWork.get(w.id);
+          const isParty = !parties || parties.has(auth.member.id);
+          const haystack = (isParty
+            ? `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`
+            : `${w.description ?? ""}`).toLowerCase();
           if (haystack.includes(needle)) {
             result.total += 1;
-            workHits.push(w);
+            workHits.push(isParty ? w : { ...w, title: null });
           }
         }
         // Keep the newest `limit` matches (still chronological), like the
@@ -5597,9 +5685,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       const room = this.room(roomId);
       const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      const built = buildRoomContext({
+      const builtRaw = buildRoomContext({
         state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
       });
+      // F-S6c-3: evaluatedThrough here has the same semantics as the
+      // reply-list surface — it must stop at the viewer's visible
+      // horizon, not the raw room sequence, which counts private
+      // events the viewer cannot see. Participants' horizons still
+      // reach their own private events, so their reads are unchanged.
+      // cursors.roomSequence stays the raw head, as elsewhere.
+      const built = { ...builtRaw, evaluatedThrough: visibleSequenceHorizon(this.db, roomId, auth.member.id, room.sequence,
+        auth.member.id === room.state.room.ownerId) };
       const identity = {
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null

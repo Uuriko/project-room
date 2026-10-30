@@ -8,7 +8,7 @@ import { Buffer } from "node:buffer";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
-import { messageInHistory } from "./history-visibility.mjs";
+import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -71,7 +71,14 @@ export class ReplyRequests {
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
       // At most 500 retained subjects; no bodies and no mutable paging boundary.
       if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
-      return { evaluatedThrough: room.sequence, selection: { direction, status }, requests, nextReads };
+      // F-S6c-3: evaluatedThrough is the viewer's visible horizon, not the
+      // raw room sequence — the raw sequence counts private events past
+      // the viewer's horizon and lets them compute how many hidden events
+      // exist. For a participant the private request's own event is
+      // visible, so their horizon still reaches it.
+      const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
+        auth.member.id === this.store.roomAuthority(roomId).ownerId);
+      return { evaluatedThrough, selection: { direction, status }, requests, nextReads };
     }, { requestsOnly: true });
   }
   selected(token, roomId, requestMessageId, options = {}) {
