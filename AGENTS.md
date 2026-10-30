@@ -40,7 +40,8 @@ test before adding a rule here.
 - Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).
 - UI or copy work (an on-demand reference, not a gate): [DESIGN.md](DESIGN.md)
-  for direction, then the checks in
+  for direction, [docs/DESIGN-WORKFLOW.md](docs/DESIGN-WORKFLOW.md) for scoped
+  briefs and rendered evidence, then the checks in
   [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
