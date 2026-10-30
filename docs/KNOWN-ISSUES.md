@@ -17,8 +17,8 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 
 | Status | Ledger rows |
 | --- | --- |
-| fixed | 16 |
-| open | 112 |
+| fixed | 17 |
+| open | 111 |
 | open (fix in PR) | 30 |
 | open (part in PR) | 2 |
 | stale | 9 |
@@ -38,27 +38,27 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 
 | ID | Issue | Sev | Lane | Next step |
 | --- | --- | --- | --- | --- |
-| KI-006 | Prod 93 commits behind main; 20-PR wave undeployed | P1 | Codex | Codex lands #5428 and deploys with smoke; John's Tab verifies KI-001/KI-006 within 4h of deploy |
-| KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
+| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
 | KI-024 | Stop does not stop a paused agent's writes | P1 | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
 | KI-026 | room-acp not on npm; recommended npx command 404s | P1 | Grok (+Potter npm login) | #5415 serves /room-acp.tgz; publish when npm login exists |
 | KI-031 | Friend journey proven only with a scripted agent, not a real model | P1 | Jill-Dot | Jill-Dot runs packaged install + real model on second laptop |
 | KI-051 | Unbounded default snapshot (474 KB agent read, muse-room 12.7 MB) | P1 | Codex | One snapshot window PR |
 | KI-052 | Projection rewritten on every write (O(n^2)) | P1 | Codex | Rebase #4842 |
-| KI-061 | 524 open PRs, 218 conflicting | P1 | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
+| KI-061 | 530 open PRs (gh 4:17 PM PT; conflict count recomputing after main moved) | P1 | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
 | KI-062 | CI capacity: cancelled heads | P1 | Potter | Potter: free org or GitHub app |
 | KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | P1 | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
+| KI-014 | Blank invite became owner-level; new agents talkable by anyone | P1 | Codex (#5428 path) | Land #5427 inside #5428 |
 
 ## Ledger
 
 | ID | Issue | Source | Status | Evidence | Category | Sev | Effort | Lane | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | Delta 23644/23712, UNFIXED #1 | open | prod /api/health/jobs 2026-10-30 2:55 PM PT: integrity failing 415; #4930 merged on main keeps genuine parity fatal | bug | P1 | S (human read) + M | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
-| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | Delta 23636, Grok 23101 | open (fix in PR) | #5334 head 3e08ddce: kind stamped on land/deploy receipts + shadow; deleted-row replay tests (stamped, legacy) fail before, pass after | bug | P1 | S | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
+| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | Delta 23644/23712, UNFIXED #1 | open | prod /api/health/jobs 2026-10-30 4:17 PM PT at 260d4366 (includes #4930): integrity failing 416, last success 2026-10-11; deploy did not clear it, so the parity gap is real data, not the check | bug | P1 | S (human read) + M | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
+| KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | Delta 23636, Grok 23101 | open (fix in PR) | prod 4:17 PM PT at 260d4366: patrol stale (last success 23:00Z), not failing; #5334 rebased d9a20874: kind stamped on land/deploy receipts + shadow; deleted-row replay tests (stamped, legacy) fail before, pass after | bug | P1 | S | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
 | KI-003 | claim-prs job: SQLITE_CONSTRAINT in public claim writer | Grok 22968 | open | prod jobs: claim-prs stale, same error | bug | P2 | M | Jill fleet | Find the constraint row; fix writer; frozen area so keep minimal |
 | KI-004 | webhook-dispatch goes stale between 30-min crons (60s alarm not running) | Grok 22968 | open | prod jobs: webhook-dispatch stale | bug | P2 | M | Codex | Check DO alarm re-arm after code reset |
 | KI-005 | room-backup job failing (1 error per tick) | prod jobs | open | prod jobs: room-backup failing 1 | bug | P2 | S | Potter-blocked | No backup work until Potter asks; logged only |
-| KI-006 | Prod 93 commits behind main; 20-PR wave undeployed | Fo 23647, Jill 23719 | open | GitHub compare dfe1848a...2249dbb5 ahead_by 93 (Fo 23867, Jill 21:16Z); gates whether KI-001 fix #4930 is live (John's Tab 23887) | redesign | P1 | S | Codex | Codex lands #5428 and deploys with smoke; John's Tab verifies KI-001/KI-006 within 4h of deploy |
+| KI-006 | Prod was 93 commits behind main; 20-PR wave undeployed | Fo 23647, Jill 23719 | fixed | prod /api/version 2026-10-30 4:17 PM PT: sourceRevision 260d4366 (#5428 merge) = main, compare ahead_by 0; flip was unannounced (Y0sj 23940 incident), two audit fixes incl. #5442 absent from it (Y0sj 23941) | redesign | P1 | S | Codex | Done; follow-ups: #5442 landing (Codex), deploy-announce discipline |
 | KI-007 | /api/ready intermittently 503 (DO probe budget) | #5177, Delta 23636 | open | issue #5177 open; Delta 5/5 503 sample; John's Tab 1 of 6 at ~8:48 AM PT Oct 30 (23887) | bug | P2 | M | Codex | Keep #5177 as the one tracker |
 | KI-008 | /api/health returns 200 during DO outage; 503 body tells agents to call room_check_access | UNFIXED #17 (QA10-2/3) | open | no PR found | bug | P3 | S | Codex | Fold into health work after KI-001 |
 | KI-009 | Self-heal observability (stale-permit reset count) | UNFIXED #14 | stale | waits on #4878 (merged) but no consumer asked since | simplify | P3 | S | none | Drop unless an incident needs it |
@@ -113,7 +113,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-058 | Per-channel DOM growth 6,448 nodes | QA10-6 | open | no PR | bug | P3 | M | none | Later |
 | KI-059 | Projection cache weight double-count | QA5 O-6 | open | #4848 open | bug | P3 | S | Codex | Rebase #4848 |
 | KI-060 | Main test.yml red most runs (17 of 26) | Streamline audit #2 | open (fix in PR) | #5403 #5404 #5405 #5410 #5413 #5414 open; main unit job cancels at its 25-min timeout and browser shards red, no completing main unit run (John's Tab 23887) | bug | P1 | S | Codex | Land the green-main set first; then block feature PRs on red main |
-| KI-061 | 524 open PRs, 218 conflicting | gh 2026-10-30 | open | gh pr list | simplify | P1 | M | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
+| KI-061 | 530 open PRs (gh 4:17 PM PT; conflict count recomputing after main moved) | gh 2026-10-30 | open | gh pr list | simplify | P1 | M | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
 | KI-062 | CI capacity: cancelled heads | UNFIXED blocked | open | Potter-blocked | redesign | P1 | S | Potter | Potter: free org or GitHub app |
 | KI-063 | Coverage 45 min, unit 25 min on PRs | Streamline #10 | open (fix in PR) | #5424 open | simplify | P2 | S | Grok | Land #5424 |
 | KI-064 | Fuzz/QA jobs on every main push | MVP cut #4 | open (fix in PR) | #5406 open | cut | P2 | S | Grok | Land #5406 |
