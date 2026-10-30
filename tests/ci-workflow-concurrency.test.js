@@ -233,8 +233,12 @@ test("required merge-gate jobs stay present and the unit suite is one job", () =
   const coverageIf = String(workflow.jobs.coverage.if);
   assert.match(coverageIf, /schedule/);
   assert.match(coverageIf, /workflow_dispatch/);
-  assert.match(coverageIf, /merge_group/);
+  assert.doesNotMatch(coverageIf, /merge_group/);
   assert.doesNotMatch(coverageIf, /pull_request/);
+  // Coverage is a nightly ratchet, not part of the landing gate.
+  assert.equal(workflow.jobs.test.needs.includes("coverage"), false);
+  // A main push runs the files affected since the previous main head.
+  assert.match(String(workflow.jobs.unit.steps.find(step => step.env?.BASE_SHA)?.env.BASE_SHA), /github\.event\.before/);
 });
 
 // The workflow `if` is the boundary GitHub evaluates. Heavy jobs must see

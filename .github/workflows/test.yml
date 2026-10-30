@@ -158,9 +158,10 @@ jobs:
   # the split cost three runner slots without overlapping. One process is
   # about one setup plus the three test portions (historically ~10 minutes;
   # the cap is 25). A pull request runs the affected files
-  # (scripts/unit-ci.mjs --affected). Main, the merge queue, schedule, and
-  # workflow_dispatch run scripts/unit-ci.mjs --all, which writes
-  # unit-all-*.json for the duration refresh.
+  # (scripts/unit-ci.mjs --affected). A main push runs the files affected
+  # since the previous main head (the full run hit the 25-minute cap). The
+  # merge queue, schedule, and workflow_dispatch run scripts/unit-ci.mjs
+  # --all, which writes unit-all-*.json for the duration refresh.
   unit:
     needs: [changes]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
@@ -214,9 +215,9 @@ jobs:
         run: node scripts/host-isolation-preflight.mjs
       - name: Run the unit suite
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || { [ "$GITHUB_EVENT_NAME" = "push" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; }; then
             node scripts/unit-ci.mjs --affected --base="$BASE_SHA"
           else
             node scripts/unit-ci.mjs --all
@@ -414,10 +415,9 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
-    # Nightly, manual, and merge-queue only. Pull requests and main pushes
-    # skip this job; the `test` check treats that skip as success. A skip on
-    # schedule, workflow_dispatch, or merge_group fails `test`.
-    if: always() && !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group')
+    # Nightly and manual only, and not part of the `test` gate: a 45-minute
+    # ratchet does not block landing. A drop shows as a red nightly run.
+    if: always() && !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     # Per-module coverage ratchet (backlog Q015): runs the root unit suite
     # with V8 coverage and fails when any module in coverage-thresholds.json
     # drops below its threshold. Zero dependencies; the script points TMPDIR
@@ -515,12 +515,12 @@ jobs:
           if [ "$lint" -ne 0 ] || [ "$stories" -ne 0 ]; then exit 1; fi
           node scripts/ci-affected.mjs --run-page-weight
   test:
-    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage, safety-net]
+    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, safety-net]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage, and the safety net
+      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, and the safety net
         env:
           CONTRACT: ${{ needs.contract.result }}
           LINT: ${{ needs.lint.result }}
@@ -528,26 +528,15 @@ jobs:
           BROWSER: ${{ needs.browser.result }}
           CLOUDFLARE: ${{ needs.cloudflare.result }}
           VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
-          COVERAGE: ${{ needs.coverage.result }}
           SAFETY_NET: ${{ needs.safety-net.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE" "safety-net:$SAFETY_NET"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "safety-net:$SAFETY_NET"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
-            # coverage runs on schedule, workflow_dispatch, and merge_group.
-            # pull_request and push skip it on purpose.
-            if [ "$name" = "coverage" ] && [ "$result" = "skipped" ]; then
-              case "$EVENT_NAME" in
-                pull_request|push) continue ;;
-              esac
-              echo "coverage skipped on $EVENT_NAME"
-              failed=1
-              continue
-            fi
             # The safety net is pull-request only, including drafts.
             if [ "$name" = "safety-net" ] && [ "$result" = "skipped" ]; then
               if [ "$EVENT_NAME" = "pull_request" ]; then
