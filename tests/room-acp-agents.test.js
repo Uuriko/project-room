@@ -7,7 +7,7 @@ import { parseArgs } from "../room-acp/src/args.mjs";
 import { candidates, probe, splitCommand, KNOWN_AGENTS } from "../room-acp/src/agents.mjs";
 import { main } from "../room-acp/src/cli.mjs";
 
-const fake = fileURLToPath(new URL("../room-acp/test/fixtures/fake-agent.mjs", import.meta.url));
+const fake = fileURLToPath(new URL("../room-acp/fixtures/fake-agent.mjs", import.meta.url));
 const fakeCmd = `"${process.execPath}" "${fake}"`;
 
 test("parseArgs: link, subcommands, options and errors", () => {

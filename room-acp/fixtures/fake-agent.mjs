@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Lives outside any test/ directory so the default `node --test` glob does not run it.
 // Scripted ACP agent for tests. Mode via FAKE_ACP_MODE:
 //   echo (default)   replies "echo: <prompt text>"
 //   slow             waits FAKE_ACP_DELAY_MS (default 300) before replying
@@ -6,7 +7,7 @@
 //   ask-permission   requests permission, replies with the chosen optionId
 //   no-loadSession   like echo but does not advertise loadSession
 //   tools            emits a plan and tool calls before replying
-import { createPeer } from "../../src/jsonrpc.mjs";
+import { createPeer } from "../src/jsonrpc.mjs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "echo";
 const delay = Number(process.env.FAKE_ACP_DELAY_MS ?? 300);
