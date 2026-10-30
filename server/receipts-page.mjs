@@ -55,7 +55,8 @@ ${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
-const names = list => list.length ? list.map(escapeHtml).join(", ") : "—";
+// MI-022: "none", not an em dash a screen reader reads as "dash".
+const names = list => list.length ? list.map(escapeHtml).join(", ") : "none";
 
 // A public-work receipt's outcome (#3733), composed from its records by
 // the read model: the train's record states (submitted / verified) and
@@ -105,7 +106,7 @@ function shareSection(receipt) {
 <h2>Share this receipt</h2>
 <p class="meta">${escapeHtml(links.text)}</p>
 <p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
-<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
+<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="Project Room receipt badge: ${escapeHtml(verdictLineOf(receipt))}"></p>
 <p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
 <p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
 </section>`;
