@@ -17,7 +17,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, roomMode, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
-import { requestedRoomMode } from "./room-mode.mjs";
+import { requestedRoomMode, roomModeEnv } from "./room-mode.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
@@ -279,12 +279,15 @@ export class AgentRooms {
     // RC-2026-09-18-021: the message is derived from ROOM_KINDS so the taught
     // vocabulary can never drift from the enforced one.
     if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
+    const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
+    if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
     // Mode is creation-only and lab is gated on ROOM_LAB_MODE_ENABLED
     // (server/room-mode.mjs): off, requesting lab is a 422 refusal, never a
     // silent coerce to production. Absent mode resolves to "production".
-    const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined);
-    const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
-    if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    // The arm reads through the store's featureEnv bag when it carries one
+    // (roomModeEnv — the Worker's bindings), and a lab request also needs
+    // the resolved room id to carry the lab- prefix (both in the resolver).
+    const mode = requestedRoomMode(Object.hasOwn(request, "mode") ? request.mode : undefined, roomModeEnv(this.store), roomId);
     // requestId is the client-generated idempotency key for creates that let
     // the server mint the room id: a dropped response retried with the same
     // key returns the original room instead of minting a second one.

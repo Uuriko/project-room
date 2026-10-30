@@ -35,7 +35,7 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
-  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
+  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember, roomMode
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -5611,6 +5611,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(replayEvents(emptyRoomState(), events)); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
+      // Mode is a birth property and import is not a flip door: the
+      // imported log must resolve to the mode this room already has. The
+      // reducer's creation validation checks the mode vocabulary only, so
+      // without this comparison a crafted log could set or drop `mode`
+      // here with no ROOM_LAB_MODE_ENABLED check and no reference to the
+      // room's existing mode (critic F1). Refused with the import
+      // conflict shape, before anything is deleted or written. A room
+      // whose log is imported before it exists is not reachable here —
+      // authenticate/roomAuthority above already require the room — so
+      // every import this guard sees is into an existing room; creating
+      // a room (and its mode) happens only on the creation paths.
+      if (roomMode(state.room) !== roomMode(previous.room)) {
+        fail(422, "invalid_import", `Import would change the room mode from ${roomMode(previous.room)} to ${roomMode(state.room)}; mode is set at creation and cannot change`);
+      }
       // Dependent rows reference event ids/sequences; a history replacement
       // drops them. Pending invitations are lost on restore (documented).
       this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);

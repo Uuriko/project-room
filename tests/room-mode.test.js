@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { applyEvent, emptyRoomState, event, EVENT_TYPES as T, PERMISSIONS, ROOM_MODES, roomMode } from "../src/events.js";
-import { roomLabModeEnabled, requestedRoomMode } from "../server/room-mode.mjs";
+import { roomLabModeEnabled, roomModeEnv, requestedRoomMode } from "../server/room-mode.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -216,8 +216,13 @@ test("lab prefix (F3): a lab room id must start with lab- on both creation paths
 });
 
 test("featureEnv (F4): the creation paths read the arm through the store's featureEnv bag", t => {
+  // Helper semantics mirror featureEnv(store) in project-map-store.mjs:
+  // an own object featureEnv is the bag; anything else falls back to
+  // process.env (roomModeEnv({}) === process.env is that fallback).
+  assert.equal(roomModeEnv({}), process.env);
+  assert.equal(roomModeEnv({ featureEnv: null }), process.env);
   const bag = { ROOM_LAB_MODE_ENABLED: "1" };
-  assert.equal(bag.ROOM_LAB_MODE_ENABLED, "1");
+  assert.equal(roomModeEnv({ featureEnv: bag }), bag);
 
   const { f, admin } = accountSetup(t);
   f.store.featureEnv = { ROOM_LAB_MODE_ENABLED: "1" };
