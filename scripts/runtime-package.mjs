@@ -304,6 +304,7 @@ optional.push("cloudflare/request-timing.mjs"); // Server-Timing and per-request
 optional.push("cloudflare/health-probe.mjs"); // Worker-side /api/ready SELECT 1 probe (imported by cloudflare/room.mjs)
 optional.push("server/identity-secret-hash.mjs"); // HMAC identity verifiers and legacy scrypt upgrade (imported by server/agent-identities.mjs)
 optional.push("server/retention.mjs", "server/audit-retention.mjs"); // pure planners (imported by server/retention-run.mjs)
+optional.push("server/analytics/board-views.mjs", "server/analytics/catalog.mjs", "server/analytics/context.mjs", "server/analytics/schema.mjs"); // #3588 board-view facts (imported by server/http.mjs, server/mcp-public-work.mjs, server/work-claim-routes.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
 optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)

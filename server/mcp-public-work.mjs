@@ -5,6 +5,7 @@ import { PUBLIC_WORK_MCP_TOOLS, ROOM_MCP_PUBLIC_URL } from '../src/room-mcp-join
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
 import { ServiceError } from './service-error.mjs';
 import { stampPublicWorkReview, stampPublicWorkTask, stampPublicWorkTasks } from './content-trust.mjs';
+import { recordBoardView } from './analytics/board-views.mjs';
 const id = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' };
 const positive = { type: 'integer', minimum: 1 };
 const strings = { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 100 } };
@@ -49,7 +50,19 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
  if (problems) return mcpCallError(requestId, { reason: 'invalid_arguments', tool: name, ...problems });
  try {
   let value;
-  if (name === 'public_work_recommend') value = stampPublicWorkTasks(store.publicWorkClaims.match(secret, { ...args, autoClaim: false }));
+  if (name === 'public_work_recommend') {
+   value = stampPublicWorkTasks(store.publicWorkClaims.match(secret, { ...args, autoClaim: false }));
+   // #3588: a recommendation is a board view on the mcp door; record one
+   // fact with the board-wide claimable count list() computes. Fail-soft:
+   // a recording problem never changes the tool result.
+   let claimableCount = null;
+   try { claimableCount = store.publicWorkClaims.list({ limit: 1 }).claimableCount; } catch { claimableCount = null; }
+   if (claimableCount != null) {
+    let actorId = null;
+    try { actorId = secret ? store.identities.resolveGlobalIdentitySecret(secret)?.identityId ?? null : null; } catch { actorId = null; }
+    recordBoardView(store.db, { actorId, actorKind: 'agent', door: 'mcp', scope: 'public', claimableCount, at: store.now() });
+   }
+  }
   else if (name === 'public_work_read_task') value = stampPublicWorkTask(store.readTransaction(() => {
    if (secret && !store.identities.resolveGlobalIdentitySecret(secret)) throw new ServiceError(401, 'unauthenticated', 'Unknown or revoked identity');
    return store.publicWorkClaims.read(args.taskId);
