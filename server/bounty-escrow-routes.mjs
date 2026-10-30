@@ -410,6 +410,16 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       return { roomId, bounty, settlement, alreadySettled, receipt };
     });
   }
+  // The dispute case file (UT2 candidate 2): GET on the same path the
+  // dispute opens on. Before this, GET here fell through to 405 for every
+  // party and the challenger's grounds appeared in no read at all. Party
+  // scoping (poster / worker / challenger / seated decider) is enforced in
+  // escrow.getDisputeCase; a bounty with no dispute is a plain 404.
+  if (escrowRoute === "dispute" && req.method === "GET") {
+    const caseFile = runPure(reject, () => escrow.getDisputeCase(roomId, bountyId, { viewer: caller }));
+    if (caseFile === null) reject(404, "not_found", "this bounty has no dispute");
+    return json(res, 200, { roomId, dispute: caseFile });
+  }
   if (escrowRoute === "dispute" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["bond", "grounds"], optional: ["idempotencyKey"] }))

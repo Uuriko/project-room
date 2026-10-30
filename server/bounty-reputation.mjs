@@ -63,7 +63,18 @@ function decidedSignals(data) {
     // frivolous): challenger loses; a forfeited challenge bond costs extra.
     out.push({ agent: challenger, type: "dispute_lost" });
     out.push({ agent: claimant, type: "dispute_won" });
-    if (data.resolution && data.resolution.bondForfeited === true)
+    // The challenger's bond_forfeited signal keys off the DISPUTE bond's
+    // own disposition, not the resolution's widened bondForfeited flag
+    // (UT2 candidate 2: that flag now reports any bond forfeited in the
+    // settlement, including the claimant's claim bond). Legacy events
+    // without bondConsequences keep the old flag read. A timeout-default
+    // forfeits the dispute bond to the pool mechanically, but the
+    // projector's timeout scoring has never charged the challenger the
+    // extra signal for a challenge that died unresolved — preserved.
+    const disputeBondForfeited = data.resolution?.bondConsequences
+      ? data.resolution.bondConsequences.disputeBond?.disposition === "forfeited-to-pool"
+      : data.resolution?.bondForfeited === true;
+    if (disputeBondForfeited && outcome !== "timeout-default")
       out.push({ agent: challenger, type: "bond_forfeited" });
   } else if (outcome === "split") {
     // Nobody won cleanly: both sides share a small loss.
