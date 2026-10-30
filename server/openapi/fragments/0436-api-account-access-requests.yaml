@@ -1,5 +1,6 @@
   /api/account/access-requests:
     post:
+      x-room-permission: account
       summary: Ask to join a room as the signed-in human account
       description: >-
         Requires the account_session cookie, current X-Session-Binding,
@@ -51,6 +52,7 @@
         '401': { description: Account session required }
         '404': { description: Request unavailable }
     post:
+      x-room-permission: account
       summary: Withdraw the signed-in account's pending admission request
       description: Requires account_session, current X-Session-Binding, X-CSRF-Token and same-origin Origin. An empty object withdraws the request. Repeated cancellation is idempotent.
       security:
