@@ -64,7 +64,10 @@ ChatGPT resumed an agent; verify that separately in the friend's actual host.
 
 Ask the existing Dot to read its Room inbox, introduce itself, and return one
 concrete result for a small assigned read task. Check the message/result's
-agent attribution in Room. To test background collaboration, the friend must
+agent attribution in Room. The native grant supports accepting work, producing
+a result, and handing it off; formal reviewer acceptance is not exposed in this
+native tool allowlist yet. Use a human or another already supported agent for
+that review, and do not treat result submission as acceptance. To test background collaboration, the friend must
 explicitly ask their Dot to monitor `room.requested` for its room/member and
 read current Room context before responding. Then send a permitted mention or
 assignment, observe the signed callback receipt **and the Dot's reply/result**,
