@@ -22,7 +22,7 @@ import { join } from "../room-acp/src/join.mjs";
 import { Bridge } from "../room-acp/src/bridge.mjs";
 
 const FAKE_AGENT = fileURLToPath(new URL("../room-acp/fixtures/fake-agent.mjs", import.meta.url));
-const step = (name, ok, detail = "") => { console.log(`${ok ? "ok" : "FAIL"} - ${name}${detail ? ` (${detail})` : ""}`); if (!ok) process.exitCode = 1; return ok; };
+export const isExpectedReply = (body, marker) => typeof body === "string" && body.startsWith("echo: ") && body.includes(marker) && !/\(turn (?:failed|cancelled)|\(stopped early:|\(the agent declined\)/.test(body);
 
 async function waitFor(check, ms = 60000) {
   const end = Date.now() + ms;
@@ -30,7 +30,7 @@ async function waitFor(check, ms = 60000) {
   return null;
 }
 
-async function startLocal() {
+export async function startLocal() {
   const { createAcceptanceFixture } = await import("./acceptance-fixture.mjs");
   const { createRoomServer } = await import("../server/http.mjs");
   const f = createAcceptanceFixture();
@@ -42,7 +42,9 @@ async function startLocal() {
   };
 }
 
-export async function runJourney({ origin, roomId, ownerKey, log = () => {} }) {
+export async function runJourney({ origin, roomId, ownerKey, log = () => {}, fakeMode = "echo", print = console.log }) {
+  const steps = [];
+  const step = (name, ok, detail = "") => { steps.push({ name, ok: Boolean(ok) }); print(`${ok ? "ok" : "FAIL"} - ${name}${detail ? ` (${detail})` : ""}`); return ok; };
   const api = async (path, body) => {
     const res = await fetch(origin + path, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
     const json = await res.json().catch(() => ({}));
@@ -60,33 +62,35 @@ export async function runJourney({ origin, roomId, ownerKey, log = () => {} }) {
     const connection = await join({ link, displayName: name, env: { ...process.env, ROOM_ACP_HOME: home } });
     step("2 friend's room-acp joins with the link", Boolean(connection?.memberId));
 
-    bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env: { ...process.env, ROOM_ACP_HOME: home, FAKE_ACP_MODE: "echo" }, respondTo: "owner", waitMs: 10000, cadenceSeconds: 30, log });
+    bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env: { ...process.env, ROOM_ACP_HOME: home, FAKE_ACP_MODE: fakeMode }, respondTo: "owner", waitMs: 10000, cadenceSeconds: 30, log });
     done = bridge.run();
     step("2b bridge holds the wake queue", Boolean(await waitFor(() => bridge.fencingToken, 30000)));
 
     const messageId = `qa-${randomUUID()}`;
+    const marker = `friend-result-${randomUUID()}`;
     const handle = name.replace(/\s+/g, "-"); // joined handle; needs #5421
-    await api(`${room}/commands`, { id: randomUUID(), type: "message.posted", data: { messageId, body: `@${handle} say hello` } });
+    await api(`${room}/commands`, { id: randomUUID(), type: "message.posted", data: { messageId, body: `@${handle} say hello ${marker}` } });
     const reply = await waitFor(async () => {
       const read = await api(`${room}/messages/${encodeURIComponent(messageId)}/thread`);
       return (read.json.thread?.replies ?? []).find(entry => entry.authorId === connection.memberId);
     });
-    step("3 chat mention gets a threaded reply the owner can read", Boolean(reply));
+    step("3 chat mention gets a threaded reply the owner can read", isExpectedReply(reply?.body, marker));
 
     const claimId = `qa-claim-${randomUUID().slice(0, 8)}`;
-    const created = await api(`${room}/work-claims`, { id: claimId, title: "QA: friend's agent claim", note: "Reply with a one-line result.", assignee: connection.memberId });
+    const created = await api(`${room}/work-claims`, { id: claimId, title: "QA: friend's agent claim", note: `Reply with a one-line result: ${marker}`, assignee: connection.memberId });
     step("4 owner assigns a Board claim to the agent", created.status === 201, `status ${created.status}`);
     const noted = await waitFor(async () => {
       const thread = await api(`${room}/work-claims/${encodeURIComponent(claimId)}/thread`);
       return (thread.json.entries ?? []).find(entry => entry.kind === "note" && entry.actorId === connection.memberId);
     });
-    step("5 agent's result shows in the claim thread", Boolean(noted));
+    step("5 agent's result shows in the claim thread", isExpectedReply(noted?.note, marker));
   } catch (error) {
     step("journey", false, error?.code ?? error?.message ?? "error");
   } finally {
     bridge?.stop(); await done?.catch(() => {});
     rmSync(home, { recursive: true, force: true });
   }
+  return { ok: steps.length === 6 && steps.every(entry => entry.ok), steps };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -98,7 +102,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.error("Set ROOM_QA_ROOM to a throwaway qa- room and ROOM_QA_OWNER_KEY to its owner key, or pass --local.");
     process.exit(2);
   }
-  await runJourney({ ...target, log: process.env.QA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
+  const result = await runJourney({ ...target, log: process.env.QA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
   await target.close();
-  process.exit(process.exitCode ?? 0);
+  process.exit(result?.ok ? 0 : 1);
 }
