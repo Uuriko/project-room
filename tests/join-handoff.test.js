@@ -15,7 +15,7 @@ const app = readFileSync(join(ROOT, "src/app.js"), "utf8");
 test("deep-link boot tries the room-cookie session before the account gate", () => {
   const probe = app.indexOf("// Join-flow sessions are room-cookie sessions");
   assert.ok(probe !== -1, "the deep-link boot carries the join-flow comment");
-  const restoreCall = app.indexOf("const joined = await client.restore();", probe);
+  const restoreCall = app.indexOf("const joined = await restoreAtStartup();", probe);
   assert.ok(restoreCall > probe, "the room-cookie probe (no roomId, room mode) runs first");
   const matchCheck = app.indexOf("if (joined?.roomId === requestedRoom) return;", restoreCall);
   assert.ok(matchCheck > restoreCall, "a matching cookie session opens the room immediately");

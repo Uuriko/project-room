@@ -46,6 +46,6 @@ test("first-paint boot gates the session probe on hasSessionHint()", () => {
   );
   const gate = app.indexOf("if (hasSessionHint()) {");
   assert.ok(gate !== -1, "the boot fallthrough consults hasSessionHint()");
-  const probe = app.indexOf("await client.restore();", gate);
+  const probe = app.indexOf("await restoreAtStartup();", gate);
   assert.ok(probe > gate, "the first-paint GET /api/session probe sits inside the hint gate");
 });
