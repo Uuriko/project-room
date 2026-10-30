@@ -106,3 +106,28 @@ test("bridge: messages during a slow turn batch into one next turn", async t => 
   assert.match(list[1].body, /second[\s\S]*third/);
   await waitFor(() => bridge.stats.acked === 3);
 });
+
+test("bridge: a Board claim assigned to the agent runs one turn and replies as a claim note", async t => {
+  const room = await startRoom(t);
+  const { bridge, connection } = await startBridge(t, room);
+  const call = (path, body) => fetch(room.origin + path, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${room.ownerKey}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then(async res => ({ status: res.status, json: await res.json() }));
+  const created = await call("/api/rooms/commons/work-claims", { id: "fix-login", title: "Fix the login button", note: "It does nothing on Safari.", assignee: connection.memberId });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const claim = await (async () => {
+    const end = Date.now() + 20000;
+    while (Date.now() < end) {
+      const read = await call("/api/rooms/commons/work-claims/fix-login");
+      const hit = (read.json.history ?? []).find(entry => entry.agentId === connection.memberId && /^echo: /.test(entry.note ?? ""));
+      if (hit) return { read: read.json, hit };
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error("no claim note");
+  })();
+  assert.match(claim.hit.note, /Fix the login button/);
+  assert.match(claim.hit.note, /Safari/);
+  await waitFor(() => bridge.stats.acked >= 1);
+  assert.ok(bridge.host.sessions.has("work-claim:fix-login"));
+  const thread = await call("/api/rooms/commons/work-claims/fix-login/thread");
+  assert.equal(thread.status, 200);
+  assert.ok(JSON.stringify(thread.json).includes("echo: "), "the reply shows in the claim thread");
+});

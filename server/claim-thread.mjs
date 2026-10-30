@@ -14,10 +14,13 @@
 // either a room-wide board event or a line of that claim's own history.
 // Nothing here reads chat messages, so DMs and private replies cannot leak.
 
-const HISTORY_ONLY = new Set(["pr_autolinked", "deploy_linked"]);
+// "noted" carries the text of a note-only update (an agent's result, a
+// human's ask); the claim read already returns it, so no new visibility.
+const HISTORY_ONLY = new Set(["pr_autolinked", "deploy_linked", "noted"]);
 export const CLAIM_THREAD_LIMIT = 500;
 
 export function claimThreadKind(action, data = {}) {
+  if (action === "noted") return "note";
   if (action === "pr_autolinked") return "pr";
   if (action === "deploy_linked") return "deploy";
   if (action === "ci_changed") return "ci";
