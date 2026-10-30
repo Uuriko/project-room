@@ -31,12 +31,24 @@
 // journal is the record):
 //
 //   visible ⟺ NOT operator-unpublished (receipt or room)
-//             AND the room's recorded public-receipts setting is ON
-//                 (room_public_receipts_setting.enabled = 1 — a settled
-//                 lot is public only with the owner's recorded opt-in,
-//                 #3594: never-recorded, recorded-off, and unreadable
-//                 are all private)
+//             AND the room's recorded public-receipts setting is ON,
+//                 consulted AT READ TIME from the authoritative record
+//                 (rooms.projection $.room.publicReceipts.enabled — a
+//                 settled lot is public only with the owner's recorded
+//                 opt-in, #3594: never-recorded, recorded-off, and
+//                 unreadable are all private)
 //             AND NOT owner-hidden (the directory toggle above)
+//
+// The recorded-setting leg used to read the write-time mirror
+// (room_public_receipts_setting), and a desynced mirror changed public
+// exposure in both directions, indefinitely: a stale enabled=1 served a
+// lot after the owner opted out (or after a restore/import dropped the
+// recorded setting), and a missing mirror hid a lot the owner had opted
+// in (B7-2-F1/F2/F4, B2-4-F1 — the settled-lot drift class). The mirror
+// is consulted now only where the store carries no rooms table at all
+// (a predating/partial store, where the mirror is the only record that
+// can exist); wherever the authoritative record can be read, it alone
+// decides, so mirror drift cannot move a lot's public state.
 //
 // Legacy stores: a settings table predating the public_receipts column
 // has no private rooms by definition (the column's default is public),
@@ -133,7 +145,9 @@ export function ownerToggleReadable(db) {
 // reads snapshot tables). lotReceiptVisible/receiptVisible below are
 // these functions over facts read from the db; a snapshot consumer that
 // derives the same facts must reach the same verdicts — that parity is
-// the U5 obligation, pinned by the conformance corpus.
+// the U5 obligation, pinned by the conformance corpus. For the lot rule
+// the settingEnabled fact is the AUTHORITATIVE recorded setting (the
+// room projection's publicReceipts leg), never a mirror of it.
 export function receiptVisibleFromFacts({ unpublished = false, receiptsPrivate = false } = {}) {
   return !unpublished && !receiptsPrivate;
 }
@@ -242,17 +256,55 @@ export function receiptVisible(db, id) {
   return !hiddenReceiptIds(db, [id]).has(id);
 }
 
-// The lot rule over a live db: operator unpublish, the recorded opt-in,
-// and the owner's directory toggle, composed in one place so the read
-// model and any other lot consumer cannot apply different subsets.
+// The room's recorded public-receipts setting, read from the
+// authoritative record at read time: the room projection's
+// $.room.publicReceipts.enabled leg, extracted in SQL so the read never
+// hydrates the projection. Returns one of:
+//   { status: "recorded", enabled: 1 | 0 | null } — the rooms row exists;
+//     enabled is null when no setting was ever recorded (#3594: absent
+//     is private), 1/0 for a recorded on/off.
+//   { status: "absent", enabled: null } — the authoritative store is
+//     there but holds no row for the room (or cannot be read): no
+//     recorded opt-in exists, so the verdict is private.
+//   { status: "unavailable", enabled: null } — the store carries no
+//     rooms table at all (a predating/partial store): the authoritative
+//     record cannot exist here, and the caller falls back to the
+//     write-time mirror, the only record such a store can hold.
+export function recordedReceiptsSetting(db, roomId) {
+  try {
+    const row = db.prepare(`SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS enabled
+      FROM rooms WHERE id=?`).get(roomId);
+    if (!row) return { status: "absent", enabled: null };
+    return { status: "recorded", enabled: row.enabled === 1 ? 1 : row.enabled === 0 ? 0 : null };
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return { status: "unavailable", enabled: null };
+    return { status: "absent", enabled: null }; // a store that cannot answer recorded no opt-in
+  }
+}
+
+// The write-time mirror of the recorded setting, kept as the fallback
+// record for stores with no rooms table (see recordedReceiptsSetting).
+function mirroredReceiptsSetting(db, roomId) {
+  try {
+    const row = db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
+    return row ? row.enabled : null;
+  } catch { return null; } // a store that cannot answer recorded no opt-in
+}
+
+// The lot rule over a live db: operator unpublish, the recorded opt-in
+// consulted at read time from the authoritative record, and the
+// owner's directory toggle, composed in one place so the read model
+// and any other lot consumer cannot apply different subsets. Mirror
+// drift — a stale, missing, or wrongly-polarity
+// room_public_receipts_setting row — cannot change the verdict
+// wherever the authoritative record can be read (B7-2-F1/F2, B2-4-F1).
 export function lotReceiptVisible(db, { id, roomId } = {}) {
   if (typeof id !== "string" || !id || typeof roomId !== "string" || !roomId) return false;
   const unpublished = isUnpublished(db, "receipt", id) || isUnpublished(db, "room", roomId);
-  let settingEnabled = null;
-  try {
-    const row = db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
-    settingEnabled = row ? row.enabled : null;
-  } catch { settingEnabled = null; } // a store that cannot answer recorded no opt-in
+  const recorded = recordedReceiptsSetting(db, roomId);
+  const settingEnabled = recorded.status === "unavailable"
+    ? mirroredReceiptsSetting(db, roomId)
+    : recorded.enabled;
   const receiptsPrivate = ownerToggleReadable(db) ? roomReceiptsPrivate(db, roomId) : false;
   return lotVisibleFromFacts({ unpublished, settingEnabled, receiptsPrivate });
 }

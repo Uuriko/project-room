@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // MEMBER-PERMS PR2: simulated browser journeys against a disposable real server.
 // Authoring gate: these own UI wiring, selection, retry and session lifecycle.
 // Credible regressions are posting admission instead of an authenticated upgrade,
@@ -23,6 +24,7 @@ import { clickChrome, openMemberProfile } from "./room-chrome.mjs";
 const requestPath = "/api/rooms/commons/members/me/permission-requests";
 const isPermissionRequest = request => request.method() === "POST" && new URL(request.url()).pathname === requestPath;
 const ownRow = (page, memberId = "requester") => page.locator(`#presence-list [data-member-record-id="${memberId}"]`);
+const reviewAction = (row, label) => row.getByRole("button", { name: new RegExp(`^${label} — .+`) });
 const attentionRow = (page, name = "Permission Requester") => page.locator("#attention-list > li").filter({ hasText: name });
 
 function deferred() {
@@ -100,7 +102,7 @@ async function ask(page, memberId = "requester", { keyboard = false } = {}) {
 async function decide(page, label, expectedStatus = 200) {
   const reply = page.waitForResponse(response => response.request().method() === "POST"
     && /\/access-requests\/[^/]+\/decide$/.test(new URL(response.url()).pathname));
-  await attentionRow(page).getByRole("button", { name: label, exact: true }).click();
+  await reviewAction(attentionRow(page), label).click();
   const response = await reply;
   assert.equal(response.status(), expectedStatus, await response.text());
   return response.json();
@@ -136,17 +138,24 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   assert.match(await row.locator(".attention-detail").textContent(), /Accept work/);
   assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
   assert.equal(await attentionRow(owner, "Ordinary Joiner").locator(".attention-kind").textContent(), "Join request");
+  await captureDesignEvidence(owner, { id: "owner-join-request", title: "Owner reviews agent join and permission requests", fixture: "real AccessRequests identity; not human-account admission", testName: t.name, component: "decision controls" });
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "review controls fit the viewport");
   await decide(owner, "Approve");
   await row.waitFor({ state: "detached" });
   await page.locator("#message-list").getByText(new RegExp(`Approved permission request ${request.requestId}`)).waitFor();
+  const joinRow = attentionRow(owner, "Ordinary Joiner");
+  await reviewAction(joinRow, "Approve").click();
+  await joinRow.waitFor({ state: "detached" });
+  assert.equal(f.pending().length, 0, "owner approved both distinct requests");
+  assert.ok(Object.values(f.store.roomAuthority("commons").members).some(member => member.displayName === "Ordinary Joiner"), "join approval adds the identity as a member");
+  await captureDesignEvidence(owner, { id: "owner-join-approved", title: "Owner has approved join and permission requests", fixture: "Real identity admission and separate human-member permission upgrade", testName: t.name, component: "decision success" });
   assert.deepEqual(f.permissions("requester"), ["accept_work", "complete_work"]);
   await ownRow(page).locator("[data-permission-request-status]").filter({ hasText: "You can take work now." }).waitFor();
   await page.keyboard.press("Control+k");
   await page.locator("#room-actions-query").fill("board");
   await page.locator('[data-room-action="board"]').press("Enter");
   const card = page.locator('article[data-claim-id="permission-work"]');
-  await card.getByRole("button", { name: "Claim", exact: true }).click();
+  await card.getByRole("button", { name: "Claim — Permission browser work", exact: true }).click();
   await page.locator('[aria-labelledby="board-col-claimed"] article[data-claim-id="permission-work"]').waitFor();
   assert.equal(await page.locator("#board-status").textContent(), "Claimed 'Permission browser work'");
   assert.equal(f.store.workClaims.get("commons", "permission-work").owner, "requester");
@@ -159,27 +168,27 @@ test("an admin can cancel partial review, approve only selected permissions, and
   const admin = await f.login("admin"), row = attentionRow(admin);
   await row.waitFor();
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
-  assert.equal(await row.getByRole("button", { name: "Approve", exact: true }).isDisabled(), true,
+  assert.equal(await reviewAction(row, "Approve").isDisabled(), true,
     "an admin is not offered a grant it does not hold");
   assert.match(await row.textContent(), /You cannot grant: Complete work/);
   assert.deepEqual(f.permissions("requester"), []);
   let writes = 0;
   admin.on("request", request => { if (request.method() === "POST" && /\/decide$/.test(new URL(request.url()).pathname)) writes++; });
   const sequence = f.store.room("commons").sequence;
-  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  await reviewAction(row, "Approve partial").click();
   const selection = row.locator("fieldset");
   await selection.waitFor();
   assert.equal(await selection.getByRole("checkbox").count(), 2);
   assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isDisabled(), true);
   assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
   await selection.getByRole("checkbox", { name: "Accept work", exact: true }).uncheck();
-  assert.equal(await row.getByRole("button", { name: "Approve selected", exact: true }).isDisabled(), true);
+  assert.equal(await reviewAction(row, "Approve selected").isDisabled(), true);
   await row.getByRole("button", { name: "Cancel", exact: true }).click();
   await selection.waitFor({ state: "detached" });
   assert.equal(writes, 0, "opening, selecting and cancelling sends no decision");
   assert.equal(f.store.room("commons").sequence, sequence, "cancel appends no room event");
   assert.equal(f.pending().length, 1);
-  const partialButton = row.getByRole("button", { name: "Approve partial", exact: true });
+  const partialButton = reviewAction(row, "Approve partial");
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Cancel returns focus to partial review");
 
   await partialButton.click();
@@ -322,7 +331,7 @@ test("ownership transfer closes a partial review and clears the owner-only rollu
   await row.waitFor();
   const ownerDetail = page.locator("#attention-list > li").filter({ hasText: title });
   await ownerDetail.waitFor();
-  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  await reviewAction(row, "Approve partial").click();
   await row.locator("fieldset").waitFor();
   const held = f.hold(), captured = deferred();
   await page.route("**/api/rooms/commons/access-requests?status=pending", async route => {
@@ -369,7 +378,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
     if (request.method() === "POST" && /\/access-requests\/[^/]+\/decide$/.test(new URL(request.url()).pathname)) decisions++;
   });
   for (const label of ["Approve", "Decline", "Approve partial"]) {
-    const action = row.getByRole("button", { name: label, exact: true });
+    const action = reviewAction(row, label);
     await action.focus();
     const refreshed = page.waitForResponse(isQueue);
     unrelatedMessage(`Unrelated activity while focused on ${label}`);
@@ -385,7 +394,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
     await held.promise;
     await route.fulfill({ response });
   });
-  await row.getByRole("button", { name: "Approve", exact: true }).focus();
+  await reviewAction(row, "Approve").focus();
   unrelatedMessage("The reader moves away during a pending refresh");
   await captured.promise;
   await page.locator("#updates-close").click();

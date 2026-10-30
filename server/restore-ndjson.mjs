@@ -319,6 +319,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   let trailer = null;
   let carry = "";
   let settled = false;
+  let abortResult = null;
   // #3599: created when the watermark line lands (it names the sanitize
   // policy); a row arriving before it resolves under the legacy policy —
   // finish() refuses a watermark-less stream and aborts the replay anyway.
@@ -464,6 +465,9 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   }
 
   function abort() {
+    // finish() may already have attempted cleanup before the route handles
+    // its error. Preserve that result instead of reporting a false clean skip.
+    if (abortResult) return abortResult;
     if (settled) return { cleaned: true, skipped: true };
     settled = true;
     let cleanupError = null;
@@ -478,12 +482,13 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     } catch (error) { cleanupError = error; }
     try {
       if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
-    } catch { /* closing the permit must not mask the original failure */ }
-    db.exec("PRAGMA foreign_keys=ON");
+    } catch (error) { cleanupError ??= error; }
+    try { db.exec("PRAGMA foreign_keys=ON"); } catch (error) { cleanupError ??= error; }
     // The caller reports a failed cleanup: the store was verified empty
     // before the replay, but if these deletes failed it may now hold
     // partial data, and the operator must not treat it as retryable-empty.
-    return { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    abortResult = { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    return abortResult;
   }
 
   function finish() {
@@ -548,8 +553,8 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
-      settled = true;
       db.exec("PRAGMA foreign_keys=ON");
+      settled = true;
       return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
     } catch (error) {
       abort();

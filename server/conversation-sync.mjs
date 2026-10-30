@@ -38,13 +38,26 @@ function signer(store) {
   };
 }
 
-function archivedConversationRows(store,roomId,{viewerId,channelId,messageId,floor,limit,afterId}) {
+// A short, proven public-only append cannot change private records or authority.
+// Anything else (including a long gap) keeps the conservative reset contract.
+function publicOnlyAppend(store, roomId, saved, sequence) {
+  if (!Number.isSafeInteger(saved?.sequence) || sequence <= saved.sequence || sequence - saved.sequence > 100) return false;
+  const anchor = store.db.prepare('SELECT id FROM events WHERE room_id=? AND sequence=?').get(roomId, saved.sequence)?.id ?? null;
+  if (anchor !== saved.anchor) return false;
+  const rows = store.db.prepare(`SELECT json_extract(body,'$.type') AS type,
+    json_extract(body,'$.data.toMemberId') AS recipient FROM events
+    WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT 101`).all(roomId, saved.sequence, sequence);
+  return rows.length === sequence - saved.sequence && rows.every(row => row.type === 'message.posted' && !row.recipient);
+}
+
+function archivedConversationRows(store,roomId,{viewerId,channelId,peerMemberId,messageId,floor,limit,afterId}) {
   const repository=messageRepository(store,roomId,store.room(roomId,{verifyBodyHashes:true}).state);
-  const candidates=messageId===null ? repository.records({descending:true,afterId,visibility:{viewerId,channelId,floor}}) : [repository.get(messageId)];
+  const candidates=messageId===null ? repository.records({descending:true,afterId,visibility:{viewerId,channelId,peerMemberId,floor}}) : [repository.get(messageId)];
   const rows=[];
   for(const message of candidates) {
     if(!message || message.toMemberId && message.authorId!==viewerId && message.toMemberId!==viewerId)continue;
     if(channelId!==null && (message.toMemberId || (message.channelId||DEFAULT_CHANNEL_ID)!==channelId))continue;
+    if(peerMemberId!==null && !((message.authorId===viewerId && message.toMemberId===peerMemberId) || (message.authorId===peerMemberId && message.toMemberId===viewerId)))continue;
     if(floor&&!messageInHistory(message,floor))continue;
     const {editHistory:_history,...record}=message;
     rows.push({position:0,messageId:message.id,body:JSON.stringify(record)});
@@ -57,12 +70,13 @@ function archivedConversationRows(store,roomId,{viewerId,channelId,messageId,flo
 // tombstones arrive together. SQLite filters DMs before paging; JS only parses
 // bounded selected rows. Certified rooms use indexed records; rooms still
 // replaying (or changed since certification) retain the projection fallback.
-export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null,
+export function readConversation(store, token, roomId, { limit = 50, cursor = null, since = null, messageId = null, channelId = null, peerMemberId = null,
   expectedSessionBinding = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
     || [cursor, since, messageId].filter(value => value !== null).length > 1
     || messageId !== null && !validId(messageId)
-    || channelId !== null && !validId(channelId)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+    || channelId !== null && !validId(channelId)
+    || peerMemberId !== null && (!validId(peerMemberId) || channelId !== null)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     // Channel history is public-room conversation, never an addressed DM.
@@ -74,13 +88,15 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const identity = { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
       viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
       viewerSessionRevision: auth.sessionRevision ?? null };
-    const scope = digest([identity, auth.credentialHash, limit, channelId]);
+    const scope = digest([identity, auth.credentialHash, limit, channelId, peerMemberId]);
     const signed = signer(store), saved = cursor !== null || since !== null ? signed.decode(cursor ?? since) : null;
     const base = { ...identity, conversationVersion: 1, sequence: head.sequence, limit, messageId,
-      ...(channelId !== null ? { channelId } : {}) };
+      ...(channelId !== null ? { channelId } : {}), ...(peerMemberId !== null ? { peerMemberId } : {}) };
     const reset = () => ({ ...base, mode: "reset", messages: [], nextCursor: null, checkpoint: null });
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
-    if (cursor !== null && (saved.sequence !== head.sequence || saved.anchor !== anchor || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
+    const sameHead = saved?.sequence === head.sequence && saved?.anchor === anchor;
+    const privateAppend = peerMemberId !== null && !sameHead && publicOnlyAppend(store, roomId, saved, head.sequence);
+    if (cursor !== null && ((!sameHead && !privateAppend) || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
     // Certification covers the full record and query columns at this exact
     // head. Never replay or perform a full parity scan on a read request.
     const indexed = Boolean(store.db.prepare(`SELECT 1 FROM messages_backfill_cursor
@@ -104,17 +120,18 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // uncertified projections must never treat the unqualified mirror as truth.
     const entityRefs = !indexed && !archiveMerged && Boolean(store.db.prepare("SELECT instr(projection, '\"_entity\":1') AS refs FROM rooms WHERE id=?").get(roomId)?.refs);
     const rows = (archiveMerged
-      ? archivedConversationRows(store,roomId,{viewerId:auth.member.id,channelId,messageId,floor,limit,afterId:cursor===null?null:saved.beforeMessageId})
+      ? archivedConversationRows(store,roomId,{viewerId:auth.member.id,channelId,peerMemberId,messageId,floor,limit,afterId:cursor===null?null:saved.beforeMessageId})
       : indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
         AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
         AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+        AND (? IS NULL OR (author_id=? AND to_member_id=?) OR (author_id=? AND to_member_id=?))
         AND (? IS NULL OR message_id=?)
         AND (? IS NULL OR created_at>=?)
         AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY seq DESC, message_id DESC LIMIT ?`)
       .all(roomId, before, before, cursor !== null ? saved.beforeId : "", auth.member.id, auth.member.id,
-        channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
+        channelId, DEFAULT_CHANNEL_ID, channelId, peerMemberId, auth.member.id, peerMemberId, peerMemberId, auth.member.id, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1)
       : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
       FROM (
@@ -130,13 +147,15 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
         AND (? IS NULL OR (
           COALESCE(NULLIF(json_extract(m.value,'$.channelId'),''),?)=?
           AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')='')))
+        AND (? IS NULL OR (json_extract(m.value,'$.authorId')=? AND json_extract(m.value,'$.toMemberId')=?)
+          OR (json_extract(m.value,'$.authorId')=? AND json_extract(m.value,'$.toMemberId')=?))
         AND (? IS NULL OR json_extract(m.value,'$.id')=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>=?)
         AND (? IS NULL OR json_extract(m.value,'$.createdAt')>?
           OR json_extract(m.value,'$.id') NOT IN (SELECT value FROM json_each(?)))
       ORDER BY CAST(m.key AS INTEGER) DESC LIMIT ?`)
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
-        messageId, messageId, floor?.at ?? null, floor?.at ?? null,
+        peerMemberId, auth.member.id, peerMemberId, peerMemberId, auth.member.id, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
       .map(row => indexed || archiveMerged ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
         // The recovery source must itself verify: a hot-path room() read
@@ -172,16 +191,69 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       before: selected.at(-1).position, indexed, archiveMerged,
       ...(indexed ? { beforeId: selected.at(-1).messageId } : {}),
       ...(archiveMerged ? {beforeMessageId:selected.at(-1).messageId} : {}) }) : null;
-    // Include sequence/anchor: any intervening room mutation invalidates older
-    // cached pages, even if the changed message is outside this latest window.
-    const version = digest([head.sequence, anchor, messages]);
-    const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version }) : null;
-    if (since !== null && saved.version === version) return { ...base, mode: "not_modified", nextCursor, checkpoint };
+    // Private latest-window equality is sufficient only at the same head or
+    // after a proven short public-only append. Other changes invalidate older pages.
+    const version = peerMemberId !== null ? digest([indexed, archiveMerged, messages]) : digest([head.sequence, anchor, messages]);
+    const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version, sequence: head.sequence, anchor }) : null;
+    if (since !== null && saved.version === version && (peerMemberId === null || sameHead || privateAppend)) return { ...base, mode: "not_modified", nextCursor, checkpoint };
     return withContentTrust({
       ...base, mode: "replace",
       ...(addressing ? { addressing } : {}),
       messages: messages.map(message => markIfOther(message, auth.member.id, message.authorId)),
       nextCursor, checkpoint, messageBytes: bytes
     });
+  });
+}
+
+// Directory metadata only: never hydrate bodies or infer other people's pairs.
+// SQL applies caller visibility and history floors before grouping/pagination.
+export function readDirectConversations(store, token, roomId, { limit = 50, cursor = null, expectedSessionBinding = null } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, 'invalid_conversation_selection', 'Choose a bounded conversation list');
+  return store.readTransaction(() => {
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    const head = store.db.prepare('SELECT sequence FROM rooms WHERE id=?').get(roomId);
+    const anchor = store.db.prepare('SELECT id FROM events WHERE room_id=? AND sequence=?').get(roomId, head.sequence)?.id ?? '';
+    const identity = { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+      viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
+      viewerSessionRevision: auth.sessionRevision ?? null };
+    const scope = digest(['direct-directory', identity, auth.credentialHash, limit]);
+    const signed = signer(store), saved = cursor === null ? null : signed.decode(cursor);
+    const base = { ...identity, directoryVersion: 1, sequence: head.sequence, limit };
+    if (cursor !== null && (!saved || saved.scope !== scope || saved.sequence !== head.sequence || saved.anchor !== anchor || typeof saved.after !== 'string'))
+      return { ...base, mode: 'reset', peers: [], nextCursor: null };
+    const indexed = Boolean(store.db.prepare(`SELECT 1 FROM messages_backfill_cursor
+      WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?`).get(roomId, head.sequence, head.sequence, anchor));
+    const marker = indexed ? null : archiveMarker(store.db, roomId);
+    let source, sourceParams;
+    if (indexed) {
+      source = 'SELECT message_id AS id, author_id AS author, to_member_id AS recipient, created_at AS created FROM messages WHERE room_id=?';
+      sourceParams = [roomId];
+    } else {
+      source = `SELECT json_extract(m.value,'$.id') AS id,
+        CASE WHEN json_extract(m.value,'$._entity')=1 THEN json_extract(e.record_json,'$.authorId') ELSE json_extract(m.value,'$.authorId') END AS author,
+        CASE WHEN json_extract(m.value,'$._entity')=1 THEN json_extract(e.record_json,'$.toMemberId') ELSE json_extract(m.value,'$.toMemberId') END AS recipient,
+        CASE WHEN json_extract(m.value,'$._entity')=1 THEN json_extract(e.record_json,'$.createdAt') ELSE json_extract(m.value,'$.createdAt') END AS created
+        FROM rooms r, json_each(r.projection,'$.messages') m
+        LEFT JOIN messages e ON json_extract(m.value,'$._entity')=1 AND e.room_id=r.id AND e.message_id=json_extract(m.value,'$.id') WHERE r.id=?`;
+      sourceParams = [roomId];
+      if (marker?.throughSeq) {
+        source += ` UNION ALL SELECT message_id,author_id,to_member_id,created_at FROM messages
+          WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))`;
+        sourceParams.push(roomId, marker.throughSeq, marker.retainedJson);
+      }
+    }
+    const floor = store.historyFloor(roomId, auth.member.id);
+    const rows = store.db.prepare(`WITH visible AS (${source}), pairs AS (
+      SELECT CASE WHEN author=? THEN recipient ELSE author END AS memberId, created
+      FROM visible WHERE recipient IS NOT NULL AND recipient<>'' AND (author=? OR recipient=?)
+      AND (? IS NULL OR created>=?)
+      AND (? IS NULL OR created>? OR id NOT IN (SELECT value FROM json_each(?)))
+    ) SELECT memberId,MAX(created) AS lastMessageAt FROM pairs WHERE memberId>?
+      GROUP BY memberId ORDER BY memberId LIMIT ?`).all(...sourceParams,
+      auth.member.id, auth.member.id, auth.member.id, floor?.at ?? null, floor?.at ?? null,
+      floor?.at ?? null, floor?.at ?? null, JSON.stringify([...(floor?.sameInstant ?? [])]), saved?.after ?? '', limit + 1);
+    const peers = rows.slice(0, limit);
+    const nextCursor = rows.length > limit ? signed.encode({ scope, sequence: head.sequence, anchor, after: peers.at(-1).memberId }) : null;
+    return { ...base, mode: 'replace', peers, nextCursor };
   });
 }

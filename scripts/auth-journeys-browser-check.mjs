@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // Auth journeys from the live auth audit (2026-10-09), run against a local
 // server with captured mail. Each passing path stays guarded here. A path that
 // is still broken on main is a node:test todo entry: it runs and reports but
@@ -103,10 +104,14 @@ test("signup, then verify by the emailed code; a wrong code is reported once", {
   const f = await setup(t);
   const page = await f.open(DESK);
   const email = "journey-verify@example.invalid";
+  await page.goto(f.origin);
+  await page.locator('#auth-signin-ui [data-password-mode="signup"]').first().click();
+    await captureDesignEvidence(page, { id: "signup", title: "Create account form", fixture: "acceptance fixture + synthetic email", testName: t.name, component: "page" });
   assert.equal(await signUp(page, f.origin, email), 202);
   await page.locator("#main").waitFor({ state: "visible" });
   const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
   assert.ok(mail?.code, "signup sends a verification code");
+    await captureDesignEvidence(page, { id: "first-room", title: "First account room after signup", fixture: "actual signup + synthetic verification email", testName: t.name, component: "page" });
   await clickChrome(page, "#account-settings-button");
   const code = page.getByLabel("Verification code");
   await code.waitFor();
@@ -114,6 +119,7 @@ test("signup, then verify by the emailed code; a wrong code is reported once", {
   await page.getByRole("button", { name: "Verify email" }).click();
   await page.getByText("That code is not valid").first().waitFor();
   assert.equal(await visibleCount(page, "That code is not valid"), 1, "the wrong-code error is shown once");
+    await captureDesignEvidence(page, { id: "verification-error", title: "Verification code error", fixture: "synthetic incorrect verification code", testName: t.name, component: "form error" });
   await code.fill(mail.code);
   const verified = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/email/verify");
   await page.getByRole("button", { name: "Verify email" }).click();

@@ -1,4 +1,4 @@
-import { readConversation } from '../server/conversation-sync.mjs';
+import { readConversation, readDirectConversations } from '../server/conversation-sync.mjs';
 import { createSquad } from "../server/squads.mjs";
 // Test gate: actual HTTP + SQLite protects viewer privacy, current-record
 // reconstruction and reset semantics. Existing full snapshot tests cannot
@@ -316,4 +316,151 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
     active: false, permissions: ['steer', 'accept_work'] });
   assert.throws(() => read('direct', f.alice), error => error.status === 401);
   assert.equal(hydrationCalls, 0);
+});
+
+for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} private pair selection filters before paging and binds continuations`, async t => {
+  const f = await setup(t, storage === 'indexed');
+  for (let i = 0; i < 5; i++) {
+    f.post(`pair-${i}`, `pair text ${i}`, { toMemberId: i % 2 ? 'owner' : 'alice' }, i % 2 ? f.alice : f.owner);
+    f.post(`other-${i}`, `other text ${i}`, { toMemberId: 'bob' }, f.alice);
+    f.post(`public-pair-${i}`, `public text ${i}`);
+  }
+  if (storage === 'archive') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+    f.store.checkMessagesParity();
+    assert.equal(f.store.archiveMessages('commons', { keepNewest: 3, dryRun: false }).ok, true);
+    f.store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
+  }
+  const first = await f.get({ peerMemberId: 'alice', limit: 2 });
+  assert.equal(first.status, 200);
+  assert.equal(first.value.peerMemberId, 'alice');
+  assert.deepEqual(first.value.messages.map(m => m.id), ['pair-3', 'pair-4']);
+  const next = await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor });
+  assert.deepEqual(next.value.messages.map(m => m.id), ['pair-1', 'pair-2']);
+  assert.equal((await f.get({ peerMemberId: 'bob', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+  assert.equal((await f.get({ limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+  assert.equal((await f.get({ peerMemberId: 'owner', limit: 2, cursor: first.value.nextCursor }, f.alice)).value.mode, 'reset');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'not_modified');
+  assert.equal((await f.get({ peerMemberId: 'alice', messageId: 'public-pair-0' })).status, 404);
+  assert.equal((await f.get({ peerMemberId: 'alice', messageId: 'other-0' })).status, 404);
+  assert.equal((await f.get({ peerMemberId: 'alice', messageId: 'pair-0' }, f.bob)).status, 404);
+  assert.equal((await f.get({ peerMemberId: 'alice', channelId: 'general' })).status, 422);
+  assert.equal((await f.get({ peerMemberId: '' })).status, 422);
+  assert.deepEqual((await f.get({ peerMemberId: 'nonexistent' })).value.messages, []);
+  f.post('public-during-private-read', 'Unrelated public update');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'not_modified');
+  assert.deepEqual((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.messages.map(m => m.id), ['pair-1', 'pair-2']);
+  // A reply is still private at the persisted event envelope. It must not
+  // qualify for the public-only append exception, even after a public post.
+  f.post('private-reply-after-public', 'Private reply stays in the pair', { toMemberId: 'alice', replyToId: 'pair-4' });
+  const afterReply = await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint });
+  assert.equal(afterReply.value.mode, 'replace');
+  assert.equal(afterReply.value.messages.at(-1).id, 'private-reply-after-public');
+  assert.equal(afterReply.value.messages.at(-1).toMemberId, 'alice');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+  assert.equal((await f.get({ messageId: 'private-reply-after-public' }, f.bob)).status, 404);
+  f.command(f.owner, 'message.edited', { messageId: storage === 'archive' ? 'public-during-private-read' : 'pair-0', body: 'Changed record requires invalidation', expectedMessageRevision: 0 });
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'replace');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+
+});
+
+test('private pair reads honor reactivation history floors and reauthorize conditional cursors', async t => {
+  const f = await setup(t, true);
+  f.command(f.owner, 'room.history_visibility_set', { historyVisibility: 'since_join' });
+  f.post('old-private', 'Old private text', { toMemberId: 'alice' });
+  const before = await f.get({ peerMemberId: 'owner' }, f.alice);
+  assert.deepEqual(before.value.messages.map(m => m.id), ['old-private']);
+  f.command(f.owner, 'member.access_changed', { memberId: 'alice', expectedMemberRevision: 0, active: false, permissions: ['steer', 'accept_work'] });
+  assert.equal((await f.get({ peerMemberId: 'owner', since: before.value.checkpoint }, f.alice)).status, 401);
+  f.command(f.owner, 'member.access_changed', { memberId: 'alice', expectedMemberRevision: 1, active: true, permissions: ['steer', 'accept_work'] });
+  const restored = f.store.issueAccessKey('commons', 'alice');
+  f.post('new-private', 'New private text', { toMemberId: 'alice' });
+  assert.deepEqual((await f.get({ peerMemberId: 'owner' }, restored)).value.messages.map(m => m.id), ['new-private']);
+  assert.equal((await f.get({ peerMemberId: 'owner', messageId: 'old-private' }, restored)).status, 404);
+  assert.equal((await f.get({ peerMemberId: 'owner', since: before.value.checkpoint }, restored)).value.mode, 'reset');
+});
+
+for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} private directory lists only caller pairs without message bodies`, async t => {
+  const f = await setup(t, storage === 'indexed');
+  f.post('alice-owner', 'SECRET ALICE BODY', { toMemberId: 'owner' }, f.alice);
+  f.post('bob-owner', 'SECRET BOB BODY', { toMemberId: 'bob' });
+  f.post('alice-bob', 'THIRD PARTY BODY', { toMemberId: 'bob' }, f.alice);
+  f.command(f.owner, 'member.added', { memberId: 'carol', displayName: 'Carol', kind: 'human', permissions: [] });
+  f.post('alice-carol', 'UNRELATED PAIR BODY', { toMemberId: 'carol' }, f.alice);
+  for (let i = 0; i < 6; i++) f.post(`directory-public-${i}`, 'public');
+  if (storage === 'archive') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+    f.store.checkMessagesParity();
+    assert.equal(f.store.archiveMessages('commons', { keepNewest: 2, dryRun: false }).ok, true);
+  }
+  const first = await f.get({ limit: 1 }, f.owner, '/conversations');
+  assert.equal(first.status, 200, JSON.stringify(first.value));
+  assert.deepEqual(first.value.peers.map(p => p.memberId), ['alice']);
+  assert.ok(first.value.nextCursor);
+  assert.equal(JSON.stringify(first.value).includes('BODY'), false);
+  const second = await f.get({ limit: 1, cursor: first.value.nextCursor }, f.owner, '/conversations');
+  assert.deepEqual(second.value.peers.map(p => p.memberId), ['bob']);
+  assert.equal(second.value.nextCursor, null);
+  const crossed = await f.get({ limit: 1, cursor: first.value.nextCursor }, f.alice, '/conversations');
+  assert.equal(crossed.value.mode, 'reset');
+  const alice = await f.get({}, f.alice, '/conversations');
+  assert.deepEqual(alice.value.peers.map(p => p.memberId), ['bob', 'carol', 'owner']);
+  f.post('directory-change', 'public change');
+  assert.equal((await f.get({ limit: 1, cursor: first.value.nextCursor }, f.owner, '/conversations')).value.mode, 'reset');
+  assert.equal((await f.get({ limit: 101 }, f.owner, '/conversations')).status, 422);
+  assert.equal((await f.get({ peerMemberId: 'alice' }, f.owner, '/conversations')).status, 422);
+  assert.equal((await f.get({}, 'invalid-credential', '/conversations')).status, 401);
+});
+
+for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} private directory forgets pre-reactivation pairs at the same timestamp`, async t => {
+  const f = await setup(t, storage === 'indexed');
+  f.store.now = () => Date.parse('2026-10-05T12:00:00.000Z');
+  f.command(f.owner, 'room.history_visibility_set', { historyVisibility: 'since_join' });
+  f.post('old-pair', 'old private', { toMemberId: 'alice' });
+  const revision = () => f.store.snapshot(f.owner, 'commons').state.members.alice.revision;
+  f.command(f.owner, 'member.access_changed', { memberId: 'alice', expectedMemberRevision: revision(), active: false, permissions: [] });
+  f.command(f.owner, 'member.access_changed', { memberId: 'alice', expectedMemberRevision: revision(), active: true, permissions: [] });
+  const alice = f.store.issueAccessKey('commons', 'alice');
+  f.post('new-pair', 'new private', { toMemberId: 'alice' }, f.bob);
+  if (storage === 'archive') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+    f.store.checkMessagesParity();
+    assert.equal(f.store.archiveMessages('commons', { keepNewest: 1, dryRun: false }).ok, true);
+  }
+  const page = await f.get({ limit: 1 }, alice, '/conversations');
+  assert.equal(page.status, 200);
+  assert.deepEqual(page.value.peers.map(p => p.memberId), ['bob']);
+  assert.equal(page.value.nextCursor, null);
+});
+
+test('private continuation public-append proof is capped at one hundred events', async t => {
+  const f = await setup(t);
+  f.store.roomFlood = { consume() {} };
+  f.post('bounded-private-first', 'one', { toMemberId: 'alice' });
+  f.post('bounded-private-second', 'two', { toMemberId: 'alice' });
+  const first = (await f.get({ peerMemberId: 'alice', limit: 1 })).value;
+  for (let i = 0; i < 100; i++) f.post(`bounded-public-${i}`, 'public only');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, since: first.checkpoint })).value.mode, 'not_modified');
+  f.post('bounded-public-over', 'one beyond proof budget');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, since: first.checkpoint })).value.mode, 'replace');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, cursor: first.nextCursor })).value.mode, 'reset');
+});
+
+
+for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} cold private directory never hydrates a full room`, async t => {
+  const f = await setup(t);
+  f.post('cold-directory-private', 'private body'.repeat(1000), { toMemberId: 'alice' });
+  f.post('cold-directory-public', 'public body'.repeat(1000));
+  if (storage !== 'projection') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+    f.store.checkMessagesParity();
+    if (storage === 'archive') assert.equal(f.store.archiveMessages('commons', { keepNewest: 1, dryRun: false }).ok, true);
+  }
+  await f.restart();
+  const spy = t.mock.method(f.store, 'room', () => { throw new Error('Directory must not hydrate room history'); });
+  const page = readDirectConversations(f.store, f.owner, 'commons');
+  assert.deepEqual(page.peers.map(peer => peer.memberId), ['alice']);
+  assert.ok(JSON.stringify(page).length < 2000, 'large message bodies never become directory output');
+  spy.mock.restore();
 });

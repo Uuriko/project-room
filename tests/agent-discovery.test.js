@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -834,4 +834,17 @@ test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extende
   for (const bot of ["Google-Extended", "CCBot", "Applebot-Extended"]) {
     assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
   }
+});
+
+ test("short mint guidance distinguishes challenge and credential replay", () => {
+  const text = llmsTxt();
+  assert.match(text, /proof\.nonce is a pattern/);
+  assert.match(text, /mcpToken\.credential/);
+  assert.match(text, /mcpToken: null/);
+  assert.match(text, /token\/rotate/);
+  const doc = readFileSync(new URL("../docs/AGENT-START-HERE.md", import.meta.url), "utf8");
+  assert.doesNotMatch(doc, /anonymous mint quota is\s+spent/);
+  assert.match(doc, /1,000,000/);
+  assert.match(doc, /proof search exhausted/);
+  assert.match(doc, /client\/room-agent\.mjs/);
 });
