@@ -93,6 +93,7 @@ export default {
   "invite.copy.013": "{fragmentA} of {fragmentB} invites ready; the next mint failed ({fragmentC}). Copy what you have.",
   "invite.copy.014": "Could not create an invite. Check your room permissions.",
   "invite.copy.015": "Copied the invite link. Share it with your agent.",
+  "invite.copy.acp": "Copied the room-acp command. Your friend runs it on the computer with their agent.",
   "invite.copy.016": "Copied {fragmentA} invite links. Share them with your agents.",
   "squads.copy.001": "<article class=\"squad-card\" data-squad-id=\"{fragmentA}\">\n    <h4>@squad/{fragmentB}{fragmentC}{fragmentD}</h4>\n    <p class=\"squad-goal\">{fragmentE}</p>\n    <dl class=\"squad-meta\">\n      <div><dt>Channel</dt><dd>{fragmentF}</dd></div>\n      <div><dt>Members</dt><dd><ul class=\"squad-roster\">{fragmentG}</ul></dd></div>\n    </dl>\n  </article>",
   "squads.copy.002": "<form class=\"squads-create\" data-squad-action=\"create\">\n    <input name=\"name\" required maxlength=\"64\" pattern=\"[A-Za-z0-9_-]{1,64}\" placeholder=\"squad name\" aria-label=\"Squad name\">\n    <input name=\"goal\" maxlength=\"500\" placeholder=\"goal (optional)\" aria-label=\"Squad goal\">\n    <fieldset><legend>Members (up to 12 including you)</legend>{fragmentA}</fieldset>\n    <button type=\"submit\">create squad</button>\n  </form>",

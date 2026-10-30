@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inviteMintBody, COLLABORATE_PERMISSIONS, agentInviteHandoff, agentInviteJoinLink, mintInviteLink, inviteLinksText, BULK_MINT_COUNTS } from "../src/agent-invite-ui.js";
+import { inviteMintBody, COLLABORATE_PERMISSIONS, agentInviteHandoff, agentInviteJoinLink, mintInviteLink, inviteLinksText, BULK_MINT_COUNTS, roomAcpCommand } from "../src/agent-invite-ui.js";
 
 test("invite mint body: contribute/review use standing profiles", () => {
   assert.deepEqual(inviteMintBody("contribute"), { profile: "contribute" });
@@ -87,4 +87,11 @@ test("bulk mints call one request per invite with distinct display names", async
   assert.equal(links.length, 5);
   assert.ok(links.every(entry => entry.link.startsWith("https://room.example/join/RM-C")));
   assert.equal(new Set(links.map(entry => entry.code)).size, 5);
+});
+
+test("roomAcpCommand fills the real invite link and quotes the name", () => {
+  const loc = new URL("https://room.trydemigod.com/");
+  const link = "https://room.trydemigod.com/join/RM-ABC123";
+  assert.equal(roomAcpCommand(link, "", loc), "npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp 'https://room.trydemigod.com/join/RM-ABC123'");
+  assert.equal(roomAcpCommand(link, " Sam's agent ", loc).endsWith("--name 'Sam'\\''s agent'"), true);
 });

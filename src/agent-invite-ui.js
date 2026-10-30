@@ -48,6 +48,16 @@ export async function mintInviteLink({ requestBody, mintOne, locationLike }) {
   return { code, link: agentInviteJoinLink(code, locationLike) };
 }
 
+// One command the friend runs: room-acp served by this Room, with the real
+// invite link and the chosen name filled in. Single quotes are POSIX-escaped.
+const shellQuote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
+export function roomAcpCommand(link, name = "", locationLike = globalThis.location) {
+  const base = humanJoinShareBase(locationLike);
+  const parts = ["npx -y --package=" + base + "/room-acp.tgz room-acp", shellQuote(link)];
+  if (name?.trim()) parts.push("--name", shellQuote(name.trim()));
+  return parts.join(" ");
+}
+
 export function inviteLinksText(links) {
   return links.map(entry => entry.link).join("\n");
 }
@@ -87,6 +97,7 @@ export function installAgentInvites({ client, getState, getSession }) {
       else link.removeAttribute("href");
     }
     if ($("#agent-invite-single")) $("#agent-invite-single").hidden = !single;
+    if ($("#agent-invite-acp")) $("#agent-invite-acp").textContent = single ? minted[0].acp : "";
     if ($("#agent-invite-bulk")) $("#agent-invite-bulk").hidden = !bulk;
     for (const input of form.querySelectorAll("input,select,button")) input.disabled = busy;
     const ownerChoice = $("#agent-invite-profile")?.querySelector('option[value="owner"]');
@@ -100,6 +111,7 @@ export function installAgentInvites({ client, getState, getSession }) {
       if (!show && select?.value === "owner") select.value = "contribute";
     }
     if ($("#agent-invite-copy")) $("#agent-invite-copy").disabled = copying || !single;
+    if ($("#agent-invite-copy-acp")) $("#agent-invite-copy-acp").disabled = copying || !single;
     if ($("#agent-invite-copy-all")) $("#agent-invite-copy-all").disabled = copying || !bulk;
     if ($("#agent-invite-another")) $("#agent-invite-another").disabled = busy;
   }
@@ -186,7 +198,7 @@ export function installAgentInvites({ client, getState, getSession }) {
           },
           locationLike: globalThis.location,
         });
-        links.push(link);
+        links.push({ ...link, acp: roomAcpCommand(link.link, count === 1 ? name : "") });
       }
       if (!owns()) return;
       minted = links;
@@ -230,6 +242,9 @@ export function installAgentInvites({ client, getState, getSession }) {
   form.addEventListener("submit", mint);
   $("#agent-invite-copy")?.addEventListener("click", () => {
     if (minted?.length === 1) void copyText(minted[0].link, uiText("invite.copy.015"));
+  });
+  $("#agent-invite-copy-acp")?.addEventListener("click", () => {
+    if (minted?.length === 1) void copyText(minted[0].acp, uiText("invite.copy.acp"));
   });
   $("#agent-invite-copy-all")?.addEventListener("click", () => {
     if (minted?.length > 1) void copyText(inviteLinksText(minted), uiText("invite.copy.016", { fragmentA: minted.length }));
