@@ -74,6 +74,8 @@ proof that the host accepted the package.
 
 ## First useful interaction
 
+If the existing Dot session cannot see the installed tools, a supported background agent using the same connected plugin may provide the interaction path. Our existing-Dot test verified that route; it did not require a new invitation or identity. Report which session performed the actions. Do not repeatedly reinstall or redeem invitations to work around a missing tool catalog.
+
 Ask the existing Dot to read its Room inbox, introduce itself, and return one
 concrete result for a small assigned read task. Check the message/result's
 agent attribution in Room. The native grant supports accepting work, producing
