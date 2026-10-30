@@ -60,6 +60,17 @@ function fakeStore({ blockRows = [], blockReadError = false, eventRows = [], eve
   return {
     db: {
       prepare(sql) {
+        if (sql.startsWith("SELECT 1 AS found FROM events")) {
+          // The recovery leg's per-failure identity validation: does
+          // the failure record's threaded (room, event id, sequence)
+          // name a real stored event?
+          if (eventReadError) throw new Error("injected event-validation read failure");
+          return {
+            get: (roomId, eventId, sequence) => eventRows.some(event => event.room_id === roomId
+              && event.id === eventId && event.sequence === sequence) ? { found: 1 } : undefined,
+            all: () => []
+          };
+        }
         if (sql.includes("JOIN events")) {
           if (eventReadError) throw new Error("injected event-validation read failure");
           const joined = blockRows.filter(block => block.event_id != null
@@ -340,6 +351,107 @@ test("Vc control: a failure whose threaded identity matches the validated block 
   assert.equal(result.errors, undefined);
   assert.equal(result.blockedFailures, 1);
   assert.equal(result.blockedRooms, 1);
+});
+
+// --- Recovery regression (John's Tab re-qualification, room seq 23565) -
+//
+// At both cured heads the parked-summary recovery case failed: after an
+// operator repair (the event fixed in place, the log re-imported), the
+// import lifts the park — block row and cursor are deleted — but the
+// durable failure record, now carrying the threaded identity of the
+// event it parked on, stays outstanding until the rotating backfill
+// step next visits the room and clears it. The narrowed partition only
+// corroborated via a standing block, so every tick in that window went
+// fatal ("no tick fails during recovery" failed). At the pre-cure head
+// 87188ace the window rode as parked and the case passed 5/5. The
+// recovery leg below restores that window on positive evidence only:
+// no standing block for the room, a threaded identity on the record,
+// and that identity validated against a real stored event.
+
+test("recovery: a lifted park whose record carries a validated threaded identity does not fail the tick", async () => {
+  // Repair lifted the block (empty block table), but the failure record
+  // — written while the park stood, with the block's identity threaded
+  // onto it — has not been cleared by the backfill step yet. The named
+  // event is real: it is the event the room parked on, since repaired.
+  const failure = { ...backfillFailure("aaa"), eventId: "ev-standin", eventSequence: 3 };
+  const result = await tick(
+    fakeStore({
+      blockRows: [],
+      eventRows: [{ room_id: "aaa", id: "ev-standin", sequence: 3 }],
+      n: 0, gapBlocks: 0
+    }),
+    [failure]
+  );
+  assert.ok(!FAILED(result), "a recovering room's stale record must not fail the tick while the backfill step catches up");
+  assert.equal(result.errors, undefined);
+  assert.equal(result.blockedFailures, 1, "the recovering record still rides the summary as its own number");
+  assert.equal(result.blockedRooms, 0, "no standing block remains — the park was lifted");
+});
+
+test("recovery: a lifted park whose threaded identity names a nonexistent event stays fatal", async () => {
+  const failure = { ...backfillFailure("aaa"), eventId: "ev-UNRELATED-999", eventSequence: 7 };
+  const result = await tick(
+    fakeStore({
+      blockRows: [],
+      eventRows: [{ room_id: "aaa", id: "ev-real", sequence: 3 }],
+      n: 0, gapBlocks: 0
+    }),
+    [failure]
+  );
+  assert.ok(FAILED(result), "an identity that does not validate against the stored log is not recovery evidence");
+  assert.equal(result.errors, 1);
+  assert.equal(result.blockedFailures, undefined);
+});
+
+test("recovery: a lifted park whose threaded identity sits at the wrong sequence stays fatal", async () => {
+  const failure = { ...backfillFailure("aaa"), eventId: "ev-standin", eventSequence: 9 };
+  const result = await tick(
+    fakeStore({
+      blockRows: [],
+      eventRows: [{ room_id: "aaa", id: "ev-standin", sequence: 3 }],
+      n: 0, gapBlocks: 0
+    }),
+    [failure]
+  );
+  assert.ok(FAILED(result), "the stored event sits at a different sequence than the record claims");
+  assert.equal(result.errors, 1);
+  assert.equal(result.blockedFailures, undefined);
+});
+
+test("recovery: an identity-less record with no standing block stays fatal", async () => {
+  // The empty-block specimen shape with an event log present: a record
+  // carrying no threaded identity has no positive evidence behind it,
+  // validated event log or not.
+  const result = await tick(
+    fakeStore({
+      blockRows: [],
+      eventRows: [{ room_id: "commons", id: "ev-real", sequence: 3 }],
+      n: 0, gapBlocks: 0
+    }),
+    [backfillFailure("commons")]
+  );
+  assert.ok(FAILED(result), "no threaded identity, no corroboration — the failure stays fatal");
+  assert.equal(result.errors, 1);
+  assert.equal(result.blockedFailures, undefined);
+});
+
+test("recovery: a standing unvalidated block for the room excludes the recovery leg", async () => {
+  // The room still has a standing block, and it names an unrelated
+  // event. The recovery leg requires the park to be lifted; a standing
+  // block is judged by the block leg alone, and this one does not
+  // validate — even though the record's own identity would.
+  const failure = { ...backfillFailure("commons"), eventId: "ev-real", eventSequence: 3 };
+  const result = await tick(
+    fakeStore({
+      blockRows: [{ room_id: "commons", event_id: "ev-UNRELATED-999", sequence: 7 }],
+      eventRows: [{ room_id: "commons", id: "ev-real", sequence: 3 }],
+      n: 1, gapBlocks: 0
+    }),
+    [failure]
+  );
+  assert.ok(FAILED(result), "a standing block that does not validate cannot be bypassed via the recovery leg");
+  assert.equal(result.errors, 1);
+  assert.equal(result.blockedFailures, undefined);
 });
 
 test("Vc threading: runIntegrityBackfillStep records the event identity runMessagesBackfill returns", async t => {
