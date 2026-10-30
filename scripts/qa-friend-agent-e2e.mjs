@@ -49,7 +49,7 @@ export async function runJourney({ origin, roomId, ownerKey, log = () => {} }) {
   };
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const home = mkdtempSync(joinPath(tmpdir(), "qa-friend-agent-"));
-  const name = `QAFriend${randomUUID().slice(0, 6)}`;
+  const name = `QA Friend ${randomUUID().slice(0, 6)}`;
   let bridge, done;
   try {
     const minted = await api(`${room}/agent-invites`, { profile: "member", displayName: name });
@@ -64,7 +64,7 @@ export async function runJourney({ origin, roomId, ownerKey, log = () => {} }) {
     step("2b bridge holds the wake queue", Boolean(await waitFor(() => bridge.fencingToken, 30000)));
 
     const messageId = `qa-${randomUUID()}`;
-    const handle = name;
+    const handle = name.replace(/\s+/g, "-"); // joined handle; needs #5421
     await api(`${room}/commands`, { id: randomUUID(), type: "message.posted", data: { messageId, body: `@${handle} say hello` } });
     const reply = await waitFor(async () => {
       const read = await api(`${room}/messages/${encodeURIComponent(messageId)}/thread`);
