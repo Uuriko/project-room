@@ -18,13 +18,13 @@
     "docs/agents/aider.md": "sha256:0e525437e0e3e92636c90880ca19ebf858347896dd7bcdfbc4063b8a18bb9fca",
     "docs/agents/claude-code.md": "sha256:8399ccfe383f95b4b393cad6aad14bc4b5ca87cca22344909005f3a2502a186a",
     "docs/agents/cline.md": "sha256:ea77a0293ff647ad8b901f314c9094d09eb272f70724335ee3b240617fa95772",
-    "docs/agents/codex.md": "sha256:31b49ee9064da9012ec86d8fe56d5eb757eb6f3a1debe51f4c2697d535a2c4b5",
+    "docs/agents/codex.md": "sha256:b758e2ba03d18188de62a810f119a84fd1518f79d55265e56f841d8d248c2f50",
     "docs/agents/crewai.md": "sha256:fcb848389120ecb27ad31d8bc69f0a453c5938f9beb8b84f391928b36df74472",
     "docs/agents/cursor.md": "sha256:70de1672b079a8f5812693a48e1ad553bb490559d6dee4e9f2e21475ce3bf4e8",
-    "docs/agents/index.md": "sha256:59a60ccc19fe696b3aa5e4ef94b437cc1c6e4ce350b7e48d486fd489fe3aef4f",
+    "docs/agents/index.md": "sha256:4c69b5f5e017e05449db199e569902f67b20652676b3a42d09f14fb24d803afd",
     "docs/agents/langgraph.md": "sha256:2bcc9a9ef0f9334a86a7ff7355bb22956f206429f9d8fae2551834d028761eae",
     "docs/agents/openai-agents-sdk.md": "sha256:9ebcc0730e72b257ae3a19957d54bedd773f548a738c3d2a8a80f7bbe6af283b",
-    "docs/agents/paste.md": "sha256:6c4beccb8d2174d0b5f93f036bdbfd13ac1f37d8f067c65bf15afe5e98abf26a",
+    "docs/agents/paste.md": "sha256:2d0e93c8327871a74ce80a1ac21972705f30b174f31b0540edd9102471e51930",
     "docs/agents/vscode.md": "sha256:2731527a7e7c2ee0ebcef7b81de5c2900803607a4b97fc6415efb61aaab889dd",
     "examples/integrations/aider/README.md": "sha256:bb73998fbec477d88018355c33ffcd010cb96b1767e0b90364691894e71d384d",
     "examples/integrations/claude-code/README.md": "sha256:4173a2fd32fd3de7515555b8d27278920106b014d7cd6b1cd80af90e9c55ecc5",
@@ -182,7 +182,7 @@
     "src/workflow.js": "sha256:7a7b57700bea2aa06ee4135d7c1d58d48daca1a5f95fe44910242bd0d7284b52",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
     "strings/en.js": "sha256:d657e7695189fd58f83901d3c10cf39e4e49212ee6af2527219292ceb598dd5c",
-    "strings/en.json": "sha256:77f7271d1d8f23ba194c773f94ab0994df9603e58f262d69d45f15cadfcd38a1"
+    "strings/en.json": "sha256:133d18248d17758861b6151f30187df2f94ae2858ea65a0b774c4d339e71dc3c"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:54f8001bbd8e7009fefb9e4ce8571bee85499ff9bce6e64678de5475097c7d9e",

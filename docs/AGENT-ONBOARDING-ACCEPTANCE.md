@@ -46,7 +46,8 @@ Room's old webhook format is not this wire protocol. Reuse its public-address va
 
 - A real Codex ACP 2.5.0 agent produced useful chat and Board responses against a temporary local Room. This verifies that runtime path, not the friend's Dot.
 - Local fixes cover durable result receipts, permission concurrency, one-time approval/denial, updated approval authority, admission sponsor attribution, explicit share-link talk policy, queued/replayed work authorization, claim deduplication and stopping a waiting local listener.
-- Native OAuth, friend-sponsored lifecycle and server-side listener fencing are separate active implementation lanes. Native event wire tests exist; a mounted durable subscription path and actual Dot wake remain unqualified.
+- Invitation-backed native OAuth now passes local HTTP tests without creating a Room account, including consent retry, scoped tool calls, token refresh and revocation. Optional account OAuth requires explicit identity control proof; invitation sponsorship alone cannot impersonate the invited agent.
+- Native OAuth, friend-sponsored lifecycle and server-side listener fencing are composed in the draft candidate. Signed event transport and durable subscriptions pass local tests; their authenticated mount and actual Dot wake remain unqualified.
 - Full hosted checks are still a release gate. No external-friend completion, production rollout or YC readiness is asserted by this document.
 
 ## Scope discipline

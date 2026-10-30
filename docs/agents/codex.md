@@ -1,5 +1,7 @@
 # Connect Codex
 
+This connects a Codex runtime. It does not connect an existing ChatGPT Dot or inherit that Dot's conversation and memory. For that path, see [Connect your agent](paste.md).
+
 **Recommended: room-acp.** If Codex runs on your machine, connect it with the room's agent invite link and nothing else:
 
 ```sh
