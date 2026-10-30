@@ -11,7 +11,7 @@ import {loadConnection} from '../room-acp/src/credentials.mjs';
 import {Bridge, mayTalk} from '../room-acp/src/bridge.mjs';
 import {parseArgs} from '../room-acp/src/args.mjs';
 
-test('Muse shared invitation joins with full access and survives saved ACP sessions', async t=>{
+test('Muse shared invitation joins with full access, mints Member by default, and the room owner gets work out of it', async t=>{
  const f=await startRoom(t);f.f.store.initialize(initialRoom('muse-room'));
  const key=f.f.store.issueAccessKey('muse-room','owner');
  f.f.store.command(key,'muse-room',{id:randomUUID(),type:'room.development_access_set',data:{enabled:true}});
@@ -24,18 +24,18 @@ test('Muse shared invitation joins with full access and survives saved ACP sessi
  new SessionMap({roomId:c.roomId,hostId:c.hostId,env:f.env}).set('thread','session');
  assert.equal(loadConnection({},f.env).memberId,c.memberId);
  const minted=f.f.store.invites.create(c.credential,'muse-room',{});
- assert.deepEqual(minted.permissions,PERMISSIONS);
+ assert.notDeepEqual(minted.permissions,PERMISSIONS); // no scope = Member, not owner-level
+ assert.ok(!minted.ownerEquivalent);
  const peer=f.f.store.invites.redeem(minted.code,{displayName:'Next collaborator'});
- assert.equal(f.f.store.talkPolicy(key,'muse-room',peer.memberId).policy,'room');
+ assert.equal(f.f.store.talkPolicy(key,'muse-room',peer.memberId).policy,'owner');
  assert.doesNotThrow(()=>f.f.store.setTalkPolicy(c.credential,'muse-room',peer.memberId,{policy:'room'}));
  const bridge=new Bridge({connection:c,candidate:{id:'fake',label:'Fake',command:process.execPath,args:[FAKE_AGENT]},env:f.env,waitMs:1000});
  const done=bridge.run();t.after(async()=>{bridge.stop();await done;});
  const waitFor=async check=>{const end=Date.now()+15000;while(Date.now()<end){if(check())return;await new Promise(r=>setTimeout(r,30));}throw Error('bridge did not respond');};
  await waitFor(()=>bridge.fencingToken);
  f.f.store.command(key,'muse-room',{id:randomUUID(),type:'member.added',data:{memberId:'john',displayName:'John',kind:'human',permissions:PERMISSIONS}});
- const johnKey=f.f.store.issueAccessKey('muse-room','john');
 
- f.f.store.command(johnKey,'muse-room',{id:randomUUID(),type:'message.posted',data:{messageId:'john-task',body:'@Friend agent please do this task'}});
+ f.f.store.command(key,'muse-room',{id:randomUUID(),type:'message.posted',data:{messageId:'owner-task',body:'@Friend agent please do this task'}});
  await waitFor(()=>bridge.stats.posted>0);
  assert.ok(f.f.store.room('muse-room').state.messages.some(m=>m.authorId===c.memberId && m.body.includes('please do this task')));
  f.f.store.command(peer.identitySecret,'muse-room',{id:randomUUID(),type:'message.posted',data:{messageId:'agent-task',body:'@Friend agent collaborate on the next task'}});
