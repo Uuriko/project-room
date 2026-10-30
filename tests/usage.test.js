@@ -135,17 +135,19 @@ test("sessions and spend follow the period; unreported spend is unknown, not zer
   const tripped = propose("Over budget");
   session(tripped, { expectedRevision: revision(tripped), status: "processing", budget: { maxSpendCents: 100 } });
   session(tripped, { expectedRevision: revision(tripped), status: "active", spendCents: 50 });
-  // The report that trips the wire is refused, so the forced stop keeps the last accepted number.
+  // The report that trips the wire is refused as a mutation, but the forced
+  // stop records the triggering spend (#3349): the session's recorded spend
+  // is the number that tripped it, not the last accepted report.
   assert.throws(() => session(tripped, { expectedRevision: revision(tripped), status: "processing", spendCents: 150 }), /budget/);
   const enforced = (await usage()).body;
   assert.deepEqual(enforced.sessions, { started: 3, stopped: 2, budgetStops: 1 });
-  assert.deepEqual(enforced.spend, { reportedCents: 170, sessionsReported: 2, sessionsUnreported: 1 });
+  assert.deepEqual(enforced.spend, { reportedCents: 270, sessionsReported: 2, sessionsUnreported: 1 });
 
   // Widening the period brings the old session back; a narrow one drops the early runs.
   const wide = (await usage("?days=60")).body;
   assert.equal(wide.period.days, 60);
   assert.deepEqual(wide.sessions, { started: 4, stopped: 3, budgetStops: 1 });
-  assert.equal(wide.spend.reportedCents, 670);
+  assert.equal(wide.spend.reportedCents, 770);
   clock.advance(2 * DAY);
   const narrow = (await usage("?days=1")).body;
   assert.deepEqual(narrow.sessions, { started: 0, stopped: 0, budgetStops: 0 });
