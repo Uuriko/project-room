@@ -32,6 +32,7 @@ test('actual Room request executes fixed local test and replays saved answer wit
   assert.equal(receipt.outcome,'passed'); assert.equal(receipt.binding.requestMessageId,'test-batch-request'); assert.equal(receipt.source.revision,f.config.revision);
   assert.match(receipt.executor.tools['request-runner.mjs'],/^[a-f0-9]{64}$/);
   assert.equal(receipt.results[0].counts.pass,1);
+  assert.equal(receipt.executor.platform,process.platform); assert.equal(receipt.executor.architecture,process.arch);
 });
 test('lost reply acknowledgment recovers saved result with executor unavailable', async t => {
   const f = await fixture(t); const original = RoomAgentClient.prototype.replyAction; let lose = true;
@@ -80,4 +81,9 @@ test('child environment excludes inherited Room credentials', async t => {
   t.after(()=>{if(prior===undefined) delete process.env.ROOM_AGENT_TOKEN;else process.env.ROOM_AGENT_TOKEN=prior;});
   const f=await fixture(t);await runRequestOnce(f.args);
   assert.match(JSON.parse(f.db.prepare('SELECT response FROM request_runs').get().response).body,/Local test batch: passed/);
+});
+
+test('inconsistent counts and outstanding TODO never pass', () => {
+  assert.equal(testObservation('# tests 3\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n',0).outcome,'unknown');
+  assert.equal(testObservation('# tests 2\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 1\n',0).outcome,'unknown');
 });

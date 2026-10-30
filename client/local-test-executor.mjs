@@ -13,7 +13,7 @@ const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 export function testObservation(stdout, code) {
   const get = name => { const rows = [...stdout.matchAll(new RegExp(`^# ${name} (\\d+)\\s*$`, 'gm'))]; return rows.length ? Number(rows.at(-1)[1]) : null; };
   const counts = Object.fromEntries(['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(k => [k, get(k)]));
-  const complete = Object.values(counts).every(Number.isSafeInteger) && counts.cancelled === 0 && counts.pass + counts.fail > 0;
+  const complete = Object.values(counts).every(Number.isSafeInteger) && counts.cancelled === 0 && counts.todo === 0 && counts.tests === counts.pass + counts.fail + counts.cancelled + counts.skipped + counts.todo && counts.pass + counts.fail > 0;
   const outcome = complete && code === 0 && counts.fail === 0 ? 'passed'
     : complete && Number.isInteger(code) && code !== 0 && counts.fail > 0 ? 'failed' : 'unknown';
   return { outcome, counts };
@@ -33,15 +33,17 @@ export function configuredLocalTests(config, { run = hostSubprocess } = {}) {
   const toolFiles = ['local-test-executor.mjs', 'host-subprocess.mjs', 'request-runner.mjs'];
   const tools = Object.fromEntries(toolFiles.map(name => [name, digest(readFileSync(new URL(name, import.meta.url)))]));
   const nodeSha256 = digest(readFileSync(c.node));
-  let nodeVersion;
+  let nodeVersion, targetPlatform, targetArchitecture;
   const gitRead = async (args, signal) => {
     const r = await run({ command: c.git, args: ['-c','core.fsmonitor=false',...args], timeoutMs: 10000 }, { cwd: c.checkout, env, signal, maxBytes: 1048576 });
     if (r.exitCode !== 0) throw new Error('Source verification failed');
     return r.stdout.toString('utf8').trim();
   };
   const verify = async ({ signal } = {}) => {
-    const version = await run({ command: c.node, args: ['--version'], timeoutMs: 10000 }, { cwd: c.checkout, env, signal, maxBytes: 128 });
-    nodeVersion = version.stdout.toString('utf8').trim();
+    const version = await run({ command: c.node, args: ['-p', 'JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})'], timeoutMs: 10000 }, { cwd: c.checkout, env, signal, maxBytes: 128 });
+    const runtime = JSON.parse(version.stdout.toString('utf8'));
+    nodeVersion = runtime.version; targetPlatform = runtime.platform; targetArchitecture = runtime.arch;
+    if (![targetPlatform, targetArchitecture].every(v => typeof v === 'string' && /^[a-z0-9_]+$/.test(v))) throw new Error('Invalid target runtime identity');
     if (version.exitCode !== 0 || !/^v(2[4-9]|[3-9][0-9])\./.test(nodeVersion)) throw new Error('Node24 or newer required');
     if (await gitRead(['rev-parse','HEAD'], signal) !== c.revision || await gitRead(['rev-parse','HEAD^{tree}'], signal) !== c.tree
       || await gitRead(['status','--porcelain','--untracked-files=no'], signal)) throw new Error('Source must remain clean at the pinned revision/tree');
@@ -73,7 +75,7 @@ export function configuredLocalTests(config, { run = hostSubprocess } = {}) {
     const outcome = !verified || results.some(r => r.outcome === 'unknown') ? 'unknown'
       : results.some(r => r.outcome === 'failed') ? 'failed' : results.length === c.suites.length ? 'passed' : 'unknown';
     const receipt = { version: 1, kind: 'local-test-request', binding, source: { revision: c.revision, tree: c.tree },
-      executor: { tools, nodeSha256, nodeVersion, platform: process.platform, architecture: process.arch },
+      executor: { tools, nodeSha256, nodeVersion, platform: targetPlatform, architecture: targetArchitecture },
       configSha256: digest(JSON.stringify(c)), startedAt, finishedAt: new Date().toISOString(), outcome, results,
       limitations: ['operator-local-not-sandboxed','dependencies-not-attested','stderr-and-incomplete-stdout-not-retained','not-human-review-or-release'] };
     const bytes = JSON.stringify(receipt, null, 2) + '\n'; writeFileSync(join(out, 'receipt.json'), bytes, { flag: 'wx', mode: 0o600 });
