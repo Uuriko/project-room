@@ -30,6 +30,7 @@ import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHOR
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
+import { seedNewAgentPolicy } from "./agent-talk-policy.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 import { ONBOARDING_REPLAY_WINDOW_MS, onboardingRotateNext } from "./agent-rooms.mjs";
@@ -80,6 +81,8 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   chat: "Read-only: the agent can observe the room but holds no work permissions.",
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
+  guest: "Guest: read and chat.",
+  member: "Member (default): steer, accept, complete, verify, manage claims, record external writes. Not manage_members, decide, or invite_member.",
   collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
@@ -339,6 +342,9 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
+    // #5384: "owner" is the Owner level by name; no scope at all means Member.
+    if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
+    if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) profile = "member";
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
     if (ownerLevel) {
@@ -568,6 +574,8 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
+      // #5384: a newly joined agent hears its owner and the owner's agents by default.
+      seedNewAgentPolicy(this.db, row.room_id, memberId, now);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);

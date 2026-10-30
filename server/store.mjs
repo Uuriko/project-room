@@ -44,6 +44,8 @@ import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
+import { mayWake, readTalkPolicy, writeTalkPolicy } from "./agent-talk-policy.mjs";
+import { memberIdForWakeIdentity as talkMemberForIdentity } from "./wake-identity-resolution.mjs";
 import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal, ChannelUpdateJournal, channelJournalSchema, SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns, JevShadowJournal, jevShadowSchema, SlaBreachAlertJournal, slaBreachAlertSchema, membershipDelegationJournalSchema, MembershipDelegationJournal } from "./journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
@@ -6557,7 +6559,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
         });
       }
-      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
+      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId
+        && dmTalkAllowed(this.db, state, roomId, auth.member.id, incoming.data.toIdentityId, this.now())) {
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
@@ -6828,6 +6831,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
+      // #5384: the agent's who-can-talk setting, enforced here at fan-out.
+      if (!mayWake(this.db, state, roomId, senderMemberId, memberId)) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_policy", kind, subjectId: memberId, reason: "talk_policy" });
+        continue;
+      }
       const identityId = identityIdForWakeMember(this.db, roomId, memberId);
       // #3345: a mention target with no identity link on either table can
       // never be woken — that used to be a silent `continue`; it is now a
@@ -6937,6 +6946,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
     if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
     return warnings;
+  }
+
+  // #5384: read and change who can talk to (wake) an agent member.
+  talkPolicy(token, roomId, memberId, expectedSessionBinding = null) {
+    this.authenticate(token, roomId, expectedSessionBinding);
+    const state = this.room(roomId).state;
+    if (!state.members?.[memberId]) fail(404, "unknown_member", "No such member in this room");
+    return { roomId, memberId, ...readTalkPolicy(this.db, roomId, memberId) };
+  }
+
+  setTalkPolicy(token, roomId, memberId, { policy, allowed = [] } = {}, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    return this.transaction(() => writeTalkPolicy(this.db, this.room(roomId).state,
+      { roomId, actorId: auth.member.id, memberId, policy, allowed }, this.now(), fail));
   }
 
   // #658: per-room mention timeout, defaulting to 30 minutes. Owner-
@@ -7164,4 +7187,12 @@ export function decodeSearchCursor(value, needle, kind) {
   try { parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); } catch { bad(); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 2 || parsed.k !== kind || parsed.h !== searchCursorHash(needle, kind) || !validSearchAnchor(parsed.a)) bad();
   return { anchor: parsed.a };
+}
+
+// #5384: a DM to an agent wakes it only when its who-can-talk setting allows
+// the sender. The DM itself still lands.
+function dmTalkAllowed(db, state, roomId, senderId, identityId, at) {
+  const memberId = talkMemberForIdentity(db, roomId, identityId, at);
+  if (!memberId) return true;
+  return mayWake(db, state, roomId, senderId, memberId);
 }

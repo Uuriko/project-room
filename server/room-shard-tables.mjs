@@ -82,7 +82,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "quarantine_thread_splits", "read_horizons", "referral_chain_members", "referral_invite_keys",
   "referral_invites", "referrals", "request_runs", "room_access_auto_approve", "room_join_policy",
   "room_assistant_config", "room_assistant_ops", "room_assistant_runs", "room_attachments",
-  "room_code_checks", "room_code_drops", "room_directory_settings", "room_mention_settings",
+  "room_code_checks", "room_code_drops", "room_directory_settings", "room_mention_settings", "agent_talk_policies",
   "room_public_receipts_setting", "room_public_settings", "room_schema_stamp",
   "room_trial_requests", "room_trial_tasks", "room_verification_policy", "room_vetting_keys",
   "room_vetting_receipts", "saved_messages", "share_link_access", "share_link_codes",

@@ -1586,6 +1586,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_talk_policies",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "room_mention_settings",
     "key": "room_id",
     "action": "delete",
