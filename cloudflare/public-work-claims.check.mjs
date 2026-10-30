@@ -50,7 +50,7 @@ export class PublicClaimTestRoom extends ProjectRoom {
         });
       }
       if (path === '/__fixture/legacy-writer') {
-        const registry=createDurableWorkClaimRegistry(this.store.db);
+        const registry=createDurableWorkClaimRegistry(this.store.db,{transaction:fn=>this.store.transaction(fn)});
         registry.set('commons',createWork({id:'private-worker',title:'Private writer retained'}));
         const task=this.store.publicWorkClaims.read('worker-public-task');
         registry.set(task.namespaceId,createWork({id:'forbidden-worker',title:'No public permit'}));
