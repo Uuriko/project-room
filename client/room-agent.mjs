@@ -266,7 +266,14 @@ async function discoveryRequest(origin, path, { method = "GET", body, token, sam
   }
   let value;
   try { value = await response.json(); } catch { value = null; }
-  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (!response.ok) {
+    const error = new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+    // Keep the parsed body reachable: a 428 proof_required body carries the
+    // proof-of-work recipe the caller needs to solve and resend (the mint
+    // path below); every other caller ignores it.
+    error.body = value;
+    throw error;
+  }
   return value;
 }
 function requireIdentitySecret(secret) {
@@ -292,10 +299,51 @@ export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDE
   throw new Error("proof search exhausted");
 }
 
+// Solve the proof-of-work recipe a 428 proof_required body carries, exactly
+// as the body specifies it: the SHA-256 hex of "{bucket}:{trimmedDisplayName}:{nonce}"
+// must start with the recipe's prefix, and the bucket is one of its
+// acceptBuckets. Returns the winning nonce, or null when the recipe is
+// missing or malformed (the caller then surfaces the original 428). The
+// difficulty is whatever the server stated — never lowered here; the
+// server's verifier judges the result on resend.
+export function solveIdentityMintProofFromRecipe(displayName, proof) {
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  if (!name || !proof || typeof proof !== "object") return null;
+  let prefix = null;
+  if (typeof proof.prefix === "string" && /^0{1,8}$/.test(proof.prefix)) prefix = proof.prefix;
+  else if (Number.isInteger(proof.bits) && proof.bits >= 4 && proof.bits <= 32 && proof.bits % 4 === 0) prefix = "0".repeat(proof.bits / 4);
+  if (!prefix) return null;
+  const buckets = (Array.isArray(proof.acceptBuckets) ? proof.acceptBuckets : [proof.bucket])
+    .filter(bucket => Number.isSafeInteger(bucket) && bucket >= 0);
+  if (!buckets.length) buckets.push(Math.floor(Date.now() / IDENTITY_MINT_POW_WINDOW_MS));
+  for (const bucket of buckets) {
+    for (let i = 0; i < 2_000_000; i++) {
+      const nonce = i.toString(36);
+      const hex = createHash("sha256").update(`${bucket}:${name}:${nonce}`).digest("hex");
+      if (hex.startsWith(prefix)) return nonce;
+    }
+  }
+  return null;
+}
+
 // Mint an identity without a room credential; store the returned secret securely.
 export async function createAgentIdentity(origin, displayName, options = {}) {
-  const proof = solveIdentityMintProof(displayName);
-  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName, proof, ...(options.identitySecret ? { recoverable: true } : {}) }, token: options.identitySecret }, options);
+  const submit = proof => discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName, proof, ...(options.identitySecret ? { recoverable: true } : {}) }, token: options.identitySecret }, options);
+  let value;
+  try {
+    value = await submit(solveIdentityMintProof(displayName));
+  } catch (error) {
+    // E5-b: a cohort cold-starting from one address spends the free mint
+    // quota and the server answers 428 proof_required, naming the difficulty
+    // it now requires (which load can escalate past the base proof solved
+    // above). Solve the recipe that 428 body carries and retry exactly once
+    // instead of dead-ending the join; any other failure, a recipe that
+    // cannot be solved, and a second 428 all propagate unchanged.
+    if (error?.status !== 428 || error?.code !== "proof_required") throw error;
+    const proof = solveIdentityMintProofFromRecipe(displayName, error.body?.proof ?? error.body?.detail?.proof);
+    if (proof === null) throw error;
+    value = await submit(proof);
+  }
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
   return value;
