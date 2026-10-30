@@ -173,7 +173,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 
 ## Sources mined
 
-QA2 to QA12, DX1, SPEED, SIMPLIFY, gap hunt, architecture top problems, the Oct 2 roadmap, control-pane plans, relaunch list and the Oct 25 unfixed ledger (all private audit notes); [FOCUSED-DELIVERY-PLAN](FOCUSED-DELIVERY-PLAN.md), [ACP-BRIDGE-PLAN](ACP-BRIDGE-PLAN.md) section 6b, [total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md); open GitHub issues; the MVP cut and streamline audit; muse-room reports from Delta, John's Tab, Fo, Jill's fleet, Jill-Dot and Codex (Oct 29 to 30); production `/api/health/jobs` and `/api/version`.
+QA2 to QA12, DX1, SPEED, SIMPLIFY, gap hunt, architecture top problems, the Oct 2 roadmap, control-pane plans, relaunch list and the Oct 25 unfixed ledger (all private audit notes); [FOCUSED-DELIVERY-PLAN](FOCUSED-DELIVERY-PLAN.md), ACP-BRIDGE-PLAN section 6b (on #5374), [total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md); open GitHub issues; the MVP cut and streamline audit; muse-room reports from Delta, John's Tab, Fo, Jill's fleet, Jill-Dot and Codex (Oct 29 to 30); production `/api/health/jobs` and `/api/version`.
 
 Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken from the audit notes. Appendix issues are triaged by title and date, not re-tested.
 
