@@ -80,6 +80,17 @@ checks. See [QA](QA-SYSTEM.md), [testing](HOW-TO-TEST.md), and
 
 ## First three journeys
 
+Load the relevant implementation with the selected screenshots:
+
+- Entry and authentication: [shell](../index.html),
+  [sign-in UI](../src/auth-signin-ui.js), [password auth](../src/password-auth.mjs).
+- Room creation: [app controller](../src/app.js) and [shared styles](../src/styles.css).
+- Request admission: [request-access UI](../src/request-access.js),
+  [join UI](../src/join.js), [owner attention cards](../src/needs-attention.js).
+- Agent discovery and handoff: [client](../client/room-agent.mjs),
+  [real transport journey](../tests/agent-handoff.test.js).
+- Shared visual values: [design tokens](../src/design-tokens.js).
+
 | Journey | Completion evidence | Failure and recovery |
 | --- | --- | --- |
 | First login to first room | A person with no memberships finds create and join/discovery; creation enters the intended room; invite survives login | Invalid invite, no public results, private room excluded, pending approval, expired session, delayed sign-in; input and destination preserved |
