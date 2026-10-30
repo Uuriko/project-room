@@ -1,3 +1,4 @@
+// Exercises server/routes/mcp-invite-oauth.mjs through the normal Node boot and real consent HTTP requests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

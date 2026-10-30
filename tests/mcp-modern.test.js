@@ -1,3 +1,4 @@
+// Exercises server/mcp-modern.mjs through the shared HTTP boundary, including official SDK requests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';

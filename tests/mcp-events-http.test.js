@@ -1,3 +1,4 @@
+// Exercises server/mcp-events-runtime.mjs through the real authenticated HTTP mount and committed Room events.
 import { writeTalkPolicy } from '../server/agent-talk-policy.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
