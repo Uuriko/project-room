@@ -50,7 +50,7 @@ jobs:
       coverage: ${{ steps.plan.outputs.coverage }}
       docs_only: ${{ steps.plan.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # Three-dot diff against the PR base needs history on both sides.
       - id: plan
@@ -70,7 +70,7 @@ jobs:
       - name: Docs-only pull request
         if: needs.changes.outputs.docs_only == 'true'
         run: echo "docs-only diff; contract check is unchanged" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.docs_only != 'true'
         with:
           fetch-depth: 0 # The v2-journal and runtime-package gates read retained ancestor commits.
@@ -104,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Fail if the baseline refresh marker reached main
         run: |
           marker="scripts/visual-regression-baselines/.refresh-requested"
@@ -137,7 +137,7 @@ jobs:
       - name: Docs-only pull request
         if: needs.changes.outputs.docs_only == 'true'
         run: echo "docs-only diff; lint is unchanged" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.docs_only != 'true'
         with:
           # PRs use the merge commit's first parent; manual branch runs need
@@ -186,7 +186,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # The agent-upgrade gates read retained ancestor commits.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -268,7 +268,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # The packaged fallback gate reads retained ancestor commits.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -326,7 +326,7 @@ jobs:
       - name: Fail closed when shards were skipped unexpectedly
         if: needs.browser-shards.result == 'skipped' && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
         run: echo "browser shards skipped unexpectedly (changes=${{ needs.changes.result }}, browser=${{ needs.changes.outputs.browser }})" && exit 1
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.browser-shards.result != 'skipped'
         with:
           fetch-depth: 0 # Affected selection diffs the pull-request base.
@@ -359,7 +359,7 @@ jobs:
       - name: Docs-only pull request
         if: needs.changes.outputs.docs_only == 'true'
         run: echo "docs-only diff; cloudflare suite is unchanged" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.docs_only != 'true'
         with:
           fetch-depth: 0 # The recovery gate packages an exact retained ancestor.
@@ -442,7 +442,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # secret-scan-diff and room-lifecycle tests read the origin/main tree.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -492,7 +492,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Depth 2 gives the PR merge commit's first parent, which the i18n
           # ratchet scans. A depth-1 checkout looks like a modified baseline.
