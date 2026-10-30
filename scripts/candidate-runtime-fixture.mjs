@@ -138,6 +138,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
+  paths.add('server/message-search.mjs'); // FTS5 room-message search index over the messages table (PERF-50 D2-a; imported by server/store.mjs)
   paths.add('server/legacy-message-shape.mjs'); // projection shape upgrade v1 (imported by server/store.mjs)
   paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
   paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
