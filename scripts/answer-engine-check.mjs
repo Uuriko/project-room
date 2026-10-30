@@ -6,7 +6,12 @@ import { postAnalyticsSnapshot, postOpsSummary, redact, resolveIngestPath } from
 // Weekly check: the same prompts go to ChatGPT, Claude, Perplexity, and Grok,
 // one call each. Scores are derived from the response text and the URLs it
 // cites. Raw answers are written for the workflow artifact and are not
-// committed. A missing key skips that engine and exits 0 when nothing was called.
+// committed. A missing key skips that engine. When NO engine ran at all
+// (every key missing), the check measured nothing: it emits an explicit
+// MEASURED-NOTHING report and exits 1 so the weekly workflow fails
+// instead of going green on zero measurements (T-4 hardening of
+// find:answer-engine-check-001). A run where at least one engine was
+// measured keeps the previous exit semantics.
 
 const sleep = ms => new Promise(done => { setTimeout(done, ms); });
 export const DEFAULT_PROMPTS = new URL("./answer-engine-prompts.json", import.meta.url);
@@ -259,6 +264,9 @@ export function engineRollup(id, engine, answers) {
 
 export function answerSummaryMarkdown(report) {
   const lines = [`## Answer engines ${report.date}`, "", "| Engine | Result | Mentioned | Recommended | Mention rate |", "| --- | --- | --- | --- | --- |"];
+  if (report.engines.length > 0 && report.engines.every(engine => engine.skipped)) {
+    lines.push("", "> **MEASURED-NOTHING:** every engine was skipped (all API keys missing). This run contains zero measurements and the workflow step fails on purpose — a green run here would mean nothing was checked.");
+  }
   for (const engine of report.engines) {
     if (engine.skipped) {
       lines.push(`| ${engine.id} | skipped: ${engine.skipped.replace(" not set", "")} not set | | | |`);
@@ -381,6 +389,7 @@ export async function runAnswerCheck({
   if (ops.posted) say(`ops post: ${ops.status}`);
   else if (ops.status) say(`ops post failed: ${ops.status}`);
   const ran = engines.some(engine => !engine.skipped);
+  if (!ran) say("MEASURED-NOTHING: no answer engine ran (all API keys missing) — failing this check so the weekly workflow cannot go green on zero measurements");
   const route = !ran ? null : (ingestPath === undefined ? await resolveIngestPath() : ingestPath);
   const analytics = await postAnalyticsSnapshot({
     origin: String(env.ROOM_ORIGIN ?? origin).trim(),
@@ -390,7 +399,7 @@ export async function runAnswerCheck({
     fetchImpl,
   });
   if (!analytics.sent) say(`answer_engine.snapshot not sent: ${ran ? (analytics.reason ?? analytics.status) : "no engine ran"}`);
-  return { exitCode: failed ? 1 : 0, lines, report, summaryPath, rawPath };
+  return { exitCode: failed || !ran ? 1 : 0, lines, report, summaryPath, rawPath };
 }
 
 function parseArgs(argv) {
