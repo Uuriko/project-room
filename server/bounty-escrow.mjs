@@ -2972,6 +2972,44 @@ export class BountyEscrow {
     return { paid: toCredits(earner), fee: toCredits(fee), signed: movement?.receipt ? [movement.receipt] : [] };
   }
 
+  // Public-work mirror exemption (S3, CURE-MIRROR-REVIEW-EXEMPTION): a
+  // bounty linked in public_work_settlements with an attached submission
+  // (receipt_id set) whose public-work review has not reached a terminal
+  // verdict is NEVER free-missed by the keeper. The mirror deadline is a
+  // deliberate far-future placeholder for the John-gated free-miss flip
+  // (Constitution VIII.1, not decided — see public-work-settlement.mjs):
+  // on this rail reviewer silence settles nothing, settlement fires only
+  // on an actual verdict, and a verdict is honoured whenever it lands
+  // (acceptWork has no deadline guard, by the same rule). Before this
+  // exemption the two sides disagreed past the deadline: keeper-first
+  // refunded `unverified` (poster whole, worker 0), verdict-first
+  // attributed in full — a pure ordering race. A terminal review state
+  // recorded alongside a still-`submitted` bounty (reachable only by
+  // writing the review record directly, bypassing the review module —
+  // whose verdict and bounty transition commit in one transaction) is NOT
+  // pending: the exemption falls away and the free-miss proceeds. An
+  // unparseable review record is treated as pending — never free-miss on
+  // an ambiguous review state; the refund is irreversible, a deferred
+  // keeper pass is not. Stores whose schema predates the rail (no link
+  // table) have no mirror bounties and read as not-exempt.
+  _mirrorReviewPending(bounty) {
+    const tables = new Set(this.db.prepare(
+      "SELECT name AS n FROM sqlite_master WHERE type='table' AND name IN ('public_work_settlements','public_work_reviews')")
+      .all().map(row => row.n));
+    if (!tables.has("public_work_settlements")) return false;
+    const link = this.db.prepare(
+      "SELECT receipt_id AS receiptId FROM public_work_settlements WHERE room_id=? AND bounty_id=?")
+      .get(bounty.roomId, bounty.bountyId);
+    if (!link?.receiptId) return false;
+    if (!tables.has("public_work_reviews")) return true;
+    const row = this.db.prepare(
+      "SELECT state_json AS stateJson FROM public_work_reviews WHERE receipt_id=?").get(link.receiptId);
+    if (!row) return true; // no verdict recorded yet: the default review state is pending
+    let reviewState = null;
+    try { reviewState = JSON.parse(row.stateJson)?.state ?? null; } catch { return true; }
+    return reviewState !== "accepted" && reviewState !== "rejected";
+  }
+
   // One mechanical pass over a single bounty; returns { action, signed } or null.
   _keeperPass(bounty, now, at) {
     const actor = RULE_ACTOR;
@@ -2983,8 +3021,12 @@ export class BountyEscrow {
       this._approve(bounty, at, actor); return { action: "approved", signed: [] };
     }
     // Free-miss: submitted work the reviewer never verified settles at zero —
-    // the escrow returns to the poster, the worker earns nothing.
+    // the escrow returns to the poster, the worker earns nothing. Public-work
+    // mirror bounties with a review still pending are exempt (see
+    // _mirrorReviewPending): their deadline is a placeholder, not a verdict
+    // substitute, so the pass leaves them for the review outcome.
     if (bounty.state === "submitted" && now >= bounty.deadlineMs) {
+      if (this._mirrorReviewPending(bounty)) return null;
       const signed = this._settleUnverified(bounty, at, actor); return { action: "refunded", signed };
     }
     if ((bounty.state === "funded" || bounty.state === "claimed") && now >= bounty.deadlineMs) {
