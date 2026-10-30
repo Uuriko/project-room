@@ -32,7 +32,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
-import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, currentReviewOf, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
@@ -463,31 +463,59 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
 }
 
 // Review asks (hw-h2-needs-me-review-asks): open items that name this member
-// as reviewer (tag rev-<memberId>) and are ready to review (in_progress or a
-// linked PR). Standing state like openWork: it never moves the cursor, it
-// retires when the member records a review on the current basis, and it
-// returns when the head moves.
+// as reviewer (tag rev-<memberId>) and are ready to review (in_progress, a
+// linked PR, or delivered — the state whose entire meaning is "awaiting a
+// verdict"; excluding it emptied the named reviewer's queue at exactly the
+// delivery transition, B-SURFACES F1 / X3 cell 5). Standing state like
+// openWork: it never moves the cursor, and it returns when the head moves.
+// Before delivery a recorded review on the current basis retires the ask,
+// as before. Once delivered, a verdict alone does NOT retire it: recording
+// a review is only the first of the two reviewer steps the update route
+// enforces, so the ask stays and its per-item `next` advances to the
+// state-moving call that completes the review (approve -> update
+// {state:"done"}; changes_requested -> update {state:"in_progress"}).
+// The ask retires only when the claim itself leaves `delivered` (done, or
+// back in_progress after a send-back), so the queue cannot read "handled"
+// while the work is neither accepted nor returned (B-SURFACES F2).
 export function reviewAsksOf(store, roomId, memberId, authority, claims = null) {
   const list = claims ?? claimBoardOf(store, roomId);
   if (!list) return null;
+  const phaseOf = item => {
+    if (item.state !== "delivered") return hasCurrentReview(item, memberId) ? null : "review";
+    const verdict = currentReviewOf(item, memberId)?.verdict;
+    if (verdict === "approve") return "complete";
+    if (verdict === "changes_requested") return "send_back";
+    return "review";
+  };
   const asks = list.filter(item => item && item.state !== "done" && !item.supersededBy && item.owner && item.owner !== memberId
       && resolveNamedReviewers(item, authority?.members).includes(memberId)
-      && (item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)
-      && !hasCurrentReview(item, memberId))
+      && (item.state === "in_progress" || item.state === "delivered" || item.pullRequest || (item.pullRequests ?? []).length)
+      && phaseOf(item) !== null)
     .sort((a, b) => String(claimUpdatedAt(b) ?? "").localeCompare(String(claimUpdatedAt(a) ?? "")) || String(a.id).localeCompare(String(b.id)));
   if (!asks.length) return null;
+  const claimPath = id => `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(id)}`;
   return {
     roomId,
     count: asks.length,
-    top: asks.slice(0, OPEN_WORK_SHOWN).map(item => ({
-      id: item.id,
-      title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
-      ...snippetField(item),
-      owner: item.owner,
-      ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
-      ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
-      ...(item.revision ? { revision: item.revision } : {})
-    })),
+    top: asks.slice(0, OPEN_WORK_SHOWN).map(item => {
+      const phase = phaseOf(item);
+      return {
+        id: item.id,
+        title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+        ...snippetField(item),
+        owner: item.owner,
+        state: item.state,
+        phase,
+        ...(phase === "complete"
+          ? { next: `POST ${claimPath(item.id)}/update`, nextBody: { state: "done" } }
+          : phase === "send_back"
+            ? { next: `POST ${claimPath(item.id)}/update`, nextBody: { state: "in_progress" } }
+            : { next: `POST ${claimPath(item.id)}/review` }),
+        ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
+        ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
+        ...(item.revision ? { revision: item.revision } : {})
+      };
+    }),
     next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/review`
   };
 }
