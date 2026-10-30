@@ -1,3 +1,4 @@
+import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed } from './mcp-oauth.mjs';
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
 import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
@@ -927,7 +928,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -955,7 +956,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
-        instructions: AUTH_INSTRUCTIONS
+        instructions: oauthPrincipal
+          ? "You are connected as the approved agent in one room. Use room_check_access, then room_read_messages. Request tools/list with profile full for authorized work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
+          : AUTH_INSTRUCTIONS
       }
     };
   }
@@ -981,7 +984,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     return { jsonrpc: "2.0", id: requestId, result: {
       profile: selection.profile,
       ...(selection.focus === undefined ? {} : { focus: selection.focus }),
-      tools: listedMcpTools(selection.profile, selection.aliases, agent, selection.focus),
+      tools: listedMcpTools(selection.profile, selection.aliases, agent, selection.focus)
+        .filter(tool => !oauthPrincipal || mcpOAuthToolAllowed(canonicalMcpToolName(tool.name), oauthPrincipal.scopes)),
       _meta: {
         discovery: MCP_DISCOVERY_BLOCK,
         ...(selection.focus === undefined ? {} : { focus: {
@@ -994,12 +998,19 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   if (message.method === "tools/call") {
     const called = message.params?.name;
     const name = canonicalMcpToolName(called);
+    if (oauthPrincipal && !mcpOAuthToolAllowed(name, oauthPrincipal.scopes))
+      return mcpCallError(requestId, { reason: "insufficient_scope", tool: called, hint: "This action is outside the connected agent grant" });
     if (typeof name !== "string" || !SUGGESTABLE_TOOLS.includes(name)) {
       return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
     }
     if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl });
     let args = message.params?.arguments ?? {};
     const selected = HOSTED_TOOLS.find(entry => entry.name === name);
+    if (oauthPrincipal && object(args)) {
+      if (args.roomId !== undefined && args.roomId !== oauthPrincipal.roomId)
+        return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: "This connection is limited to its approved room" });
+      args = { ...args, roomId: oauthPrincipal.roomId };
+    }
     args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
@@ -1039,6 +1050,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           : validRoomArgs(name, args);
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
+      if (oauthPrincipal) enforceMcpCallVisibility(store, identity, name);
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
@@ -1165,9 +1177,19 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, oauthResource } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+    if (typeof authorization === "string" && /^bearer oat_/i.test(authorization)) {
+      const token = authorization.slice(7);
+      const grant = oauthProvider?.verifyAccessToken(token, { resource: oauthResource });
+      const options = { store, provider: oauthProvider, token, resource: oauthResource, roomId: grant?.binding?.roomId };
+      const principal = grant && resolveMcpOAuthPrincipal(options);
+      if (!principal) return rpcError(message, MCP_AUTH_REQUIRED, "OAuth grant no longer grants access to this agent");
+      const identity = { identityId: principal.identityId, displayName: store.room(principal.roomId).state.members[principal.memberId].displayName };
+      return runMcpOAuthRequest(options, () => handleAuthed(message, { store, secret: token, identity, mcpUrl,
+        searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal }));
+    }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
     // Handled before auth parsing — a presented credential is ignored and a
     // fresh anonymous identity is minted, mirroring POST /api/agent-identities.

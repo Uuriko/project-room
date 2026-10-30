@@ -1,3 +1,4 @@
+import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
 import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
@@ -4781,6 +4782,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
+    if (typeof token === "string" && token.startsWith("oat_")) {
+      const principal = authenticateMcpOAuthRequest(this, token, roomId);
+      if (!principal) fail(401, "unauthenticated", "OAuth grant is expired, revoked, outside its resource, or no longer owns this agent");
+      const resolved = this.identities.resolveIdentityLink(principal.identityId, roomId);
+      if (!resolved || resolved.member.id !== principal.memberId) fail(403, "no_access", "Agent membership is no longer active");
+      return { account: null, member: resolved.member, roomId, identityId: principal.identityId,
+        credentialHash: hash(token), credentialScope: "room", kind: "oauth-agent",
+        oauthScopes: principal.scopes, expiresAt: null, csrf: null, sessionBinding: null };
+    }
     // Round-2 #101: multi-room agent identities. One identity secret works in
     // every room the identity is linked to; rooms keep sovereignty via link/unlink.
     // RC-2026-09-18-012: scoped API keys ("rak_"+secret) authenticate the

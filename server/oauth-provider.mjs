@@ -74,7 +74,7 @@ const checkResource = (record, resource) => {
     fail("invalid_target", "resource does not match this grant");
 };
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive, isBindingActive } = {}) {
   check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
@@ -87,6 +87,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     "onSecurityEvent must be a function if given");
   check(isAccountActive === undefined || typeof isAccountActive === "function",
     "isAccountActive must be a function if given");
+
+  check(isBindingActive === undefined || typeof isBindingActive === "function", "isBindingActive must be a function");
+  const bindingActive = record => !record.binding || !isBindingActive || isBindingActive(record.userId, record.binding);
 
   const sqlite = db ? createOAuthProviderSqlite(db) : null;
   const clientStore = clients ?? sqlite?.clients ?? new Map();
@@ -172,6 +175,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
       "userId must be a non-empty string up to 128 chars");
     const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, codeChallenge });
     const grantBinding = validateBinding(binding);
+    if (!bindingActive({ userId, binding: grantBinding })) fail("invalid_grant", "agent connection is no longer active");
     const code = `oac_${newSecret(24)}`;
     const record = {
       codeHash: sha256(code),
@@ -225,6 +229,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(record.clientId === clientId, "client_id mismatch");
     check(record.redirectUri === redirectUri, "redirect_uri mismatch");
     checkResource(record, resource);
+    if (!bindingActive(record)) fail("invalid_grant", "agent connection is no longer active");
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     // PKCE S256 verification.
     const expected = base64url(createHash("sha256").update(codeVerifier).digest());
@@ -322,6 +327,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     check(record.clientId === clientId, "client_id mismatch");
     checkResource(record, resource);
+    if (!bindingActive(record)) fail("invalid_grant", "agent connection is no longer active");
     // Issue the replacement pair BEFORE revoking the old token (#2944).
     // issueTokenPair can still throw (validateScopes, or
     // normalizeSessionMeta for a non-object session); revoking first would
@@ -346,7 +352,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     const record = accessStore.get(digest);
     if (!record) return null;
     if (isExpired(record, now)) { accessStore.delete(digest); return null; }
-    if (record.revoked) return null;
+    if (record.revoked || !bindingActive(record)) return null;
     if (record.binding ? resource !== record.binding.resource : resource !== undefined) return null;
     // Deleted/deactivated accounts lose API access immediately, even if a
     // token row somehow survived the deletion purge.

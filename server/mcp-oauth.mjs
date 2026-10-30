@@ -1,12 +1,13 @@
 // OAuth resource and principal validation. This module does not mint agent
 // identities or grant room membership. Wire it only after an explicit human
 // consent flow selects an agent already sponsored by that human.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { OAUTH_SCOPES } from './oauth-provider.mjs';
 
 export function mcpOAuthResourceMetadata(resource, issuer) {
   for (const value of [resource, issuer]) {
     const url = new URL(value);
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || url.href !== value)
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || (url.href !== value && url.origin !== value))
       throw new TypeError('Exact HTTPS resource and issuer required');
   }
   return Object.freeze({ resource, authorization_servers: [issuer],
@@ -27,7 +28,7 @@ export function mcpOAuthChallenge(metadataUrl) {
 export function validateMcpOAuthBinding(store, userId, binding) {
   if (!binding || !userId) return null;
   const fields = ['resource', 'roomId', 'identityId', 'memberId', 'humanMemberId'];
-  if (fields.some(key => typeof binding[key] !== 'string' || !binding[key])) return null;
+  if (Object.keys(binding).length !== fields.length || fields.some(key => typeof binding[key] !== 'string' || !binding[key] || binding[key].length > 512)) return null;
   const { roomId, identityId, memberId, humanMemberId } = binding;
   const account = store.db.prepare('SELECT active FROM accounts WHERE id=?').get(userId);
   if (account?.active !== 1) return null;
@@ -41,6 +42,16 @@ export function validateMcpOAuthBinding(store, userId, binding) {
   const agent = state.members?.[memberId];
   if (human?.kind !== 'human' || human.active !== true || agent?.kind !== 'agent' || agent.active !== true
     || agent.accountableHumanId !== humanMemberId || agent.identityId !== identityId) return null;
+  const connection = store.agentConnections?.row?.(roomId, memberId);
+  if (connection && (connection.status !== 'issued' || connection.expires_at <= store.now()
+    || !store.agentConnections.authority(connection)
+    || store.db.prepare('SELECT revoked FROM credentials WHERE hash=?').get(connection.credential_hash)?.revoked !== 0)) return null;
+  if (store.agentConnections?.identityAuthority && !store.agentConnections.identityAuthority(roomId, memberId)) return null;
+  if (store.identities?.resolveIdentityLink) {
+    try {
+      if (store.identities.resolveIdentityLink(identityId, roomId)?.member?.id !== memberId) return null;
+    } catch { return null; }
+  }
   return Object.freeze({ userId, roomId, identityId, memberId, humanMemberId });
 }
 
@@ -55,4 +66,43 @@ export function resolveMcpOAuthPrincipal({ store, provider, token, resource, roo
   const principal = validateMcpOAuthBinding(store, grant.userId, grant.binding);
   return principal ? Object.freeze({ ...principal, clientId: grant.clientId,
     scopes: Object.freeze([...grant.scopes]) }) : null;
+}
+
+// A request-local gate keeps OAuth tokens confined to their MCP resource. REST
+// handlers cannot use these tokens, and concurrent requests cannot borrow auth.
+const oauthRequests = new AsyncLocalStorage();
+export function runMcpOAuthRequest(options, callback) {
+  return oauthRequests.run(options, callback);
+}
+export function authenticateMcpOAuthRequest(store, token, roomId) {
+  const current = oauthRequests.getStore();
+  if (!current || current.store !== store || current.token !== token || current.roomId !== roomId) return null;
+  return resolveMcpOAuthPrincipal(current);
+}
+
+const scopeTools = {
+  'rooms:read': ['room_check_access'],
+  'chat:read': ['room_read_messages', 'room_read_inbox', 'room_list_requests', 'room_read_request'],
+  'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request'],
+  'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],
+  'work:write': ['room_claim', 'room_accept_work', 'room_start_work', 'room_block_work', 'room_resolve_blocker', 'room_handoff', 'room_submit_text_result'],
+};
+export function mcpOAuthToolAllowed(name, scopes) {
+  return Object.entries(scopeTools).some(([scope, names]) => scopes.includes(scope) && names.includes(name));
+}
+
+export function listMcpOAuthAgents(store, userId, resource) {
+  const humans = store.db.prepare('SELECT room_id,member_id FROM member_accounts WHERE account_id=?').all(userId);
+  const result = [];
+  for (const human of humans) {
+    let state;
+    try { state = store.room(human.room_id).state; } catch { continue; }
+    for (const member of Object.values(state.members ?? {})) {
+      if (member.kind !== 'agent' || member.accountableHumanId !== human.member_id || !member.identityId) continue;
+      const binding = { resource, roomId: human.room_id, identityId: member.identityId, memberId: member.id, humanMemberId: human.member_id };
+      if (validateMcpOAuthBinding(store, userId, binding)) result.push({ binding,
+        label: `${member.displayName || member.id} — ${state.room?.title || human.room_id}` });
+    }
+  }
+  return result;
 }

@@ -1,3 +1,4 @@
+import { mcpOAuthResourceMetadata, listMcpOAuthAgents, validateMcpOAuthBinding } from './mcp-oauth.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -384,6 +385,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
+  mcpOAuthClients = [], // Explicit verified public-client registrations; empty disables native MCP OAuth.
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
@@ -538,6 +540,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Durable Object in production); client registry comes from config.
   const oauthProvider = createOAuthProvider({
     db: store.db,
+    isBindingActive: (userId, binding) => Boolean(validateMcpOAuthBinding(store, userId, binding)),
     clock: () => store.now(),
     // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
     // whole token family inside the provider; log it as a structured
@@ -554,7 +557,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } catch { return false; }
     },
   });
-  for (const c of connectorClients) {
+  const oauthResource = mcpOAuthClients.length ? new URL("/mcp", origin).href : null;
+  if (oauthResource) mcpOAuthResourceMetadata(oauthResource, origin);
+  const oauthMetadataUrl = oauthResource ? new URL("/.well-known/oauth-protected-resource/mcp", origin).href : null;
+  const mcpClientIds = new Set(mcpOAuthClients.map(client => client.clientId));
+  for (const c of [...connectorClients, ...mcpOAuthClients]) {
     oauthProvider.registerClient(c);
   }
   // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
@@ -712,7 +719,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     });
   }
   const hostedRoomMcp = createHostedRoomMcp(store, {
-    agentRooms,
+    agentRooms, oauthProvider: oauthResource ? oauthProvider : null, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
@@ -1272,7 +1279,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, oauthMetadataUrl });
         }
         return writeRoomMcpNode(req, res, url);
       }
@@ -1672,9 +1679,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
       }
       // OAuth2 authorization server for third-party connectors (RFC 6749).
+      if (["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"].includes(url.pathname)
+        && req.method === "GET") {
+        if (!oauthResource) return json(res, 404, { error: "not_found" });
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return json(res, 200, mcpOAuthResourceMetadata(oauthResource, origin));
+      }
       // GET /.well-known/oauth-authorization-server — server metadata (RFC 8414).
       if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
         const issuer = expectedOrigin();
+        res.setHeader("Access-Control-Allow-Origin", "*");
         return json(res, 200, {
           issuer,
           authorization_endpoint: issuer + "/oauth/authorize",
@@ -1731,7 +1745,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             clientId: url.searchParams.get("client_id"),
             redirectUri: url.searchParams.get("redirect_uri"),
             scopes: (url.searchParams.get("scope") || "").split(" ").filter(Boolean),
-            state: url.searchParams.get("state"),
+            state: url.searchParams.get("state") ?? undefined,
             codeChallenge: url.searchParams.get("code_challenge"),
           });
           if (url.searchParams.get("code_challenge_method") !== "S256") {
@@ -1741,6 +1755,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const code = error instanceof ServiceError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
         }
+        const mcpConsent = mcpClientIds.has(validated.client.clientId);
+        if (mcpConsent && url.searchParams.get("resource") !== oauthResource)
+          return json(res, 400, { error: "invalid_target", error_description: "Select the advertised MCP resource" });
+        if (!mcpConsent && url.searchParams.has("resource"))
+          return json(res, 400, { error: "invalid_target", error_description: "This client is not enabled for MCP" });
+        const agentChoices = mcpConsent ? listMcpOAuthAgents(store, auth.account.id, oauthResource) : [];
+        if (mcpConsent && !agentChoices.length)
+          return json(res, 409, { error: "agent_connection_required", error_description: "Join the room as yourself, then create your own connected agent before authorizing it" });
         const scopeLabels = {
           "rooms:read": "See your rooms",
           "chat:read": "Read messages",
@@ -1762,7 +1784,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const nativeAccountLabel = [nativeAccountName, nativeAccountEmail].filter(Boolean).join(" · ") || "Current signed-in account";
         const nativeConsentWarning = validated.client.clientId === "project-room-macos"
           ? `<p data-native-account>Account: ${esc(nativeAccountLabel)}</p><p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>` : "";
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const agentConsentFields = mcpConsent
+          ? `<input type="hidden" name="resource" value="${esc(oauthResource)}"><p>This connects your agent, with its existing room permissions. It does not sign in as you.</p><label>Agent and room <select name="agent_binding" required>${agentChoices.map(({ binding, label }) => `<option value="${esc(JSON.stringify(binding))}">${esc(label)}</option>`).join("")}</select></label>` : "";
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize">${agentConsentFields}<input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Referrer-Policy", "same-origin");
         // Browsers apply form-action to every redirect hop of the Allow POST,
@@ -1838,7 +1862,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end();
         };
         if (decision !== "allow") return failRedirect("access_denied", "The user denied the request");
+        let binding;
+        if (mcpClientIds.has(validated.client.clientId)) {
+          if (data.resource !== oauthResource) return failRedirect("invalid_target", "Wrong MCP resource");
+          try { binding = JSON.parse(data.agent_binding); } catch { return failRedirect("invalid_request", "Choose your connected agent"); }
+          if (binding?.resource !== oauthResource || !validateMcpOAuthBinding(store, accountId, binding))
+            return failRedirect("access_denied", "This agent is not currently connected to your account");
+        } else if (data.resource !== undefined || data.agent_binding !== undefined)
+          return failRedirect("invalid_target", "This client is not enabled for MCP");
         const { code } = oauthProvider.issueCode({
+          binding,
           clientId: validated.client.clientId,
           userId: accountId,
           redirectUri: validated.redirectUri,
@@ -1855,7 +1888,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
       if (url.pathname === "/oauth/token" && req.method === "POST") {
         rate(`oauth-token-exchange:${remoteAddress}`, 60);
-        const data = await body(req);
+        const form = /^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(req.headers["content-type"] || "");
+        const data = form ? Object.fromEntries(new URLSearchParams(await readText(req, JSON_BODY_BYTES,
+          () => new ServiceError(413, "too_large", "Request is too large")))) : await body(req);
         const grantType = data.grant_type;
         // F-02 session metadata: the IP and User-Agent seen at issuance,
         // stored read-only on the token records so GET /api/oauth/sessions
@@ -1872,13 +1907,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               clientId: data.client_id,
               redirectUri: data.redirect_uri,
               codeVerifier: data.code_verifier,
-              session: sessionMeta,
+              session: sessionMeta, resource: data.resource,
             });
           } else if (grantType === "refresh_token") {
             tokens = oauthProvider.refresh({
               refreshToken: data.refresh_token,
               clientId: data.client_id,
-              session: sessionMeta,
+              session: sessionMeta, resource: data.resource,
             });
           } else {
             return json(res, 400, { error: "unsupported_grant_type" });

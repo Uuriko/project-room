@@ -1,49 +1,73 @@
 # Native agent OAuth implementation checkpoint
 
-This is an implementation checkpoint, not installation instructions or a claim
-that ChatGPT Dot currently connects. A Codex ACP adapter runs Codex; it does not
-carry an existing Dot's identity or conversation context.
+A Codex ACP adapter runs Codex; it does not connect an existing ChatGPT Dot or
+carry its conversation context. Native OAuth connects the existing host's tools.
+This implementation is tested service plumbing, not a claim that a real Dot has
+installed or run it.
 
-The friend must join as a human, then explicitly connect an agent sponsored by
-that human. The OAuth consent must select that exact agent and room. An agent
-invitation's issuer must never silently become the friend's accountable human.
+## Implemented optional human-account path
 
-## Implemented foundation
+The person joins as a human and creates an identity-linked agent sponsored by
+that human. Native OAuth consent lists only that account's currently sponsored
+agents, with the exact room shown. It does not act as the human account or infer
+ownership from the invitation issuer. Friend-sponsored enrollment requires the
+separate agent-connections lifecycle implementation.
 
-`server/oauth-provider.mjs` supports optional resource-bound agent grants. A
-binding contains the exact HTTPS resource URL, room, agent identity, agent member,
-and accountable human member. Code exchange and refresh require the same
-resource; access verification without that audience fails. The binding survives
-SQLite persistence and refresh rotation. Existing desktop account grants remain
-separate and cannot be upgraded to agent grants.
+The shared HTTP server accepts explicitly configured `mcpOAuthClients` entries
+using the existing provider's exact registered redirect matching and PKCE S256.
+Cloudflare reads the same list from JSON `ROOM_MCP_OAUTH_CLIENTS`. The list is
+empty by default: no guessed client IDs, callbacks or advertised native install.
+Configured clients enable `/.well-known/oauth-protected-resource/mcp` (root alias
+also provided), OAuth consent with agent selection, form-encoded token exchange,
+and MCP 401 resource metadata challenges. The canonical resource is the configured
+HTTPS origin plus `/mcp`; callbacks must use that exact resource during code
+exchange and refresh.
 
-`server/mcp-oauth.mjs` provides metadata/challenge builders and a principal
-resolver. It verifies the live account, human account membership, agent identity
-link, active human and agent memberships, accountable human, requested room,
-audience and requested OAuth scopes. It returns a principal, never an identity
-secret. Each actual operation must additionally enforce ordinary Room command
-permissions and privacy rules.
+Grants persist the account, exact resource, room, agent identity/member and human
+member. A revoked grant, inactive account/member, changed ownership, invalid
+connection authority, expired connection or revoked connection key fails closed.
+Existing desktop account grants remain separate and cannot be upgraded to agent
+grants. SQLite persistence and refresh rotation preserve the full binding.
 
-## Required before native installation can be advertised
+MCP dispatch uses request-local authentication: an OAuth token is accepted only
+inside its MCP request context, not through REST or account endpoints. Each
+operation rechecks live binding, normal Room authorization and privacy. The
+allowlisted catalog includes scoped chat reads/replies and assigned work
+accept/start/block/claim/text-result tools. It excludes wrapper dispatch, global
+identity creation, agent invitations and administrative tools. OAuth scope never
+adds Room permissions. No surrogate identity secret is minted or exposed.
 
-1. Verified client registration/callback metadata from the actual host. Do not
-   invent a ChatGPT callback or accept arbitrary redirects. The existing provider
-   supports predefined clients; deployment must configure real client metadata
-   or implement a separately reviewed standards-compliant registration path.
-2. Friend-sponsored enrollment lifecycle and explicit consent agent selection.
-   Validate the binding before code issuance, not only at tool invocation.
-3. Shared HTTP discovery/authorization/token routing must pass the resource and
-   server-validated binding. Current HTTP routes do not yet do this.
-4. MCP dispatch and RoomStore authentication must accept bounded OAuth principals
-   and intersect scopes with live member permissions. Do not replace an OAuth
-   token with a broad saved identity secret or act as its human account.
-5. Mount resource metadata and challenges only with that operational flow. The
-   helper builders alone do not make an OAuth endpoint usable.
-6. Verify HTTP and Cloudflare parity, then one real Dot connect/read/reply/work
-   result/review. Background events/listening require separate observed evidence.
+## Remaining deployment and product work
 
-The current foundation intentionally does not advertise or enable this unfinished
-OAuth installation path. `tests/mcp-oauth.test.js` covers audience substitution,
-omitted audience, scope/room escalation, durable rotation/restart, revocation,
-account deletion, human/agent removal, ownership and identity replacement, and
-legacy account-grant substitution.
+- Configure verified native-host client/callback information, or implement a
+  separately reviewed standard client registration path. Do not guess callbacks.
+- Compose friend-sponsored enrollment and the native connection UI; test the
+  actual non-owner friend path with its ownership lifecycle.
+- Qualify Cloudflare execution and an actual Dot installation, receive/reply,
+  useful task result and review. Node HTTP tests do not establish these facts.
+- Background receiving/event subscriptions are a separate capability and require
+  observed delivery, resume and duplicate handling evidence.
+
+## Accountless invitation path
+
+Human Room signup is optional in the product target. The path above remains an
+optional way to bind a verified Room account; it is not a requirement for every
+native connection. An accountless invite grant needs a separate explicit
+principal type and a receipt-bound lifecycle, not a synthetic human account or
+an OAuth token impersonating the invitation issuer.
+
+The lowest-assumption native flow is an invitation input on the OAuth consent
+page, beside optional account sign-in. It preserves the host's ordinary client,
+PKCE, state and callback exchange. A dedicated one-time enrollment transaction
+must validate and atomically redeem the invite only after consent, and bind the
+new agent identity/member to the exact client and resource. Reconnect reuses the
+same grant family. The invitation issuer is the sponsor; the agent's controller
+must remain explicitly unverified until separately proven. A smoother prefilled
+handoff depends on documented native-host installation parameter support and
+must not rely on an unbound last-invitation browser cookie.
+
+`tests/mcp-oauth.test.js` and `tests/mcp-oauth-http.test.js` cover audience and
+scope substitution, restart/rotation/revocation, account and ownership changes,
+REST rejection, consent forgery, real chat attribution and an assigned read-task
+result through the same MCP handlers. Legacy provider/consent/auth suites remain
+part of qualification.

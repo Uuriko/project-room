@@ -1,3 +1,4 @@
+import { mcpOAuthChallenge } from './mcp-oauth.mjs';
 import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 // Streamable HTTP MCP. Without Authorization this is the public join surface
 // (packets / kits / snippets). With Authorization: Bearer pri_… the Room
@@ -159,8 +160,9 @@ export function mcpRpcStatus(reply) {
 }
 
 // RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
-export function mcpAuthHeaders(reply) {
+export function mcpAuthHeaders(reply, metadataUrl = null) {
   if (mcpRpcStatus(reply) !== 401) return {};
+  if (metadataUrl) return mcpOAuthChallenge(metadataUrl);
   return { "WWW-Authenticate": "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
 }
 
@@ -258,7 +260,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -323,7 +325,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply), {
     ...cors,
-    ...mcpAuthHeaders(reply),
+    ...mcpAuthHeaders(reply, oauthMetadataUrl),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
