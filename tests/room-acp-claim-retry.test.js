@@ -78,6 +78,38 @@ test("receipts isolate origin, room and member, but survive host changes", async
   assert.equal(counts.prompts, 4);
 });
 
+test("fresh wake for a terminal claim acks and skips without a turn or note", async t => {
+  const { make, counts } = setup(t);
+  // First, a live claim runs exactly one turn (the census baseline: 1 -> 2 was the bug).
+  let state = "claimed";
+  const first = make();
+  first.room.claim = async () => ({ id: "work", owner: "agent", state, history: [{ action: "created", agentId: "owner" }] });
+  await deliver(first);
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+  assert.equal(counts.acks, 1);
+  // The claim reaches a terminal state; a FRESH signalId naming it (reassign-after-done,
+  // admin re-wake, wake regeneration) must ack-and-skip, not run a second turn.
+  // Same-signalId redelivery is already deduped by the TurnReceipt and is not this case.
+  state = "done";
+  await first.accept({ signalId: "assigned-fresh-9", workClaim: "work", reason: "assigned" });
+  await first.queue.idle();
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+  assert.equal(counts.acks, 2);
+  assert.equal(first.stats.skipped, 1);
+  // "closed" is the other terminal state in server/work-claims.mjs
+  // (there is no "cancelled" claim state: cancel is a verb into "closed").
+  const closedBridge = make();
+  closedBridge.room.claim = async () => ({ id: "work", owner: "agent", state: "closed", history: [{ action: "created", agentId: "owner" }] });
+  await closedBridge.accept({ signalId: "assigned-fresh-10", workClaim: "work", reason: "assigned" });
+  await closedBridge.queue.idle();
+  assert.equal(counts.prompts, 1);
+  assert.equal(counts.notes.length, 1);
+  assert.equal(counts.acks, 3);
+  assert.equal(closedBridge.stats.skipped, 1);
+});
+
 test("actual claim-note API deduplicates the stable request ID", async t => {
   const fixture = await startRoom(t);
   const connection = await join({ link: fixture.invite().link, displayName: "Retry agent", env: fixture.env });

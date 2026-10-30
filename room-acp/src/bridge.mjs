@@ -26,6 +26,13 @@ const sleep = (ms, signal) => new Promise(resolve => {
 
 // Claim wakes the bridge turns into work. Others (ci, review, lease) are acked.
 export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
+// Terminal claim states, mirroring TERMINAL_CLAIM_STATES in
+// server/work-claims.mjs (STATES there has no "cancelled" state: cancel is a
+// verb that lands a claim in "closed"). A fresh wake naming a claim already
+// in one of these states must not run another turn: the same-signalId path
+// is already deduped by the persisted TurnReceipt, but a fresh signalId
+// (reassign-after-done, admin re-wake, wake regeneration) has no receipt.
+export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
 export const MAX_CLAIM_NOTE = 1500;
 // The person who put the claim on the Board is who asked for the work.
@@ -230,6 +237,10 @@ export class Bridge {
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
     const claim = await this.room.claim(signal.workClaim);
+    if (TERMINAL_CLAIM_STATES.includes(claim?.state)) {
+      this.log(`ignored claim ${signal.workClaim} (${signal.reason}): claim is ${claim.state} (terminal)`);
+      await this.ack([signal.signalId]); this.stats.skipped++; return;
+    }
     const authorId = claimRequester(claim);
     if (claim?.owner !== this.me.id || !mayTalk({ authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo })) {
       this.log(`ignored claim ${signal.workClaim} (${signal.reason})`);

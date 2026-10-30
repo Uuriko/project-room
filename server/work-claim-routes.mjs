@@ -1443,11 +1443,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
     }
     // Jev-harness receipt-acceptance gate (docs/JEV-GATES.md): the receipt
-    // is scored BEFORE the transition so the verdict can ride the
-    // verification fact (#3546) as an advisory signal; the shadow journal
-    // below still records every scored done. Shadow mode never changes the
-    // outcome — scoring sits in a try, and a failure leaves the fact
-    // without a jev entry rather than breaking the transition.
+    // is scored BEFORE the transition so the shadow journal below can
+    // record every scored done. D1: the score is shadow measurement only —
+    // it must NOT ride the verification fact (#3546), where an unqualified
+    // `jev:{verdict:"request-changes"}` beside `state:"verified"` stated
+    // two contradictory verdicts about the same work. The full decision
+    // (score, verdict, signals, escalate) lives in the owner-only shadow
+    // journal. Shadow mode never changes the outcome — scoring sits in a
+    // try, and a failure leaves the journal without an entry rather than
+    // breaking the transition.
     let jevDecision = null;
     if (data.state === "done") {
       try {
@@ -1468,7 +1472,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
         delivery: data.delivery, policy,
-        jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
         requestId: data.requestId, now: nowMs,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
     if (data.state === "done" && jevDecision) {
