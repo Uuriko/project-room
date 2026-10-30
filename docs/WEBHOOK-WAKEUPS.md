@@ -20,6 +20,8 @@ The JSON body is `{ deliveryId, subscriptionId, eventType, issuedAt, roomId, dat
 
 The HMAC does not cover that ISO-8601 string. It covers the canonical JSON `{ deliveryId, eventType, issuedAt, data }` where `issuedAt` is the unix milliseconds integer the server signed with. A receiver that HMACs the body as received will not match `x-webhook-signature`. Reject a delivery whose integer `issuedAt` is more than 5 minutes from now. Treat `deliveryId` as the idempotency key: retries and redrives reuse it.
 
+Retries consult the triggering event's current state before POSTing. If the message behind a `message.posted` delivery was edited after an earlier failed attempt, the retry carries the current body, not the pre-edit text. If that message was deleted or redacted, the delivery is dead-lettered without a POST, the same as a delivery whose subscription was removed.
+
 ## Verify-delivery (the other signature)
 
 `server/agent-webhook-subscriptions.mjs` (`signPayload`) signs `JSON.stringify({ eventType, data })` only. The digest is bare hex: no `sha256=` prefix and no timestamp. `POST /api/agent-webhooks/{subscriptionId}/verify-delivery` with `{ eventType, data, signature }` checks that digest and returns whether it matches. The subscription secret stays on the server; callers send the digest, not the secret.
