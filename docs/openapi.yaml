@@ -18808,6 +18808,7 @@ components:
         actor: { $ref: '#/components/schemas/Actor' }
         before:
           type: object
+          nullable: true
           properties:
             account: { type: string }
             lotState: { type: string }
