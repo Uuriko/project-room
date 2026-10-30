@@ -8,8 +8,9 @@ import { CONTENT_TRUST } from "../server/content-trust.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
-const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
-const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "\\S" };
+// Match the complete string for hosts that full-match JSON Schema patterns.
+const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
+const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
 const limit = { type: "integer", minimum: 1, maximum: 50 };

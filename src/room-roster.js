@@ -1,3 +1,5 @@
+import { uiText } from "./strings.js";
+
 const ACCESS = new Set(["chat", "contribute", "review"]);
 const ROUTES = new Set(["packet", "mcp", "direct"]);
 const WRITE_FLAGS = new Set(["--write", "--install", "--apply", "--save", "--config", "--config-file"]);
@@ -289,11 +291,11 @@ export function connectionStanding({
     const detail = "Credential has not been used. Work grants are not shown.";
     return { compact, detail, summary: `${compact}. ${detail}` };
   }
-  const credential = "Access ready";
   const tools = hostTools == null
     ? "Host tools not checked"
     : hostTools.length ? "Host tools available" : "Host tools missing";
-  const compact = `${credential}. Can read and post.`;
+  const compact = uiText(hostTools == null ? "connection.tools.unverified"
+    : hostTools.length ? "connection.tools.available" : "connection.tools.missing");
   if (permissions == null) {
     const detail = `${tools}. Work grants not checked.`;
     return { compact, detail, summary: `${compact} ${detail}` };
@@ -303,8 +305,8 @@ export function connectionStanding({
   const work = unselected.length === 0
     ? "Work grants include accept, complete, verify, and write."
     : unselected.length === OPTIONAL_WORK.length
-      ? "Work grants not selected. Chat remains available."
-      : `Owner-selected limit: ${unselected.join(", ")} not granted. Chat remains available.`;
+      ? "Work grants not selected. Room chat access is granted."
+      : `Owner-selected limit: ${unselected.join(", ")} not granted. Room chat access is granted.`;
   const detail = `${tools}. ${work}`;
   return { compact, detail, summary: `${compact} ${detail}` };
 }

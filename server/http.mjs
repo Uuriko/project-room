@@ -568,7 +568,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   for (const c of [...connectorClients, ...mcpOAuthClients]) {
     oauthProvider.registerClient(c);
   }
-  const inviteOAuth = oauthResource ? createMcpInviteOAuth({ store, clients: mcpOAuthClients, resource: oauthResource }) : null;
+  const inviteOAuth = oauthResource ? createMcpInviteOAuth({ store, clients: mcpOAuthClients, resource: oauthResource, issuer: origin }) : null;
   // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
   // tombstone at github:<id> / google:<sub>, and its login methods are gone, so
   // a returning person reaches the provision step below. Take the next free
@@ -1704,6 +1704,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, {
           issuer,
           authorization_endpoint: issuer + "/oauth/authorize",
+          authorization_response_iss_parameter_supported: true,
           token_endpoint: issuer + "/oauth/token",
           revocation_endpoint: issuer + "/oauth/revoke",
           response_types_supported: ["code"],
@@ -1880,6 +1881,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const failRedirect = (error, description) => {
           const u = new URL(validated.redirectUri);
           u.searchParams.set("error", error);
+          u.searchParams.set("iss", expectedOrigin());
           if (description) u.searchParams.set("error_description", description);
           if (state) u.searchParams.set("state", state);
           res.statusCode = 302;
@@ -1905,6 +1907,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
         const u = new URL(validated.redirectUri);
         u.searchParams.set("code", code);
+        u.searchParams.set("iss", expectedOrigin());
         if (state) u.searchParams.set("state", state);
         res.statusCode = 302;
         res.setHeader("Location", u.href);

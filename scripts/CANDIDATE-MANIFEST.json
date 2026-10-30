@@ -24,7 +24,7 @@
     "docs/agents/index.md": "sha256:4c69b5f5e017e05449db199e569902f67b20652676b3a42d09f14fb24d803afd",
     "docs/agents/langgraph.md": "sha256:2bcc9a9ef0f9334a86a7ff7355bb22956f206429f9d8fae2551834d028761eae",
     "docs/agents/openai-agents-sdk.md": "sha256:9ebcc0730e72b257ae3a19957d54bedd773f548a738c3d2a8a80f7bbe6af283b",
-    "docs/agents/paste.md": "sha256:2d0e93c8327871a74ce80a1ac21972705f30b174f31b0540edd9102471e51930",
+    "docs/agents/paste.md": "sha256:f40b866bf711be622338ea02f8aef83498f14796c63600c25a793a80d9c3540a",
     "docs/agents/vscode.md": "sha256:2731527a7e7c2ee0ebcef7b81de5c2900803607a4b97fc6415efb61aaab889dd",
     "examples/integrations/aider/README.md": "sha256:bb73998fbec477d88018355c33ffcd010cb96b1767e0b90364691894e71d384d",
     "examples/integrations/claude-code/README.md": "sha256:4173a2fd32fd3de7515555b8d27278920106b014d7cd6b1cd80af90e9c55ecc5",
@@ -158,7 +158,7 @@
     "src/room-deep-link.js": "sha256:fc111ee798a43ee05991c147fa1b4cf0b743c5cc5530a8357ff8770146ea98c3",
     "src/room-instructions.js": "sha256:f44a40e9edcf346e1804bdbd87dd7529d51b16e212a74f1d74d7aa79ea91901c",
     "src/room-layout.js": "sha256:dfa9a49f34650ced88c9df63633d9ebf82ff7d25a1c535f983b675bba544ced3",
-    "src/room-roster.js": "sha256:e4464c12d1f9ec8eb145af86d6d9afde14366bf79deae1e7b6a5301ae8c3c0bf",
+    "src/room-roster.js": "sha256:6788f1eef8e49496dee1aea8152abf76d471924341ca9600b84dbd9070f954aa",
     "src/room-setup-prompt.js": "sha256:f770646b20288b3064b232f2fb60428179cc50e729e1889cea3a9f26100c8789",
     "src/service-origin.js": "sha256:cb4ac28e46f80308f243d39b6ad68412c55a2cacb5bb79a50215d1e362e51414",
     "src/session-expiry.js": "sha256:4215ee5fd849272d6ffede7c1f68da7c93f1ed82f0e4455b82fe24796baa5196",
@@ -181,8 +181,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:7a7b57700bea2aa06ee4135d7c1d58d48daca1a5f95fe44910242bd0d7284b52",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "strings/en.js": "sha256:53b40d77cefedb49a945c99a84a4bee0d0937cca8526fc4691cff22a77f25ac9",
-    "strings/en.json": "sha256:0de8057e8848d43e3b41be5caa4e7f9ec12cdf8b4d403d3b3cd0b3bc1f4307e3"
+    "strings/en.js": "sha256:44b0716308b28b43e1a5a462848f14aaa346f0d0a48e6e083766f44470de9eca",
+    "strings/en.json": "sha256:a06c78868ad18cd3d541bc8b28e0898cc4a573f7b52d9003988458052b1fe583"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:54f8001bbd8e7009fefb9e4ce8571bee85499ff9bce6e64678de5475097c7d9e",
@@ -192,7 +192,7 @@
     "cloudflare/pnpm-lock.yaml": "sha256:ccd56c35c71f2a0e696120d5db191035aea0b091c2f0b95935dd85a59bbf9248",
     "cloudflare/room.mjs": "sha256:dafbf0020f0fe8fa96b0040fb29b17f966e92bbcfac65afef6c53800ce10e05a",
     "cloudflare/storage.mjs": "sha256:efff85a064ff81ea5a863e4d11af5ca1711e28c9c424d724cf8812be35969e41",
-    "cloudflare/wrangler.jsonc": "sha256:25ae12bac05781d1b4ab7c8602da6b20f4084c96082afa0aba737382ccb1a862",
+    "cloudflare/wrangler.jsonc": "sha256:78a47a03a741ab259eb5f01932bdbd0a0b28c0020ff014887b8f7dabf6b0304f",
     "scripts/deploy-recovery.mjs": "sha256:fc03c7a0ca6514c7262d0590774855f991b7eb0b5c7e0aa7fb0b25eedf7a81a7"
   },
   "packages": {
