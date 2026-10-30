@@ -1,0 +1,34 @@
+  /oauth/invite:
+    post:
+      operationId: confirmNativeAgentInvitation
+      summary: Preview or accept an invitation for a native agent without a Room account
+      description: Requires the same-origin browser and short-lived HttpOnly nonce cookie from the native OAuth authorization start. No agent credential or human account is accepted as a substitute. The OAuth client must be explicitly configured on this deployment.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [nonce, invitation, decision]
+              properties:
+                nonce: {type: string}
+                invitation: {type: string}
+                decision: {type: string, enum: [preview, allow]}
+                display_name: {type: string, maxLength: 80}
+      responses:
+        '200':
+          description: Invitation preview and consent form
+          content:
+            text/html:
+              schema: {type: string}
+        '302':
+          description: Consent accepted; redirect to the registered client with a PKCE-bound authorization code
+        '400':
+          description: Invalid or expired invitation or confirmation
+        '403':
+          description: Origin or nonce cookie does not match
+        '404':
+          description: Native agent connections are not configured
+        '429':
+          description: Confirmation rate limit reached

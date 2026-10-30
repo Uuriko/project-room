@@ -1,4 +1,5 @@
-import { createMcpInviteOAuth, inviteOAuthPage } from './mcp-invite-oauth.mjs';
+import { renderInviteOAuthPage } from "./routes/mcp-invite-oauth.mjs";
+import { createMcpInviteOAuth } from './mcp-invite-oauth.mjs';
 import { mcpOAuthResourceMetadata, listMcpOAuthAgents, validateMcpOAuthBinding } from './mcp-oauth.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
@@ -1352,7 +1353,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
-        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider,
+        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider, inviteOAuth,
         githubClient: github, googleClient: google,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
@@ -1725,13 +1726,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }, req.method === "HEAD");
       }
       // Native invitation consent is the default; a Room account is optional.
-      const invitePage = (view, request) => {
-        res.setHeader("Cache-Control", "no-store");
-        res.setHeader("Referrer-Policy", "no-referrer");
-        res.setHeader("Content-Security-Policy", `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' ${new URL(request.redirectUri).origin}`);
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        return res.end(inviteOAuthPage(view));
-      };
+      const invitePage = (view, request) => renderInviteOAuthPage(res, view, request);
       if (url.pathname === "/oauth/authorize" && req.method === "GET" && inviteOAuth
         && mcpClientIds.has(url.searchParams.get("client_id")) && url.searchParams.get("connection") !== "account") {
         rate(`oauth-invite-start:${remoteAddress}`, 30);
@@ -1742,24 +1737,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           account.searchParams.set("connection", "account");
           return invitePage({ ...started, accountUrl: account.pathname + account.search }, started.request);
         } catch (error) { return json(res, 400, { error: "invalid_request", error_description: error.message }); }
-      }
-      if (url.pathname === "/oauth/invite" && req.method === "POST" && inviteOAuth) {
-        rate(`oauth-invite-confirm:${remoteAddress}`, 30);
-        checkOrigin(req, true);
-        const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-        const data = Object.fromEntries(new URLSearchParams(text));
-        const nonce = typeof data.nonce === "string" && /^[A-Za-z0-9_-]{43}$/.test(data.nonce) ? data.nonce : null;
-        const cookieNonce = nonce ? cookie(req, `oauth_invite_${nonce.slice(0, 16)}`) : null;
-        if (!nonce || cookieNonce !== nonce) return json(res, 403, { error: "csrf_denied" });
-        try {
-          if (data.decision === "allow") {
-            const redirect = inviteOAuth.approve(nonce, data.invitation, data.display_name);
-            res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
-            return res.end();
-          }
-          const viewed = inviteOAuth.preview(nonce, data.invitation);
-          return invitePage({ nonce, ...viewed }, viewed.request);
-        } catch (error) { return json(res, 400, { error: "invitation_connection_failed", error_description: error.message }); }
       }
       // GET /oauth/authorize — validate the request and show the consent screen.
       // The user must be logged in (account session cookie); otherwise redirect

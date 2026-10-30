@@ -7,6 +7,7 @@ import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 import { mcpOAuthPrincipalDescriptor, resolveMcpOAuthPrincipal, authorizeMcpOAuthDescriptor, listMcpOAuthAgents, validateMcpOAuthBinding } from '../server/mcp-oauth.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { defaultServerArgs } from '../server/boot-options.mjs';
 const CLIENT = { clientId: 'native-test', name: 'Native test agent', redirectUris: ['https://client.example/callback'] };
 const origin = 'https://room.example', resource = origin + '/mcp';
 const verifier = 'x'.repeat(43), challenge = createHash('sha256').update(verifier).digest('base64url');
@@ -21,7 +22,7 @@ async function setup(t) {
   const owner = store.issueAccessKey('commons', 'owner');
   const invitation = store.invites.create(owner, 'commons', { profile: 'member' });
   const accountsBefore = store.db.prepare('SELECT count(*) n FROM accounts').get().n;
-  const server = createRoomServer({ store, origin, mcpOAuthClients: [CLIENT] });
+  const server = createRoomServer(defaultServerArgs({ store, origin, env: { ROOM_MCP_OAUTH_CLIENTS: JSON.stringify([CLIENT]) } }));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
