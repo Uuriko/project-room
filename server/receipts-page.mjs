@@ -18,6 +18,9 @@ body{margin:0;background:var(--bg);color:var(--text);font:17px/1.55 var(--font-s
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:var(--blue)}
+a:focus-visible,button:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.skip-link{position:absolute;left:1rem;top:1rem;padding:.5rem .75rem;background:var(--bg);color:var(--text);clip-path:inset(50%)}
+.skip-link:focus{clip-path:none}
 .card,.detail{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .card{border-top:1px solid var(--line);padding:1rem 0}
 .meta{color:var(--muted);font-size:.9rem}
@@ -83,8 +86,8 @@ export function renderReceiptsHtml(page) {
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
-<body><header><p><a href="/">Project Room</a></p></header>
-<main>
+<body><a class="skip-link" href="#main">Skip to content</a><header><p><a href="/">Project Room</a></p></header>
+<main id="main" tabindex="-1">
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
 ${items}
@@ -330,8 +333,8 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
     ogAlt: verdictLine,
   })}
-<body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
-<main>
+<body><a class="skip-link" href="#main">Skip to content</a><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
+<main id="main" tabindex="-1">
 <h1>${escapeHtml(receipt.title)}</h1>
 ${renderVerificationBlock(receipt, verification)}
 <dl class="detail">
