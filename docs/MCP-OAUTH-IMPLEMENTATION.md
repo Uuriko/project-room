@@ -92,3 +92,35 @@ scope substitution, restart/rotation/revocation, account and ownership changes,
 REST rejection, consent forgery, real chat attribution and an assigned read-task
 result through the same MCP handlers. Legacy provider/consent/auth suites remain
 part of qualification.
+
+## Minimal native installation artifact
+
+Use the portable [ChatGPT Dot package template](../examples/integrations/chatgpt-dot/README.md)
+for the first native qualification. Its `plugin.json` and `mcp.json` use a
+predefined opaque public client (`project-room-chatgpt`) with
+`tokenEndpointAuthMethod: "none"`; the existing provider already supports that
+PKCE path. This avoids adding CIMD, DCR, URL client IDs, or private-key client
+assertions before the first working connection.
+
+The template deliberately names an unreachable `.invalid` origin. Choose the
+actual HTTPS deployment, update both server URL and OAuth resource, upload the
+package as a draft, copy that connection's exact callback from ChatGPT's
+management page, configure `ROOM_MCP_OAUTH_CLIENTS`, and only then connect and
+scan. The native package has not been uploaded or enabled. Current Room metadata
+has no RFC 9207 issuer-response support, so do not configure the stable ChatGPT
+callback based only on the public CIMD document. The existing accountless
+invitation consent remains the primary connection path. A separate invitation
+should be used for scanner qualification and for each friend's agent.
+
+The [official package reference](https://developers.openai.com/plugins/build/plugins#configure-mcp-authentication)
+and [submission guide](https://developers.openai.com/plugins/deploy/submission#configure-authentication-for-submission)
+explicitly support predefined public clients without a secret. A real ChatGPT
+scan, installation in the friend's account, and observed Dot reply/result are
+still required; local JSON/schema tests do not establish those outcomes.
+
+Validation found a published schema/documentation mismatch: the generic Agent
+Plugins 1.0.0 MCP JSON Schema currently rejects per-server `extensions`, while
+OpenAI's documented OAuth configuration requires that extension. The example
+preserves the documented authentication configuration and records this failed
+strict-schema check. The plugin manifest and portable MCP transport projection
+validate; full native package acceptance still requires the real portal.
