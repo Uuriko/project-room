@@ -347,12 +347,29 @@ const artifactShaOf = value => {
   check(typeof bare === "string" && /^[0-9a-f]{64}$/.test(bare), "artifact sha256 must be 64 lowercase hex characters");
   return bare;
 };
+// Strict shape (UT2 candidate 7): the bundle, its artifact and each
+// check/criterion entry accept exactly the fields the kernel stores.
+// Anything else is refused BY NAME instead of being silently dropped on a
+// success response — a worker who puts the work itself in artifact.content
+// (the natural inline-delivery guess) must learn that no such field exists,
+// not lose the content. The wording mirrors the product's other
+// unknown-field refusals (server/http.mjs body(), members-directory).
+const DELIVERY_FIELDS = ["artifact", "checks", "criteria"];
+const DELIVERY_ARTIFACT_FIELDS = ["kind", "ref", "sha256"];
+const DELIVERY_CHECK_FIELDS = ["name", "result", "command"];
+const DELIVERY_CRITERION_FIELDS = ["criterion", "status", "evidenceRef"];
+const rejectUnknownFields = (value, fields, where) => {
+  const unknown = Object.keys(value).filter(key => !fields.includes(key));
+  check(unknown.length === 0, `${where} has unknown fields: ${unknown.join(", ")}`);
+};
 const deliveryOf = value => {
   if (value === undefined || value === null) return null;
   check(value !== null && typeof value === "object" && !Array.isArray(value), "delivery must be an object");
+  rejectUnknownFields(value, DELIVERY_FIELDS, "delivery");
   let artifact = null;
   if (value.artifact !== undefined && value.artifact !== null) {
     check(typeof value.artifact === "object" && !Array.isArray(value.artifact), "delivery artifact must be an object");
+    rejectUnknownFields(value.artifact, DELIVERY_ARTIFACT_FIELDS, "delivery artifact");
     check(typeof value.artifact.kind === "string" && value.artifact.kind.length > 0 && value.artifact.kind.length <= 64,
       "delivery artifact kind must be 1..64 characters");
     check(typeof value.artifact.ref === "string" && value.artifact.ref.length > 0 && value.artifact.ref.length <= 512,
@@ -363,6 +380,7 @@ const deliveryOf = value => {
   check(Array.isArray(checks) && checks.length <= MAX_DELIVERY_CHECKS, `delivery checks must hold at most ${MAX_DELIVERY_CHECKS} entries`);
   const checkRows = checks.map(entry => {
     check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each delivery check must be an object");
+    rejectUnknownFields(entry, DELIVERY_CHECK_FIELDS, "each delivery check");
     check(typeof entry.name === "string" && entry.name.length > 0 && entry.name.length <= 200,
       "each delivery check name must be 1..200 characters");
     check(DELIVERY_CHECK_RESULTS.includes(entry.result), `each delivery check result must be one of ${DELIVERY_CHECK_RESULTS.join(", ")}`);
@@ -375,6 +393,7 @@ const deliveryOf = value => {
   const seenCriteria = new Set();
   const criteriaRows = criteria.map(entry => {
     check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each delivery criterion must be an object");
+    rejectUnknownFields(entry, DELIVERY_CRITERION_FIELDS, "each delivery criterion");
     check(typeof entry.criterion === "string" && entry.criterion.length > 0 && entry.criterion.length <= 500,
       "each delivery criterion must be 1..500 characters");
     check(!seenCriteria.has(entry.criterion), `delivery criteria maps criterion "${entry.criterion}" twice`);
@@ -425,7 +444,10 @@ const verificationOf = value => {
 // finish transition froze onto it (digest + who delivered + when).
 const storedDeliveryOf = value => {
   if (value === undefined || value === null) return null;
-  const bundle = deliveryOf(value);
+  // The stored shape carries the stamp (digest/deliveredBy/deliveredAt)
+  // beside the bundle; validate the bundle fields alone so the strict
+  // shape above does not refuse the kernel's own stored record.
+  const bundle = deliveryOf({ artifact: value.artifact, checks: value.checks, criteria: value.criteria });
   check(bundle !== null, "delivery must be an object");
   check(typeof value.digest === "string" && /^[0-9a-f]{64}$/.test(value.digest), "delivery digest must be 64 lowercase hex characters");
   check(typeof value.deliveredBy === "string" && value.deliveredBy.length > 0 && value.deliveredBy.length <= 128,
