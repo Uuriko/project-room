@@ -129,9 +129,17 @@ test("step0 fates: a maximally populated item's board row drops the named fields
     assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
   }
   assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
-  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
+  for (const key of ["definitionOfDone", "mode", "verifierMemberId", "accountableMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
     assert.equal(Object.hasOwn(row, key), false, `board row must not carry ${key} at Step 0`);
   }
+  // Decision-gate fields are survivors, not drops: B-4' Phase 0 slice 2
+  // (#3629, board backfill version 2 in server/work-item-board.mjs) carries
+  // ownerDecisionRequired and humanDecisionMakerId verbatim from the item
+  // onto the board row, so this fate-1 row (proposed with both set) keeps
+  // both, with the item's values. These assertions fail if either field
+  // goes missing from the row.
+  assert.equal(row.ownerDecisionRequired, true, "board row must carry ownerDecisionRequired at Step 0 since slice 2");
+  assert.equal(row.humanDecisionMakerId, "owner", "board row must carry humanDecisionMakerId at Step 0 since slice 2");
   // #3547 kernel fact vs item vocabulary: the claim row now always carries
   // the kernel's `verification` field (null here — the mirror ran no kernel
   // verify), but the item's verification object stays off the board: its
