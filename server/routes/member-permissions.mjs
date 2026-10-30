@@ -100,7 +100,13 @@ export const MEMBER_PERMISSION_ROUTES = Object.freeze([
       id, method, path, auth: "account", capability: null, scope: "worker", handler: accountAdmission, authenticate: accountAdmissionContext,
       parity: "exempt:authenticated human account admission is separate from identity-secret agent requests",
       events: method === "POST" && !path.includes("{requestId}") ? ["access.requested"] : [],
-      schema: { response: { type: "object" } }
+      schema: { response: { type: "object", required: ["request"], properties: { request: { type: "object" } } },
+        ...(path.includes("{requestId}") ? { params: { type: "object", required: ["requestId"], properties: { requestId: { type: "string", maxLength: 64 } } } } : {}),
+        ...(method !== "POST" ? {} : { body: path.includes("{requestId}") ? { type: "object", additionalProperties: false, properties: {} }
+          : { type: "object", required: ["roomId", "displayName", "requestedPermissions"], additionalProperties: false,
+            properties: { roomId: { type: "string" }, displayName: { type: "string", minLength: 1, maxLength: 80 },
+              requestedPermissions: { type: "array", items: { type: "string" } }, requestId: { type: "string", maxLength: 64 },
+              note: { type: "string", nullable: true, maxLength: 500 }, referredBy: { type: "string", nullable: true, maxLength: 80 } } } }) }
     })),
   Object.freeze({ id: "request-member-permissions", method: "POST", path: "/api/rooms/{roomId}/access-requests",
     auth: "room", capability: null, scope: "room", handler: requestMemberPermissions,

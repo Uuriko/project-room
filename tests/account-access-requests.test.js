@@ -1,9 +1,10 @@
+import { planAccountDeletion, executeAccountDeletion } from "../server/account-deletion.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { AccessRequests } from "../server/access-requests.mjs";
+import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:"); store.initialize(initialRoom("commons"));
@@ -127,4 +128,41 @@ test("another reviewed request cannot change an existing account membership gran
   assert.deepEqual(second.grantedPermissions, []);
   assert.deepEqual(f.store.accountRooms(f.alice.token, f.alice.session.sessionBinding).rooms.map(room => room.id), ["commons"]);
   assert.deepEqual(f.store.accountRooms(f.bob.token, f.bob.session.sessionBinding).rooms, []);
+});
+
+
+test("expired requests cannot admit, removed membership is withheld, and corrupt account intent stays fenced", async t => {
+  const f = await fixture(t);
+  await f.call("/api/account/access-requests", f.alice, f.input);
+  f.store.db.prepare("UPDATE access_requests SET created_at=? WHERE request_id=?").run(f.store.now() - REQUEST_TTL_MS - 1, f.input.requestId);
+  assert.equal((await f.call(`/api/account/access-requests/${f.input.requestId}`)).body.request.status, "expired");
+  assert.throws(() => f.access.decide(f.owner, "commons", f.input.requestId, { decision: "approve" }), e => e.code === "already_decided");
+  await f.call("/api/account/access-requests", f.alice, { ...f.input, requestId: "fresh-request" });
+  const approved = f.access.decide(f.owner, "commons", "fresh-request", { decision: "approve" });
+  f.store.command(f.owner, "commons", { id: crypto.randomUUID(), type: "message.posted", data: { messageId: "owner-message", body: "Welcome" } });
+  f.store.command(f.alice.token, "commons", { id: crypto.randomUUID(), type: "message.posted", data: { messageId: "applicant-message", body: "Thanks" } }, f.alice.session.sessionBinding);
+  f.store.command(f.owner, "commons", { id: crypto.randomUUID(), type: "member.access_changed", data: { memberId: approved.memberId, expectedMemberRevision: 0, permissions: [], active: false } });
+  const removed = await f.call("/api/account/access-requests/fresh-request");
+  assert.equal(removed.body.request.status, "approved"); assert.equal(removed.body.request.memberId, undefined);
+  assert.deepEqual(f.store.accountRooms(f.alice.token, f.alice.session.sessionBinding).rooms, []);
+  f.store.db.prepare("UPDATE access_requests SET requested_permissions='[]' WHERE request_id=?").run(f.input.requestId);
+  assert.throws(() => f.access.list(f.owner, "commons", { status: "expired" }), e => e.code === "invalid_request");
+});
+
+
+test("real account deletion purges account admission rows while preserving other principals and shared history", async t => {
+  const f = await fixture(t);
+  await f.call("/api/account/access-requests", f.alice, { ...f.input, note: "Private applicant note" });
+  await f.call("/api/account/access-requests", f.bob, { ...f.input, displayName: "Bob Applicant", requestId: "bob-request" });
+  const agent = f.store.identities.create("Independent Agent");
+  f.access.request("commons", { identityId: agent.identityId, displayName: "Independent Agent", requestedPermissions: [], requestId: "agent-request" }, agent.secret);
+  const history = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all();
+  const { plan } = planAccountDeletion(f.store, "alice-account");
+  assert.equal(plan.steps.find(step => step.category === "account_admission_requests").itemCount, 1);
+  executeAccountDeletion(f.store, plan);
+  assert.equal(f.store.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(f.input.requestId), undefined);
+  assert.ok(f.store.db.prepare("SELECT * FROM access_requests WHERE request_id='bob-request'").get());
+  assert.ok(f.store.db.prepare("SELECT * FROM access_requests WHERE request_id='agent-request'").get());
+  assert.deepEqual(f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all(), history, "already shared history retains the existing policy");
+  assert.throws(() => f.access.decide(f.owner, "commons", f.input.requestId, { decision: "approve" }), e => e.status === 404);
 });
