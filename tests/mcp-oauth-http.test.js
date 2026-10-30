@@ -156,3 +156,30 @@ for (const action of ['revoke', 'rotate']) test(`identity ${action} fences issue
   const refreshed = await f.exchange({ grant_type: 'refresh_token', refresh_token: f.tokens.refresh_token, client_id: CLIENT.clientId, resource });
   assert.equal(refreshed.status, 400);
 });
+
+test('mixed native reads require every category while full grants read the real brief', async t => {
+  const f = await setup(t);
+  const mixed = ['room_read_inbox', 'room_list_work', 'room_read_request', 'room_read_work', 'room_read_work_discussion', 'room_activation_pack'];
+  for (const scope of ['rooms:read chat:read', 'rooms:read work:read', 'chat:read work:read']) {
+    const consent = await f.consent({ scope });
+    const code = new URL(consent.headers.get('location')).searchParams.get('code');
+    const exchanged = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+    const token = (await exchanged.json()).access_token;
+    const listed = await f.rpc('tools/list', {}, token);
+    const names = listed.body.result.tools.map(tool => tool.name);
+    const denied = scope === 'chat:read work:read' ? ['room_read_request', 'room_read_work', 'room_activation_pack'] : mixed;
+    for (const name of denied) {
+      assert.ok(!names.includes(name), `${scope} must not discover ${name}`);
+      const called = await f.rpc('tools/call', { name, arguments: { workItemId: 'hidden-work', requestMessageId: 'hidden-request' } }, token);
+      assert.match(JSON.stringify(called.body), /outside the connected agent grant/, `${scope}: ${name}`);
+    }
+    if (scope.includes('chat:read')) assert.ok(names.includes('room_read_messages'));
+    if (scope.includes('work:read')) assert.ok(names.includes('room_read_board'));
+  }
+  const listed = await f.rpc('tools/list');
+  assert.ok(listed.body.result.tools.some(tool => tool.name === 'room_activation_pack'));
+  const pack = await f.rpc('tools/call', { name: 'room_activation_pack', arguments: {} });
+  assert.notEqual(pack.body.result?.isError, true, JSON.stringify(pack.body));
+  assert.equal(pack.body.result.structuredContent.room.slug, 'commons');
+  assert.equal(pack.body.result.structuredContent.orientation.purpose, f.store.room('commons').state.room.charter?.purpose ?? f.store.room('commons').state.room.purpose ?? '');
+});

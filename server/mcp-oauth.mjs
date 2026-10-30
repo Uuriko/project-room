@@ -94,7 +94,18 @@ const scopeTools = {
   'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],
   'work:write': ['room_claim', 'room_accept_work', 'room_start_work', 'room_block_work', 'room_resolve_blocker', 'room_handoff', 'room_submit_text_result'],
 };
+// Mixed projections must satisfy every data category, in discovery and dispatch.
+// Keep this separate from membership checks: OAuth consent cannot widen them.
+const compositeReadScopes = {
+  room_read_inbox: ['chat:read', 'work:read'],
+  room_list_work: ['chat:read', 'work:read'], // needs_me includes reply requests
+  room_read_request: ['rooms:read', 'chat:read', 'work:read'], // preparation includes work and charter
+  room_read_work: ['rooms:read', 'chat:read', 'work:read'], // source/discussion and room preparation
+  room_read_work_discussion: ['chat:read', 'work:read'],
+  room_activation_pack: ['rooms:read', 'chat:read', 'work:read'],
+};
 export function mcpOAuthToolAllowed(name, scopes) {
+  if (Object.hasOwn(compositeReadScopes, name)) return compositeReadScopes[name].every(scope => scopes.includes(scope));
   return Object.entries(scopeTools).some(([scope, names]) => scopes.includes(scope) && names.includes(name));
 }
 

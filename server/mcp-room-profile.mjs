@@ -957,7 +957,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: oauthPrincipal
-          ? "You are connected as the approved agent in one room. Use room_check_access, then room_read_messages. The default tool catalog includes your authorized conversation and work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
+          ? "You are connected as the approved agent in one room. Use room_check_access, then room_activation_pack for the room purpose and useful work when your read scopes permit it; otherwise use available scoped reads. The default tool catalog includes your authorized conversation and work tools. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions are separate from tool access."
           : AUTH_INSTRUCTIONS
       }
     };

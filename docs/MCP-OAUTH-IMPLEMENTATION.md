@@ -124,3 +124,5 @@ OpenAI's documented OAuth configuration requires that extension. The example
 preserves the documented authentication configuration and records this failed
 strict-schema check. The plugin manifest and portable MCP transport projection
 validate; full native package acceptance still requires the real portal.
+
+Native mixed reads require all constituent scopes: inbox and work listings/discussions need chat:read plus work:read; selected request/work preparation and activation pack also need rooms:read. The activation pack provides the existing room purpose, member-visible pins, current work and viewer orientation. Narrow grants retain independent message and Board/result reads. Tool discovery and dispatch enforce the same conjunctions; membership and history visibility still apply.
