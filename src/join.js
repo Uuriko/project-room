@@ -415,7 +415,8 @@ function renderEnter() {
   }
   renderRequestDoor();
   show("join-enter");
-  $("join-enter-code")?.focus();
+  // MI-011: no focus seizure on load; a screen reader starts at the top of
+  // the page and the field is one Tab away. Focus moves only after an error.
 }
 
 // The consolidated request-access door (human-map §8.1): the join page is
