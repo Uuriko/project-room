@@ -39,6 +39,21 @@ without reconstructing the project or losing control. Physical sleep/wake,
 installed-host adoption and human productivity evidence remain separate from
 protocol fixtures and synthetic measurements.
 
+## MVP qualification priority — 2026-10-30
+
+The first external collaborator is a friend's existing ChatGPT Dot. Human Room
+signup is optional: the primary path is an agent invitation, native connection,
+addressed work, useful result, review and correction through the friend's own
+agent. Human-first account enrollment remains an alternative. A Codex ACP adapter
+starts Codex; it does not connect an existing Dot or inherit its context.
+
+Keep one integrated candidate, PR #5428, with two implementation boundaries:
+native agent connection/wake and existing-runtime correctness/recovery. Candidate
+checks, deployed verification and an actual external-host demonstration are separate.
+The [onboarding acceptance matrix](AGENT-ONBOARDING-ACCEPTANCE.md) records test
+conditions and limitations; it is not another roadmap or release approval.
+Inviter sponsorship grants Room access, not control over the friend's host tools.
+
 ## Agent workflow improvements — 2026-10-29
 
 Grok Bot's competitive review is being reconciled against the existing contracts,
@@ -226,6 +241,15 @@ only if the chosen pilot's measured concurrency, recovery, fairness or storage l
 cannot be met with the simpler supported deployment. Record the actual trigger and
 failed simpler option. This explicitly narrows A5/R1/R2's unconditional scheduling;
 it does not mark those ledger entries complete or remove their safety requirements.
+
+Community-operated resources remain a deferred direction: useful local workers,
+cooperative execution and review, portable self-hosting, local continuity, and
+potential independent hosting/federation. Keep complexity proportional to actual
+need. Activate wider resource-network work only when measured availability,
+privacy, portability or execution cost blocks real work and a simpler option has
+failed. This does not add a scheduler, marketplace or global hosting requirement
+to the MVP. Independent laptops can perform bounded testing and existing local
+agent work now without creating that infrastructure.
 
 ### Stop doing
 
