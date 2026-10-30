@@ -105,3 +105,39 @@ test('persisted friend connection survives a fresh store and expiry ends identit
   assert.equal(reopened.agentConnections.identityAuthority('commons','friend-dot'),false);
   assert.throws(()=>reopened.authenticate(a.credential.token,'commons'));
 });
+test('two independently sponsored agents receive addressed requests and deliver an exact reviewed result through human correction',async t=>{
+  const f=fixture(t),{textVersion}=await import('../server/text-results.mjs');
+  const agents={};
+  for(const [who,id] of [['friend','friend-dot'],['owner','john-agent']]) {
+    const identity=f.s.identities.create(id);
+    const identityLinkCode=f.s.identities.mintLinkCode(identity.identityId,identity.secret,{roomId:'commons'}).linkCode;
+    f.create(who,id,{identityId:identity.identityId,identityLinkCode});agents[id]=identity;
+    f.s.agentHeartbeats.heartbeat({agentId:identity.identityId,hostId:`host-${id}`,mode:'pull-only',workWakes:true});
+  }
+  const send=(actor,type,data)=>f.s.command(actor==='owner'?f.owner:agents[actor].secret,'commons',{id:randomUUID(),type,data});
+  for(const [from,to] of [['john-agent','friend-dot'],['friend-dot','john-agent']]) {
+    writeTalkPolicy(f.s.db,f.state(),{roomId:'commons',actorId:to==='friend-dot'?'friend':'owner',memberId:to,policy:'members',allowed:[from]},Date.now(),()=>assert.fail());
+    const messageId=randomUUID();const q=send(from,'message.posted',{messageId,toMemberId:to,body:'Please check the launch checklist.',requestKind:'reply'});
+    const signals=f.s.agentHeartbeats.pendingWakes(agents[to].identityId);
+    assert.ok(signals.some(s=>s.messageId===messageId),'actual registered receiver gets addressed wake');
+    send(to,'message.posted',{messageId:randomUUID(),body:'Checklist reviewed; test invitation recovery.',responseToRequestId:messageId,expectedRequestRevision:0,responseOutcome:'answered',contextEventId:q.event.id,contextSequence:q.sequence,replyToId:messageId,toMemberId:from,workItemId:null});
+    assert.equal(f.state().replyRequests[messageId].status,'answered');
+    f.s.agentHeartbeats.ackWakes({agentId:agents[to].identityId,signalIds:signals.map(s=>s.signalId)});
+  }
+  send('owner','work.proposed',{workItemId:'launch-check',title:'Friend launch checklist',definitionOfDone:'An actionable checklist with recovery checks',accountableMemberId:'friend-dot',verifierMemberId:'john-agent',independentVerificationRequired:true,ownerDecisionRequired:true,humanDecisionMakerId:'owner',mode:'read'});
+  const item=()=>f.state().workItems['launch-check'];
+  const mutate=(actor,type,data={})=>send(actor,type,{workItemId:'launch-check',expectedRevision:item().revision,...data});
+  mutate('friend-dot','work.accepted');mutate('friend-dot','work.started');
+  const complete=body=>{const post=send('friend-dot','message.posted',{messageId:randomUUID(),workItemId:'launch-check',body});return mutate('friend-dot','work.completed',{evidenceKind:'room_text',evidenceMessageId:post.event.data.messageId,evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:item().receipt?.eventId??null,producerId:'friend-dot',summary:'Checklist ready',nextAction:'Review exact checklist'});};
+  const verify=()=>mutate('john-agent','verification.recorded',{result:'pass',completionEventId:item().receipt.eventId,evidenceVersion:item().receipt.evidenceVersion,summary:'Checked invite and recovery steps'});
+  const decide=(decision,reason)=>{const post=send('owner','message.posted',{messageId:randomUUID(),body:reason});return mutate('owner','owner.decision_recorded',{decision,completionEventId:item().receipt.eventId,evidenceVersion:item().receipt.evidenceVersion,reason,sourceMessageId:post.event.data.messageId});};
+  complete('1. Invite friend. 2. Verify an addressed answer.');verify();
+  decide('changes_requested','Add a reconnect check.');
+  mutate('friend-dot','work.started',{resolvedBlocker:'Adding reconnect check'});
+  complete('1. Invite friend. 2. Verify addressed answer. 3. Disconnect and reconnect; verify no duplicate output.');
+  assert.throws(()=>decide('approved','Looks good'),'old review cannot approve new evidence');
+  verify();decide('approved','Recovery check included; accepted.');
+  assert.equal(item().decision.decision,'approved');assert.equal(item().verification.independenceConfirmed,true);
+  assert.notEqual(f.state().members['friend-dot'].accountableHumanId,f.state().members['john-agent'].accountableHumanId);
+  assert.doesNotThrow(()=>f.s.agentConnections.verify());
+});
