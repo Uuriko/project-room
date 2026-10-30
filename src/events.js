@@ -1,4 +1,4 @@
-import { canAdministerRoom } from './room-administration.js';
+import { canAdministerRoom, canInviteCoOwners, museDevelopmentAccess } from './room-administration.js';
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
@@ -18,6 +18,7 @@ export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
+  ROOM_DEVELOPMENT_ACCESS_SET: "room.development_access_set",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
@@ -402,6 +403,15 @@ export function spendPricingEnabled(state) {
   return stored.enabled !== false;
 }
 
+function setDevelopmentAccess(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (state.room.id !== "muse-room") throw new Error("Development access is only available in Muse Room");
+  if (!ownerLevel(state, actor.id)) throw new Error("Room administrator required");
+  if (typeof incoming.data?.enabled !== "boolean" || Object.keys(incoming.data).some(k => k !== "enabled")) throw new Error("enabled must be a boolean");
+  state.room.developmentAccess = { enabled: incoming.data.enabled, setById: actor.id, setAt: incoming.at,
+    revision: (state.room.developmentAccess?.revision ?? 0) + 1 };
+}
+
 function setSpendPricing(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   if (!canAdministerRoom(state, actor.id)) throw new Error("Only a Room administrator may set spend pricing");
@@ -662,6 +672,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
+    [EVENT_TYPES.ROOM_DEVELOPMENT_ACCESS_SET]: setDevelopmentAccess,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---
@@ -832,7 +843,7 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "dependsOn", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1104,7 +1115,7 @@ function addMember(state, incoming) {
   // AGENT_ADMIN_PERMISSIONS only when the grant event's actor is the room
   // owner. The grant is explicit, auditable (actorId on the event), and
   // marked on the event + projection via delegatedAdmin below.
-  const isOwnerGrant = !isBootstrapOwner && incoming.actorId === state.room.ownerId;
+  const isOwnerGrant = !isBootstrapOwner && canInviteCoOwners(state, incoming.actorId);
   validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner, isOwnerGrant);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
@@ -1234,7 +1245,7 @@ function changeMemberAccess(state, incoming) {
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
   // #643: thread the owner-grant context like addMember does — the owner may
   // grant (or strip) administration on a non-owner agent.
-  const isOwnerGrant = incoming.actorId === state.room.ownerId;
+  const isOwnerGrant = canInviteCoOwners(state, incoming.actorId);
   validatePermissions(incoming.data.permissions, member.kind, false, isOwnerGrant);
   // A self-leave with unchanged permissions grants and removes no authority,
   // so the scoped-administration rule does not apply to it. Without this,
@@ -1337,7 +1348,7 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   // Delegated agents may grant existing humans permissions they hold.
   // Delegating administrative authority onward to agents remains owner-controlled.
   // The subset check below also prevents granting or removing unheld authority.
-  if (actor.delegatedAdmin && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
+  if (actor.delegatedAdmin && !museDevelopmentAccess(state) && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
     throw new Error("Delegated administrators cannot re-delegate");
   }
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);

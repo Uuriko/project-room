@@ -4,6 +4,10 @@ import { archiveMarker, affectedMessageIds } from './messages-store.mjs';
 import { DEFAULT_CHANNEL_ID } from '../src/events.js';
 import { messageInHistory } from './history-visibility.mjs';
 
+// S-6: per-store retained-set seq maps (see liveSeqs below). WeakMap so a
+// discarded store takes its cache with it.
+const seqCaches = new WeakMap();
+
 export function decodeMessageRecord(row) {
   const record = JSON.parse(row.record_json);
   if (!record || typeof record !== 'object' || record.id !== row.message_id) throw new Error('Invalid archived message record');
@@ -35,6 +39,42 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
   const live = state.messages ?? [];
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = marker ? [roomId, marker.throughSeq, marker.retainedJson] : [];
+  // The retained set's id->seq map. A message row's seq is fixed at insert
+  // (no update path touches it) and the room sequence advances on every
+  // command, so (room sequence, archive marker) pins the map: cache it per
+  // store and let any write move the key past the stale entry. Stores that
+  // cannot key it (test doubles without room()) build it fresh, as before.
+  // On current main the map itself is messageSequences(): the messages-table
+  // lookup plus the posting-event fallback for unindexed rows.
+  function liveSeqs(ids) {
+    let cache = null, key = null;
+    if (marker && typeof store.room === 'function') {
+      key = `${store.room(roomId).sequence}|${marker.throughSeq}|${marker.retainedJson}`;
+      cache = seqCaches.get(store);
+      if (!cache) { cache = new Map(); seqCaches.set(store, cache); }
+      const hit = cache.get(roomId);
+      if (hit && hit.key === key) return hit.seqs;
+    }
+    const seqs = messageSequences(store.db, roomId, ids);
+    if (cache) cache.set(roomId, { key, seqs });
+    return seqs;
+  }
+  // Archived-leg viewer count with both visibility halves pushed into SQL:
+  // the targeted-DM rule and the PRIV-2 history floor (created_at window +
+  // same-instant exclusions, encoded exactly as records()' visibleSql).
+  // countViewerVisible below is the live+archived total; this is the
+  // archived leg alone, which snapshot()'s archived-room default needs for
+  // its window marker.
+  function countArchivedForViewer(viewerId, floor = null) {
+    if (!marker) return 0;
+    const at = floor?.at ?? null;
+    const row = store.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${archived}
+      AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
+      AND (? IS NULL OR created_at>=?)
+      AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))`)
+      .get(...params, viewerId, viewerId, at, at, at, at, JSON.stringify([...(floor?.sameInstant ?? [])]));
+    return Number(row?.n ?? 0);
+  }
   function* records({ bodyPrefix = null, descending = false, afterId = null, beforeSequence = null, beforeId = null, visibility = null, omitBodies = false } = {}) {
     if (typeof omitBodies !== 'boolean') throw new TypeError('Message body projection must be boolean');
     if (beforeId !== null && (beforeSequence === null || typeof beforeId !== 'string' || !beforeId || beforeId.length > 256)) throw new TypeError('Message tie-break requires a sequence cursor');
@@ -69,7 +109,7 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       return;
     }
     const ids = live.map(m => m.id);
-    const seqs = messageSequences(store.db, roomId, ids);
+    const seqs = liveSeqs(ids);
     const order = (a,b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     let cursor = beforeSequence === null ? null : { seq: beforeSequence, id: beforeId ?? '' };
     if (afterId !== null) {
@@ -150,6 +190,7 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
         .get(...params, viewerId, viewerId, ...floorParams);
       return count + Number(row?.n ?? 0);
     },
+    countArchivedForViewer,
     firstPostedAtByAuthor() {
       const result=new Map();
       const add=(author,at)=>{const time=Date.parse(at);if(author && Number.isFinite(time) && (!result.has(author)||time<result.get(author)))result.set(author,time);};

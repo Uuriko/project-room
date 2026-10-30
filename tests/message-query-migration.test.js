@@ -121,7 +121,9 @@ test('partial message backfill after prefix archive preserves snapshots and seek
  assert.deepEqual(f.repo().recent(3).map(m=>m.id),expected.slice(-3));
  assert.deepEqual([...f.repo().records({afterId:'partial-8'})].map(m=>m.id),expected.slice(9));
  assert.deepEqual([...f.repo().records({afterId:'partial-10',descending:true})].map(m=>m.id),expected.slice(0,10).reverse());
- assert.deepEqual(f.s.snapshot(f.token,'commons').state.messages.map(m=>m.id),expected);
+ // #4265 ruling: a bare snapshot on an archived room returns the live window
+ // only; this assertion wants full history, so it asks for it explicitly.
+ assert.deepEqual(f.s.snapshot(f.token,'commons',null,'full',false,false,'full',null,true).state.messages.map(m=>m.id),expected);
  assert.deepEqual(f.s.snapshot(f.token,'commons',null,'full',false,false,'full',3).state.messages.map(m=>m.id),expected.slice(-3));
  assert.equal(f.s.db.prepare('SELECT count(*) n FROM messages WHERE message_id=?').get('partial-8').n,0,'read does not mutate or certify the partial table');
 });

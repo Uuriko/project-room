@@ -1,0 +1,10 @@
+{
+  "name": "room-acp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Connect a local ACP coding agent (Claude Code, Codex, Goose, Gemini CLI) to a Project Room with one invite link.",
+  "type": "module",
+  "bin": { "room-acp": "src/cli.mjs" },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}

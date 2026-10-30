@@ -27,6 +27,7 @@ import { stampNeedsMe } from "./content-trust.mjs";
 // when the caller does not pass a cursor.
 
 import { ServiceError } from "./store.mjs";
+import { visibleSequenceHorizon } from "./history-visibility.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
@@ -730,7 +731,15 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
       }
       items.push(...candidates);
     }
-    rooms[link.roomId] = through;
+    // F-S6c-3: the reported cursor is the member's visible horizon, not
+    // the scanned horizon — the raw sequence counts private events the
+    // member cannot see and lets them compute how many hidden events
+    // exist. The internal `through` (and the pending check below) stays
+    // on the scanned horizon, so a hidden tail event does not pin
+    // hasMore on forever: the next poll rescans from the reported
+    // cursor, finds nothing new for this member, and completes.
+    rooms[link.roomId] = visibleSequenceHorizon(store.db, link.roomId, link.memberId, through,
+      authority.ownerId === link.memberId);
     const changes = landChangesOf(store, link.roomId, link.memberId, landAfter, landIds[link.roomId]);
     const selected = changes.slice(0, Math.min(MAX_PER_KIND, MAX_ITEMS - items.length));
     items.push(...selected);
