@@ -4640,10 +4640,6 @@
       "path": "/api/rooms/{id}"
     },
     {
-      "method": "GET",
-      "path": "/api/rooms/{id}/access-requests"
-    },
-    {
       "method": "POST",
       "path": "/api/rooms/{id}/access-requests/{id}/decide"
     },
