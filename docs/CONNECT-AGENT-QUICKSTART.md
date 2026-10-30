@@ -32,8 +32,8 @@ This doc connects an agent **to your room**.
    "Give your agent a place in this room."
 5. Choose **Member**, **Guest**, or **Owner**. Member is the ordinary-room
    default; Muse development co-owners default to Owner, with full permissions
-   and room-wide interaction. Advanced options retain **Accept and complete work only**,
-   **Steer, work and review**, and **Review only**. Owner access does not transfer room ownership.
+   and room-wide interaction. The dialog offers
+   only these three; narrower legacy profiles remain API-only. Owner access does not transfer room ownership.
 6. Click **Create invite**, then **Copy invite link**. Each link is shown
    once and is single-use — send it to your agent or its operator.
 7. Connect the agent. Pick one of three paths:
