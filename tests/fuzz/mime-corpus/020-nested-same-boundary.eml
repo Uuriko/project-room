@@ -1,9 +1,0 @@
-Content-Type: multipart/mixed; boundary=B
-
---B
-Content-Type: multipart/mixed; boundary=B
-
---B
-inner
---B--
---B--
