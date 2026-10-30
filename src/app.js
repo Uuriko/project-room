@@ -1,3 +1,4 @@
+import { talkPolicySelect, TALK_POLICY_LABELS } from "./talk-policy-ui.js";
 import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
 import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
@@ -426,6 +427,7 @@ let roomActionsContext = null;
 // C6: owner-facing agent controls. agentPauses is the owner's last-read paused
 // roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
 // Remove button is waiting for its confirming second click.
+let talkPolicies = new Map();
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
@@ -682,7 +684,7 @@ const client = new RoomClient({
     // Restore the authored human defaults: People stays quiet until disclosed.
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
     $("#room-about").open = true;
-    agentPauses = new Map(); armedRemoval = null;
+    agentPauses = new Map(); talkPolicies = new Map(); armedRemoval = null;
     $("#message-delivery").replaceChildren(); $("#message-delivery").hidden = true;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -2094,7 +2096,7 @@ function render() {
     const agent = m.kind === "agent";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
     // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}">${agent ? `<button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button>` : ""}<button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}">${agent ? `<button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button>${talkPolicySelect(m.id, talkPolicies.get(m.id))}` : ""}<button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const connectionStale = $("#connection-status").dataset.interrupted === "true";
   const presenceStale = connectionStale || presenceUnrefreshed || presenceObservationAged();
@@ -4955,7 +4957,31 @@ async function refreshAgentPauses() {
     render();
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
-$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
+async function refreshTalkPolicies() {
+  if (!state || !session || state.room.ownerId !== session.member.id) return;
+  const generation = client.generation;
+  const agents = Object.values(state.members).filter(m => m.kind === "agent" && m.active !== false && m.id !== session.member.id);
+  const read = await Promise.allSettled(agents.map(m => client.request(client.path(`/members/${encodeURIComponent(m.id)}/talk-policy`))));
+  if (generation !== client.generation || !state) return;
+  read.forEach((r, i) => { if (r.status === "fulfilled" && r.value?.policy) talkPolicies.set(agents[i].id, r.value.policy); });
+  render();
+}
+document.addEventListener("change", async e => {
+  const select = e.target.closest?.("[data-talk-policy]");
+  if (!select || !state || !session || state.room.ownerId !== session.member.id) return;
+  const memberId = select.dataset.talkPolicy, previous = talkPolicies.get(memberId) ?? "room";
+  const generation = client.generation;
+  try {
+    const view = await client.request(client.path(`/members/${encodeURIComponent(memberId)}/talk-policy`), { method: "PUT", data: { policy: select.value } });
+    if (generation !== client.generation || !state) return;
+    talkPolicies.set(memberId, view?.policy ?? select.value);
+    notice(`${displayName(memberId)}: ${TALK_POLICY_LABELS[talkPolicies.get(memberId)] ?? select.value} can wake it.`);
+  } catch (error) {
+    select.value = previous;
+    if (generation === client.generation && state) notice(error.message || "Setting not saved. Try again.", true);
+  }
+});
+$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshTalkPolicies(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
 // plan-dir-card: lazy-load a member's directory card the first time its
 // chip section expands. The endpoint 404s when the member has no visible
 // card; the section only renders when the roster advertised a cardAgentId,

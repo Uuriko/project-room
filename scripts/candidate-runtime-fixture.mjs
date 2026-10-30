@@ -59,6 +59,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/composer-files.js'); // Composer file chips (imported by src/app.js)
   paths.add('src/session-expiry.js'); // Session-expiry locale rendering (imported by src/app.js + src/join.js)
   paths.add('src/agent-invite-ui.js');
+  paths.add('src/talk-policy-ui.js'); // #5384
   paths.add('src/share-invite-code.js');
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
