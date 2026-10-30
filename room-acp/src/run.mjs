@@ -9,7 +9,7 @@ export async function run(options, { print, env = process.env, fetchImpl = fetch
   if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
   const list = candidates({ agent: options.agent ?? connection.agent, agentCmd: options.agentCmd, env });
   let candidate = null;
-  for (const entry of list) { if ((await probe(entry, { env })).ok) { candidate = entry; break; } }
+  for (const entry of list) { if ((await probe(entry, { env, timeoutMs: entry.command === "npx" ? 120000 : 10000 })).ok) { candidate = entry; break; } }
   if (!candidate) { print("No working ACP agent found. Run `room-acp doctor`, or pass --agent / --agent-cmd."); return 1; }
   const log = logger(line => print(line));
   const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, maxSessions: options.maxSessions, fetchImpl, log });

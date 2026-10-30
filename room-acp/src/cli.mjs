@@ -12,7 +12,7 @@ export async function doctor(options, { print = console.log, env = process.env }
   if (!list.length) { print("No ACP agent found. Install one of: claude-agent-acp, codex-acp, goose, gemini, or pass --agent-cmd."); return 1; }
   let ok = 0;
   for (const candidate of list) {
-    const result = await probe(candidate, { cwd: options.cwd ?? process.cwd(), env });
+    const result = await probe(candidate, { cwd: options.cwd ?? process.cwd(), env, timeoutMs: candidate.command === "npx" ? 120000 : 10000 });
     if (result.ok) {
       ok++;
       const caps = result.capabilities;
