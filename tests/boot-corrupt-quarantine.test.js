@@ -15,6 +15,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { createRuntimePackage } from "../scripts/runtime-package.mjs";
+import { v11ReplyBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Two rooms: alpha carries three messages and a valid checkpoint; beta is
 // the healthy bystander every case must keep serving.
@@ -99,6 +103,75 @@ test("the quarantine record clears once the room's bytes are repaired", t => {
   store.repairProjectionProvenance();
   assert.deepEqual(store.corruptRoomReports(), []);
   assert.equal(store.room("alpha").state.messages.length, 3);
+});
+
+// The upgrade half of #4126: a database stored by an older schema carries
+// the same corruption through the constructor's legacy reconciliation scans
+// (reply-request, help-field and outside-credit markers) and the work
+// projection migration, all of which run before the quarantine scan. Each
+// fixture below is a genuine old database, built by that era's packaged
+// runtime (the tests/external-producer.test.js pattern): commons carries
+// one message and a checkpoint, beta is the healthy bystander.
+const v25Baseline = "33c817a911ebb9fb0310592cac77d8e61380541d"; // schema v25 runtime
+
+async function legacyFixture(t, commit) {
+  const directory = mkdtempSync(join(tmpdir(), "room-boot-quarantine-legacy-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const repository = fileURLToPath(new URL("../", import.meta.url));
+  const runtime = join(directory, "runtime");
+  createRuntimePackage({ repository, commit, destination: runtime });
+  const { RoomStore: OldStore } = await import(pathToFileURL(join(runtime, "server/store.mjs")));
+  const { initialRoom: legacyInitialRoom } = await import(pathToFileURL(join(runtime, "server/bootstrap.mjs")));
+  const filename = join(directory, "room.sqlite");
+  const old = new OldStore(filename);
+  old.initialize(legacyInitialRoom());
+  old.initialize(legacyInitialRoom("beta"));
+  const key = old.issueAccessKey("commons", "owner");
+  old.command(key, "commons", { id: "cmd-m1", type: "message.posted", data: { body: "hello from the old schema", messageId: "m1" } });
+  const row = old.db.prepare("SELECT sequence, projection FROM rooms WHERE id='commons'").get();
+  old.db.prepare("INSERT INTO projection_checkpoints (room_id, sequence, projection) VALUES ('commons', ?, ?)")
+    .run(row.sequence, row.projection);
+  return { filename, old };
+}
+
+test("upgrading a v25 database with an invalid-JSON room projection quarantines that room only", async t => {
+  const f = await legacyFixture(t, v25Baseline);
+  f.old.db.prepare("UPDATE rooms SET projection='garbage{' WHERE id='commons'").run();
+  f.old.close();
+  const store = new RoomStore(f.filename);
+  t.after(() => store.close());
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
+  assert.deepEqual(store.corruptRoomReports().map(report => report.roomId), ["commons"]);
+  // The healthy room reads and writes after the upgrade boot.
+  assert.equal(store.room("beta").state.room.id, "beta");
+  const key = store.issueAccessKey("beta", "owner");
+  store.command(key, "beta", { id: "cmd-after-upgrade", type: "message.posted", data: { body: "still serving", messageId: "after-upgrade" } });
+  assert.equal(store.room("beta").state.messages.length, 1);
+  assert.throws(() => store.room("commons"), SyntaxError);
+});
+
+test("upgrading a v25 database with a garbage checkpoint replays the full history", async t => {
+  const f = await legacyFixture(t, v25Baseline);
+  f.old.db.prepare("UPDATE projection_checkpoints SET projection='garbage{' WHERE room_id='commons'").run();
+  f.old.close();
+  const store = new RoomStore(f.filename);
+  t.after(() => store.close());
+  assert.deepEqual(store.corruptRoomReports(), []);
+  assert.equal(store.room("commons").state.messages.length, 1);
+  assert.equal(store.rebuildProjection("commons").state.messages.length, 1);
+  assert.equal(store.room("beta").state.room.id, "beta");
+});
+
+test("upgrading a v11 database with an invalid-JSON room projection passes every legacy scan", async t => {
+  const f = await legacyFixture(t, v11ReplyBaseline);
+  f.old.db.prepare("UPDATE rooms SET projection='garbage{' WHERE id='commons'").run();
+  f.old.close();
+  const store = new RoomStore(f.filename);
+  t.after(() => store.close());
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
+  assert.deepEqual(store.corruptRoomReports().map(report => report.roomId), ["commons"]);
+  assert.equal(store.room("beta").state.room.id, "beta");
+  assert.throws(() => store.room("commons"), SyntaxError);
 });
 
 test("a healthy database boots with an empty quarantine record", t => {
