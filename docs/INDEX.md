@@ -114,7 +114,7 @@ Worked examples: [examples/claim.md](examples/claim.md), [examples/receipt.md](e
 
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). Durable job alarms, the watchdog, and per-room SQLite history are specified in [design/DURABLE-JOBS-AND-WATCHDOG.md](design/DURABLE-JOBS-AND-WATCHDOG.md). Those flags stay off; the page is not a cutover. The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md). The October 2026 page-weight and origin-time baseline is [PERF-2026-10.md](PERF-2026-10.md).
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). Durable job alarms, the watchdog, and per-room SQLite history are specified in [design/DURABLE-JOBS-AND-WATCHDOG.md](design/DURABLE-JOBS-AND-WATCHDOG.md). Those flags stay off; the page is not a cutover. The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Swarm knowledge
 
@@ -152,16 +152,7 @@ Specialized references that are current but narrow: [WORKITEMS-BOARD-STEP0.md](W
 
 ## History
 
-Earlier implementation and release plans retain their original evidence:
-[unified conversation](UNIFIED-CONVERSATION-20261019.md),
-[chat-to-result](CHAT-RESULT-IMPLEMENTATION-20261019.md),
-[collaboration execution](COLLABORATION-EXECUTION-20261019.md),
-[focused collaboration](FOCUSED-COLLABORATION-PLAN-20261019.md),
-[entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md),
-[controller simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md),
-[release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
-[cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
-Reconcile dated implementation and next-action claims before reusing them.
+Dated implementation and release plans from October 2026 were removed in the MVP docs collapse; git history keeps them. The one current plan is [FOCUSED-DELIVERY-PLAN.md](FOCUSED-DELIVERY-PLAN.md). The [release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md) record stays because tests cite it.
 
 Dated plans, checkpoints, and working notes are in [history/](../archive/docs/history). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
 
