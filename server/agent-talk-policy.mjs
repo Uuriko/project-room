@@ -3,7 +3,8 @@
 // a bridge can never disagree with what actually wakes the agent.
 //
 // Policies:
-//   owner   the agent's accountable human and that human's own agents (default
+//   owner   the agent's accountable human, that human's own agents, and the
+//           room owner (default
 //           for agents that join after this ships)
 //   members owner rule plus a named list of member ids
 //   room    anyone in the room (what every agent had before; agents with no
@@ -55,6 +56,7 @@ export function talkAllowed(state, setting, senderId, targetId) {
   const sender = state?.members?.[senderId];
   if (!sender) return false;
   if (owner && (senderId === owner || memberOwnerId(state, senderId) === owner)) return true;
+  if (state?.room?.ownerId && senderId === state.room.ownerId) return true; // room owner can always get work out of a member agent
   return policy === "members" && allowed.includes(senderId);
 }
 
@@ -65,7 +67,7 @@ export function mayWake(db, state, roomId, senderId, targetId) {
 // Seed the default for a newly joined agent. Never overwrites a choice.
 export function seedNewAgentPolicy(db, roomId, memberId, at, state = null) {
   db.prepare(`INSERT OR IGNORE INTO agent_talk_policies(room_id,member_id,policy,allowed_json,updated_by,updated_at)
-    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, museDevelopmentAccess(state) ? "room" : DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
+    VALUES(?,?,?,?,?,?)`).run(roomId, memberId, DEFAULT_NEW_AGENT_POLICY, "[]", "default", at);
 }
 
 // Validate and write a change. Only the room owner or the agent's own

@@ -30,7 +30,7 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
   if (!authorId || authorId === me?.id) return false;
   if (respondTo === "anyone") return Boolean(members[authorId] && members[authorId].active !== false);
   const boss = me?.accountableHumanId ?? ownerId;
-  if (authorId === boss) return true;
+  if (authorId === boss || authorId === ownerId) return true; // ownerId = room owner
   const author = members[authorId];
   return Boolean(author && author.kind === "agent" && author.active !== false && author.accountableHumanId === boss);
 }
