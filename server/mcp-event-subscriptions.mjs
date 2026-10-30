@@ -35,6 +35,17 @@ function thinId(value) {
   return value;
 }
 
+function subscriptionIdentity(principal, name, args, delivery) {
+  const key = principalKey(principal);
+  if (name !== "room.requested" || !args || Object.keys(args).sort().join(",") !== "memberId,roomId" || args.roomId !== principal.roomId || args.memberId !== principal.memberId) fail("Event scope must match the authenticated agent");
+  if (delivery?.mode !== "webhook") fail("Only webhook delivery is supported");
+  let url;
+  try { url = new URL(delivery.url); } catch { fail("Invalid callback URL"); }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) fail("Invalid callback URL");
+  const canonicalArgs = { roomId: args.roomId, memberId: args.memberId };
+  return { id: `sub_${hash(JSON.stringify([key, url.href, name, canonicalArgs]))}`, url, canonicalArgs };
+}
+
 export function createMcpEventSubscriptions({ store, authorize, transport, dnsResolvers, now = () => store.now(), ttlMs = HOUR }) {
   if (typeof authorize !== "function" || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 24 * HOUR) throw new TypeError("Invalid event configuration");
   const db = store.db;
@@ -51,15 +62,10 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
   async function subscribe({ principal, name, arguments: args, delivery, cursor = null, ttlMs: requestedTtl }) {
     sweep();
     const key = principalKey(principal);
-    if (name !== "room.requested" || !args || Object.keys(args).sort().join(",") !== "memberId,roomId" || args.roomId !== principal.roomId || args.memberId !== principal.memberId || cursor !== null) fail("Event scope must match the authenticated agent");
-    if (delivery?.mode !== "webhook") fail("Only webhook delivery is supported");
+    if (cursor !== null) fail("Event replay is not supported");
+    const { id, url, canonicalArgs } = subscriptionIdentity(principal, name, args, delivery);
     eventSigningKey(delivery.secret);
-    let url;
-    try { url = new URL(delivery.url); } catch { fail("Invalid callback URL"); }
-    if (url.protocol !== "https:" || url.username || url.password || url.hash) fail("Invalid callback URL");
     if (!await authorize(JSON.parse(key))) throw Object.assign(new Error("Event grant denied"), { code: -32001 });
-    const canonicalArgs = { roomId: args.roomId, memberId: args.memberId };
-    const id = `sub_${hash(JSON.stringify([key, url.href, name, canonicalArgs]))}`;
     if (!get(id) && db.prepare("SELECT count(*) AS n FROM mcp_event_subscriptions WHERE principal=?").get(key).n >= 20) fail("Event subscription limit exceeded");
     const old = get(id), previous = old && JSON.parse(old.document);
     const generation = randomUUID();
@@ -85,8 +91,10 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
     }
     return { id, refreshBefore: new Date(expiresAt).toISOString(), cursor: null, truncated: false };
   }
-  function unsubscribe({ principal, id }) {
+  function unsubscribe({ principal, id, name, arguments: args, delivery }) {
     const key = principalKey(principal);
+    if (id === undefined) id = subscriptionIdentity(principal, name, args, delivery).id;
+    if (typeof id !== "string" || id.length > 128) fail("Invalid subscription id");
     // Tombstones fence challenge completion and in-flight delivery acknowledgements.
     db.prepare("UPDATE mcp_event_subscriptions SET state='inactive',document='{}',generation=? WHERE id=? AND principal=?").run(randomUUID(), id, key);
     db.prepare("UPDATE mcp_event_outbox SET state='dead',lease=NULL WHERE subscription_id=? AND EXISTS (SELECT 1 FROM mcp_event_subscriptions WHERE id=? AND principal=? AND state='inactive')").run(id, id, key);

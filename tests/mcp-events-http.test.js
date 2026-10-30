@@ -65,7 +65,7 @@ test('native work assignment needs no desktop host registration and unsubscribe 
   assert.equal(f.store.agentHeartbeats.statusOf(f.grant.identity_id).hosts.length, 0);
   f.store.command(f.owner, 'commons', { id: 'native-assign', type: 'work.proposed', data: { workItemId: 'native-task', title: 'Review the plan', definitionOfDone: 'A concrete review', accountableMemberId: f.grant.member_id, mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false } });
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
-  assert.equal((await f.rpc('events/unsubscribe', { id: sub.result.id })).result.resultType, 'complete');
+  assert.equal((await f.rpc('events/unsubscribe', { name: 'room.requested', arguments: { memberId: f.grant.member_id, roomId: 'commons' }, delivery: { mode: 'webhook', url: 'https://callback.example/events' } })).result.resultType, 'complete');
   f.mention('after-unsubscribe'); await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
 });
 

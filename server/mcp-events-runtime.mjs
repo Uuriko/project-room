@@ -31,8 +31,7 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
       }
       if (message.method === 'events/subscribe') return result(await manager.subscribe({ ...args, principal: descriptor }));
       if (message.method === 'events/unsubscribe') {
-        if (typeof args.id !== 'string' || args.id.length > 128) throw Object.assign(new Error('Invalid subscription id'), { code: -32602 });
-        return result(manager.unsubscribe({ principal: descriptor, id: args.id }));
+        return result(manager.unsubscribe({ ...args, principal: descriptor }));
       }
       return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } };
     } catch (error) { return { jsonrpc: '2.0', id: message.id, error: { code: Number.isInteger(error.code) ? error.code : -32603,
