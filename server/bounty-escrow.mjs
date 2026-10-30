@@ -2175,6 +2175,14 @@ export class BountyEscrow {
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
       check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
       check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
+      // #3591: the deadline is also the end of the review window. Claim and
+      // submit already refuse at it (the same check, above in claimBounty /
+      // submitWork); accept must too, or a post-deadline accept races a
+      // permissionless finalizeBounty for the same facts and poke order
+      // decides the ledger. This check moves no money — settlement stays
+      // with the keeper doors (finalizeBounty / closeEpoch) — it only makes
+      // the boundary deterministic: post-deadline accepts always lose.
+      check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the acceptance deadline passed");
       check(verifierAttestation !== null && typeof verifierAttestation === "object" && !Array.isArray(verifierAttestation)
         && Object.keys(verifierAttestation).length > 0, "invalid_input", "verifierAttestation must be a non-empty object");
       if (verifierAttestation.at !== undefined)
