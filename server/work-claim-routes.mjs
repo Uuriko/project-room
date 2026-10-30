@@ -235,9 +235,9 @@ function releaseRoundConflict(item, callerRound, roomId) {
   const detail = stateChange.from === null
     ? `its current state is "${stateChange.to}"`
     : stateChange.from !== stateChange.to && stateChange.ownerChanged
-      ? `its state changed from "${stateChange.from}" to "${stateChange.to}" and its owner changed`
+      ? `its state changed from ${JSON.stringify(stateChange.from)} to ${JSON.stringify(stateChange.to)} and its owner changed`
       : stateChange.from !== stateChange.to
-        ? `its state changed from "${stateChange.from}" to "${stateChange.to}"`
+        ? `its state changed from ${JSON.stringify(stateChange.from)} to ${JSON.stringify(stateChange.to)}`
         : stateChange.ownerChanged
           ? "its owner changed"
           : "it was released and re-claimed";
