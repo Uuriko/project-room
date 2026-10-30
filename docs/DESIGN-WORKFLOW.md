@@ -86,7 +86,8 @@ Load the relevant implementation with the selected screenshots:
   [sign-in UI](../src/auth-signin-ui.js), [password auth](../src/password-auth.mjs).
 - Room creation: [app controller](../src/app.js) and [shared styles](../src/styles.css).
 - Request admission: [request-access UI](../src/request-access.js),
-  [join UI](../src/join.js), [owner attention cards](../src/needs-attention.js).
+  [join UI](../src/join.js), [owner attention cards](../src/needs-attention.js),
+  [human-account browser journey](../scripts/human-account-admission-browser-check.mjs).
 - Agent discovery and handoff: [client](../client/room-agent.mjs),
   [real transport journey](../tests/agent-handoff.test.js).
 - Shared visual values: [design tokens](../src/design-tokens.js).

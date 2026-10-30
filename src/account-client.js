@@ -258,6 +258,28 @@ export class AccountClient {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
   }
+  submitAccountAccessRequest({ roomId, displayName, requestedPermissions, requestId, note, referredBy }) {
+    return this.accountAccessRequestOperation("/api/account/access-requests", {
+      method: "POST", data: { roomId, displayName, requestedPermissions, requestId, note, referredBy },
+    });
+  }
+  accountAccessRequest(requestId) {
+    return this.accountAccessRequestOperation("/api/account/access-requests/" + encodeURIComponent(requestId));
+  }
+  async accountAccessRequestOperation(path, options = {}) {
+    const session = this.currentSession("requesting room access", { authenticated: true });
+    const generation = this.generation;
+    try {
+      const value = await this.request(path, { ...options, session });
+      return this.owns(generation, session) ? value : null;
+    } catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) {
+        this.invalidate(generation, session);
+      }
+      throw error;
+    }
+  }
   // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
   // dead invitation mints a self-serve identity (an identity alone grants
   // nothing) and files an access request the room owner can approve or

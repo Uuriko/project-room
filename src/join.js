@@ -12,7 +12,7 @@
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
-import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
+import { submitGeneralAccessRequest, approvedAccountRequestRoom, readHumanAccessRequest, retireHumanAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 
@@ -419,10 +419,17 @@ function renderEnter() {
 
 // The consolidated request-access door (human-map §8.1): the join page is
 // the one place a human without a code asks a room owner in. Submission
-// reuses the existing flow (src/request-access.js): mint a self-serve
-// identity (an identity alone grants nothing), file POST
-// /api/access-requests with its secret as proof, stash for idempotent
-// retries. Wired once-only, like the entry form.
+// preserves a signed human account; agent identity proof stays separate.
+// Wired once-only, like the entry form.
+let admissionEpoch = 0;
+let stopAdmissionWatch = null;
+function beginAdmissionOperation() {
+  admissionEpoch++;
+  stopAdmissionWatch?.();
+  stopAdmissionWatch = null;
+  return admissionEpoch;
+}
+
 function renderRequestDoor() {
   const card = $("join-request");
   if (!card) return;
@@ -459,22 +466,36 @@ function renderRequestDoor() {
     form.dataset.requestWired = "1";
     form.addEventListener("submit", async event => {
       event.preventDefault();
+      const operation = beginAdmissionOperation();
       const statusEl = $("join-request-status");
       const submitEl = $("join-request-submit");
       if (submitEl) submitEl.disabled = true;
       if (statusEl) { statusEl.textContent = uiText("join.request.sending"); statusEl.classList.add("visible"); statusEl.classList.remove("error"); }
       try {
+        const client = new AccountClient();
         const result = await submitGeneralAccessRequest({
-          client: new AccountClient(),
+          client,
+          requireHuman: true,
           storage: globalThis.sessionStorage,
           roomId: fixed ? roomId : $("join-request-room")?.value,
           displayName: $("join-request-name")?.value,
           note: $("join-request-note")?.value,
           referredBy: $("join-request-referred")?.value,
         });
+        if (operation !== admissionEpoch) return;
         form.hidden = true;
         if (statusEl) statusEl.textContent = uiText("join.request.sent", { roomId: result.roomId, requestId: result.requestId });
+        if (result.principalKind === "account") {
+          if (globalThis.history) {
+            const target = new URL(globalThis.location.href);
+            target.searchParams.set("room", result.roomId);
+            target.searchParams.set("access-request", "pending");
+            globalThis.history.replaceState(globalThis.history.state, "", target.href);
+          }
+          watchHumanAdmission(client, result, statusEl, operation);
+        }
       } catch (error) {
+        if (operation !== admissionEpoch) return;
         if (submitEl) submitEl.disabled = false;
         const message = error?.code === "rate_limited" || error?.status === 429
           ? uiText("join.request.rateLimited")
@@ -482,11 +503,131 @@ function renderRequestDoor() {
             ? uiText("join.request.alreadyMember")
             : typeof error?.message === "string" && error.message ? error.message : uiText("join.request.failed");
         if (statusEl) { statusEl.textContent = message; statusEl.classList.add("visible", "error"); }
+        if (statusEl && error?.code === "account_session_required") {
+          const link = document.createElement("a");
+          link.href = roomEntryHref(error.roomId ?? roomId);
+          link.textContent = uiText("join.request.signin");
+          statusEl.append(" ", link);
+        }
         $("join-request-name")?.focus({ preventScroll: true });
       }
     });
   }
   card.hidden = false;
+  if (new URLSearchParams(globalThis.location?.search).get("access-request") === "pending" && !card.dataset.resumeStarted) {
+    card.dataset.resumeStarted = "1";
+    void resumeHumanAdmission(roomId, card, form);
+  }
+}
+
+async function resumeHumanAdmission(roomId, card, form) {
+  const operation = beginAdmissionOperation();
+  const submitEl = $("join-request-submit");
+  if (submitEl) submitEl.disabled = true;
+  const statusEl = $("join-request-status");
+  card.open = true;
+  if (statusEl) { statusEl.textContent = uiText("join.request.checking"); statusEl.classList.add("visible"); }
+  const client = new AccountClient();
+  try {
+    const session = await client.restore();
+    if (operation !== admissionEpoch) return;
+    if (!session?.authenticated || !session.account?.id) throw new Error(uiText("join.request.signinCheck"));
+    const saved = readHumanAccessRequest(globalThis.sessionStorage, session.account.id, roomId, session.account.authEpoch ?? 0);
+    if (!saved) throw new Error(uiText("join.request.noSaved"));
+    form.hidden = true;
+    watchHumanAdmission(client, { requestId: saved.requestId, roomId }, statusEl, operation);
+  } catch (error) {
+    if (operation !== admissionEpoch) return;
+    if (submitEl) submitEl.disabled = false;
+    if (statusEl) { statusEl.textContent = error.message; statusEl.classList.add("error"); }
+  }
+}
+
+// The pending request is an actual account operation. Check while this
+// page is visible, stop on terminal decisions or navigation, and verify
+// discovery before entering. No identity secret/session is installed.
+function watchHumanAdmission(client, request, statusEl, operation) {
+  if (operation !== admissionEpoch) return;
+  if ($("join-enter")) $("join-enter").hidden = true;
+  const card = $("join-request");
+  if (card) {
+    card.open = true;
+    const title = card.querySelector?.("summary");
+    if (title) title.textContent = uiText("join.request.title", { roomId: request.roomId });
+    const description = card.querySelector?.(":scope > p:not(#join-request-status)");
+    if (description) description.hidden = true;
+  }
+  const session = client.session, generation = client.generation;
+  let timer, stopped = false, checking = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(timer);
+    globalThis.removeEventListener("pagehide", leave);
+    globalThis.document.removeEventListener("visibilitychange", visible);
+  };
+  const leave = event => {
+    stop();
+    // A frozen page retains its hidden form. Re-enter through boot so
+    // the current account and its saved request are restored afresh.
+    if (event.persisted) globalThis.addEventListener("pageshow", event => {
+      if (event.persisted) globalThis.location.reload();
+    }, { once: true });
+  };
+  const visible = () => { if (!globalThis.document.hidden) { clearTimeout(timer); void check(); } };
+  const check = async () => {
+    if (stopped || checking || operation !== admissionEpoch) return;
+    if (globalThis.document.hidden) return;
+    checking = true;
+    try {
+      const result = await approvedAccountRequestRoom(client, request.requestId, request.roomId);
+      if (stopped || operation !== admissionEpoch || !client.owns(generation, session)) { stop(); return; }
+      if (result.room) {
+        stop();
+        globalThis.location.assign(roomEntryHref(result.room.id));
+        return;
+      }
+      if (["denied", "cancelled", "expired", "unavailable"].includes(result.status)) {
+        stop();
+        if (statusEl) statusEl.textContent = result.status === "denied" ? uiText("join.request.denied")
+          : result.status === "cancelled" ? uiText("join.request.cancelled")
+          : result.status === "unavailable" ? uiText("join.request.unavailable") : uiText("join.request.expired");
+        if (statusEl && result.status !== "denied") {
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.textContent = uiText("join.request.again");
+          retry.addEventListener("click", async () => {
+            retry.disabled = true;
+            try {
+              if (!await client.confirm()) throw new Error(uiText("join.request.accountChanged"));
+              if (operation !== admissionEpoch) return;
+              if (!retireHumanAccessRequest(globalThis.sessionStorage, session, request.roomId, request.requestId)) {
+                throw new Error(uiText("join.request.changed"));
+              }
+              const target = new URL(globalThis.location.href);
+              target.searchParams.delete("access-request");
+              globalThis.location.assign(target.href);
+            } catch (error) { statusEl.textContent = error.message; }
+          });
+          statusEl.append(" ", retry);
+        }
+        return;
+      }
+      if (statusEl) {
+        statusEl.classList.remove("error");
+        statusEl.textContent = result.status === "approved" ? uiText("join.request.membershipPending") : uiText("join.request.waiting");
+      }
+    } catch (error) {
+      if (stopped || operation !== admissionEpoch) return;
+      if (statusEl) statusEl.textContent = client.session ? uiText("join.request.reconnecting") : uiText("join.request.accountChanged");
+      if (!client.session) { stop(); return; }
+    } finally { checking = false; }
+    if (!stopped) timer = setTimeout(check, 5000);
+  };
+  stopAdmissionWatch = stop;
+  globalThis.addEventListener("pagehide", leave, { once: true });
+  globalThis.document.addEventListener("visibilitychange", visible);
+  void check();
 }
 
 async function boot() {
