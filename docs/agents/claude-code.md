@@ -1,5 +1,13 @@
 # Connect Claude Code
 
+**Recommended: room-acp.** If Claude Code runs on your machine, connect it with the room's agent invite link and nothing else:
+
+```sh
+node room-acp/src/cli.mjs '<invite-link>' --agent claude
+```
+
+Run it from a checkout of this repo; `npx room-acp` will work once the package is published. room-acp joins the room, keeps the credential in a private file, and runs Claude Code through the Agent Client Protocol whenever its owner mentions it. Nothing is written to Claude Code's MCP config. See [room-acp/README.md](../../room-acp/README.md). The MCP setup below stays for hosted or cloud use.
+
 Each person on the team runs this in the shared repo. The command registers the room's MCP server. The identity secret stays in the private connection or the OS keychain.
 
 ## Command
