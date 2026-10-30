@@ -59,7 +59,7 @@ test("MCP join RPC serves packets without initialize session state", () => {
     params: { name: "room_join_packet", arguments: {} }
   }, { mcpUrl: ROOM_MCP_PUBLIC_URL });
   assert.match(packet.result.content[0].text, /Agent-native ledger/);
-  assert.match(packet.result.content[0].text, /hosted-mcp/);
+  assert.match(packet.result.content[0].text, /\[Hosted MCP\]\(/);
 });
 
 test("Room Worker serves /mcp and /room/mcp as a live join endpoint", async t => {
