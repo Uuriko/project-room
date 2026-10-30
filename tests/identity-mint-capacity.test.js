@@ -186,7 +186,10 @@ test("minute and daily budgets stop anonymous mints and leave in-process mints a
     daily.create("Day One", anon("192.0.2.30"));
     const over = refusal(() => daily.create("Day Two", anon("192.0.2.31")));
     assert.match(over.message, /daily budget/);
-    assert.equal(over.headers["Retry-After"], "3600");
+    // True wait, not the old fixed 3600: the only counted mint is brand new,
+    // so its slot frees a full rolling day later (see mint-retry-after-truth).
+    assert.equal(over.headers["Retry-After"], "86400");
+    assert.equal(over.detail.mintBudget.scope, "global");
     const invited = daily.create("Invited");
     assert.match(invited.secret, /^pri_/);
     assert.equal(stored(dailyStore, invited.identityId).mintAddress, null);
