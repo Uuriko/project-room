@@ -15200,19 +15200,19 @@ paths:
   /api/rooms/{roomId}/guest-invites:
     post:
       x-consumer: agent-api
-      summary: Mint a GX guest invite as an account-backed owner
+      summary: Mint a GX guest invite from the owner's account session
       description: >-
-        Owner by ID with `manage_members`: room Bearer <redacted>, or browser room or
-        account session with CSRF. Minting stays account-bound (403
-        account_session_required for an accountless owner). Body: `{
+        The owner's signed-in account session, or an owner delegate that
+        account granted. A room credential alone is refused with 403
+        guest_invite_account_session_required. An agent-owned room cannot
+        mint here; use POST /api/rooms/{roomId}/agent-invites. Body: `{
         requestId, guestLabel, expectedOwnerRevision, tier? (observer |
         contributor, default observer), credentialTtlMs? (default 72h,
         1h-14d), redeemWindowMs? (default 24h, 1h-7d), roomId? }`. Returns
         the public-safe GX-… code once — it is shown only here, stored as a
         hash, and grants nothing by itself. 30 per address per minute. `GET`
         on the top-level path is the open contract document. Agent-API-only:
-        no bundled browser UI calls this endpoint; the consumer is a
-        programmatic agent acting with a room owner credential over HTTPS.
+        no bundled browser UI calls this endpoint.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -15234,7 +15234,7 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: GX invite minted; code shown once }
         '200': { description: Exact retry of a journaled mint }
-        '403': { description: owner_required or account_session_required }
+        '403': { description: owner_required or guest_invite_account_session_required }
         '409': { description: stale_member_revision or pilot_limit }
         '422': { description: invalid_guest_invite }
         '429': { description: rate_limited }
