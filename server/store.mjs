@@ -114,51 +114,6 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensur
 import { identityRoomSeats } from "./membership-resolution.mjs";
 import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
-// Board v2 is retired. These tables stay so existing databases and the
-// recovery audit still see them. Nothing drops board_vtwo_*.
-const RETIRED_BOARD_V2_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS board_vtwo_claims (
-    task_id     TEXT PRIMARY KEY,
-    lane        TEXT NOT NULL,
-    files       TEXT NOT NULL,
-    lease       TEXT NOT NULL,
-    lease_h     INTEGER NOT NULL,
-    reason      TEXT NOT NULL,
-    state       TEXT NOT NULL,
-    claim_seq   INTEGER NOT NULL,
-    claim_at    TEXT NOT NULL,
-    heartbeat_at TEXT,
-    last_seq    INTEGER NOT NULL,
-    receipts    TEXT NOT NULL DEFAULT '[]'
-  );
-  CREATE TABLE IF NOT EXISTS board_vtwo_events (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    at        TEXT NOT NULL,
-    kind      TEXT NOT NULL,
-    task_id   TEXT,
-    lane      TEXT,
-    payload   TEXT NOT NULL,
-    supersedes INTEGER,
-    idempotency_key TEXT,
-    mirror_issue   INTEGER,
-    mirror_comment INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS board_vtwo_mirror (
-    id             INTEGER PRIMARY KEY CHECK (id = 1),
-    current_issue  INTEGER NOT NULL,
-    issues         TEXT NOT NULL DEFAULT '[]'
-  );
-  CREATE TABLE IF NOT EXISTS board_vtwo_idempotency (
-    scoped_key TEXT PRIMARY KEY,
-    status INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_kind ON board_vtwo_events(kind);
-  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
-  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
-`;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { wakeForAgent } from "./sleeper-wake.mjs";
@@ -1176,7 +1131,7 @@ function roomSchemaStamp() {
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, pairingSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
-    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
+    directSendSchema, inboxStitchSchema,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
@@ -1731,12 +1686,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
-      // PR #1144: board-v2 durable registry (claims/events/mirror/idempotency)
-      // is purely additive — IF NOT EXISTS is idempotent, no schema version
-      // bump, intentionally outside the writer fence (see unfencedAdditiveTables).
-      // Applied here (not only where the registry is instantiated) so upgrades,
-      // store-only fixtures, and the recovery audit see the tables.
-      this.db.exec(RETIRED_BOARD_V2_SCHEMA);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.

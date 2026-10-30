@@ -395,14 +395,6 @@ export const unfencedAdditiveTables = Object.freeze([
   // additive, older writers have no code path to it, and the row only gates
   // delivery — it never grants anything.
   "human_push_preferences",
-  // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
-  // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
-  // and intentionally NOT fenced — older writers have no code path to them,
-  // and the module verifies its own schema on open.
-  "board_vtwo_claims",
-  "board_vtwo_events",
-  "board_vtwo_mirror",
-  "board_vtwo_idempotency",
   // integrity_snapshot (cold-start checksum): one row written only after the
   // yielding integrity job finishes. Purely additive and intentionally NOT
   // fenced — older writers have no code path to it, and a missing or stale
@@ -503,6 +495,18 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
 const RETIRED_OPERATOR_TABLES = Object.freeze([
   "agent_operator_controls",
 ]);
+// Retired board-v2 durable registry (PR #1144): no module creates the
+// board_vtwo_* tables anymore (creation removed), but databases written
+// before the removal still carry them (no DROP was issued, for data
+// preservation). They stay in the allowed set so the recovery audit
+// passes on upgraded databases, while fresh databases simply do not
+// have them.
+const RETIRED_BOARD_VTWO_TABLES = Object.freeze([
+  "board_vtwo_claims",
+  "board_vtwo_events",
+  "board_vtwo_mirror",
+  "board_vtwo_idempotency",
+]);
 // Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
 // journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
 // signal journal (server/claim-reputation.mjs): created on demand by
@@ -570,7 +574,7 @@ const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotatio
 // queue, open pull file sets, and overlap-notice keys. Created on first
 // push. Older writers have no path to these tables.
 const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...RETIRED_BOARD_VTWO_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
