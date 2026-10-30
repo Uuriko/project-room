@@ -5,8 +5,8 @@
         One ordered record per Board claim (#5378): every committed claim
         change (claim, review, CI, merge or close, release) from the room's
         `work_claim.updated` events in sequence order, plus the system steps
-        stamped only on the claim's history (`pr_autolinked`, `deploy_linked`).
-        Each entry carries a `kind` (claim, pr, ci, review, merge, deploy).
+        stamped only on the claim's history (`pr_autolinked`, `deploy_linked`, and note-only updates as `noted` with their text).
+        Each entry carries a `kind` (claim, pr, ci, review, merge, deploy, note).
         Same visibility as the claim read; no chat messages are included.
         The newest 500 events are returned; `truncated` is true when older
         ones exist.

@@ -5,7 +5,7 @@
 import { RoomClient, RoomError } from "./room.mjs";
 import { AgentHost } from "./agent-host.mjs";
 import { ThreadQueue } from "./queue.mjs";
-import { buildPrompt } from "./prompt.mjs";
+import { buildPrompt, buildClaimPrompt } from "./prompt.mjs";
 import { renderTurn } from "./render.mjs";
 import { SessionMap } from "./sessions.mjs";
 import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./permission.mjs";
@@ -14,6 +14,13 @@ export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
 
 const sleep = (ms, signal) => new Promise(resolve => { const timer = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true }); });
+
+// Claim wakes the bridge turns into work. Others (ci, review, lease) are acked.
+export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
+export const CLAIM_KEY = "work-claim:";
+export const MAX_CLAIM_NOTE = 1500;
+// The person who put the claim on the Board is who asked for the work.
+export const claimRequester = claim => (claim?.history ?? []).find(entry => entry?.action === "created")?.agentId ?? null;
 
 export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
   if (!authorId || authorId === me?.id) return false;
@@ -99,6 +106,7 @@ export class Bridge {
     if (this.seen.has(signal.signalId)) return;
     this.seen.add(signal.signalId);
     try {
+      if (signal.workClaim) { await this.acceptClaim(signal); return; }
       if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
       const message = (await this.room.thread(signal.messageId)).thread;
       if (!mayTalk({ authorId: message.authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo })) {
@@ -112,7 +120,46 @@ export class Bridge {
     } catch (error) { this.seen.delete(signal.signalId); throw error; }
   }
 
+  // A Board claim assigned to this agent: one session per claim, reply as a
+  // claim note so it lands in that claim's thread.
+  async acceptClaim(signal) {
+    if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
+    const claim = await this.room.claim(signal.workClaim);
+    const authorId = claimRequester(claim);
+    if (claim?.owner !== this.me.id || !mayTalk({ authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo })) {
+      this.log(`ignored claim ${signal.workClaim} (${signal.reason})`);
+      await this.ack([signal.signalId]); this.stats.skipped++; return;
+    }
+    this.queue.push(CLAIM_KEY + claim.id, { signalId: signal.signalId, claim, author: this.members[authorId]?.displayName ?? authorId });
+  }
+
+  async claimTurn(threadKey, batch) {
+    const signalIds = batch.map(item => item.signalId);
+    const claimId = threadKey.slice(CLAIM_KEY.length);
+    let body;
+    try {
+      await this.agentReady();
+      const { sessionId } = await this.host.session(threadKey);
+      const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: batch[batch.length - 1].claim, author: batch[0].author }), { sessionId });
+      body = renderTurn(recorder, { stopReason });
+      this.stats.turns++;
+    } catch (error) {
+      this.log(`claim turn failed: ${error.message}`);
+      if (this.controller.signal.aborted) return;
+      body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+    }
+    try {
+      await this.room.claimNote(claimId, body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body);
+      this.stats.posted++;
+      await this.ack(signalIds);
+    } catch (error) {
+      for (const id of signalIds) this.seen.delete(id);
+      this.log(`posting the claim note failed (${error.code ?? error.message}); will retry on re-delivery`);
+    }
+  }
+
   async turn(threadKey, batch) {
+    if (threadKey.startsWith(CLAIM_KEY)) return this.claimTurn(threadKey, batch);
     const signalIds = batch.map(item => item.signalId);
     let body;
     try {
