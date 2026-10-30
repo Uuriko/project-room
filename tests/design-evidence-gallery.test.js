@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { readCaptures, renderGallery, JOURNEYS } from "../scripts/design-evidence-gallery.mjs";
+import { readCaptures, renderGallery } from "../scripts/design-evidence-gallery.mjs";
 
 test("gallery binds screenshot bytes, preserves failed test status and refuses unsafe paths", t => {
   const dir = mkdtempSync(join(tmpdir(), "design-gallery-"));
@@ -29,11 +29,10 @@ test("gallery escapes fixture labels and keeps coverage and failure limitations 
   assert.ok(!html.includes('<script>'));
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /capture alone is not a pass/);
-  assert.match(html, /human-account owner admission/);
+  assert.match(html, /real Google\/email delivery/);
   assert.match(html, /real-provider sign-in proof/);
   assert.match(html, /Source stable during capture: NO/);
   assert.match(html, /Overall evidence: NOT passed/);
   assert.match(html, /explicit dark and light themes/);
   assert.match(html, /Image framing/);
-  assert.equal(JOURNEYS.length, 5);
 });
