@@ -75,13 +75,26 @@ it. Model login and local files remain with the operator.
 ## Permissions
 
 room-acp gives the agent no file or terminal access of its own; the agent works
-in `--cwd` with its own tools. When the agent asks permission for a tool call,
-room-acp posts a permission request. Reply directly to that specific request
-with `allow` or `deny`; a generic answer elsewhere in the conversation does not
-count. The current bridge routes these approvals to the Room sponsor (falling
-back to the room owner), with claim requests sent by DM. This is delegation of
-local tool approval to that person, not proof that they control the host. The
-operator must authorize that delegation before using remote approvals.
+in `--cwd` with its own tools. By default, room-acp cancels tool permission
+requests immediately and prints how to configure approvals locally. Joining a
+Room does not authorize the inviter or room sponsor to approve host tools.
+
+The laptop operator can explicitly trust a particular Room human:
+
+```sh
+room-acp run --permission-approver <exact-human-member-id>
+```
+
+This setting is saved only in this laptop's private connection file. It binds
+to that member, never automatically follows a room owner or sponsor change,
+and requires the human to remain active. Use `--permission-approver none` to
+remove the trust. Existing connections without this explicit setting remain
+disabled. Choose someone you trust with the local agent's tool requests.
+
+With approval enabled, room-acp posts a permission request. That selected
+human must reply directly to the specific request with `allow` or `deny`;
+a generic answer elsewhere does not count. Claim requests go to the selected
+human by DM. Native ChatGPT/Dot consent is separate from this local ACP option.
 
 `allow` approves this action once, never a persistent host grant. No answer in
 five minutes, cancellation, or any error means deny. An “Approval received”

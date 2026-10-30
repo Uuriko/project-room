@@ -1,6 +1,6 @@
 // `room-acp run`: load the saved connection, pick the agent, run the bridge.
 import { candidates, probe } from "./agents.mjs";
-import { loadConnection } from "./credentials.mjs";
+import { loadConnection, saveConnection } from "./credentials.mjs";
 import { Bridge } from "./bridge.mjs";
 import { logger } from "./redact.mjs";
 
@@ -19,6 +19,10 @@ export async function selectAgent(options, { env = process.env, onFailure = () =
 export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null } = {}) {
   const connection = loadConnection({ roomId: options.room }, env);
   if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
+  if (options.permissionApprover !== undefined) {
+    connection.permissionApproverId = options.permissionApprover === "none" ? null : options.permissionApprover;
+    saveConnection(connection, env);
+  }
   const candidate = preparedCandidate ?? await selectAgent({ ...options, agent: options.agent ?? connection.agent }, { env });
   if (!candidate) { print("No working ACP agent found. Run `room-acp doctor`, or pass --agent / --agent-cmd."); return 1; }
   const log = logger(line => print(line));
@@ -26,6 +30,9 @@ export async function run(options, { print, env = process.env, fetchImpl = fetch
   onBridge?.(bridge);
   const stop = () => bridge.stop();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  print(connection.permissionApproverId
+    ? `Host tool approvals: locally authorized Room human ${connection.permissionApproverId}. Use --permission-approver none to disable.`
+    : "Host tool approvals: Room approvals disabled; permission requests are cancelled. Use --permission-approver <member-id> only for a human you trust with this laptop.");
   print(`room-acp: ${candidate.label} is listening in room ${connection.roomId} as ${connection.displayName}. Mention it in the Room. Ctrl-C to stop.`);
   try { const reason = await bridge.run(); return reason === "access_ended" ? 3 : 0; }
   finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }

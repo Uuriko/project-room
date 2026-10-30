@@ -4,9 +4,9 @@ import { Bridge } from '../room-acp/src/bridge.mjs';
 import { ThreadQueue } from '../room-acp/src/queue.mjs';
 
 function fixture() {
-  const state = { room: { ownerId: 'owner' }, members: { owner: { id: 'owner', active: true }, next: { id: 'next', active: true }, agent: { id: 'agent', active: true, accountableHumanId: 'owner' } } };
+  const state = { room: { ownerId: 'owner' }, members: { owner: { id: 'owner', kind: 'human', active: true }, next: { id: 'next', kind: 'human', active: true }, agent: { id: 'agent', active: true, accountableHumanId: 'owner' } } };
   const counts = { prompts: 0, posts: 0, acks: 0 };
-  const bridge = new Bridge({ connection: { apiBase: 'http://localhost', roomId: 'r', memberId: 'agent', hostId: 'h' }, persistSessions: false, host: {
+  const bridge = new Bridge({ connection: { apiBase: 'http://localhost', roomId: 'r', memberId: 'agent', hostId: 'h' }, permissionApproverId: 'owner', persistSessions: false, host: {
     session: async () => ({ sessionId: 's', created: true }),
     prompt: async () => { counts.prompts++; return { recorder: { text: 'done', tools: new Map() }, stopReason: 'end_turn' }; },
     stop() {},
@@ -21,7 +21,7 @@ function fixture() {
 }
 const wake = { signalId: 'wake', messageId: 'message', author: 'owner', body: 'work' };
 
-test('refresh changes permission approver and cancels old pending authority', async () => {
+test('local approver stays bound despite sponsor change; removal cancels pending authority', async () => {
   const { bridge, state } = fixture();
   await bridge.refreshRoom();
   let requestSignal;
@@ -29,7 +29,10 @@ test('refresh changes permission approver and cancels old pending authority', as
   await bridge.onPermission({});
   state.members.agent.accountableHumanId = 'next';
   await bridge.refreshRoom();
-  assert.equal(bridge.permissions.approverId, 'next');
+  assert.equal(bridge.permissions.approverId, 'owner');
+  assert.equal(requestSignal.aborted, false);
+  state.members.owner.active = false;
+  await bridge.refreshRoom();
   assert.equal(requestSignal.aborted, true);
 });
 

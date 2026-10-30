@@ -11,7 +11,7 @@ export function defaultHostId() {
   return `room-acp-${host}-${randomBytes(3).toString("hex")}`;
 }
 
-export async function join({ link, displayName, agent = null, origin, env = process.env, fetchImpl = fetch }) {
+export async function join({ link, displayName, agent = null, permissionApproverId = null, origin, env = process.env, fetchImpl = fetch }) {
   const { apiBase, code, linkToken } = parseInvite(link, origin ? { origin } : {});
   registerSecret(code); registerSecret(linkToken);
   const room = new RoomClient({ apiBase, fetchImpl });
@@ -32,7 +32,7 @@ export async function join({ link, displayName, agent = null, origin, env = proc
     joined = { ...admitted, displayName, credential: identity.secret, identitySecret: identity.secret };
   } else joined = await room.redeem({ code, displayName });
   registerSecret(joined.credential); registerSecret(joined.identitySecret);
-  const connection = { version: 1, apiBase, ...joined, hostId: defaultHostId(), agent, joinedAt: new Date().toISOString() };
+  const connection = { version: 1, apiBase, ...joined, hostId: defaultHostId(), agent, permissionApproverId, joinedAt: new Date().toISOString() };
   saveConnection(connection, env);
   return connection;
 }

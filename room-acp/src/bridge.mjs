@@ -84,13 +84,14 @@ class TurnReceipts {
 }
 
 export class Bridge {
-  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
+  constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
+    this.permissionApproverId = permissionApproverId;
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
     this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
@@ -117,10 +118,18 @@ export class Bridge {
     while (!this.host.running && this.ready && !this.controller.signal.aborted) await this.ready;
   }
 
-  // Tool permission asks go to the agent's accountable human in the thread.
+  // Host tool approvals require the local operator to name a trusted human.
+  // Room sponsorship or invitation never supplies this host authority.
   async onPermission(request) {
+    if (!this.permissionApproverId) {
+      this.log("Tool permission cancelled: Room approvals are disabled. On this laptop, explicitly choose a trusted human with --permission-approver <member-id> to enable them.");
+      return { outcome: { outcome: "cancelled" } };
+    }
     try { await this.refreshRoom(); } catch { return { outcome: { outcome: "cancelled" } }; }
-    if (this.controller.signal.aborted || this.me.active === false) return { outcome: { outcome: "cancelled" } };
+    if (this.controller.signal.aborted || this.me.active === false || !this.approverAvailable) {
+      this.log("Tool permission cancelled: the locally selected approver is not an active human in this room.");
+      return { outcome: { outcome: "cancelled" } };
+    }
     try { await this.assertListener(); } catch { return { outcome: { outcome: "cancelled" } }; }
     const approverId = this.permissions.approverId;
     const signal = AbortSignal.any([this.controller.signal, this.approverController.signal]);
@@ -128,7 +137,7 @@ export class Bridge {
       await this.refreshRoom();
       await this.assertListener();
       return !signal.aborted && this.me.active !== false && this.permissions.approverId === approverId &&
-        Boolean(this.members[approverId] && this.members[approverId].active !== false);
+        this.approverAvailable;
     } }, signal);
   }
 
@@ -138,12 +147,15 @@ export class Bridge {
     this.ownerId = value?.state?.room?.ownerId ?? null;
     this.title = value?.state?.room?.title ?? this.connection.roomId;
     this.me = this.members[this.connection.memberId] ?? { id: this.connection.memberId };
-    const approverId = this.me.accountableHumanId ?? this.ownerId;
-    if (this.permissions && this.permissions.approverId !== approverId) {
+    const approverId = this.permissionApproverId;
+    const approver = this.members[approverId];
+    const authority = JSON.stringify([approverId, approver?.kind, approver?.identityId, approver?.accountId, approver?.active]);
+    this.approverAvailable = Boolean(approver && approver.kind === "human" && approver.active !== false);
+    if (this.approverAuthority !== undefined && this.approverAuthority !== authority) {
       this.approverController.abort(); this.approverController = new AbortController();
-      this.permissions.approverId = approverId;
     }
-    this.permissions ??= new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
+    this.approverAuthority = authority;
+    this.permissions ??= new PermissionBroker({ room: this.room, approverId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
   }
 
   async assertListener() {

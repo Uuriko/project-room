@@ -43,7 +43,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
           return 1;
         }
       }
-      const connection = await join({ link: options.link, displayName: options.name ?? "Coding agent", agent: options.agent, origin: options.origin, env, fetchImpl: io.fetchImpl });
+      const connection = await join({ link: options.link, displayName: options.name ?? "Coding agent", agent: options.agent, permissionApproverId: options.permissionApprover === "none" ? null : options.permissionApprover ?? null, origin: options.origin, env, fetchImpl: io.fetchImpl });
       print(`Joined room ${connection.roomId} as ${connection.displayName}. Credential saved privately; it is never printed.`);
       if (io.joinOnly) return 0;
       options.command = "run";

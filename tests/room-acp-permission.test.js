@@ -13,9 +13,9 @@ const waitFor = async (check, ms = 20000) => {
   while (Date.now() < end) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw new Error("timed out waiting");
 };
-async function startBridge(t, room, permissionTimeoutMs) {
+async function startBridge(t, room, permissionTimeoutMs, permissionApproverId = "owner") {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
-  const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] },
+  const bridge = new Bridge({ connection, permissionApproverId, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] },
     env: { ...room.env, FAKE_ACP_MODE: "ask-permission" }, waitMs: 3000, permissionTimeoutMs, permissionPollMs: 50 });
   const done = bridge.run();
   t.after(async () => { bridge.stop(); await done; });
@@ -75,4 +75,13 @@ test("a permission ask in a Board claim turn goes to the owner as a DM; allow th
   while (Date.now() < end && !notes.some(note => /permission: allow_once/.test(note))) { notes = await claimNotes(); await new Promise(resolve => setTimeout(resolve, 100)); }
   assert.ok(notes.some(note => /^Waiting for owner permission: Run rm -rf build/.test(note)), notes.join(" | "));
   assert.ok(notes.some(note => /permission: allow_once/.test(note)), notes.join(" | "));
+});
+
+test("without local operator opt-in, host permission is cancelled without asking the sponsor", async t => {
+  const room = await startRoom(t);
+  const { connection } = await startBridge(t, room, 20000, null);
+  const rootId = room.say("@Coder clean the build");
+  const final = await waitFor(() => mine(room, rootId, connection.memberId).find(message => /^permission: /.test(message.body)));
+  assert.match(final.body, /permission: cancelled/);
+  assert.equal(room.messages().some(message => message.authorId === connection.memberId && /^Permission needed/.test(message.body)), false);
 });

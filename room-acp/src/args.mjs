@@ -12,11 +12,12 @@ Options:
   --mode <id>                           ACP session mode to set (default: agent's own)
   --max-sessions <n>                    concurrent agent sessions (default 4)
   --respond-to <owner|anyone>           whose mentions start a turn (default anyone; Room policy still applies)
+  --permission-approver <member-id|none>  explicitly trust a Room human for host tool approvals (default disabled)
   --name <display name>                 display name when joining
   --room <roomId>                       pick a saved room when several are saved
   -h, --help                            show this help`;
 
-const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room"]);
+const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver"]);
 
 export function parseArgs(argv) {
   const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "anyone", name: null, origin: null, room: null, help: false };
@@ -37,6 +38,7 @@ export function parseArgs(argv) {
   options.maxSessions = Number(options.maxSessions);
   if (!Number.isInteger(options.maxSessions) || options.maxSessions < 1 || options.maxSessions > 32) throw new Error("--max-sessions must be 1..32");
   if (!["owner", "anyone"].includes(options.respondTo)) throw new Error("--respond-to must be owner or anyone");
+  if (options.permissionApprover !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(options.permissionApprover)) throw new Error("--permission-approver must be an exact member ID or none");
   const [first, ...rest] = positional;
   if (rest.length) throw new Error(`unexpected argument ${rest[0]}`);
   if (["doctor", "status", "logout", "run"].includes(first)) options.command = first;
