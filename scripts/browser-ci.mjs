@@ -43,7 +43,22 @@ async function suiteScriptFromPackage(script) {
 async function resolvePlan(script) {
   if (process.env.CI_BROWSER_SCOPE !== "affected") return browserPlan(script);
   const { affectedBrowserFiles } = await import("./ci-affected.mjs");
-  return affectedBrowserFiles(process.env.BASE_SHA).plan;
+  const selection = affectedBrowserFiles(process.env.BASE_SHA);
+  return { ...selection.plan, selection: {
+    scope: selection.coverage, base: process.env.BASE_SHA, changed: selection.changed,
+    budgetMs: selection.budgetMs, selected: selection.selected, omitted: selection.omitted,
+  } };
+}
+
+// Selection is not an execution result. Persist it before even an empty shard
+// returns so uploaded evidence cannot imply omitted checks ran successfully.
+export function writeBrowserSelection(plan, destination, revision = "local") {
+  const report = { schemaVersion: 1, revision, planHash: plan.planHash,
+    ...(plan.selection ?? { scope: "full", base: null, changed: [], budgetMs: null,
+      selected: plan.files.map(test => ({ test, via: "full suite" })), omitted: [] }) };
+  mkdirSync(dirname(destination), { recursive: true });
+  writeFileSync(destination, JSON.stringify(report, null, 2) + "\n");
+  return report;
 }
 
 async function main() {
@@ -62,6 +77,7 @@ async function main() {
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
   const receiptPath = `test-results/browser-shard${suffix}-attempt-${attempt}.json`;
   const files = shard ? plan.shards[shard.index - 1].files : plan.files;
+  writeBrowserSelection(plan, `test-results/browser-selection${suffix}-attempt-${attempt}.json`, process.env.GITHUB_SHA ?? "local");
   if (!files.length) {
     if (!shard || process.env.CI_BROWSER_SCOPE !== "affected") throw new Error("Refusing an empty browser shard");
     mkdirSync(dirname(destination), { recursive: true });
@@ -76,7 +92,7 @@ async function main() {
   mkdirSync(dirname(destination), { recursive: true });
   rmSync(receiptPath, { force: true });
   rmSync(destination, { force: true });
-  console.log(`browser-ci: ${shard ? `shard ${shard.index}/${shard.total}` : "full suite"}, ${files.length} scripts; spec + annotations -> stdout, junit -> ${destination}`);
+  console.log(`browser-ci: ${shard ? `shard ${shard.index}/${shard.total}` : plan.selection ? "affected suite" : "full suite"}, ${files.length} scripts; spec + annotations -> stdout, junit -> ${destination}`);
   const started = Date.now();
   const result = spawnSync(process.execPath, ciArgs(script, destination, shard, plan), { stdio: "inherit" });
   if (result.error) throw result.error;

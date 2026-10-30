@@ -51,6 +51,29 @@ function noteSkippedInvalidClaim(skipped, roomId, claimId, error) {
   return entry;
 }
 
+// --- public-work namespace boundary ---------------------------------------
+// Rows whose room_id is a public-work namespace key (minted by the
+// public-work module's enable()) are partitions of work_claims owned
+// end-to-end by that module: the door is their sole lifecycle authority —
+// generation-fenced, journaled, settled by receipt and escrow attach under
+// its writer permit, never by PR outcome or board housekeeping. The sync
+// family's whole-registry phases therefore never select namespace rows for
+// any transition (lease release, stale retirement, deployed close, PR
+// settlement, autolink, deploy link). Selecting them is what wedged
+// claim-prs at 307 consecutive failures: the writer fence
+// (server/public-work-claim-fence.mjs) aborts the write, and in the lease
+// sweep the aborted write was the release itself, so the row re-tripped
+// every tick. (CP-DIAG diagnosis, CP-CENSUS G1–G5, CP-ADVERSARY verdict.)
+export function isPublicClaimNamespace(store, roomId) {
+  if (!store?.db || typeof store.db.prepare !== "function" || typeof roomId !== "string") return false;
+  try {
+    return Boolean(store.db.prepare("SELECT 1 FROM public_work_tasks WHERE namespace_key=?").get(roomId));
+  } catch (error) {
+    if (/no such table: public_work_tasks/i.test(error?.message ?? "")) return false;
+    throw error;
+  }
+}
+
 const LOOKUP_LIMIT = 4;
 const LOOKUP_LIMIT_NO_TOKEN = 1;
 const MAX_BODY_CHARS = 65_536;
@@ -368,6 +391,7 @@ function ciReadDue(item, nowMs) {
 // Reading the current row first makes the retry a no-op: the links are
 // already stamped, so `linked` misses and the function returns false.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
+  if (isPublicClaimNamespace(store, roomId)) return false;
   const current = registry?.get?.(roomId, item?.id) ?? item;
   const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
@@ -474,18 +498,45 @@ export function writeClaimPullBudget(store, until, nowMs) {
     .run(BUDGET_ROOM, JSON.stringify({ rateLimitedUntil: until }), nowMs);
 }
 
-function holdDue(registry, roomId, items, until, nowMs) {
+function holdDue(store, roomId, items, until, nowMs) {
+  // Defense in depth behind the poll's candidate exclusion: a namespace
+  // room's claims are never held by the sync (the door owns their
+  // lifecycle), and this set is uncaught inside the batch transaction —
+  // one refused hold would roll back every settlement in the batch.
+  if (isPublicClaimNamespace(store, roomId)) return;
   for (const item of items) {
-    const current = registry.get(roomId, item.id);
+    const current = store.workClaims.get(roomId, item.id);
     if (!current?.pullRequest?.url || current.pullRequest.outcome) continue;
     if (!["claimed", "in_progress", "blocked"].includes(current.state)) continue;
-    registry.set(roomId, holdForRateLimit(current, nowMs, until));
+    store.workClaims.set(roomId, holdForRateLimit(current, nowMs, until));
   }
+}
+
+// The namespace skip must hold BEFORE the candidate LIMIT, not only in
+// the JS pass below: when 32 or more earlier-due namespace rows are
+// queued, the LIMIT fills entirely with rows the JS pass then discards,
+// and due private claims starve tick after tick (admission defect —
+// Codex review, muse-room 15734; the same defect was found on #4246's
+// original head and fixed there first). Exclude namespace rows in SQL
+// when public_work_tasks exists; a registry without the table keeps the
+// legacy no-exclusion shape (the loaders' catch already tolerates the
+// missing table). The per-row isPublicClaimNamespace check in each
+// loader stays as the mid-run backstop.
+export function publicNamespaceSqlExclusion(store) {
+  if (!store?.db || typeof store.db.prepare !== 'function') return '';
+  try {
+    store.db.prepare("SELECT 1 FROM public_work_tasks LIMIT 1").get();
+  } catch (error) {
+    if (/no such table: public_work_tasks(?:\s|$)/i.test(error?.message ?? "")) return "";
+    throw error;
+  }
+  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)";
 }
 
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -498,7 +549,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
         AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
@@ -506,7 +557,7 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -521,6 +572,7 @@ function loadDueClaims(store, nowMs) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -536,6 +588,7 @@ function loadDueClaims(store, nowMs) {
 // pullVerificationDue both require an unstamped outcome).
 function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
+  const exclusion = publicNamespaceSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -549,7 +602,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       ) OR (
         json_extract(item_json, '$.state') = 'done'
         AND json_extract(item_json, '$.deliveryMode') = 'merged'
@@ -558,7 +611,7 @@ function loadVerificationClaims(store, nowMs, limit) {
         AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
              OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
-             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)${exclusion}
       )
       ORDER BY COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
@@ -573,6 +626,7 @@ function loadVerificationClaims(store, nowMs, limit) {
   }
   const due = [];
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -634,6 +688,7 @@ function heldPullIndex(store) {
   }
   const index = new Map();
   for (const row of rows) {
+    if (isPublicClaimNamespace(store, row.roomId)) continue;
     let urls = [];
     try { urls = (JSON.parse(row.links) ?? []).map(pull => pull?.url); } catch { /* fall back to the primary link */ }
     if (typeof row.url === "string") urls.push(row.url);
@@ -842,7 +897,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
         list.push(entry.item);
         byRoom.set(entry.roomId, list);
       }
-      for (const [roomId, items] of byRoom) holdDue(store.workClaims, roomId, items, batch.rateLimitedUntil, nowMs);
+      for (const [roomId, items] of byRoom) holdDue(store, roomId, items, batch.rateLimitedUntil, nowMs);
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
@@ -894,6 +949,10 @@ function writeHousekeepingState(store, state, nowMs) {
 // rotation. #3464: closeWhenLive re-validates the stored row; isolate per
 // item so one invalid row cannot abort the phase for every other room.
 function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
+  // Namespace rows are public-work tasks, never land/deploy board
+  // claims: kind and revision are room-board facts the door's items do
+  // not carry, so a deployed close can never legitimately select one.
+  if (isPublicClaimNamespace(store, roomId)) return;
   let item;
   try {
     item = store.workClaims.get(roomId, claimId);
@@ -921,7 +980,7 @@ function closeDeployedClaims(store, nowMs, skipped = null, deadline = Infinity) 
   // full each tick and processed in deadline-checked chunks.
   const pairs = claimCandidatePairs(store, `
     SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-    WHERE COALESCE(${fieldText("kind")}, 'work') IN ('land', 'deploy')
+    WHERE COALESCE(${fieldText("kind")}, 'work') IN ('land', 'deploy')${publicNamespaceSqlExclusion(store)}
       AND COALESCE(${fieldText("state")}, 'unclaimed') NOT IN ('done', 'closed')
       AND (${fieldText("revision")} = ? OR ${fieldText("ci.headSha")} = ?)
     ORDER BY room_id, rowid`, [SOURCE_REVISION, SOURCE_REVISION]);
@@ -987,7 +1046,7 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
   const leaseText = fieldText("leaseExpiresAt");
   const pairs = claimCandidatePairs(store, `
     SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')
+    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}
       AND typeof(${leaseText}) = 'text'
       AND (${leaseText} NOT GLOB '????-??-??T??:??:??.???Z' OR ${leaseText} <= ?)
     ORDER BY room_id, rowid`, [new Date(nowMs).toISOString()]);
@@ -1009,6 +1068,11 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
 }
 
 function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
+  // Namespace partitions are the public-work door's jurisdiction: their
+  // lapsed leases are released by the door's own sweep inside apply(),
+  // under the permit. The cron never selects them (see the namespace
+  // boundary note above) — this set is the one that wedged claim-prs.
+  if (isPublicClaimNamespace(store, roomId)) return 0;
   const candidates = [];
   for (const claimId of claimIds) {
     let item;
@@ -1114,6 +1178,10 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
       if (progress) progress.complete = false;
       return closed;
     }
+    // Namespace partitions belong to the public-work module's lifecycle;
+    // the board stale sweep never retires their rows, whatever a config
+    // row says (a namespace's claim row projects a live public task).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
     const items = unclaimedRoomItems(store, roomId, skipped);
     let pairs;
@@ -1173,7 +1241,7 @@ export function staleSweepDueAt(store, _nowMs) {
           ) AS activity
         FROM work_claims
         JOIN work_claim_config ON work_claim_config.room_id = work_claims.room_id
-        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1
+        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1${publicNamespaceSqlExclusion(store)}
           AND COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'
           AND NOT EXISTS (
             SELECT 1 FROM json_each(COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
@@ -1207,6 +1275,8 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
     throw error;
   }
   for (const roomId of roomIds) {
+    // The door's claims never settle by PR outcome (receipts, not pulls).
+    if (isPublicClaimNamespace(store, roomId)) continue;
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
         if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;

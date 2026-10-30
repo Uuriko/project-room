@@ -1302,7 +1302,11 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
-      disputeDecider: row.dispute_decider ?? null,
+      // Disclose the designated decider, falling back to the designated verifier.
+      // disputeBounty checks eligibility before seating; this read does not
+      // confirm an active seat. _mutable/_saveBounty preserve the raw column,
+      // including NULL for a verifier-only designation.
+      disputeDecider: row.dispute_decider ?? row.verifier ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -2485,7 +2489,8 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
-      check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      check(dispute.decider === lane, "not_authorized",
+        `only the seated decider may rule (seated decider: ${dispute.decider})`);
       // Defense in depth: seating now refuses a challenger-designee, but a
       // dispute seated before that exclusion existed (or recorded by any
       // other path) still cannot be ruled on by the party who raised it.

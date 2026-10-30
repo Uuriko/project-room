@@ -51,3 +51,73 @@ for (const width of [390, 1280]) test(`room-only workspace ${width}: no email su
     assert.equal(response.status, 404, path);
   }
 });
+
+test("account-home session replacement clears old rooms and refresh restores the current account", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage(); page.setDefaultTimeout(10000);
+  const key = f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id);
+  await page.goto(origin + "/?account=1"); await signInFixture(page, key);
+  await page.locator('[data-account-room="commons"]').waitFor();
+  // A completed sign-in in another tab replaces the browser slot while this
+  // tab still holds its previous binding. Use the real account HTTP contract.
+  const slot = await (await page.context().request.get(origin + "/api/account-session")).json();
+  const replaced = await page.context().request.post(origin + "/api/account-session", {
+    headers: { Origin: origin, "X-CSRF-Token": slot.csrf, "X-Session-Binding": slot.sessionBinding },
+    data: { accountAccessKey: key, expectedSessionRevision: slot.sessionRevision }
+  });
+  assert.equal(replaced.status(), 201);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.locator("#auth-error").filter({ hasText: /(?:session|browser account) changed/i }).waitFor();
+  assert.equal(await page.locator("#account-rooms-panel").isVisible(), false);
+  assert.equal(await page.locator('[data-account-room]').count(), 0);
+  await page.locator("#refresh-button").click();
+  await page.locator('[data-account-room="commons"]').waitFor();
+  assert.equal(await page.locator("#auth-panel").isVisible(), false);
+  assert.equal(await page.locator("#auth-error").textContent(), "");
+});
+
+for (const target of ["commons", "unavailable-room"]) test(`Google return restores ${target} without probing revoked room cookies`, { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage(); page.setDefaultTimeout(10000);
+  const account = f.store.accountForMember("commons", "owner");
+  const slot = f.store.createAccountSessionSlot();
+  f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(account.id), slot.session.sessionRevision);
+  await page.context().addCookies([{ name: "account_session", value: slot.token, url: origin, httpOnly: true, sameSite: "Strict" }]);
+  await page.goto(origin + "/?account=1");
+  await page.locator('[data-account-room="commons"]').waitFor();
+  await page.evaluate(async room => { const { stashGoogleRoom } = await import("/src/google-room-return.js"); stashGoogleRoom(room); }, target);
+  const reads = [];
+  page.on("request", r => { const u = new URL(r.url()); if (u.pathname === "/api/session") reads.push(u.search); });
+  let accountBeforeApp = false;
+  const accountStarted = target === "commons"
+    ? page.waitForRequest(r => new URL(r.url()).pathname === "/api/account-session", { timeout: 2000 }).then(() => true, () => false)
+    : null;
+  if (target === "commons") await page.route(origin + "/src/app.js", async route => {
+    // Hold the heavy module until the independent account read begins. The
+    // fallback deadline prevents a serialized implementation hanging the test.
+    accountBeforeApp = await accountStarted;
+    await route.continue();
+  });
+  await page.goto(origin + "/?room=wrong-fallback&google=signed-in");
+  if (target === "commons") await page.locator("#main").waitFor({ state: "visible" });
+  else await page.locator('[data-account-room="commons"]').waitFor();
+  if (target === "commons") assert.equal(accountBeforeApp, true, "account restore overlaps the blocked app download");
+  assert.deepEqual(reads, [`?room=${target}`], "exactly one authorized room restore, no old-cookie probe or fallback-room read");
+  assert.equal(new URL(page.url()).searchParams.has("google"), false);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:google-room-return:v1")), null);
+  assert.equal(await page.locator("#auth-panel").isVisible(), false);
+});

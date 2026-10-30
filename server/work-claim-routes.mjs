@@ -1018,7 +1018,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
-    assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
+    assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other), get: other => registry.get(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     const open = openClaimCount(registry.list(roomId), nowMs);
     if (open >= config.maxOpenClaims) {
@@ -1104,7 +1104,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
-    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other), get: other => registry.get(roomId, other) });
     // #3880: dependsOn gates the AvailableWork projection (a claim is
     // claimable only when every dependency is done); the claim write path
     // must enforce the same definition, or the projection's "claimable"
@@ -1463,7 +1463,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // runPure's mapping, plus 409 for a stale round (same as the update
       // route's round precondition).
       if (error instanceof ClaimError && error.code === "work_claim_conflict") {
-        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+        reject(409, error.code, "The release basis does not match the current claim. Use claimedAt and history.length + (historyOmitted ?? 0) from the same fresh read; review the current owner before retrying.");
       }
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;

@@ -62,6 +62,31 @@ export async function listMemberAccessRequests(ctx) {
   return ctx.json(ctx.res, 200, { roomId, requests: records, next });
 }
 
+function accountAdmissionContext(ctx) {
+  const token = ctx.cookie(ctx.req, ctx.accountCookieName);
+  if (!token) ctx.reject(401, "account_session_required", "Sign in to request room membership");
+  const binding = ctx.accountBinding(ctx.req, ctx.url);
+  const auth = ctx.store.authenticateAccountSession(token, null, binding);
+  return { token, binding, auth };
+}
+
+async function accountAdmission(ctx) {
+  const { token, binding, auth } = accountAdmissionContext(ctx);
+  const requests = service(ctx), id = ctx.params.requestId;
+  ctx.rate(`account-access-request:${ctx.remoteAddress}`, ctx.req.method === "GET" ? 60 : 20);
+  if (ctx.req.method === "GET") return ctx.json(ctx.res, 200, { request: requests.statusAccount(token, id, binding) });
+  ctx.protectWrite(ctx.req, auth, false);
+  const data = await ctx.body(ctx.req);
+  if (id) {
+    if (!ctx.exact(data, [])) ctx.reject(422, "invalid_request", "Cancellation takes an empty object");
+    return ctx.json(ctx.res, 200, { request: requests.cancelAccount(token, id, binding) });
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data) || !["roomId", "displayName", "requestedPermissions"].every(key => Object.hasOwn(data, key))
+    || typeof data.roomId !== "string" || Object.keys(data).some(key => !["roomId", "displayName", "requestedPermissions", "requestId", "note", "referredBy"].includes(key)))
+    ctx.reject(422, "invalid_request", "Use roomId, displayName, requestedPermissions and optional requestId, note, referredBy; account identity comes from the session");
+  return ctx.json(ctx.res, 201, { request: requests.requestAccount(token, data.roomId, data, binding) });
+}
+
 const parameters = Object.freeze({ type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } });
 const requestBody = field => Object.freeze({ type: "object", required: [field], additionalProperties: false,
   properties: { [field]: { type: "array", items: { type: "string" } }, note: { type: "string", nullable: true }, requestId: { type: "string" } } });
@@ -69,6 +94,20 @@ const requestBody = field => Object.freeze({ type: "object", required: [field], 
 // Register all three together: adding POST alone at the queue's known path
 // would make the RT dispatcher intercept and refuse the existing GET.
 export const MEMBER_PERMISSION_ROUTES = Object.freeze([
+  ...[["account-admission-request", "POST", "/api/account/access-requests"],
+    ["account-admission-status", "GET", "/api/account/access-requests/{requestId}"],
+    ["account-admission-cancel", "POST", "/api/account/access-requests/{requestId}"]].map(([id, method, path]) => Object.freeze({
+      id, method, path, auth: "account", capability: null, scope: "worker", handler: accountAdmission, authenticate: accountAdmissionContext,
+      parity: "exempt:authenticated human account admission is separate from identity-secret agent requests",
+      events: method === "POST" && !path.includes("{requestId}") ? ["access.requested"] : [],
+      schema: { response: { type: "object", required: ["request"], properties: { request: { type: "object" } } },
+        ...(path.includes("{requestId}") ? { params: { type: "object", required: ["requestId"], properties: { requestId: { type: "string", maxLength: 64 } } } } : {}),
+        ...(method !== "POST" ? {} : { body: path.includes("{requestId}") ? { type: "object", additionalProperties: false, properties: {} }
+          : { type: "object", required: ["roomId", "displayName", "requestedPermissions"], additionalProperties: false,
+            properties: { roomId: { type: "string" }, displayName: { type: "string", minLength: 1, maxLength: 80 },
+              requestedPermissions: { type: "array", items: { type: "string" } }, requestId: { type: "string", maxLength: 64 },
+              note: { type: "string", nullable: true, maxLength: 500 }, referredBy: { type: "string", nullable: true, maxLength: 80 } } } }) }
+    })),
   Object.freeze({ id: "request-member-permissions", method: "POST", path: "/api/rooms/{roomId}/access-requests",
     auth: "room", capability: null, scope: "room", handler: requestMemberPermissions,
     schema: { params: parameters, body: requestBody("requestedPermissions"), response: { type: "object" } },

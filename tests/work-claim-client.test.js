@@ -342,7 +342,7 @@ test('SDK board reads exactly one canonical claim page and forwards explicit con
   assert.equal(first.claimsPage.hasMore, true);
   assert.equal(Object.hasOwn(first.claimsPage, 'claims'), false);
   assert.equal(Object.hasOwn(first.claimsPage, 'swept'), false);
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 1);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 1);
   const last = await owner.board({ cursor: first.claimsPage.nextCursor });
   assert.deepEqual(last.claims.map(item => item.id), ids.slice(50));
   assert.equal(last.claimsPage.hasMore, false);
@@ -371,12 +371,12 @@ test('SDK board propagates canonical query refusals without returning a legacy-o
     { cursor: '' }, { cursor: 'invalid' }, { queue: 'ready', state: 'done' }]) {
     await assert.rejects(owner.board(options), invalid);
   }
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 8);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 8);
   assert.equal(requests.some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
 // Delay an actual canonical HTTP response after the real route has evaluated
-// it. This detects a lost signal on board()'s second request without a fetch double.
+// it. This detects a lost signal on the Board read without a fetch double.
 test('SDK board cancellation aborts an in-flight canonical claim response', async t => {
   const { origin, token } = await fixture(t);
   let entered, closed, release;
@@ -386,12 +386,12 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   const requests = [];
   const proxy = createServer(async (req, res) => {
     requests.push(req.url);
-    if (req.method !== 'GET' || !['/api/rooms/commons', '/api/rooms/commons/work-claims-read'].includes(req.url)) {
+    if (req.method !== 'GET' || req.url !== '/api/rooms/commons/board') {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith('/work-claims-read')) {
+    if (req.url.endsWith('/board')) {
       res.on('close', closed);
       entered();
       await gate;
@@ -409,7 +409,7 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await refused;
   await disconnected;
   release();
-  assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+  assert.deepEqual(requests, ['/api/rooms/commons/board']);
 });
 
 
@@ -489,4 +489,34 @@ test('malformed first or middle pages cannot be hidden by a later terminal page'
     assert.equal(reads, pages.length - 1, 'stop before the terminal page can erase an earlier gap');
     assert.equal(result.claims.some(claim => claim.id === 'last'), false);
   }
+});
+
+test('discovery release instructions work with a truncated board read and reject stale rounds', async t => {
+  const { llmsFullTxt } = await import('../server/agent-discovery.mjs');
+  const releaseInstruction = llmsFullTxt().split('\n').find(line => line.includes('/work-claims/{claimId}/release'));
+  assert.match(releaseInstruction, /history\.length \+ \(historyOmitted \?\? 0\)/);
+  const { owner, store } = await fixture(t);
+  await owner.workClaimCreate({ id: 'listed-release' });
+  let item = await owner.claimWorkItem('listed-release');
+  for (let i = 0; i < 4; i++) item = updateWork(item, 'owner', { note: `Progress ${i}` });
+  store.workClaims.set('commons', item);
+  const listed = (await owner.workClaims()).claims.find(claim => claim.id === item.id);
+  assert.equal(listed.history.length, 3);
+  assert.ok(listed.historyOmitted > 0);
+  const basis = { expectedClaimedAt: listed.claimedAt,
+    expectedHistoryLength: listed.history.length + (listed.historyOmitted ?? 0) };
+  await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'work_claim_conflict');
+    assert.match(error.message, /release basis does not match/);
+    assert.match(error.message, /historyOmitted/);
+    assert.doesNotMatch(error.message, /changed since it was read/);
+    return true;
+  });
+  assert.equal((await owner.workClaimGet(item.id)).owner, 'owner');
+  assert.equal((await owner.releaseWorkItem(item.id, basis)).state, 'unclaimed');
+  await owner.claimWorkItem(item.id);
+  await assert.rejects(owner.releaseWorkItem(item.id, basis),
+    error => error.status === 409 && error.code === 'work_claim_conflict');
+  assert.equal((await owner.workClaimGet(item.id)).state, 'claimed');
 });

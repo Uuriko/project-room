@@ -650,8 +650,9 @@ function collectRoomMoney(store, roomId, base, state, nowMs, windowStart, moneyR
     unreportedAttempts: group.unreported,
   })).sort((a, b) => a.memberId.localeCompare(b.memberId));
 
-  // Accepted outcomes in the window (§5.3): a work item reaching its
-  // completed (accepted-terminal) state, plus bounties reaching paid.
+  // Recorded outcomes in the window: currently completed work items by
+  // update time, plus currently paid bounties by state-change time.
+  // Completion can precede review; these are not independent acceptance events.
   // The escrow records carry no bounty↔work-item link, so the two
   // recorded outcome sources are counted as recorded — no linkage is
   // invented here.
@@ -714,13 +715,14 @@ function collectRoomCredits(store, roomId) {
   return { byGroup, lockedMillis, disputedMillis, poolBalanceMillis, agentBalances };
 }
 
-// §5.3: reported cents ÷ accepted outcomes, denominator always shown.
+// Compatibility fields retain their names: recorded completions plus paid bounties,
+// not deduplicated independently accepted tasks. Numerator is reported session spend.
 // Ratio suppressed at n=0; "unknown" when every attempt is unreported.
 function costPerOutcome(totals) {
   const { reportedCents, unreportedAttempts, acceptedOutcomes } = totals;
   if (acceptedOutcomes === 0) {
     return Object.freeze({ status: "no_outcomes", ratioCents: null, acceptedOutcomes,
-      unreportedAttempts, label: "no accepted outcomes in window" });
+      unreportedAttempts, label: "no recorded completions or paid bounties in window" });
   }
   if (reportedCents === "unknown") {
     return Object.freeze({ status: "unknown", ratioCents: null, acceptedOutcomes,
@@ -728,7 +730,7 @@ function costPerOutcome(totals) {
   }
   const ratioCents = reportedCents / acceptedOutcomes;
   return Object.freeze({ status: "ok", ratioCents, acceptedOutcomes, unreportedAttempts,
-    label: `$${(ratioCents / 100).toFixed(2)} / accepted outcome (n=${acceptedOutcomes}, ${unreportedAttempts} unreported)` });
+    label: `$${(ratioCents / 100).toFixed(2)} reported spend / recorded outcome (n=${acceptedOutcomes}, ${unreportedAttempts} unreported attempts)` });
 }
 
 function totalsOf(entries) {

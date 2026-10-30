@@ -209,7 +209,21 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   const prefix = `test-results/${crowded ? 'crowded-' : ''}reconnect-collaboration-${touch ? 'touch' : 'desktop'}`;
   if (crowded) {
     const beforeNavigation = auditRecovery(f.store).dataSha256;
-    assert.equal(await page.locator('[data-work-record-id]').count(), 81, 'All work remains reachable');
+    assert.equal(await page.locator('[data-work-record-id]').count(), 0, 'Human chat does not mount unrelated work');
+    await openSearch(page);
+    for (let i = 0; i < 80; i++) {
+      await page.locator('#message-search').fill(`Observation archive ${i}`);
+      const result = page.locator(`#search-list [data-open-work="background-${i}"]`);
+      await result.waitFor({ state: 'visible' });
+      assert.equal(await result.locator('strong').textContent(), `Observation archive ${i}`, 'Every archived work item is discoverable by title');
+      if ([0, 39, 79].includes(i)) {
+        await result.press('Enter');
+        await page.locator(`[data-work-record-id="background-${i}"]`).waitFor({ state: 'visible' });
+        assert.equal(await page.locator('[data-work-record-id]').count(), 1);
+        await page.locator('#work-navigation-return').press('Enter');
+      }
+    }
+    await page.locator('#clear-search').click();
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-arrival.png` });
     await openCatchUp(page);
@@ -316,7 +330,12 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-ready.png` });
     await page.locator('#contribution-open').click();
-  } else await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
+  } else {
+    await openSearch(page);
+    await page.locator('#message-search').fill('prepare an agenda');
+    await page.locator('#search-list [data-open-work="test-handoff"]').click();
+    await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
+  }
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   assert.equal(await page.locator('#action-fields [name="decision"]').inputValue(), '');
   assert.equal(await page.locator('#decision-review-label').textContent(), 'Independent check · Pass');

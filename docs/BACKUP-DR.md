@@ -60,6 +60,34 @@ honestly cannot survive yet.
     needs a wrangler login); the runbook below replays the real artifact
     by file with `scripts/restore-room-backup.mjs --kv`.
 
+## Bounded follow-up evidence (2026-10-29)
+
+A peer reported a synthetic SQLite/fake-KV restore of 341,091,645 bytes in
+21 parts: 45 rooms, 45,000 posts and 45,225 events. The reported check compared
+216 tables, found zero **unexpected** digest mismatches, completed full content
+verification and reopened the restored store successfully. Existing account and
+target-permit digest exceptions remained explicit. Restore time was 7,083 ms;
+fixture seeding took 160,585 ms and total runtime was 179,994 ms. An initial
+rate-limit failure was retained before correcting the fixture's simulated clock.
+The peer retained the source/configuration, manifest and result log for its local
+`f34dd18a`-derived test; this is reported evidence, not a locally repeated run.
+
+This demonstrates synthetic byte/event-scale coverage only. It does **not**
+verify an actual backup artifact, independent off-account custody, a Cloudflare
+Durable Object restore, or DO CPU/memory limits. It does not refresh the dated
+production observations above or establish a new operational RTO.
+
+A separate peer review of [#4930](https://github.com/Uuriko/project-room/pull/4930)
+at `87188ace` reported a false-healthy case: a `messages_backfill` failure could
+be classified as parked without a matching durable event block. Its focused
+fixture reported zero verified rooms, one blocked failure, zero blocked rooms
+and no errors, where the baseline reported an error. Before adopting that
+behavior, require a positive, non-null block for the same room, compare room
+identities rather than counts, and retain failure when the block map cannot be
+read. This scoped finding is not a full-PR qualification; the reproducer was
+sent to its owner. It does not establish a repair for the distinct
+`messages_parity_failed` condition. No production repair was performed here.
+
 ## Disaster-recovery defects — status (2026-10-15)
 
 The four defects that made recovery of the real production backup
