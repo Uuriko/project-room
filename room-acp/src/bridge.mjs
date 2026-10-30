@@ -37,10 +37,10 @@ export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
 
 // Keep execution separate from delivery. An interrupted prompt may already have
 // changed the outside world, so an unfinished receipt requires human recovery.
-class ClaimReceipts {
-  constructor(connection, env, persist) {
+class TurnReceipts {
+  constructor(connection, env, persist, namespace = "claim-turns") {
     this.scope = JSON.stringify([connection.apiBase, connection.roomId, connection.memberId]);
-    this.dir = persist ? join(configDir(env), "claim-turns") : null;
+    this.dir = persist ? join(configDir(env), namespace) : null;
     this.memory = new Map();
   }
   key(signalId) { return createHash("sha256").update(this.scope + JSON.stringify(signalId)).digest("hex"); }
@@ -58,12 +58,17 @@ class ClaimReceipts {
     try { writeFileSync(path, JSON.stringify(receipt), { flag: "wx", mode: 0o600 }); }
     catch (error) {
       if (error.code !== "EEXIST") throw error;
-      const existing = JSON.parse(readFileSync(path, "utf8"));
-      if (!["started", "result", "posted"].includes(existing.phase) || typeof existing.requestId !== "string" ||
-          existing.phase === "result" && typeof existing.body !== "string") throw new Error("Invalid claim execution receipt; manual recovery required");
+      const existing = this.read(key);
       return { key, receipt: existing, fresh: false };
     }
     return { key, receipt, fresh: true };
+  }
+  read(key) {
+    const receipt = this.dir ? JSON.parse(readFileSync(join(this.dir, key + ".json"), "utf8")) : this.memory.get(key);
+    if (!receipt || !["started", "result", "posted", "linked"].includes(receipt.phase) || typeof receipt.requestId !== "string" ||
+        receipt.phase === "result" && typeof receipt.body !== "string" ||
+        receipt.phase === "linked" && !/^[a-f0-9]{64}$/.test(receipt.groupKey)) throw new Error("Invalid execution receipt; manual recovery required");
+    return receipt;
   }
   save(key, receipt) {
     if (!this.dir) { this.memory.set(key, receipt); return; }
@@ -77,7 +82,8 @@ export class Bridge {
   constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500 }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
-    this.claimReceipts = new ClaimReceipts(connection, env, persistSessions);
+    this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
+    this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
@@ -223,29 +229,67 @@ export class Bridge {
 
   async turn(threadKey, batch) {
     if (threadKey.startsWith(CLAIM_KEY)) return this.claimTurn(threadKey, batch);
-    const signalIds = batch.map(item => item.signalId);
-    let body;
     try {
-      await this.agentReady();
-      const thread = (await this.room.thread(threadKey)).thread;
-      const { sessionId, created } = await this.host.session(threadKey);
-      const prompt = buildPrompt({ roomTitle: this.title, thread, wakes: batch, firstTurn: created });
-      const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, { sessionId });
-      body = renderTurn(recorder, { stopReason });
-      this.stats.turns++;
+      const fresh = [], replay = new Set();
+      for (const item of batch) {
+        const saved = this.chatReceipts.begin(item.signalId);
+        if (saved.fresh) fresh.push({ ...saved, item });
+        else replay.add(saved.receipt.phase === "linked" ? saved.receipt.groupKey : saved.key);
+      }
+      // Retry original groups independently of this poll's new batching.
+      for (const key of replay) {
+        try { await this.deliverChatReceipt(key); }
+        catch (error) { this.log(`chat delivery failed (${error.code ?? error.message}); retrying delivery without repeating execution`); }
+      }
+      if (!fresh.length) return;
+      const { key, receipt } = fresh[0];
+      const signalIds = fresh.map(entry => entry.item.signalId);
+      const started = { ...receipt, threadKey, signalIds };
+      this.chatReceipts.save(key, started);
+      for (const entry of fresh.slice(1)) this.chatReceipts.save(entry.key, { ...entry.receipt, phase: "linked", groupKey: key });
+      let body;
+      try {
+        await this.agentReady();
+        if (this.controller.signal.aborted) return;
+        const thread = (await this.room.thread(threadKey)).thread;
+        const { sessionId, created } = await this.host.session(threadKey);
+        const prompt = buildPrompt({ roomTitle: this.title, thread, wakes: fresh.map(entry => entry.item), firstTurn: created });
+        const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, { sessionId });
+        body = renderTurn(recorder, { stopReason });
+        this.stats.turns++;
+      } catch (error) {
+        this.log(`turn failed: ${error.message}`);
+        if (this.controller.signal.aborted) return;
+        body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+      }
+      this.chatReceipts.save(key, { ...started, phase: "result", body });
+      await this.deliverChatReceipt(key);
     } catch (error) {
-      this.log(`turn failed: ${error.message}`);
-      if (this.controller.signal.aborted) return;
-      body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
+      for (const item of batch) this.seen.delete(item.signalId);
+      this.log(`chat delivery failed (${error.code ?? error.message}); retrying delivery without repeating execution`);
     }
+  }
+
+  async deliverChatReceipt(key) {
+    let receipt = this.chatReceipts.read(key);
+    if (receipt.phase === "started") {
+      this.log("chat has an interrupted execution; inspect its work before sending a new request");
+      return;
+    }
+    if (!Array.isArray(receipt.signalIds) || typeof receipt.threadKey !== "string") throw new Error("Invalid chat execution receipt; manual recovery required");
     try {
-      await this.room.post({ body, replyToId: threadKey });
-      this.stats.posted++;
-      await this.ack(signalIds);
+      if (receipt.phase === "result") {
+        await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
+          messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId });
+        this.stats.posted++;
+        const { body: _body, ...delivered } = receipt;
+        receipt = { ...delivered, phase: "posted" };
+        this.chatReceipts.save(key, receipt);
+      }
+      await this.ack(receipt.signalIds);
     } catch (error) {
-      // Not acked: the Room re-delivers these wakes on the next poll.
-      for (const id of signalIds) this.seen.delete(id);
-      this.log(`posting the reply failed (${error.code ?? error.message}); will retry on re-delivery`);
+      for (const id of receipt.signalIds) this.seen.delete(id);
+      throw error;
     }
   }
 
