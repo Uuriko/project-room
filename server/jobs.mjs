@@ -500,11 +500,27 @@ export const JOBS = Object.freeze([
           // detail chosen from the fatal set only: a parked room must
           // never mask a real failure behind its name.
           let blocksByRoom = null;
+          let validatedBlocks = null;
           try {
             blocksByRoom = new Map(store.db.prepare(
-              "SELECT room_id, event_id FROM messages_backfill_blocks WHERE skipped=0"
+              "SELECT room_id, event_id, sequence FROM messages_backfill_blocks WHERE skipped=0"
             ).all().map(row => [row.room_id, row.event_id]));
-          } catch { blocksByRoom = null; }
+            // Vc ruling (b) (room seq 23428): the validated set — the
+            // blocks whose (room_id, event_id, sequence) exactly
+            // matches a stored event row for that room. The join is
+            // the validation: a block naming a nonexistent event, an
+            // event stored under another room, or an event at a
+            // different sequence produces no row here and so can
+            // never corroborate. Either read failing leaves both maps
+            // null and the partition fails closed, exactly as a
+            // missing block map does.
+            validatedBlocks = new Map(store.db.prepare(
+              `SELECT b.room_id AS room_id, b.event_id AS event_id, b.sequence AS sequence
+               FROM messages_backfill_blocks b
+               JOIN events e ON e.room_id = b.room_id AND e.id = b.event_id AND e.sequence = b.sequence
+               WHERE b.skipped = 0`
+            ).all().map(row => [row.room_id, { eventId: row.event_id, sequence: row.sequence }]));
+          } catch { blocksByRoom = null; validatedBlocks = null; }
           const isLogGapPark = failure => {
             if (typeof failure.message === "string" && failure.message.startsWith("messages backfill stopped at ")) return true;
             return blocksByRoom !== null && blocksByRoom.has(failure.recordId)
@@ -520,10 +536,28 @@ export const JOBS = Object.freeze([
           // parked every non-gap failure on no evidence at all, so an
           // empty block table, a failed map read, and a wrong-room
           // block each produced a false healthy summary.
+          //
+          // Vc ruling (b) strengthens the corroboration (room seq
+          // 23428, ruling integrity-4930-vc-ruling-02): a non-null
+          // event_id is not enough — at the first cured head a seeded
+          // same-room block naming "ev-UNRELATED-999", an event that
+          // does not exist, still parked an unrelated failure. The
+          // block must now appear in validatedBlocks (its room, event
+          // id and sequence all match a real stored event), and when
+          // the failure record itself carries the structured event
+          // identity threaded from runMessagesBackfill through
+          // runIntegrityBackfillStep (failure.eventId /
+          // failure.eventSequence — never parsed out of diagnostic
+          // strings), that identity must match the validated block.
+          // A record carrying no identity (written before the
+          // threading, or by a direct record call) is judged on the
+          // validated block alone, so genuine parks keep parking.
           const isCorroboratedEventPark = failure => {
-            if (blocksByRoom === null || !blocksByRoom.has(failure.recordId)) return false;
-            const eventId = blocksByRoom.get(failure.recordId);
-            return eventId !== null && eventId !== undefined && eventId !== "";
+            if (validatedBlocks === null || !validatedBlocks.has(failure.recordId)) return false;
+            const block = validatedBlocks.get(failure.recordId);
+            if (typeof failure.eventId === "string" && failure.eventId !== "" && failure.eventId !== block.eventId) return false;
+            if (Number.isInteger(failure.eventSequence) && failure.eventSequence !== block.sequence) return false;
+            return true;
           };
           const parked = [];
           const fatal = [];

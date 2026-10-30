@@ -1187,6 +1187,8 @@ const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures
   failures INTEGER NOT NULL DEFAULT 1,
   first_seen_at INTEGER NOT NULL,
   last_seen_at INTEGER NOT NULL,
+  event_id TEXT,
+  event_sequence INTEGER,
   PRIMARY KEY (step, record_id)
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
@@ -2277,6 +2279,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   ensureIntegrityFailures() {
     this.db.exec(INTEGRITY_FAILURES_SCHEMA);
+    // Vc ruling (b): the event-identity columns are additive — a table
+    // created before they existed gains them here, the same
+    // pragma-checked shape as the messages_backfill_blocks columns.
+    const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_failures)").all().map(column => column.name));
+    if (!columns.has("event_id")) this.db.exec("ALTER TABLE integrity_failures ADD COLUMN event_id TEXT");
+    if (!columns.has("event_sequence")) this.db.exec("ALTER TABLE integrity_failures ADD COLUMN event_sequence INTEGER");
   }
 
   // Record one isolated integrity failure durably: step, record id, the
@@ -2285,19 +2293,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // — record ids and counts only, never record bodies or arbitrary
   // exception text. Re-recording the same failure bumps its count, so the
   // row proves the failure is still live, not a leftover.
-  recordIntegrityFailure(step, recordId, error) {
+  //
+  // `origin` is the failure's structured event identity when its source
+  // carries one (Vc ruling (b): runMessagesBackfill's blocked items name
+  // { eventId, sequence }); it is stored as structured columns, never
+  // recovered from diagnostic text. A re-record without an origin keeps
+  // the identity an earlier record stored.
+  recordIntegrityFailure(step, recordId, error, origin = null) {
     this.ensureIntegrityFailures();
     const message = allowlistedIntegrityMessage(step, error).slice(0, 240);
     const code = typeof error?.code === "string" && Number.isFinite(error?.status) && /^[a-z][a-z0-9_]{0,63}$/i.test(error.code)
       ? error.code
       : `${step}_failed`;
+    const eventId = typeof origin?.eventId === "string" && origin.eventId !== "" ? origin.eventId : null;
+    const rawSequence = Number.isInteger(origin?.eventSequence) ? origin.eventSequence : origin?.sequence;
+    const eventSequence = eventId !== null && Number.isInteger(rawSequence) ? rawSequence : null;
     const at = this.now();
     this.transaction(() => {
-      this.db.prepare(`INSERT INTO integrity_failures (step, record_id, code, message, failures, first_seen_at, last_seen_at)
-        VALUES (?, ?, ?, ?, 1, ?, ?)
+      this.db.prepare(`INSERT INTO integrity_failures (step, record_id, code, message, failures, first_seen_at, last_seen_at, event_id, event_sequence)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
         ON CONFLICT(step, record_id) DO UPDATE SET code=excluded.code, message=excluded.message,
-          failures=integrity_failures.failures + 1, last_seen_at=excluded.last_seen_at`)
-        .run(step, typeof recordId === "string" ? recordId : "", code, message, at, at);
+          failures=integrity_failures.failures + 1, last_seen_at=excluded.last_seen_at,
+          event_id=COALESCE(excluded.event_id, integrity_failures.event_id),
+          event_sequence=COALESCE(excluded.event_sequence, integrity_failures.event_sequence)`)
+        .run(step, typeof recordId === "string" ? recordId : "", code, message, at, at, eventId, eventSequence);
     });
   }
 
@@ -2313,7 +2332,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   integrityFailures() {
     this.ensureIntegrityFailures();
     return this.db.prepare(`SELECT step, record_id AS recordId, code, message, failures,
-      first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
+      first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt,
+      event_id AS eventId, event_sequence AS eventSequence
       FROM integrity_failures ORDER BY step, record_id`).all();
   }
 
@@ -2324,8 +2344,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   runIntegrityBackfillStep(deadline) {
     const result = this.backfillMessages({ deadline });
     const failedNow = new Set((result.failed ?? []).map(failure => failure.roomId));
+    // Vc ruling (b) threading: runMessagesBackfill's standing `blocked`
+    // items carry the structured event identity ({ roomId, sequence,
+    // eventId }) that its `failed` items do not. Preserve it on the
+    // durable failure record — the first #4930 cure dropped it here, so
+    // integrity_failures records carried no event identity and the job
+    // partition could not tell a block naming a real stored event from
+    // one naming a nonexistent one.
+    const blockedByRoom = new Map((result.blocked ?? []).map(block => [block.roomId, block]));
     for (const failure of result.failed ?? []) {
-      this.recordIntegrityFailure("messages_backfill", failure.roomId, failure.error);
+      const block = blockedByRoom.get(failure.roomId);
+      this.recordIntegrityFailure("messages_backfill", failure.roomId, failure.error,
+        block ? { eventId: block.eventId, sequence: block.sequence } : null);
     }
     // A room parked by an earlier call (or by a direct backfillMessages
     // call outside this wrapper) is skipped now, so it never re-enters
@@ -2333,7 +2363,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // unreported while the room waits for repair.
     for (const block of result.blocked ?? []) {
       if (!failedNow.has(block.roomId)) {
-        this.recordIntegrityFailure("messages_backfill", block.roomId, block.error);
+        this.recordIntegrityFailure("messages_backfill", block.roomId, block.error,
+          { eventId: block.eventId, sequence: block.sequence });
       }
     }
     for (const row of this.integrityFailures()) {
