@@ -105,3 +105,36 @@ service, reconnect a physically sleeping laptop, or claim that every interrupted
 execution can be recovered automatically. Local tests simulate a lost reply
 acknowledgement and reopen the SQLite journal; physical sleep remains a separate
 host qualification.
+
+## Bounded spare-capacity testing
+
+From a clean, committed checkout with dependencies installed:
+
+```sh
+node scripts/local-test-campaign.mjs /absolute/evidence-directory 0 2 24 20
+```
+
+The arguments are output directory, zero-based lane, total lanes, maximum jobs,
+and maximum minutes. Give the other laptop the **same commit**, lane `1`, and
+its own output directory. The existing event-kernel and spend-grant property
+suites receive disjoint reproducible seeds; this is randomized local validation,
+not distributed transaction or live network testing. One subprocess runs at a
+time. Prefer useful new seed coverage to CPU utilization targets.
+
+Each job saves a bounded log and receipt with source revision, Node version,
+platform, seed, suite, timestamps and exit status. Completed matching receipts
+are skipped on resume; unsuccessful receipts require operator investigation.
+Receipts are local evidence, not trusted attestations. Dependency installation
+must be kept unchanged during a campaign; dependency contents are not attested.
+Create `STOP` in the output directory to stop between jobs (at most two minutes),
+or send SIGTERM to interrupt the current job. The runner stops at its finite
+budget and on its first failure. It neither creates Room work nor publishes
+anything. Share an actual counterexample with a reproduction command before
+requesting a fix; do not send a message for every passing job.
+
+An exclusive `running.lock` prevents output-directory collisions. After a hard
+machine/process crash, inspect the recorded PID and any surviving child before
+manually removing a stale lock. No automatic lock stealing occurs. New commits
+should use a new output directory; code changes during a run are refused before
+the next job. Prioritize release verification and user work over spare-capacity
+campaigns; there is no persistent service or scheduled wakeup here.
