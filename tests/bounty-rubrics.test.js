@@ -16,7 +16,7 @@ const GROK = "id:agent/grokbot";    // worker
 const INSTINCT = "id:agent/instinct"; // designated verifier / decider
 const CODEX = "id:agent/codex";       // challenger lane
 
-let nowMs = 1_786_000_000_000;
+const nowMs = 1_786_000_000_000;
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 
 function makeEscrow(db = new DatabaseSync(":memory:")) {

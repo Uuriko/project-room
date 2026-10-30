@@ -33,7 +33,7 @@ function provider(file, clock) {
 
 test("a token issued before a restart still works, and the raw token is not stored", t => {
   const file = openDb(t);
-  let now = 1_700_000_000_000;
+  const now = 1_700_000_000_000;
   const first = provider(file, () => now);
   first.provider.registerClient(CLIENT);
   const { code } = first.provider.issueCode({
@@ -82,7 +82,7 @@ test("O1 (issue #941, durable): a replayed code revokes its family even after a 
   // in one provider instance, restart (new instance over the same SQLite
   // file), then replay the code. The family minted from the code dies.
   const file = openDb(t);
-  let now = 1_700_000_000_000;
+  const now = 1_700_000_000_000;
   const first = provider(file, () => now);
   first.provider.registerClient(CLIENT);
   const { code } = first.provider.issueCode({

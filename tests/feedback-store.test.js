@@ -188,7 +188,7 @@ test("severity routing: bug/perf → task, missing-feature → proposal, docs �
 });
 
 test("appeals: one per filing, 72h window, decided by a different lane", () => {
-  let nowMs = Date.now();
+  const nowMs = Date.now();
   const store = createFeedbackStore({ now: () => nowMs });
   const r = store.submit(goodFiling());
   store.triage(r.item.id, "junk", "reviewer-a");

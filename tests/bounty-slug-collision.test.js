@@ -23,7 +23,7 @@ import { DatabaseSync } from "node:sqlite";
 import { BountyEscrow, bountyEscrowSchema, migrateBountySequencesToSlugKey } from "../server/bounty-escrow.mjs";
 
 const LANE = "id:agent/jill";
-let nowMs = 1_786_000_000_000;
+const nowMs = 1_786_000_000_000;
 const deadline = () => new Date(nowMs + 3_600_000).toISOString();
 
 // Room ids chosen so the 12-char slugs collide, like the production pair.

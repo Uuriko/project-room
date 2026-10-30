@@ -430,7 +430,7 @@ test("fan-out with the activity table faulted still journals and later backfills
   assert.equal(eventsFor(f, "agent").length, 1);
   // D5's exact fault: schema skew — the fan-out's table is gone.
   f.store.db.exec("ALTER TABLE activity_events RENAME TO activity_events_fault");
-  let lines = captureFanoutErrors(() => {
+  const lines = captureFanoutErrors(() => {
     post(f, "owner", { messageId: "m-lost", body: "hey @agent, again" });
   });
   assert.ok(lines.some(line => /activity fan-out failed/.test(line)), "the failure was logged");

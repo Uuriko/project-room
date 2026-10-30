@@ -114,7 +114,7 @@ test("O1 (issue #941): replayed authorization code revokes the tokens already is
   // event. Regression: the old behavior rejected the replay but left the
   // issued tokens live.
   const events = [];
-  let t = 1_000_000;
+  const t = 1_000_000;
   const provider = createOAuthProvider({ clock: () => t, onSecurityEvent: event => { events.push(event); } });
   provider.registerClient({ clientId: CLIENT_A, name: "Muse", redirectUris: [URI_A, URI_B] });
   const { code, verifier: v, tokens } = fullGrant(provider);
@@ -288,7 +288,7 @@ test("FIXED (F-01): refresh-token reuse revokes the whole token family and emits
   // "revoked", attacker's chain stayed valid).
   // -----------------------------------------------------------------------
   const events = [];
-  let t = 1_000_000;
+  const t = 1_000_000;
   const provider = createOAuthProvider({
     clock: () => t,
     onSecurityEvent: event => { events.push(event); },

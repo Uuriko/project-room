@@ -62,7 +62,7 @@ function evaluateGithubExpression(raw, ctx) {
   }
 
   function parseEquality() {
-    let left = parseUnary();
+    const left = parseUnary();
     skip();
     if (source.startsWith("==", i)) {
       i += 2;
