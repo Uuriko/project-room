@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { RoomStore } from '../server/store.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
@@ -18,22 +19,22 @@ const fetch = (url, options = {}) => new Promise((resolve, reject) => {
     res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
   }); req.on('error', reject); req.end(options.body?.toString());
 });
-async function setup(t) {
+async function setup(t, { client = CLIENT, clients = [client] } = {}) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   const invitation = store.invites.create(owner, 'commons', { profile: 'member' });
   const accountsBefore = store.db.prepare('SELECT count(*) n FROM accounts').get().n;
-  const server = createRoomServer(defaultServerArgs({ store, origin, env: { ROOM_MCP_OAUTH_CLIENTS: JSON.stringify([CLIENT]) } }));
+  const server = createRoomServer(defaultServerArgs({ store, origin, env: { ROOM_MCP_OAUTH_CLIENTS: JSON.stringify(clients) } }));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const start = () => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write', state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource }));
+  const start = () => fetch(base + '/oauth/authorize?' + new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], scope: 'rooms:read chat:read chat:write work:read work:write', state: 'native-state', code_challenge: challenge, code_challenge_method: 'S256', resource }));
   const initial = await start(); assert.equal(initial.status, 200);
   const html = await initial.text(); assert.match(html, /No Project Room signup/);
   const nonce = html.match(/name="nonce" value="([^"]+)"/)[1];
   const cookie = initial.headers.get('set-cookie').split(';')[0];
   const submit = (decision, extras = {}, selectedCookie = cookie) => fetch(base + '/oauth/invite', { method: 'POST', headers: { Cookie: selectedCookie, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ nonce, decision, invitation: `https://room.example/#agent-invite/${invitation.code}`, display_name: 'Friend native agent', ...extras }) });
-  const exchange = changes => fetch(base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource, ...changes }) });
+  const exchange = changes => fetch(base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.clientId, redirect_uri: client.redirectUris[0], code_verifier: verifier, resource, ...changes }) });
   const rpc = async (token, name = 'room_check_access', args = {}) => {
     const response = await fetch(base + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) });
     return { status: response.status, body: await response.json() };
@@ -42,6 +43,11 @@ async function setup(t) {
 }
 test('invitation native OAuth needs no account, survives lost consent response without duplicate seats, and acts as the agent', async t => {
   const f = await setup(t);
+  const metadata = await (await fetch(f.base + '/.well-known/oauth-authorization-server')).json();
+  const protectedResource = await (await fetch(f.base + '/.well-known/oauth-protected-resource/mcp')).json();
+  assert.equal(metadata.authorization_response_iss_parameter_supported, true);
+  assert.equal(metadata.issuer, origin);
+  assert.deepEqual(protectedResource.authorization_servers, [metadata.issuer]);
   const preview = await f.submit('preview'); assert.equal(preview.status, 200);
   assert.match(await preview.text(), /Invitation sponsor/);
   assert.equal(f.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null);
@@ -49,6 +55,7 @@ test('invitation native OAuth needs no account, survives lost consent response w
   const location = allowed.headers.get('location'), code = new URL(location).searchParams.get('code');
   assert.match(code, /^iac_/);
   assert.equal(new URL(location).searchParams.get('state'), 'native-state');
+  assert.equal(new URL(location).searchParams.get('iss'), origin);
   assert.equal((await f.submit('allow', { display_name: 'Different agent' })).status, 400);
   const retry = await f.submit('allow'); assert.equal(retry.status, 302); assert.equal(retry.headers.get('location'), location);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 1);
@@ -164,6 +171,7 @@ test('native consent cancellation is CSRF-bound, preserves the invitation and re
   const redirect = new URL(cancelled.headers.get('location'));
   assert.equal(redirect.origin, 'https://client.example');
   assert.equal(redirect.searchParams.get('error'), 'access_denied');
+  assert.equal(redirect.searchParams.get('iss'), origin);
   assert.equal(redirect.searchParams.get('state'), 'native-state');
   assert.equal(redirect.searchParams.has('code'), false);
   assert.equal(f.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null);
@@ -183,4 +191,40 @@ test('expired or already-confirmed consent gives actionable recovery without mak
   assert.match(error.error_description, /fresh agent invitation/);
   assert.match(error.recovery, /new agent seat/);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n, 1);
+});
+
+test('hosted portable public client preserves the existing client and separates two friend consents', async t => {
+  const config = JSON.parse(readFileSync(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
+  const clients = JSON.parse(config.env.production.vars.ROOM_MCP_OAUTH_CLIENTS);
+  const legacy = clients.find(c => c.clientId === 'project-room-chatgpt');
+  assert.deepEqual(legacy.redirectUris, ['https://chatgpt.com/connector/oauth/f2CkgruSTvvC']);
+  const client = clients.find(c => c.clientId === 'project-room-chatgpt-portable');
+  assert.deepEqual(client.redirectUris, ['https://chatgpt.com/connector_platform_oauth_redirect']);
+  const packaged = JSON.parse(readFileSync(new URL('../examples/integrations/chatgpt-dot/hosted-mcp.json', import.meta.url), 'utf8')).mcpServers['project-room'];
+  assert.equal(packaged.url, config.env.production.vars.ROOM_ORIGIN + '/mcp');
+  assert.equal(packaged.extensions['com.openai'].auth.resource, packaged.url);
+  assert.deepEqual(packaged.extensions['com.openai'].auth.client, { mode: 'provided', clientId: client.clientId, tokenEndpointAuthMethod: 'none' });
+  const f = await setup(t, { client, clients });
+  const first = await f.submit('allow');
+  const firstRedirect = new URL(first.headers.get('location'));
+  assert.equal(firstRedirect.origin + firstRedirect.pathname, client.redirectUris[0]);
+  assert.equal(firstRedirect.searchParams.get('iss'), origin);
+  const firstTokens = await (await f.exchange({ grant_type: 'authorization_code', code: firstRedirect.searchParams.get('code') })).json();
+  const secondInvite = f.store.invites.create(f.owner, 'commons', { profile: 'member' });
+  const secondStart = await f.start();
+  const nonce = (await secondStart.text()).match(/name="nonce" value="([^"]+)"/)[1];
+  const cookie = secondStart.headers.get('set-cookie').split(';')[0];
+  const second = await f.submit('allow', { nonce, invitation: secondInvite.code, display_name: 'Second friend' }, cookie);
+  assert.equal(second.status, 302);
+  const secondCode = new URL(second.headers.get('location')).searchParams.get('code');
+  assert.notEqual(secondCode, firstRedirect.searchParams.get('code'));
+  const secondTokens = await (await f.exchange({ grant_type: 'authorization_code', code: secondCode })).json();
+  const firstAccess = await f.rpc(firstTokens.access_token), secondAccess = await f.rpc(secondTokens.access_token);
+  assert.notEqual(firstAccess.body.result.structuredContent.memberId, secondAccess.body.result.structuredContent.memberId);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n, f.accountsBefore);
+  for (const [registered, expected] of [[legacy, 200], [{ ...client, redirectUris: ['https://evil.example/callback'] }, 400]]) {
+    const response = await fetch(f.base + '/oauth/authorize?' + new URLSearchParams({ client_id: registered.clientId, redirect_uri: registered.redirectUris[0], scope: 'rooms:read', code_challenge: challenge, code_challenge_method: 'S256', resource }));
+    assert.equal(response.status, expected);
+    assert.equal(response.headers.get('location'), null);
+  }
 });

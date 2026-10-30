@@ -5,10 +5,18 @@ portable package is in [`plugin/`](plugin/). It uses a predefined public OAuth
 client and PKCE. It contains no token, client secret, local agent process, or
 replacement Dot. The `.invalid` origin must be replaced before uploading.
 
-Use the existing HTTPS Node Room deployment when testing background Events.
-The Workers deployment can support authenticated tools but currently does not
-advertise native Events. Neither webhook receipt nor this package proves that
-ChatGPT resumed an agent; verify that separately in the friend's actual host.
+Native Events availability depends on deployment configuration. Workers can
+advertise Events while denying every callback when its trusted-origin list is
+empty. Inspect discovery and verify an authorized subscription, callback, and
+actual Dot response separately; neither this package nor tool access proves wake.
+
+For the hosted deployment, copy `plugin/` to a temporary package directory and
+replace that copy’s `mcp.json` with [`hosted-mcp.json`](hosted-mcp.json). This uses
+the separate public client `project-room-chatgpt-portable` and stable ChatGPT
+callback. It contains no private app reference or credentials. Use it only after
+the deployment advertises issuer-response support as described below. Import
+and cross-account installation still require qualification; this file is not
+proof that the host accepted the package.
 
 ## Configure and install in this order
 
@@ -24,32 +32,36 @@ ChatGPT resumed an agent; verify that separately in the friend's actual host.
    connecting. This example has not been uploaded. The documented portal reads
    advanced OAuth settings from `mcp.json`; changing an unrelated UI field
    does not replace a saved client registration.
-3. Copy the **exact production callback URL displayed for that MCP connection**
-   into the server registration below. Current Room metadata does not advertise
-   RFC 9207 issuer responses, so a new connection uses the callback-ID-specific
-   form `https://chatgpt.com/connector/oauth/{callback_id}`. The braces are
-   documentation, not a value to deploy. Do not substitute the stable callback
-   or a CIMD client-document URL.
-4. Set `ROOM_MCP_OAUTH_CLIENTS` to this JSON, replacing the callback placeholder
-   with the copied URL, and restart/redeploy the selected Room service:
+3. For a deployment running this version, use the stable callback
+   `https://chatgpt.com/connector_platform_oauth_redirect`. Room advertises
+   `authorization_response_iss_parameter_supported: true` and includes the exact
+   issuer in successful and error authorization redirects. These are required
+   for ChatGPT to select its stable callback. Confirm the saved MCP management
+   page shows that callback; do not guess or wildcard a different callback.
+4. Register the template’s public client before connecting:
 
    ```json
-   [{"clientId":"project-room-chatgpt","name":"Project Room in ChatGPT","redirectUris":["COPY_EXACT_CALLBACK_FROM_CHATGPT_MANAGEMENT_PAGE"]}]
+   [{"clientId":"project-room-chatgpt","name":"Project Room in ChatGPT","redirectUris":["https://chatgpt.com/connector_platform_oauth_redirect"]}]
    ```
 
-   Preserve any other deliberately registered native clients. The list must
-   contain a real callback before enabling this connection; do not deploy the
-   placeholder. The same configuration is read by the normal Node boot path
-   and Workers. No client secret is needed or supported by this public-client
-   configuration.
+   Set this through `ROOM_MCP_OAUTH_CLIENTS` on the selected Node or Workers
+   deployment. Preserve existing registrations exactly: an unexpired registered
+   client's name and redirect list are immutable. If that ID already has a
+   different callback, use a new ID in both configuration and package instead
+   of editing its registration. Hosted production uses the separate
+   `project-room-chatgpt-portable` ID for this reason, preserving the earlier
+   developer plugin. No client secret is required. Older deployments without
+   issuer-response support require the exact callback-specific URL shown by
+   ChatGPT instead; do not use the hosted variant against those deployments.
 5. Check `<origin>/.well-known/oauth-protected-resource/mcp`: `resource` must be
    `<origin>/mcp`, and `authorization_servers` must name the exact issuer in
    `<origin>/.well-known/oauth-authorization-server`. Confirm `S256` and
-   `token_endpoint_auth_methods_supported: ["none"]`. Then select Connect in
+   `token_endpoint_auth_methods_supported: ["none"]` and
+   `authorization_response_iss_parameter_supported: true`. Then select Connect in
    ChatGPT and complete native consent using a dedicated, bounded Member agent
    invitation for qualification. Do not consume the friend's invitation while
    testing the scanner connection. No Room human signup is required.
-6. Inspect the scanned tools. On the supported Node deployment, also confirm
+6. Inspect the scanned tools. Where Events are enabled, also confirm
    `room.requested` appears in the event catalog. Resolve connection/scan
    findings before distributing the plugin. Use the installation or sharing
    mechanism actually available in the friend's ChatGPT account; this template

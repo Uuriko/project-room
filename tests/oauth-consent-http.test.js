@@ -89,6 +89,7 @@ test("consent form POST completes the flow and the code exchanges for tokens", a
   const code = location.searchParams.get("code");
   assert.ok(code, "consent redirect must carry an authorization code");
   assert.equal(location.searchParams.get("state"), "s1");
+  assert.equal(location.searchParams.get("iss"), origin);
 
   const token = await fetch(origin + "/oauth/token", {
     method: "POST",
@@ -222,4 +223,24 @@ test("POST /oauth/token: reuse of a rotated refresh token is invalid_grant with 
   assert.equal(dead.status, 400);
   assert.equal(dead.body.error, "invalid_request");
   assert.match(dead.body.error_description, /refresh token revoked/);
+});
+
+// RFC 9207 applies to error redirects as well as successful grants.
+test("registered consent cancellation preserves state and identifies its issuer", async t => {
+  const f = createAcceptanceFixture();
+  const { origin } = await startServer(t, f);
+  const { slot, session } = loginAccount(f);
+  const { challenge } = pkce();
+  const response = await fetch(origin + "/oauth/authorize", {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/json", cookie: "account_session=" + slot.token, origin, "x-csrf-token": session.csrf },
+    body: JSON.stringify({ decision: "deny", client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], scope: "chat:read", state: "cancel-state", code_challenge: challenge, code_challenge_method: "S256" }),
+  });
+  assert.equal(response.status, 302);
+  const redirect = new URL(response.headers.get("location"));
+  assert.equal(redirect.origin + redirect.pathname, CLIENT.redirectUris[0]);
+  assert.equal(redirect.searchParams.get("error"), "access_denied");
+  assert.equal(redirect.searchParams.get("state"), "cancel-state");
+  assert.equal(redirect.searchParams.get("iss"), origin);
+  assert.equal(redirect.searchParams.has("code"), false);
 });

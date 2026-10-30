@@ -22,7 +22,7 @@ export function ensureMcpInviteOAuthSchema(db) {
     expires_at INTEGER NOT NULL, grant_id TEXT, approval_hash TEXT
   );`);
 }
-export function createMcpInviteOAuth({ store, clients, resource }) {
+export function createMcpInviteOAuth({ store, clients, resource, issuer = new URL(resource).origin }) {
   const db = store.db;
   ensureMcpInviteOAuthSchema(db);
   const provider = createOAuthProvider({ db: inviteOAuthDatabase(db), tokenKind: 'invite', clock: () => store.now(),
@@ -91,6 +91,7 @@ export function createMcpInviteOAuth({ store, clients, resource }) {
     const { code } = provider.issueCode({ ...request, userId: grant.id, binding, codeIdempotencyKey: nonce });
     const redirect = new URL(request.redirectUri);
     redirect.searchParams.set('code', code);
+    redirect.searchParams.set('iss', issuer);
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
   });
@@ -100,6 +101,7 @@ export function createMcpInviteOAuth({ store, clients, resource }) {
     db.prepare('DELETE FROM oauth_invite_pending WHERE nonce_hash=?').run(hash(nonce));
     const redirect = new URL(request.redirectUri);
     redirect.searchParams.set('error', 'access_denied');
+    redirect.searchParams.set('iss', issuer);
     redirect.searchParams.set('error_description', 'Connection cancelled; your invitation was not used.');
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
