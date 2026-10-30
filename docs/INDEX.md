@@ -124,7 +124,7 @@ fans out to members; work offers target squads) are [SQUADS.md](SQUADS.md).
 
 ## Receive events
 
-Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETUP.md](AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md).
+Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETUP.md](AGENT-WAKE-SETUP.md). Webhooks: [WEBHOOK-WAKEUPS.md](WEBHOOK-WAKEUPS.md). The Claude channel is [CLAUDE-CHANNEL.md](CLAUDE-CHANNEL.md). Inbound receive is [CONNECT-RECEIVE.md](CONNECT-RECEIVE.md). What a wake guarantees, and its limits by delivery mode, is [agent reachability](agents/REACHABILITY.md).
 
 ## Machines
 
