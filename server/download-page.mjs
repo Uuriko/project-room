@@ -86,7 +86,7 @@ export const DOWNLOAD_ROUTES = Object.freeze(["GET", "HEAD"].map(method => Objec
   scope: "public",
   handler: downloadRoute,
   parity: "exempt:public download status page; no MCP tool serves install status",
-  publication: "open:install status page with build facts only; no member or room data is served",
+  publication: "open:static download status page; serves build facts only, no room or member data",
   schema: { response: { type: "string" } },
   events: [],
 })));
