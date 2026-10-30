@@ -13,12 +13,13 @@ Options:
   --max-sessions <n>                    concurrent agent sessions (default 4)
   --respond-to <owner|anyone>           whose mentions start a turn (default owner)
   --name <display name>                 display name when joining
+  --room <roomId>                       pick a saved room when several are saved
   -h, --help                            show this help`;
 
-const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin"]);
+const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room"]);
 
 export function parseArgs(argv) {
-  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "owner", name: null, origin: null, help: false };
+  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "owner", name: null, origin: null, room: null, help: false };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
