@@ -209,6 +209,48 @@ export class PublicWorkClaims {
     return offer;
   }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
+  // The room members a global identity acts as in this room, through the
+  // same bindings the review module uses to detect self-review
+  // (public-work-reviews selfReviewer / settlement laneForIdentity): an
+  // identity_links row, a member whose own identityId is the claimant, or
+  // the agent-room founding member whose member id IS the identity id.
+  claimantMemberIds(roomId, identityId) {
+    const ids = new Set();
+    let members = {};
+    try { members = this.store.room(roomId).state.members ?? {}; } catch { members = {}; }
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_links'").get()) {
+      for (const row of this.db.prepare('SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?').all(roomId, identityId)) {
+        const member = members[row.memberId];
+        if (member && member.active !== false) ids.add(row.memberId);
+      }
+    }
+    for (const [memberId, member] of Object.entries(members)) {
+      if (member && member.active !== false && (memberId === identityId || member.identityId === identityId)) ids.add(memberId);
+    }
+    return ids;
+  }
+  // Claim-time independence guards (UT wave-2 03-08 F1): a claim designates
+  // its claimant as the task's submitter, so a claim that makes the
+  // submitter the poster, or leaves the submission with no reviewer who is
+  // not the submitter, creates a submission nobody can ever verify or
+  // decide (selfReviewer bars them at review time). The bounty surface
+  // already refuses the poster case at claim time with 403 not_authorized
+  // ("the poster cannot claim their own bounty", 02-10); mirror that shape
+  // here, at claim time, instead of discovering the deadlock at decide time.
+  // Paid tasks are checked first by the settlement claim gate above, which
+  // keeps its own public_work_not_owner refusal for the poster case.
+  assertClaimNotSelfDealing(row, identity) {
+    const offerRow = this.db.prepare('SELECT owner_id, private_links FROM project_offers WHERE offer_id=?').get(row.offer_id);
+    if (!offerRow) return;
+    const memberIds = this.claimantMemberIds(row.room_id, identity.identityId);
+    if (identity.identityId === offerRow.owner_id || memberIds.has(offerRow.owner_id))
+      fail(403, 'not_authorized', 'the poster cannot claim their own task');
+    let reviewers = [];
+    try { reviewers = JSON.parse(offerRow.private_links)?.reviewerMemberIds ?? []; } catch { reviewers = []; }
+    if (Array.isArray(reviewers) && reviewers.length > 0
+      && reviewers.every(id => id === identity.identityId || memberIds.has(id)))
+      fail(403, 'not_authorized', 'the sole designated reviewer cannot claim a task only they could review');
+  }
   request(row, actorId, action, input, operation) {
     check(identifier(input.requestId), 'Invalid request ID');
     const encoded = canonicalJson({ action, ...input });
@@ -475,6 +517,7 @@ export class PublicWorkClaims {
           // Paid tasks gate the claim on the settlement lane + reputation
           // claim gate before any lease moves (no-op for unpaid tasks).
           this.settlementService().assertClaimable(row.room_id, offerId, identity.identityId);
+          this.assertClaimNotSelfDealing(row, identity);
           if (item.state !== 'unclaimed') {
             // G4: name the holder and the lease expiry — a bare
             // "Task already claimed" teaches the raced agent nothing actionable.
