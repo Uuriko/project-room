@@ -18,7 +18,8 @@ import { openCatchUp } from "./room-chrome.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true, dmConsent: true }), handles = new Set(), traffic = [], errors = [];
-  const server = createRoomServer({ store: f.store, streamInterval: 50 }); let browser;
+  // One owner credential drives both the page and MCP reads; lift the burst like the other journey checks.
+  const server = createRoomServer({ store: f.store, streamInterval: 50, credentialReadBurst: 600, credentialWriteBurst: 600 }); let browser;
   t.after(async () => {
     for (const handle of handles) await handle.close(); await browser?.close();
     server.closeStreams(); server.closeAllConnections();
