@@ -9,7 +9,7 @@ import { directDraftKey, directDraftPeer, directMessagePeer } from "./conversati
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
-import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
+import { installRoomLayout, syncSidebarSections, MVP_ONLY } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
@@ -2206,7 +2206,7 @@ function render() {
   const presenceNote = connectionStale ? uiText("connection.stalePresenceNote") : presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
   const checked = presenceCheckedAt ? `${presenceStale ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
   const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
-  renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
+  if (MVP_ONLY) { renderContent("#presence-list", ""); } else renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
@@ -3534,7 +3534,7 @@ async function restoreWorkOrigin(ticket) {
   input.setSelectionRange(...origin.selection); input.scrollTop = origin.composerScroll;
   $("#message-list").scrollTop = origin.listScroll;
   if (origin.type === "updates") {
-    if (!await updatesUi.restore(origin.updates)) return;
+    if (!await updatesUi?.restore(origin.updates)) return;
   } else if (origin.type === "board") {
     $("#tasks-board-open").click();
     const opening = navigationBoardEpoch;
@@ -4793,7 +4793,7 @@ $("#thread-back").addEventListener("click", () => switchThread(null));
 // to the thread root, so the local set holds root ids.
 async function refreshMutedThreads() {
   mutedThreads = new Set();
-  if (!session || !client.session) return;
+  if (!session || !client.session || MVP_ONLY) return;
   const generation = client.generation;
   try {
     const result = await client.threadMutes();
@@ -6969,7 +6969,7 @@ window.addEventListener("pageshow", e => {
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
-function loadReturnBrief() { return briefView.refresh(); }
+function loadReturnBrief() { return MVP_ONLY ? Promise.resolve() : briefView.refresh(); }
 // Notification feed (B4): items are derived on the server from events after your
 // caught-up marker and filtered by your notification preferences. Fetching never
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
