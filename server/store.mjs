@@ -1426,6 +1426,13 @@ class ProjectionCache {
   }
 }
 
+// The workItemHistory scan, pinned to its expression index the way the
+// board scan pins events_room_type (server/work-item-board.mjs): with no
+// ANALYZE statistics the planner otherwise prefers the (room_id, sequence)
+// primary key — which avoids the ORDER BY sort — and json_extracts every
+// event body in the room.
+export const WORK_ITEM_HISTORY_EVENT_SQL = "SELECT body FROM events INDEXED BY events_room_work_item WHERE room_id=? AND json_extract(body,'$.data.workItemId')=? ORDER BY sequence";
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
@@ -3336,7 +3343,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
       // The expression index cannot yield mid-build. Deferred wakes and the
       // integrity cron skip it; eager opens still create it inside this transaction.
-      if (ensureIndex) this.ensureEventTypeIndex();
+      if (ensureIndex) { this.ensureEventTypeIndex(); this.ensureWorkItemEventIndex(); }
       if (upgradeV1) {
         const rooms = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
         this.replayProvenance(rooms, { upgradeV1: true });
@@ -3403,6 +3410,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Additive. Expression indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
     this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+  }
+  ensureWorkItemEventIndex() {
+    // Additive, same shape as ensureEventTypeIndex: an expression index on
+    // events for the workItemHistory scan, which otherwise json_extracts
+    // every event body in the room. The existence check keeps the per-call
+    // ensure in workItemHistory a pure read once the index exists.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_room_work_item'").get())
+      this.db.exec("CREATE INDEX events_room_work_item ON events(room_id, json_extract(body,'$.data.workItemId'))");
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
@@ -5095,13 +5110,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   workItemHistory(token, roomId, workItemId, expectedSessionBinding = null, since = null) {
     // F3: derived, read-time change list for one work item from its own revision
     // events. Never a write; the event log stays the only record.
+    // The history scan is served by the events_room_work_item expression
+    // index; ensure it here, before the read transaction (which runs
+    // query_only), the way roomEvents ensures events_room_type.
+    this.ensureWorkItemEventIndex();
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const item = room.state.workItems[workItemId];
       if (!item) fail(404, "work_not_found", "Choose an existing work item");
       if (since !== null && (!Number.isSafeInteger(since) || since < 0 || since > item.revision)) fail(422, "invalid_history_basis", "Choose a revision this work item has reached");
-      const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.workItemId')=? ORDER BY sequence").all(roomId, workItemId);
+      const rows = this.db.prepare(WORK_ITEM_HISTORY_EVENT_SQL).all(roomId, workItemId);
       const changes = workItemChanges(rows.map(row => JSON.parse(row.body)));
       return { historyVersion: 1, workItemId, revision: item.revision,
         changes: since === null ? changes : changes.filter(change => change.revision > since) };
