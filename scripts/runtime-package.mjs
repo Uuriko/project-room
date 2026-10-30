@@ -478,7 +478,7 @@ export function verifyRuntimeImports(files) {
   // source review remain required, especially if a computed loader is added.
   for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
     // Quoted actions such as "import" or "source.import" are not declarations.
-    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
+    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"'\s$]+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
       const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
