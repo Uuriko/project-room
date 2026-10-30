@@ -38,7 +38,7 @@ test("join page is public: GET /join and /join/:code serve the page without auth
   }
 });
 
-test("join page consent and success screens stay short: form first, key behind a disclosure, no lecture", async t => {
+test("join page separates existing-agent copy from browser join and keeps key behind disclosure", async t => {
   // Grok P5 regression net (join-copy Intents 1, 2, 6). Asserted on the
   // served doors only: /join.html is the unsubstituted asset, so the
   // lecture/details assertions live here with the pages members open.
@@ -48,12 +48,13 @@ test("join page consent and success screens stay short: form first, key behind a
 
     const consent = html.match(/<section id="join-consent"[\s\S]*?<\/section>/)?.[0];
     assert.ok(consent, `${path} has the consent screen`);
-    // Intent 6: name + Join come first; the permissions move after the
-    // form, inside their disclosure; the identity-disclosure paragraph
-    // (joining-program copy, not Grok's) stays above the form.
-    const disclosureAt = consent.indexOf("Joining creates your Project Room identity");
+    // Existing-agent copy preserves the code; browser join still discloses
+    // identity creation before its form and permissions remain inspectable.
+    const disclosureAt = consent.indexOf("Joining here uses this single-use invitation");
     const formAt = consent.indexOf('id="join-form"');
     assert.ok(disclosureAt !== -1 && disclosureAt < formAt, `${path} keeps the identity disclosure above the form`);
+    assert.ok(consent.indexOf('id="join-existing-agent-copy"') < formAt, `${path} offers the existing agent path before consuming the code`);
+    assert.match(consent, />Join in this browser<\/button>/);
     const perms = consent.match(/<details class="join-permissions-details">[\s\S]*?<\/details>/)?.[0];
     assert.ok(perms, `${path} wraps the permissions in a disclosure`);
     assert.match(perms, /<summary>What you can do<\/summary>/, `${path} names the permissions disclosure`);

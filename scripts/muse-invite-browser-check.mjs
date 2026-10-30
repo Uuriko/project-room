@@ -49,9 +49,11 @@ for (const theme of ['dark', 'light']) for (const width of [1280, 390]) {
     const token=url.split('#join/')[1].split('?')[0];
     assert.deepEqual(store.shareLinks.preview(token).link.permissions,PERMISSIONS);
     assert.equal(store.shareLinks.list(owner,'muse-room').links.length,1);
-    await page.locator('#growth-kit summary').click();
-    await page.locator('#growth-copy-agent').click();
-    assert.ok((await page.evaluate(()=>window.copiedInvite)).includes(token));
+    await page.getByRole('button', { name: 'Create invitation for an agent', exact: true }).click();
+    assert.equal(await page.locator('#agent-invite-profile').inputValue(), 'member', 'native agent invite never inherits owner access implicitly');
+    await page.locator('#agent-invite-mint').click();
+    await page.getByRole('button', { name: 'Copy invitation for an agent', exact: true }).click();
+    assert.match(await page.evaluate(()=>window.copiedInvite), /\/join\/RM-/);
     mkdirSync('test-results',{recursive:true});
     await page.screenshot({path:`test-results/muse-invite-${theme}-${width}.png`});
     assert.deepEqual(errors,[]);

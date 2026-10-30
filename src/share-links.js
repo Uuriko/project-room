@@ -414,8 +414,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#growth-copy-link")?.addEventListener("click", () => copyGrowth($("#growth-invite-url")?.value, "Link copied."));
       $("#growth-copy-message")?.addEventListener("click", () => copyGrowth($("#growth-invite-message")?.value, "Message copied."));
       $("#growth-copy-agent")?.addEventListener("click", () => {
-        const url = $("#growth-invite-url")?.value;
-        if (url) void copyGrowth(uiText("entry.invite.agentInstructions", { url }), uiText("entry.invite.agentCopied"));
+        // Native OAuth accepts an unused RM invitation, not the reusable
+        // people link. Open the existing authorized mint flow; never redeem
+        // or mint behind a clipboard action.
+        const profile = $("#share-link-access")?.value === "guest" ? "guest" : "member";
+        manager.close();
+        $("#invite-agents-button")?.click();
+        if ($("#agent-invite-dialog")?.open && $("#agent-invite-profile")) $("#agent-invite-profile").value = profile;
       });
       $("#growth-kit-retry")?.addEventListener("click", () => loadKit());
       $("#growth-agent-code")?.addEventListener("click", () => $("#invite-agents-button")?.click());

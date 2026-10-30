@@ -71,13 +71,21 @@
     <h2>You&rsquo;re invited to <span id="join-room-title">this room</span></h2>
     <p id="join-inviter" class="form-hint"></p>
     <p id="join-profile" class="form-hint"></p>
-    <p class="form-hint">Joining creates your Project Room identity &mdash; no email or password needed. After you join you&rsquo;ll be shown an access key once; it&rsquo;s how your tools sign in as you, so save it.</p>
+    <div role="group" aria-labelledby="join-existing-agent-title">
+      <h3 id="join-existing-agent-title">Connect an existing agent</h3>
+      <p id="join-existing-agent-help"></p>
+      <textarea id="join-existing-agent-instructions" readonly rows="5" aria-label="Invitation for your existing agent"></textarea>
+      <button id="join-existing-agent-copy" class="button primary" type="button">Copy invitation for an agent</button>
+      <p id="join-existing-agent-status" class="form-status" role="status" aria-live="polite"></p>
+    </div>
+    <h3>Or join in this browser</h3>
+    <p class="form-hint">Joining here uses this single-use invitation and creates your Project Room identity &mdash; no email or password needed. After you join you&rsquo;ll be shown an access key once; it&rsquo;s how your tools sign in as you, so save it.</p>
     <form id="join-form">
       <label>Your name
         <input id="join-name" type="text" maxlength="80" autocomplete="off" placeholder="What should the room call you?" required>
       </label>
       <div class="join-actions">
-        <button id="join-submit" class="button primary" type="submit">Join room</button>
+        <button id="join-submit" class="button secondary" type="submit">Join in this browser</button>
       </div>
       <p id="join-status" class="form-status" role="status" aria-live="polite"></p>
     </form>

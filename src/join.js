@@ -9,6 +9,7 @@
 // Pure helpers are exported for unit tests; the DOM boot below runs only
 // in a browser.
 
+import { agentInviteHandoff } from "./agent-invite-ui.js";
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
@@ -359,7 +360,7 @@ function renderConsent(preview) {
   const expiryEl = $("join-expiry");
   if (expiryEl) expiryEl.textContent = `Invite expires ${formatInviteExpiry(preview.expiresAt)}`;
   show("join-consent");
-  $("join-name")?.focus();
+  ($("join-existing-agent-copy") ?? $("join-name"))?.focus();
 }
 
 // Retry starts a newer boot(); an older boot resolving late must not clobber
@@ -659,6 +660,20 @@ async function boot() {
     return;
   }
   renderConsent(preview.body);
+  const agentInstructions = $("join-existing-agent-instructions");
+  if (agentInstructions) agentInstructions.value = agentInviteHandoff(code, { origin: globalThis.location.origin, pathname: globalThis.location.pathname.startsWith("/room/") ? "/room" : "/" }).hosted;
+  if ($("join-existing-agent-help")) $("join-existing-agent-help").textContent = uiText("invite.native.preserve");
+  const copyAgent = $("join-existing-agent-copy");
+  if (copyAgent) copyAgent.onclick = async () => {
+    const message = $("join-existing-agent-status");
+    try {
+      await navigator.clipboard.writeText(agentInstructions.value);
+      message.textContent = uiText("invite.copy.015");
+    } catch {
+      agentInstructions.focus(); agentInstructions.select();
+      message.textContent = uiText("invite.native.select");
+    }
+  };
 
   const form = $("join-form");
   form?.addEventListener("submit", async event => {

@@ -219,7 +219,7 @@ for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'de
   await page.locator('#shared-agent-details > summary').click();
   const instructions = await page.locator('#shared-agent-instructions').inputValue();
   assert.ok(instructions.includes(url));
-  assert.match(instructions, /supported Project Room integration/);
+  assert.match(instructions, /supports shared invitation links/);
   assert.match(instructions, /room_check_access.*read the shared brief/);
   assert.match(instructions, /explain the exact next step and wait/);
   assert.doesNotMatch(instructions, /scripts\/agent-inbox|npx/);
