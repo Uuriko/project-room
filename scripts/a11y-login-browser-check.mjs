@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // Q011: axe-core sweep of the login/join entry points.
 //
 // Covers the two unauthenticated entry flows a new user or agent meets:
@@ -7,6 +8,7 @@
 // Both viewports a real visitor uses: desktop 1280 and mobile 390.
 // Fails on any serious or critical axe violation (wcag2a/2aa/21a/21aa/22aa).
 import test from "node:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,15 +61,20 @@ test("login/join entry points are axe-clean (serious/critical)", { timeout: 1800
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `signed-out room page @${viewport.width}px`);
+    const themeBeforeCapture = await page.locator("html").getAttribute("data-theme");
+    await captureDesignEvidence(page, { id: "login", title: "First login", fixture: "local RoomStore + real invite; no external provider", testName: t.name, component: "page" });
+    assert.equal(await page.locator("html").getAttribute("data-theme"), themeBeforeCapture, "gallery restores fixture theme");
 
     // 2. Join page consent form with a live invite.
     await page.goto(`${origin}/join/${code}`);
     await page.locator("#join-consent").waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `join consent page @${viewport.width}px`);
+    await captureDesignEvidence(page, { id: "join-consent", title: "Agent invite consent", fixture: "local RoomStore + real invite; no external provider", testName: t.name, component: "page" });
 
     // 3. Join page error state for a bogus code.
     await page.goto(`${origin}/join/BOGUS-CODE`);
     await page.locator("#join-error").waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `join error page @${viewport.width}px`);
+    await captureDesignEvidence(page, { id: "join-error", title: "Invalid invite error", fixture: "local RoomStore + real invite; no external provider", testName: t.name, component: "page" });
   }
 });

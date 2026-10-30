@@ -125,7 +125,11 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
     if (helpContext || offerContext || auditView !== "full" || windowed) fail(422, "invalid_snapshot_view", "Orientation does not accept snapshot context options");
     return readAgentOrientation(store, token, roomId, fence);
   }
-  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null);
+  // #4265: the non-windowed form is the explicit full-history contract (the
+  // compat ?full=1 read; the work view returns before the messages branch),
+  // so it opts in to full history at the store. The windowed default passes
+  // no opt-in and stays bounded.
+  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null, !windowed);
   if (view === "work") {
     delete snapshot.state.agentHalts;
     return snapshot;
@@ -138,14 +142,41 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   // its opening message still fits in the recent window. Match selected/list
   // request visibility without changing canonical state or historical events.
   const historyFloor = store.historyFloor(roomId, snapshot.viewerId);
+  // F-S8a-5: work items carrying a reply request are private to that
+  // request's parties on this full read too (bootstrap and the HTTP
+  // room read serialise from here). Compute parties from the
+  // unfiltered request set before it is narrowed to the viewer below;
+  // a member party to any request on an item keeps its full record.
+  // The store snapshot already applies this; repeating it here keeps
+  // the boundary at this serialiser even if a snapshot source changes.
+  const privatePartiesByWork = new Map();
+  for (const request of Object.values(snapshot.state.replyRequests ?? {})) {
+    if (!request?.workItemId) continue;
+    if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
+    privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
+  }
+  const workItemsForViewer = itemId => {
+    const parties = privatePartiesByWork.get(itemId);
+    return parties && !parties.has(snapshot.viewerId);
+  };
+  const workItems = snapshot.state.workItems ? Object.fromEntries(Object.entries(snapshot.state.workItems).map(([id, item]) =>
+    workItemsForViewer(id) ? [id, { ...item, title: null, definitionOfDone: null }] : [id, item])) : snapshot.state.workItems;
   const replyRequests = Object.fromEntries(Object.entries(snapshot.state.replyRequests ?? {}).filter(([, request]) =>
     [request.requesterId, request.recipientId].includes(snapshot.viewerId)
     && messageInHistory({ id: request.id, createdAt: request.createdAt }, historyFloor)));
   const nextState = {
     ...snapshot.state,
+    ...(snapshot.state.workItems === undefined ? {} : { workItems }),
     messages: shown,
     ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests }),
-    eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
+    eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible).map(event => {
+      const workItemId = event?.data?.workItemId;
+      if (typeof workItemId !== "string" || !workItemsForViewer(workItemId)) return event;
+      if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
+      return { ...event, data: { ...event.data,
+        ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),
+        ...(Object.hasOwn(event.data, "definitionOfDone") ? { definitionOfDone: null } : {}) } };
+    }),
     pins: windowed ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId))
   };
   if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);

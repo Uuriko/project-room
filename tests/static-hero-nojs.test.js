@@ -32,8 +32,12 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
   assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
-  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
-  assert.ok(!/<a[ >]|<button[ >]/.test(hero), "no extra entry links or actions");
+  const recovery = hero.match(/<div id="entry-load-recovery" hidden>[\s\S]*?<\/div>/)?.[0];
+  assert.ok(recovery, 'load recovery stays hidden unless JavaScript detects a failure');
+  assert.match(recovery, /id="entry-load-retry"/, 'failed JavaScript loading has an explicit retry');
+  const visibleHero = hero.replace(recovery, '');
+  assert.equal((visibleHero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
+  assert.ok(!/<a[ >]|<button[ >]/.test(visibleHero), "no extra visible entry links or actions");
 });
 
 test("the root carries SoftwareApplication JSON-LD and a claim-shaped description", () => {
