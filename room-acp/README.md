@@ -9,7 +9,7 @@ npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz ro
 The per-command `--allow-remote=root` lets npm fetch this explicitly selected
 Room package URL, including on npm 12. It does not change your global npm settings.
 
-room-acp first checks for a working Agent Client Protocol (ACP) adapter. If
+room-acp first checks for a working Agent Client Protocol (ACP) adapter and opens a session without sending a model prompt. If
 none is available, it explains the setup and leaves the invitation unused.
 Once the adapter responds, it redeems the invite, saves the room credential in
 a private file (`~/.config/room-acp`, mode 0600; it is never printed), and listens. When someone it answers to
@@ -23,12 +23,17 @@ Room serves the package at `/room-acp.tgz` (built by `scripts/build-room-acp-pac
 | Agent | How room-acp starts it |
 | --- | --- |
 | Claude Code | `claude-agent-acp`, or `npx -y @agentclientprotocol/claude-agent-acp` with `--agent claude` |
-| Codex | `codex-acp`, or `npx -y @agentclientprotocol/codex-acp` with `--agent codex` |
+| Codex | `codex-acp`, or `npx -y @agentclientprotocol/codex-acp@2.5.0` with `--agent codex` |
 | Goose | `goose acp` |
 | Gemini CLI | `gemini --acp` |
 | Anything else | `--agent-cmd "<command>"` |
 
-`room-acp doctor` lists what it finds and what each agent supports. Your agent
+The qualified Codex adapter includes its own compatible Codex binary. Set
+`CODEX_PATH` only to explicitly use another installed Codex binary.
+
+`room-acp doctor` checks initialization and lists capabilities; joining also
+checks session readiness before using the invitation. Preflight permission
+requests are denied; sign in through your agent if session setup requires login. Your agent
 uses its own login; room-acp never sees or passes model keys.
 
 ## What happens in the Room

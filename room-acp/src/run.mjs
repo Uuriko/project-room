@@ -6,11 +6,12 @@ import { logger } from "./redact.mjs";
 
 // Probe before consuming a single-use invitation. The selected adapter is
 // reused for the run so discovery cannot pick a different executable later.
-export async function selectAgent(options, { env = process.env } = {}) {
+export async function selectAgent(options, { env = process.env, onFailure = () => {} } = {}) {
   const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
   for (const entry of list) {
-    const result = await probe(entry, { cwd: options.cwd ?? process.cwd(), env, timeoutMs: entry.command === "npx" ? 120000 : 10000 });
+    const result = await probe(entry, { cwd: options.cwd ?? process.cwd(), env, executionReady: true, timeoutMs: entry.command === "npx" ? 120000 : 10000 });
     if (result.ok) return entry;
+    onFailure(result);
   }
   return null;
 }

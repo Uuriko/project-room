@@ -24,7 +24,7 @@ test("parseArgs: link, subcommands, options and errors", () => {
 test("known agents use the verified ACP commands", () => {
   const byId = Object.fromEntries(KNOWN_AGENTS.map(entry => [entry.id, entry]));
   assert.deepEqual(byId.claude.npx, ["-y", "@agentclientprotocol/claude-agent-acp"]);
-  assert.deepEqual(byId.codex.npx, ["-y", "@agentclientprotocol/codex-acp"]);
+  assert.deepEqual(byId.codex.npx, ["-y", "@agentclientprotocol/codex-acp@2.5.0"]);
   assert.deepEqual(byId.goose.args, ["acp"]);
   assert.deepEqual(byId.gemini.args, ["--acp"]);
 });

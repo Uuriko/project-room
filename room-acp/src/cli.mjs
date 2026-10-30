@@ -16,7 +16,7 @@ export async function doctor(options, { print = console.log, env = process.env }
     if (result.ok) {
       ok++;
       const caps = result.capabilities;
-      print(`ok   ${result.label} (${result.id}): protocol ${caps.protocolVersion}, loadSession ${caps.loadSession ? "yes" : "no"}${caps.authMethods.length ? `, login via ${caps.authMethods.join("/")}` : ""}`);
+      print(`ok   ${result.label} (${result.id}): protocol ${caps.protocolVersion}, loadSession ${caps.loadSession ? "yes" : "no"}${caps.authMethods.length ? `, login via ${caps.authMethods.join("/")}` : ""}; initialization only, session readiness not checked`);
     } else print(`fail ${result.label} (${result.id}): ${result.error}`);
   }
   return ok ? 0 : 1;
@@ -33,9 +33,13 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   try {
     if (options.command === "join") {
       if (!io.joinOnly) {
-        candidate = await selectAgent(options, { env });
+        let needsLogin = false;
+        candidate = await selectAgent(options, { env, onFailure: result => {
+          if (/authentication required/i.test(result.error ?? "")) needsLogin = true;
+        } });
         if (!candidate) {
-          print("No working ACP adapter found. Your invitation has not been used. Choose your agent with --agent claude or --agent codex, or pass --agent-cmd for an installed ACP adapter. Ordinary Claude/Codex commands need an ACP adapter. Run room-acp doctor first; then retry the same link.");
+          if (needsLogin) print("Your agent needs a login. Sign in using your agent’s own login command, then retry the same invitation; no model prompt was sent.");
+          print("No working ACP adapter session found. Your invitation has not been used. Choose your agent with --agent claude or --agent codex, or pass --agent-cmd for an installed ACP adapter. Ordinary Claude/Codex commands need an ACP adapter. Run room-acp doctor first; then retry the same link.");
           return 1;
         }
       }

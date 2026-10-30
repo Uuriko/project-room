@@ -11,7 +11,7 @@ export class AgentHost {
     this.process = null; this.capabilities = null; this.exitListeners = new Set();
   }
 
-  async start() {
+  async start({ timeoutMs = 30000 } = {}) {
     const spawned = spawnAgent(this.candidate, {
       cwd: this.cwd, env: this.env, log: this.log,
       onNotification: (method, params) => { if (method === "session/update") this.recorders.get(params.sessionId)?.update(params.update); },
@@ -21,7 +21,7 @@ export class AgentHost {
     const exited = new Promise(resolve => spawned.child.once("exit", (code, signal) => resolve({ code, signal })));
     exited.then(info => { if (this.process === spawned) { this.process = null; this.sessions.clear(); this.threadOf.clear(); for (const listener of this.exitListeners) listener(info); } });
     spawned.child.once("error", error => this.log(`agent failed to start: ${error.message}`));
-    this.capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs: 30000 }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
+    this.capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
     return this.capabilities;
   }
 
@@ -34,7 +34,7 @@ export class AgentHost {
     const error = new Error(`room-acp does not provide ${method}`); error.code = -32601; throw error;
   }
 
-  async session(threadKey) {
+  async session(threadKey, { timeoutMs = 60000 } = {}) {
     if (this.sessions.has(threadKey)) return { sessionId: this.sessions.get(threadKey), created: false };
     if (!this.process) throw new Error("agent is not running");
     // After a restart, resume the thread's saved session when the agent can.
@@ -43,13 +43,14 @@ export class AgentHost {
       try {
         const recorder = { update() {} }; // replayed history is not re-posted
         this.recorders.set(saved, recorder);
-        await this.process.peer.request("session/load", { sessionId: saved, cwd: this.cwd, mcpServers: [] }, { timeoutMs: 60000 });
+        await this.process.peer.request("session/load", { sessionId: saved, cwd: this.cwd, mcpServers: [] }, { timeoutMs });
         this.recorders.delete(saved);
         this.sessions.set(threadKey, saved); this.threadOf.set(saved, threadKey);
         return { sessionId: saved, created: false, loaded: true };
       } catch (error) { this.recorders.delete(saved); this.log(`could not resume the saved session (${error.message}); starting fresh`); }
     }
-    const { sessionId } = await this.process.peer.request("session/new", { cwd: this.cwd, mcpServers: [] }, { timeoutMs: 60000 });
+    const { sessionId } = await this.process.peer.request("session/new", { cwd: this.cwd, mcpServers: [] }, { timeoutMs });
+    if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("ACP agent returned no usable session ID");
     if (this.mode) await this.process.peer.request("session/set_mode", { sessionId, modeId: this.mode }, { timeoutMs: 15000 }).catch(error => this.log(`set_mode ${this.mode} failed: ${error.message}`));
     this.sessions.set(threadKey, sessionId); this.threadOf.set(sessionId, threadKey);
     this.savedSessions?.set(threadKey, sessionId);

@@ -7,6 +7,9 @@
 //   ask-permission   requests permission, replies with the chosen optionId
 //   no-loadSession   like echo but does not advertise loadSession
 //   tools            emits a plan and tool calls before replying
+//   wrong-protocol / unauthenticated / session-permission / empty-session / session-stall
+//                    reject or hold readiness before any prompt
+import { appendFileSync } from "node:fs";
 import { createPeer } from "../src/jsonrpc.mjs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "echo";
@@ -18,8 +21,17 @@ const textOf = prompt => (Array.isArray(prompt) ? prompt : []).filter(block => b
 const peer = createPeer({
   input: process.stdin, output: process.stdout,
   async onRequest(method, params) {
-    if (method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true } }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } };
-    if (method === "session/new") { const sessionId = `fake-${process.pid}-${++counter}`; sessions.set(sessionId, []); return { sessionId }; }
+    if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, method + "\n");
+    if (method === "initialize") return { protocolVersion: mode === "wrong-protocol" ? 99 : 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true } }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } };
+    if (method === "session/new") {
+      if (mode === "unauthenticated") throw Object.assign(new Error("Authentication required"), { code: -32000 });
+      if (mode === "session-stall") return new Promise(() => {});
+      if (mode === "empty-session") return { sessionId: "" };
+      if (mode === "session-permission") {
+        const answer = await peer.request("session/request_permission", { sessionId: "preflight", toolCall: { toolCallId: "setup", title: "Run a setup command", kind: "execute" }, options: [{ optionId: "allow_once", kind: "allow_once", name: "Allow" }] });
+        if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, `permission:${answer?.outcome?.outcome}\n`);
+      }
+      const sessionId = `fake-${process.pid}-${++counter}`; sessions.set(sessionId, []); return { sessionId }; }
     if (method === "session/load") { if (mode === "no-loadSession") throw Object.assign(new Error("loadSession unsupported"), { code: -32601 }); sessions.set(params.sessionId, sessions.get(params.sessionId) ?? []); return null; }
     if (method === "session/set_mode") return null;
     if (method === "session/prompt") {
