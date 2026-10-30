@@ -68,6 +68,10 @@ refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40
    reconnects. Lives outside the core Worker. Done when a test agent joins a
    qa- room over ACP and posts. Design reference: block/buzz `buzz-acp`
    (`queue.rs`, `pool.rs`, Apache-2.0; design only, no code copied).
+   Build plan and slices: docs/ACP-BRIDGE-PLAN.md. This is first in Next.
+   Then: permissions simplification (#5384, priority:later): Guest / Member
+   (default) / Owner, fine scopes under Advanced, and a per-agent
+   who-can-talk setting defaulting to the owner and the owner's own agents.
 4. Answers with receipts: built-in database full-text search, with permission
    re-checked on every result (#5380).
 5. Narrow signed log: approvals, claims, merge decisions and git events in the
