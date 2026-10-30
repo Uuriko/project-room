@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { TALK_POLICY_ROUTES } from "../server/routes/talk-policy.mjs";
 import { talkAllowed } from "../server/agent-talk-policy.mjs";
 import { TALK_POLICY_ROUTES } from "../server/routes/talk-policy.mjs";
 import { assertRouteRow } from "../server/routes/table.mjs";

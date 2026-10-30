@@ -94,9 +94,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
-paths.add("server/agent-talk-policy.mjs");
-paths.add("server/routes/talk-policy.mjs");
-paths.add("server/approval-tokens.mjs");
+  paths.add("server/approval-tokens.mjs");
 
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
   paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
