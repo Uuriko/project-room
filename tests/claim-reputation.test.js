@@ -314,6 +314,92 @@ test("duplicate terminals after a mid-history terminal stay silent", () => {
   assert.equal(signalsFor(rows, "claim_completed").length, 1);
 });
 
+// --- closed / deleted terminals (issue #4062) --------------------------------
+// The fold had no case for the terminal actions `closed` (close/cancel
+// route and claim-pr-sync's system sweep) or `deleted` (land-queue), so an
+// open position leaked forever: the phantom kept counting toward
+// HOARDING_CAP and, after a delete, suppressed a fresh position for a
+// re-created id. Recorded decision: a terminal close/delete prices
+// NOTHING — no signal — it only closes the position and marks the
+// lifecycle settled.
+
+test("close from claimed closes the position with no signal", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "closed", { claimState: "closed" })
+  ];
+  assert.equal(deriveClaimSignals(rows).length, 0, "a closed-from-claimed claim prices nothing");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 3 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 0, "the position does not leak");
+  // A duplicate close and a late done on the closed lifecycle stay silent.
+  const dup = [...rows,
+    row(3, "c1", "closed", { claimState: "closed" }),
+    row(4, "c1", "state_changed", { claimState: "done" })];
+  assert.equal(deriveClaimSignals(dup).length, 0, "duplicate terminals after closed stay silent");
+});
+
+test("cancel from in_progress closes the position with no signal", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "state_changed", { claimState: "in_progress" }),
+    row(3, "c1", "closed", { claimState: "closed" })
+  ];
+  assert.equal(deriveClaimSignals(rows).length, 0, "a cancelled claim prices nothing");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 4 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 0, "the cancelled position does not leak");
+});
+
+test("a system close closes the position with no signal", () => {
+  // claim-pr-sync's stale sweep emits action "closed" as the system actor
+  // against a claim still owned by its lane.
+  const rows = [
+    row(1, "c1", "claimed", { ownerId: "lane-a" }),
+    row(2, "c1", "closed", { claimState: "closed", ownerId: "lane-a" })
+  ];
+  assert.equal(deriveClaimSignals(rows).length, 0, "a system close prices nothing");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 3 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 0, "the swept position does not leak");
+});
+
+test("deleted closes the position with no signal", () => {
+  const rows = [
+    row(1, "c1", "claimed"),
+    row(2, "c1", "deleted", { claimState: "claimed" })
+  ];
+  assert.equal(deriveClaimSignals(rows).length, 0, "a deleted claim prices nothing");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 3 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 0, "the deleted position does not leak");
+});
+
+test("delete then re-create under the same id folds fresh, credited to the new owner", () => {
+  const rows = [
+    row(1, "c1", "claimed", { ownerId: "lane-a" }),
+    row(2, "c1", "deleted", { claimState: "claimed", ownerId: "lane-a" }),
+    row(3, "c1", "claimed", { ownerId: "lane-b" }),
+    row(4, "c1", "state_changed", { claimState: "done", ownerId: "lane-b" })
+  ];
+  const completed = signalsFor(rows, "claim_completed");
+  assert.equal(completed.length, 1, "the fresh lifecycle completes exactly once");
+  assert.equal(completed[0].agent, "lane-b", "completion is credited to the new owner, not the deleted position's owner");
+  assert.equal(completed[0].seq, 4);
+  assert.equal(deriveClaimSignals(rows).length, 1, "no other signal leaks from the deleted lifecycle");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 5 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 0);
+  assert.equal(openClaims.get("lane-b") ?? 0, 0);
+});
+
+test("a closed claim no longer counts toward HOARDING_CAP", () => {
+  const rows = [
+    ...burstRows(5),
+    row(6, "c1", "closed", { claimState: "closed" }),
+    row(7, "c6", "claimed")
+  ];
+  assert.equal(signalsFor(rows, "claim_hoarded").length, 0,
+    "closing one of five open claims frees the slot; the phantom must not price the next claim");
+  const { openClaims } = projectClaimReputation(rows, { nowMs: T0 + 8 * 60_000 });
+  assert.equal(openClaims.get("lane-a") ?? 0, 5, "four survivors plus the new claim");
+});
+
 // --- replay / determinism ---------------------------------------------------
 
 test("replaying the same events yields byte-identical signals", () => {
