@@ -15,7 +15,7 @@ export function installAgentConnections({ client, getState }) {
   const member = () => getState()?.members[client.session?.member?.id];
   const allowed = () => client.ownsAccountSession() && client.session?.account && member()?.active !== false
     && getState()?.room.id === client.session.roomId
-    && member()?.kind === "human" && member()?.permissions.includes("manage_members") && member()?.id === getState()?.room.ownerId;
+    && member()?.kind === "human";
   const owns = () => allowed() && owner === client.session && generation === client.generation && ownerRevision === member()?.revision;
   const status = text => { $("#agent-connect-status").textContent = text; };
   function conceal() { $("#agent-private-details").open = false; $("#agent-private-config").value = ""; }
@@ -64,7 +64,15 @@ export function installAgentConnections({ client, getState }) {
     warning.hidden = !taken;
     warning.textContent = taken ? "A member with this name already exists. Create access only if you want a second identity." : "";
   }
+  function constrainAccess() {
+    const select = $("#agent-connect-access");
+    if (!select) return;
+    const required = { chat: [], contribute: ["accept_work", "complete_work"], review: ["verify"] };
+    for (const option of select.options) option.disabled = (required[option.value] ?? []).some(permission => !member()?.permissions.includes(permission));
+    if (select.selectedOptions[0]?.disabled) select.value = "chat";
+  }
   function describeAccess() {
+    constrainAccess();
     if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
     fillList($("#agent-capabilities"), capabilitySummary($("#agent-connect-access").value));
   }
@@ -119,6 +127,7 @@ export function installAgentConnections({ client, getState }) {
     } finally { copying = false; render(); }
   }
   function render() {
+    constrainAccess();
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
     if (setup) describeImport();
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending);
@@ -222,7 +231,7 @@ export function installAgentConnections({ client, getState }) {
   }
   function matches(result, request) {
     const receipt = result?.receipt, connection = result?.connection;
-    return receipt?.version === 1 && receipt.action === request.action && receipt.requestId === request.requestId
+    return (receipt?.version === 1 || receipt?.version === 2 && Number.isSafeInteger(receipt.authoritySequence) && receipt.authoritySequence >= 0) && receipt.action === request.action && receipt.requestId === request.requestId
       && receipt.roomId === owner.roomId && receipt.memberId === request.memberId
       && receipt.generation === (request.action === "create" ? 1 : request.expectedGeneration + 1)
       && receipt.status === (request.action === "disconnect" ? "disconnected" : "issued")

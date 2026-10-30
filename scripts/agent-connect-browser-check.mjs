@@ -11,7 +11,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, mobile = false) {
+async function setup(t, mobile = false, friend = false) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
@@ -27,7 +27,15 @@ async function setup(t, mobile = false) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   });
-  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  let signInKey = f.keys.owner;
+  if (friend) {
+    f.store.command(f.keys.owner, "commons", { id: "friend-browser-create", type: T.MEMBER_ADDED, data: { memberId: "friend-browser", displayName: "Friend", kind: "human", permissions: ["accept_work", "complete_work"] } });
+    f.store.createAccount("friend-browser-account");
+    f.store.bindHumanAccount("commons", "friend-browser", "friend-browser-account");
+    signInKey = f.store.issueAccessKey("commons", "friend-browser");
+  }
+  await page.goto(origin); const login = await signInFixture(page, signInKey);
+  if (friend) assert.equal(login.member?.id, "friend-browser");
   await page.locator("#main").waitFor({ state: "visible" });
   const reveal = async () => {
     if (!(await page.locator("#room-sidebar").isVisible())) {
@@ -390,4 +398,19 @@ test("a just-created connection reads as ready, not as a missing member, without
   const text = await row();
   assert.doesNotMatch(text, /Member record missing/, `fresh connection must not read as a missing member: ${text.slice(0, 120)}`);
   assert.match(text, /Access ready, waiting for first action/);
+});
+
+
+test("signed-in friend connects own agent without room-owner permission", { timeout: 25000 }, async t => {
+  const f = await setup(t, false, true);
+  await f.open();
+  assert.equal(await f.page.locator('#agent-connect-access option[value="review"]').evaluate(node => node.disabled), true);
+  assert.equal(await f.page.locator('#agent-connect-access option[value="contribute"]').isDisabled(), false);
+  await f.create();
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  const config = await f.config();
+  assert.equal(f.store.room("commons").state.members[config.memberId].accountableHumanId, "friend-browser");
+  assert.equal((await new RoomAgentClient(config).checkConnection()).memberId, config.memberId);
+  assert.equal(f.store.room("commons").state.room.ownerId, "owner");
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
