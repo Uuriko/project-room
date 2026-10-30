@@ -165,7 +165,12 @@ export function availablePublicTasks(store, { limit = 50 } = {}) {
   let total = 0;
   let after = "";
   for (;;) {
-    const page = facade.list({ limit: 100, after });
+    // claimableFirst: false — this scan filters to unclaimed packets
+    // itself, so its item order is the same offer_id order the
+    // claimable-first walk yields, while offer_id pagination stays
+    // exactly-once when claims land mid-scan (#3606); the browse walk's
+    // versioned cursor would restart the scan on every claim flip.
+    const page = facade.list({ limit: 100, after, claimableFirst: false });
     const tasks = page?.tasks ?? [];
     for (const packet of tasks) {
       if (packet?.claimable !== true) continue;
