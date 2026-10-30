@@ -64,6 +64,11 @@ export const KEEP = [
   // edit those files, and the runtime package list is one of them.
   "server/repro-check.mjs",
   "server/agent-audit.mjs",
+  // Pure proof library (B1). Its HTTP proof endpoint is the named follow-on
+  // in PR #5097's body, deferred until the bound door batch settles; until
+  // that route wiring lands, the standalone verifier's only caller is
+  // tests/merkle-receipt-proofs.test.js. Remove when the endpoint wires it.
+  "server/merkle-receipts.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
