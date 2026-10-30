@@ -1,6 +1,10 @@
 // Relocate existing controls, preserving their listeners, authority and state.
 // Account destinations keep their original home outside a room; no duplicate
 // controls or parallel navigation state are introduced by this layout.
+// ROOM_MVP_ONLY: the server marks <html data-mvp-only>. MVP rooms show only
+// needs-me, threads, the Board and approvals; optional panes are not fetched.
+export const MVP_ONLY = globalThis.document?.documentElement?.hasAttribute?.("data-mvp-only") === true;
+
 export function installRoomLayout() {
   const get = selector => document.querySelector(selector);
   const main = get('#main');

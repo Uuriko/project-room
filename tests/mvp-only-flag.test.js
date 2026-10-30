@@ -24,3 +24,11 @@ test("the MVP-only rules hide non-MVP panels and pin needs-me", () => {
   for (const id of ["#cockpit-money", "#usage-grid", "#spend-figures", "#chat-suggestions"]) assert.ok(css.includes(`html[data-mvp-only] ${id}`), id);
   assert.match(css, /html\[data-mvp-only\] #needs-attention \{\s*position: sticky;/);
 });
+
+test('MVP_ONLY client switch is off without the html marker and the trim covers roster and composer extras', async () => {
+  const { MVP_ONLY } = await import('../src/room-layout.js');
+  assert.equal(MVP_ONLY, false);
+  const css = (await import('node:fs')).readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  for (const sel of ['#people-panel', '#room-more', '#composer-attach', '[data-message-action="pin"]']) assert.ok(css.includes(`html[data-mvp-only] ${sel}`), sel);
+  assert.ok(!css.includes('html[data-mvp-only] #topbar-updates'), 'Needs me lives in Updates and must stay');
+});

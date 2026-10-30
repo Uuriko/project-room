@@ -1891,3 +1891,16 @@ html[data-mvp-only] #needs-attention {
   z-index: 3;
   background: var(--surface, Canvas);
 }
+/* ROOM_MVP_ONLY trim: nav, top bar, composer and message menus keep only the
+   MVP set (needs-me, threads, Board, approvals). Roster and updates are not
+   fetched or rendered under the flag; their shells are hidden here. */
+html[data-mvp-only] #people-panel,
+html[data-mvp-only] #new-direct-message,
+html[data-mvp-only] #room-more,
+html[data-mvp-only] #composer-attach,
+html[data-mvp-only] #composer-direct-message,
+html[data-mvp-only] #request-reply,
+html[data-mvp-only] [data-message-action="pin"],
+html[data-mvp-only] [data-message-action="save"],
+html[data-mvp-only] [data-message-action="mark-unread"],
+html[data-mvp-only] [data-message-action="decide"] { display: none !important; }
