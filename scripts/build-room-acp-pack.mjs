@@ -1,15 +1,36 @@
-// Packs room-acp/ into room-acp.tgz at the repo root so the Worker can serve
-// it at /room-acp.tgz. `npx https://room.trydemigod.com/room-acp.tgz <invite>`
-// then works without an npm publish. The package has no dependencies.
+// Stage explicit source inputs only: local credentials, caches, tests and
+// untracked files must never enter the public npx archive.
 import { execFileSync } from 'node:child_process';
-import { renameSync, rmSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, renameSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const out = mkdtempSync(join(tmpdir(), 'room-acp-pack-'));
-const [{ filename }] = JSON.parse(execFileSync('npm', ['pack', join(root, 'room-acp'), '--json', '--pack-destination', out], { encoding: 'utf8' }));
-renameSync(join(out, filename), join(root, 'room-acp.tgz'));
-rmSync(out, { recursive: true, force: true });
-console.log('Packed room-acp.tgz');
+export const roomAcpInputs = Object.freeze(['package.json', 'README.md',
+  ...['agent-host', 'agents', 'args', 'bridge', 'cli', 'credentials', 'join',
+    'jsonrpc', 'link', 'permission', 'prompt', 'queue', 'redact', 'render',
+    'room', 'run', 'sessions'].map(name => `src/${name}.mjs`)]);
+
+export function buildRoomAcpPack(root) {
+  const out = mkdtempSync(join(tmpdir(), 'room-acp-pack-'));
+  try {
+    const staging = join(out, 'source');
+    for (const file of roomAcpInputs) {
+      const source = join(root, 'room-acp', file);
+      if (!lstatSync(source).isFile() || lstatSync(source).isSymbolicLink()) throw new Error(`Not a regular ACP source: ${file}`);
+      const target = join(staging, file);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(source, target);
+    }
+    const [{ filename }] = JSON.parse(execFileSync('npm', ['pack', staging, '--ignore-scripts', '--json', '--pack-destination', out], { encoding: 'utf8' }));
+    renameSync(join(out, filename), join(root, 'room-acp.tgz'));
+    return join(root, 'room-acp.tgz');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  buildRoomAcpPack(resolve(fileURLToPath(new URL('..', import.meta.url))));
+  console.log('Packed room-acp.tgz');
+}

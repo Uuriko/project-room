@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-export const publicAssets = ["src/room-administration.js", "src/work-dependencies.js", "src/work-reducers.js", "src/message-reducers.js", "src/entry.js", "src/entry-started.js", "src/entry-watchdog.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/workspace-navigation.js", "src/result-reader.js", "src/clipboard.js", "src/result-comparison.js", "src/result-feedback.js", "src/result-availability.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/direct-conversation-window.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/google-room-return.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/board-ui.js", "src/html-escape.js", "src/board-keyboard.mjs", "src/board.css", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js", "src/pairing-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "skills/project-room-setup/SKILL.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png", "og/base-receipt.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
+export const publicAssets = ["src/room-administration.js", "src/work-dependencies.js", "src/work-reducers.js", "src/message-reducers.js", "src/entry.js", "src/entry-started.js", "src/entry-watchdog.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/workspace-navigation.js", "src/result-reader.js", "src/clipboard.js", "src/result-comparison.js", "src/result-feedback.js", "src/result-availability.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/direct-conversation-window.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/google-room-return.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/board-ui.js", "src/html-escape.js", "src/board-keyboard.mjs", "src/board.css", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js", "src/pairing-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "skills/project-room-setup/SKILL.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png", "og/base-receipt.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css", "room-acp.tgz"];// Decision #36 (#3254, Option A): the generated agent pages are build output
 // (scripts/build-agent-docs.mjs renders them from the committed docs/agents/*.md
 // sources) — decision #32: generated output is never committed — so an
 // exact-commit package can never contain them, and they are not part of this
@@ -22,7 +22,7 @@ export const publicAssets = ["src/room-administration.js", "src/work-dependencie
 // obligation, and every other advertised asset remains fail-closed below.
 export const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
   "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html",
-  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html"]);
+  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "room-acp.tgz"]);
 // Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
@@ -447,6 +447,9 @@ const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retent
 optional.push("server/board-read.mjs"); // Shared authenticated Board reader used by HTTP and hosted MCP.
 
 optional.push("src/direct-conversation-window.js");
+// The hosted build creates this archive; exact-source recovery packages omit it.
+optional.push("room-acp.tgz");
+optional.push("server/claim-thread.mjs"); // Shared claimer thread receipt in the hosted MCP profile.
 export const allowed = new Set([...required, ...optional, ...historicalAssets]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
@@ -471,15 +474,104 @@ function runtimeMetadata(files) {
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
 
+// Small lexical scanner for literal module specifiers. Keep this self-contained:
+// the verifier is also copied out of the checkout and run with no dependencies.
+// Comments and string/template text are data; template interpolations are code.
+function moduleTokens(source) {
+  const tokens = [];
+  let i = 0;
+  const quoted = quote => {
+    let value = '';
+    i++;
+    while (i < source.length) {
+      const c = source[i++];
+      if (c === quote) return value;
+      if (c !== '\\') { value += c; continue; }
+      const escape = source[i++];
+      if (escape === '\n') continue;
+      if (escape === '\r') { if (source[i] === '\n') i++; continue; }
+      if (escape === 'u' || escape === 'x') {
+        const brace = escape === 'u' && source[i] === '{';
+        if (brace) i++;
+        const end = brace ? source.indexOf('}', i) : i + (escape === 'u' ? 4 : 2);
+        const hex = source.slice(i, end);
+        check(/^[0-9a-f]+$/i.test(hex), 'unsupported module string escape');
+        value += String.fromCodePoint(parseInt(hex, 16));
+        i = end + (brace ? 1 : 0);
+      } else value += ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0' })[escape] ?? escape;
+    }
+    throw new Error('Unterminated JavaScript string in runtime source');
+  };
+  const code = interpolation => {
+    let braces = 0;
+    while (i < source.length) {
+      const c = source[i];
+      if (/\s/.test(c)) { i++; continue; }
+      if (source.startsWith('//', i)) { const end = source.indexOf('\n', i); i = end < 0 ? source.length : end; continue; }
+      if (source.startsWith('/*', i)) { const end = source.indexOf('*/', i + 2); check(end >= 0, 'unterminated runtime comment'); i = end + 2; continue; }
+      if (c === '/' && (!tokens.length || ['=', '(', '[', '{', ',', ':', ';', '!', '?', '&', '|', 'return', 'case', '>', '~'].includes(tokens.at(-1)))) {
+        i++;
+        let characterClass = false;
+        while (i < source.length) {
+          const r = source[i++];
+          if (r === '\\') { i++; continue; }
+          if (r === '[') characterClass = true;
+          if (r === ']') characterClass = false;
+          if (r === '/' && !characterClass) break;
+        }
+        while (/[a-z]/i.test(source[i] ?? '') && i < source.length) i++;
+        tokens.push({ regex: true });
+        continue;
+      }
+      if (c === '"' || c === "'") { tokens.push({ string: quoted(c) }); continue; }
+      if (c === '`') {
+        i++;
+        while (i < source.length) {
+          if (source[i] === '\\') { i += 2; continue; }
+          if (source[i] === '`') { i++; break; }
+          if (source.startsWith('${', i)) { i += 2; tokens.push(';'); code(true); tokens.push(';'); continue; }
+          i++;
+        }
+        continue;
+      }
+      if (c === '}' && interpolation && braces === 0) { i++; return; }
+      if (c === '{') braces++;
+      if (c === '}') braces--;
+      const identifier = /^[A-Za-z_$][\w$]*/.exec(source.slice(i));
+      tokens.push(identifier ? identifier[0] : c);
+      i += identifier ? identifier[0].length : 1;
+    }
+  };
+  code(false);
+  return tokens;
+}
+function literalModuleSpecifiers(source) {
+  const tokens = moduleTokens(source), specs = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (!['import', 'export'].includes(tokens[i]) || tokens[i - 1] === '.') continue;
+    if (tokens[i] === 'import' && tokens[i + 1]?.string !== undefined) { specs.push(tokens[i + 1].string); continue; }
+    if (tokens[i] === 'import' && tokens[i + 1] === '(') {
+      if (tokens[i + 2]?.string !== undefined) specs.push(tokens[i + 2].string);
+      continue;
+    }
+    // Only declaration forms can have `from`, never import.meta or export
+    // default expressions, functions, classes, variables or object methods.
+    if (!(tokens[i + 1] === '{' || tokens[i + 1] === '*' ||
+      (tokens[i] === 'import' && typeof tokens[i + 1] === 'string' && /^[A-Za-z_$]/.test(tokens[i + 1])))) continue;
+    for (let j = i + 1; j < tokens.length && tokens[j] !== ';'; j++) {
+      if (tokens[j] === 'from' && tokens[j + 1]?.string !== undefined) { specs.push(tokens[j + 1].string); break; }
+    }
+  }
+  return specs;
+}
+
 // Shared by exact-package verification and the cheap working-tree preflight.
 export function verifyRuntimeImports(files) {
   // Check this codebase's literal imports, including dynamic literal imports.
   // This is not a complete JavaScript dependency parser; cold runtime tests and
   // source review remain required, especially if a computed loader is added.
   for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
-    // Quoted actions such as "import" or "source.import" are not declarations.
-    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"'\s$]+)["']/g)) {
-      const specifier = match[1];
+    for (const specifier of literalModuleSpecifiers(bytes.toString())) {
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
       const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
       check(specifier.startsWith(".") && files.has(resolved),

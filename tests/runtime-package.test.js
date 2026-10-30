@@ -34,11 +34,11 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
   // Decision #36 drift guard: the generated-pages exclusion in the package
-  // contract names exactly the docs/agents/*.html entries of the asset list —
+  // contract names the generated HTML pages and hosted ACP archive —
   // a new agent page joins the exclusion (and the CF build) by being listed,
   // and a renamed one cannot silently fall out of it.
   assert.deepEqual([...generatedAgentPages].sort(),
-    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)).sort());
+    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path) || path === "room-acp.tgz").sort());
   // The package must contain exactly the allowlisted files that exist at this commit.
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
   // the import-closure test below guarantees it covers every imported module,
