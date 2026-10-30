@@ -24,12 +24,32 @@ updates prevent its unresolved rows from being mistaken for current missing work
   it. Do not reopen the EPERM fix as missing or mark the timing failure resolved.
 - **#5163:** registry pointers adopted in #5319; optional SEO-title change declined.
   The old mixed PR was closed with that explicit partial disposition.
-- **#5165, #4998, #4983:** Codex owns current-source reconciliation. These remain
-  separate from the live release. Existing fixes require composition evidence;
-  no completion follows merely from their age or a prior passing branch.
+- **#4998 and #4983:** incorporated through #5329 and #5332 respectively;
+  original PRs are marked merged through ancestry. Current main `580b380a`
+  contains recorded receipt-privacy enforcement and hosted OG asset loading,
+  including no-store render failures. These are not in production `1528c577`.
+- **#5165:** useful enrollment/replay guidance salvaged in #5331; the conflicting
+  draft was closed with an explicit partial disposition. Its duplicate unbounded
+  solver, fixed quota assumptions and cosmetic changes were not adopted.
 
 For deployed versus merged state, use the [release checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045).
 No captured inventory entry below is silently deleted or marked complete.
+
+## Current-source review of retained proposals — 2026-10-29
+
+Seven PRs were reviewed against `580b380ad3416b23810fbe3544b10c9ae0f1aa85` using exact heads and source diffs. None is wholly superseded; no closure or deployment follows from this review.
+
+| PR and reviewed head | Disposition | Remaining work |
+| --- | --- | --- |
+| [#4988](https://github.com/Uuriko/project-room/pull/4988) · `818e2a4c` | partial | Extract only retained failure-status and Retry behavior onto current native lifecycle. Recheck locks, stopping, bounded error codes and no raw stderr; compile Swift and exercise real failed-start→retry. Do not reapply old request-runner code or claim installed upgrade. |
+| [#5059](https://github.com/Uuriko/project-room/pull/5059) · `5418bae3` | unique-unfinished | Rebase only with current cancellation/supervisor semantics. Reprove locks, exact room incarnation/opening/attempt, missing-proof refusal, legacy/generic refusal, no dispatch and no runtime attempt. No automatic unresolved-journal reset. |
+| [#5080](https://github.com/Uuriko/project-room/pull/5080) · `09e17fc6` | unique-unfinished | Qualify current tool catalog and identity binding, environment/file connection mismatch, revocation on child reload, tool list/call allowlist equality and packaged imports. Test actual model use separately; preserve authentication-only mode and capability fingerprint fences. |
+| [#4958](https://github.com/Uuriko/project-room/pull/4958) · `352ee470` | deferred-unique | Compare unique durable outbox/unknown-outcome guarantees with existing tools before selecting a slice. No operational merge-train claim. Provider mutation, authorization bindings, capacity indexing/retention and Workers qualification remain separate unfinished work. |
+| [#5187](https://github.com/Uuriko/project-room/pull/5187) · `6e0a67b3` | deferred-unique | Evaluate one real client use case against existing scoped reads; retain privacy/redaction/history floors, audit view and omittedClasses contract. Require measured total work before adopting an extra endpoint. Do not represent as cold hydration repair. |
+| [#5194](https://github.com/Uuriko/project-room/pull/5194) · `34bd4e73` | deferred-unique | Reconcile current private conversations, initial work/navigation access, partial-state semantics, generation and session binding, beforeId paging and explicit lazy-history behavior. Endpoint-only synthetic wire reduction is insufficient; no broad old app.js overwrite. |
+| [#5260](https://github.com/Uuriko/project-room/pull/5260) · `f1f16a3f` | held-not-rejected | Keep held unless narrower direct/HTTP benefit is justified or telemetry interaction solved without weakening mutation/auth guarantees. Preserve same-head corruption, external writes/schema, attempted failed mutations, outer read commit and raw-adapter bypass limitations. Not the same proposal as reverted5256; no explicit rejection found. |
+
+The refresh of open GitHub metadata found 500 PRs and 191 non-PR issues in a non-atomic paginated capture. That is discovery coverage, not 691 reviewed obligations. The original October 18 counts remain historical. Review bodies, dependencies and unique behavior before consolidation; closing an old branch is not acceptance evidence.
 
 ## Bounded older-work dispositions — 2026-10-29
 

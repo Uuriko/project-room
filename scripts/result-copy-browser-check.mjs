@@ -216,4 +216,14 @@ test("result copy: superseded work retains reported history and close returns to
   await f.card.locator(".work-details").evaluate(node => node.open = false);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.dataset.copyResult === "test-handoff"); assert.deepEqual(f.errors, []);
+  await f.card.locator(".work-details > summary").click();
+  const beforeFollow = f.snapshot();
+  await f.card.getByRole("link", { name: "Open replacement", exact: true }).click();
+  await page.locator('[data-work-record-id="replacement"]').waitFor({ state: "visible" });
+  assert.deepEqual(f.snapshot(), beforeFollow, "following replacement does not transfer acceptance or mutate evidence");
+  await openConversationWork(page, "test-handoff");
+  assert.ok(f.snapshot().state.workItems["test-handoff"].receipt, "historical result remains available after navigating back");
+  if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
+  await f.card.getByRole("link", { name: "Open replacement", exact: true }).scrollIntoViewIfNeeded();
+  await f.capture("replacement-navigation");
 });

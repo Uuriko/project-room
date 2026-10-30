@@ -12,6 +12,7 @@ import { nextWorkStep, workActions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { workContinuity, SESSION_HEARTBEAT_STALE_MS } from "../src/work-item-session.js";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { createWorkBrief } from "../client/work-brief.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function fixture(t) {
@@ -89,6 +90,11 @@ test("HTTP selected source preserves targeted-message privacy for body, access p
       assert.equal(view.accessSummary.conversation.sourceAvailability, allowed ? "available" : "unavailable");
       assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, allowed ? ["private-source"] : []);
       assert.equal(JSON.stringify(view).includes("PRIVATE-SOURCE-SENTINEL"), allowed && includeSource);
+      if (!allowed && includeSource) {
+        assert.equal(view.context.source.observation, null);
+        assert.equal(view.context.source.freshness, "unavailable");
+        assert.equal(view.context.source.editedAt, null);
+      }
       if (!allowed) {
         assert.equal(view.context.participants.some(member => member.id === "guest"), false, "private source author is not added to participants");
         assert.equal(view.accessSummary.participantIds.includes("guest"), false);
@@ -486,6 +492,101 @@ test("selected source lookup respects a late member history floor without full h
   t.mock.method(f.store, "room", () => { throw new Error("unexpected full hydration"); });
   const view = f.store.workContext(key, "commons", "test-handoff", { includeSource: true });
   assert.equal(view.context.source.status, "unavailable");
+  assert.equal(view.context.source.observation, null);
+  assert.equal(view.context.source.freshness, "unavailable");
+  assert.equal(view.context.source.editedAt, null);
   assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, []);
   assert.equal(view.accessSummary.conversation.sourceAvailability, "unavailable");
 });
+
+test("replacement reads are one-hop navigation, preserve history, and omit target source", async t => {
+  const f = await fixture(t);
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "replacement-private", toMemberId: "reviewer", body: "REPLACEMENT-PRIVATE-SENTINEL" });
+  f.send("owner", T.WORK_PROPOSED, { workItemId: "replacement-one", title: "REPLACEMENT-TITLE-SENTINEL", definitionOfDone: "Next", accountableMemberId: "owner", mode: "read", sourceMessageId: "replacement-private" });
+  f.send("owner", T.WORK_SUPERSEDED, { workItemId: "test-handoff", supersededByWorkItemId: "replacement-one", reason: "Changed direction" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const old = await f.client("producer").workContext("test-handoff");
+  assert.deepEqual(old.next.replacement, { status: "available", workItemId: "replacement-one", nextRead: { tool: "room_read_work", arguments: { workItemId: "replacement-one" } } });
+  assert.equal(old.work.id, "test-handoff");
+  assert.equal(old.work.state, "superseded");
+  assert.ok(!JSON.stringify(old).includes("REPLACEMENT-"), "old read does not hydrate target content");
+  assert.match(workContextMarkdown(old), /replacement-one/);
+  const target = await f.client("producer").workContext("replacement-one", { includeSource: true });
+  assert.equal(target.work.id, "replacement-one");
+  assert.equal(target.context.source.status, "unavailable", "target private source retains audience boundary");
+  assert.ok(!JSON.stringify(target).includes("REPLACEMENT-PRIVATE-SENTINEL"));
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before, "navigation does not accept or mutate work");
+  const state = structuredClone(before.state);
+  const project = () => selectedWorkContext({ state, workItemId: "test-handoff", viewerId: "producer", sequence: before.sequence, now: 2000 });
+  delete state.workItems["replacement-one"];
+  assert.deepEqual(project().next.replacement, { status: "unavailable", workItemId: "replacement-one", nextRead: null });
+  state.workItems["replacement-one"] = { id: "replacement-one", state: "superseded", supersededBy: "test-handoff" };
+  assert.equal(project().next.replacement.workItemId, "replacement-one", "corrupt cycle is not traversed");
+  assert.equal(project().next.replacement.nextRead.arguments.workItemId, "replacement-one");
+  const corrupt = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: async () => new Response(JSON.stringify({ ...old, next: { ...old.next, replacement: { ...old.next.replacement,
+      nextRead: { tool: "room_read_work", arguments: { roomId: "foreign-room", workItemId: "replacement-one" } } } } }), { status: 200 }) });
+  await assert.rejects(corrupt.workContext("test-handoff"), error => error.code === "invalid_response");
+  f.store.revoke(f.keys.producer);
+  await assert.rejects(f.client("producer").workContext("replacement-one"), error => error.status === 401);
+});
+
+test("opt-in source comparison tracks exact revision and bytes, omits unchanged bodies, and fails private", async t => {
+  const f = await fixture(t);
+  const client = f.client("producer");
+  const first = await client.workContext("test-handoff", { includeSource: true });
+  const source = first.context.source;
+  assert.equal(source.freshness, "observed");
+  assert.equal(source.observation.revision, 0);
+  assert.equal(source.observation.viewerId, "producer");
+  const body = source.message.body, sourceObservation = source.observation;
+  const repeated = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(repeated.context.source.status, "not_modified");
+  assert.equal(repeated.context.source.freshness, "unchanged");
+  assert.equal(repeated.context.source.message, null);
+  assert.ok(!JSON.stringify(repeated).includes(body));
+  assert.equal((await createWorkBrief(first)).version, (await createWorkBrief(repeated)).version);
+  f.send("guest", T.MESSAGE_EDITED, { messageId: "test-request", expectedMessageRevision: 0, body: "UPDATED SOURCE SENTINEL" });
+  const changed = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(changed.context.source.freshness, "changed");
+  assert.equal(changed.context.source.message.body, "UPDATED SOURCE SENTINEL");
+  assert.equal(changed.context.source.observation.revision, 1);
+  assert.ok(Number.isFinite(Date.parse(changed.context.source.editedAt)));
+
+  f.send("guest", T.MESSAGE_EDITED, { messageId: "test-request", expectedMessageRevision: 1, body });
+  const reverted = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(reverted.context.source.observation.sha256, sourceObservation.sha256);
+  assert.equal(reverted.context.source.freshness, "changed", "edit and revert is not unchanged");
+  assert.equal(reverted.context.source.observation.revision, 2);
+  const omitted = await client.workContext("test-handoff");
+  assert.equal(omitted.context.source.status, "not_requested");
+  assert.equal(omitted.context.source.observation, undefined);
+  for (const patch of [{ roomId: "other" }, { workItemId: "other" }, { viewerId: "reviewer" }, { revision: -1 }, { sha256: "bad" }])
+    await assert.rejects(client.workContext("test-handoff", { includeSource: true, sourceObservation: { ...sourceObservation, ...patch } }));
+  await assert.rejects(client.workContext("test-handoff", { sourceObservation }));
+  f.send("guest", T.MESSAGE_DELETED, { messageId: "test-request", expectedMessageRevision: 2, reason: "Remove" });
+  const deleted = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(deleted.context.source.status, "unavailable");
+  assert.equal(deleted.context.source.freshness, "unavailable");
+  assert.equal(deleted.context.source.observation, null);
+  assert.equal(deleted.context.source.nextRead, null);
+  assert.equal(deleted.context.source.message, null);
+  f.store.revoke(f.keys.producer);
+  await assert.rejects(client.workContext("test-handoff", { includeSource: true, sourceObservation }), e => e.status === 401);
+});
+
+ test("SDK refuses malformed and unsolicited source comparisons without exposing private observations", async t => {
+  const f = await fixture(t);
+  const first = await f.client("producer").workContext("test-handoff", { includeSource: true });
+  const observation = first.context.source.observation;
+  const fake = source => new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: async () => new Response(JSON.stringify({ ...first, context: { ...first.context, source } }), { status: 200 }) });
+  for (const patch of [{ observation: undefined }, { observation: { ...observation, sha256: "0".repeat(64) } },
+    { status: "not_modified", message: null, freshness: "unchanged" }]) {
+    await assert.rejects(fake({ ...first.context.source, ...patch }).workContext("test-handoff", { includeSource: true }), e => e.code === "invalid_response");
+  }
+  const unchanged = { ...first.context.source, status: "not_modified", message: null, freshness: "unchanged" };
+  await assert.rejects(fake(unchanged).workContext("test-handoff", { includeSource: true, sourceObservation: { ...observation, viewerId: "other" } }), e => e.code === "invalid_response");
+  const legacy = { status: "included", message: first.context.source.message };
+  await assert.rejects(fake(legacy).workContext("test-handoff", { includeSource: true, sourceObservation: observation }), e => e.code === "source_freshness_unavailable");
+ });

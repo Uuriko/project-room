@@ -1,4 +1,5 @@
 // Simulated human journeys against disposable first-party data, not human research.
+import { textVersion } from "../server/text-results.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -33,7 +34,7 @@ test("attempt ledger: a work card shows attributable attempts with environment a
   const revision = () => f.store.snapshot(f.keys.owner, "commons").state.workItems["attempted-work"].revision;
   send(T.SESSION_STARTED, { workItemId: "attempted-work", expectedRevision: revision(), environment: "ci-runner-2" });
   send(T.SESSION_STOPPED, { workItemId: "attempted-work", expectedRevision: revision(), status: "failed", outputs: ["log:run-1"] });
-  send(T.SESSION_STARTED, { workItemId: "attempted-work", expectedRevision: revision(), environment: "local-mac-1" });
+  send(T.SESSION_STARTED, { workItemId: "attempted-work", expectedRevision: revision(), environment: "local-mac-1", provider: "<provider>", client: "test-cli" });
   const card = page.locator('[data-work-record-id="attempted-work"]');
   await openSearch(page);
   await page.locator('#message-search').fill('Port the digest job');
@@ -45,8 +46,19 @@ test("attempt ledger: a work card shows attributable attempts with environment a
   const text = await ledger.textContent();
   assert.match(text, /#1 .+ · failed · ci-runner-2/);
   assert.match(text, /#2 .+ · running · local-mac-1/);
+  assert.match(text, /Declared, unverified · provider: <provider> · client: test-cli/);
+  assert.equal(await ledger.locator("provider").count(), 0, "declarations render as escaped text");
+  send(T.SESSION_STOPPED, { workItemId: "attempted-work", expectedRevision: revision(), status: "done" });
+  const body = "Digest completed", posted = send(T.MESSAGE_POSTED, { messageId: "attempt-result", workItemId: "attempted-work", body });
+  send(T.WORK_COMPLETED, { workItemId: "attempted-work", expectedRevision: revision(), summary: body, nextAction: "Read result", evidenceKind: "room_text",
+    evidenceMessageId: "attempt-result", evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: "owner", attempt: 2 });
+  await page.waitForFunction(() => document.querySelector('[data-work-record-id="attempted-work"] .receipt')?.textContent.includes("Attempt #2"));
+  assert.match(await card.locator(".receipt").textContent(), /Attempt #2 · Declared, unverified · provider: <provider> · client: test-cli/);
+  assert.equal(await card.locator(".receipt provider").count(), 0);
   mkdirSync("test-results", { recursive: true });
   await card.screenshot({ path: "test-results/attempts-card.png" });
+  await card.locator(".receipt").scrollIntoViewIfNeeded();
+  await card.locator(".receipt").screenshot({ path: "test-results/attempt-bound-receipt.png" });
   // An untouched card renders no ledger line, after navigating to that card.
   await page.locator('#message-search').fill('agenda');
   await page.locator('#search-list [data-open-work="test-handoff"]').click();
