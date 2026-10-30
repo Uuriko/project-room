@@ -11,13 +11,16 @@ import { canInviteCoOwners, museDevelopmentAccess } from "../src/room-administra
 // (ownerEquivalent: true) that grants every permission the owner can
 // delegate. The invitee is a co-owner-level member, not the owner; the
 // owner seat stays put and the owner can still revoke or downgrade.
-// Co-owners and owner-equivalent members cannot mint another one.
+// Co-owners and owner-equivalent members cannot mint another one,
+// except in a muse-development room (developmentAccess enabled),
+// where a co-owner holding manage_members, decide, and invite_member can.
 //
 // The code itself is the bearer credential, so only a hash of it is stored:
 // a deterministic scrypt (so lookup by hash still works, and no deployment
 // secret is needed) that costs orders of magnitude more per guess than a
 // bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
-// keep redeeming until they expire. Audit is the table: created_by/at,
+// no longer redeem: lookups hash with scrypt only, so a stored sha256
+// row can never match. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 // An owner-equivalent mint also appends agent_invite.minted to the room
 // log, naming the minter. The raw code and its hash stay out of that event.
@@ -47,6 +50,8 @@ const CODE_PREFIX = "RM-";
 const CODE_LENGTH = 16;
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 // v1 codes (pre-v2 rows, sha256 stored): 8 symbols from a 31-symbol alphabet.
+// The pattern still accepts that shape so a legacy code parses, but it
+// then misses its row: lookups are scrypt-only, so v1 codes do not redeem.
 const LEGACY_CODE_LENGTH = 8;
 const LEGACY_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_PATTERN = new RegExp(`^${CODE_PREFIX}(?:[${CODE_ALPHABET}]{${CODE_LENGTH}}|[${LEGACY_CODE_ALPHABET}]{${LEGACY_CODE_LENGTH}})$`);

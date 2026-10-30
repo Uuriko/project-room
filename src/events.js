@@ -438,10 +438,12 @@ export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
 // administration, decisions, and inviting. Share links and ordinary agent
 // invites refuse them (server/share-links.mjs, server/agent-invites.mjs,
 // #3549). The one exception is an owner-equivalent agent invite
-// (ownerEquivalent: true), which only the room's owner member can mint,
-// including when that owner is an agent. It grants these bits to a
-// co-owner-level member and does not transfer the owner seat. Co-owners
-// cannot mint another one.
+// (ownerEquivalent: true), which the room's owner member can mint,
+// including when that owner is an agent. In a muse-development room a
+// co-owner holding manage_members, decide, and invite_member can mint
+// one too. It grants these bits to a co-owner-level member and does not
+// transfer the owner seat. Outside that exception, co-owners cannot
+// mint another one.
 export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
