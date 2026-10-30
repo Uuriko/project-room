@@ -55,3 +55,21 @@ test("no answer before the timeout denies", async t => {
   assert.match(final.body, /permission: reject_once/);
   assert.ok(mine(room, rootId, connection.memberId).some(message => message.body.startsWith("No answer; denied")));
 });
+
+test("a permission ask in a Board claim turn goes to the owner as a DM; allow there selects allow", async t => {
+  const room = await startRoom(t);
+  const { connection } = await startBridge(t, room, 20000);
+  const res = await fetch(`${room.origin}/api/rooms/commons/work-claims`, { method: "POST", headers: { authorization: `Bearer ${room.ownerKey}`, "content-type": "application/json" }, body: JSON.stringify({ id: "clean-build", title: "Clean the build", assignee: connection.memberId }) });
+  assert.equal(res.status, 201);
+  const ask = await waitFor(() => room.messages().find(message => message.authorId === connection.memberId && message.toMemberId && /^Permission needed on claim clean-build: Run rm -rf build/.test(message.body)));
+  room.f.store.command(room.ownerKey, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: "o-allow", body: "allow", replyToId: ask.id, toMemberId: connection.memberId } });
+  const claimNotes = async () => {
+    const read = await fetch(`${room.origin}/api/rooms/commons/work-claims/clean-build`, { headers: { authorization: `Bearer ${room.ownerKey}` } }).then(r => r.json());
+    return (read.history ?? []).filter(entry => entry.agentId === connection.memberId).map(entry => entry.note ?? "");
+  };
+  const end = Date.now() + 20000;
+  let notes = [];
+  while (Date.now() < end && !notes.some(note => /permission: allow_once/.test(note))) { notes = await claimNotes(); await new Promise(resolve => setTimeout(resolve, 100)); }
+  assert.ok(notes.some(note => /^Waiting for owner permission: Run rm -rf build/.test(note)), notes.join(" | "));
+  assert.ok(notes.some(note => /permission: allow_once/.test(note)), notes.join(" | "));
+});
