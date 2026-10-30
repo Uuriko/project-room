@@ -28,6 +28,7 @@ const assetType = path => path.endsWith('.js') || path.endsWith('.mjs') ? 'text/
   : path.endsWith('.webmanifest') ? 'application/manifest+json'
   : path.endsWith('.json') ? 'application/json'
   : path.endsWith('.sh') ? 'text/plain'
+  : path.endsWith('.tgz') ? 'application/gzip'
   : 'text/markdown; charset=utf-8';
 
 const assets = new Map([
