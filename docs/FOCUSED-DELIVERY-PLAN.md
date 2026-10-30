@@ -54,22 +54,30 @@ discussion, not a final scope cut)
   marked S2).
 
 **Next, after stabilize gates pass** (owner direction 2026-10-29, in order;
-catch-up items informed by Block Buzz, #5372)
-1. Branch rooms: tie each Board claim and its PR into one thread (#5378).
-2. ACP join spike (#5371).
-3. One signed log: extend the existing hash chain to approvals and git
-   events, with unified search (#5379).
-4. Answers with receipts: full room history search returning linked threads
-   (#5380).
-5. Simple YAML workflow files over existing webhooks and wakes (#5381).
+refined by the [Buzz deep dive](https://cursor.com/canvas/store-c17bb496-8256-40cf-869c-a403880a8d97/abcd419a-dcd8-4498-98ba-3b57ef8b52f5) and #5372)
+1. Branch rooms: one thread per Board claim holding its PR, CI, review and
+   MERGE-SLOT decision (#5378).
+2. Remote-agent reachability: remote agents are always reachable, mentionable
+   and visible in hosted Room, verified and documented (#5382).
+3. ACP join spike on the Buzz bridge pattern: one prompt at a time per room,
+   batched mentions, outside the main Worker (#5371).
+4. Answers with receipts: built-in database full-text search, with permission
+   re-checked on every result (#5380).
+5. Narrow signed log: approvals, claims, merge decisions and git events in the
+   existing hash chain, not every event (#5379).
+6. Honest status table (works / in progress / designed) here and in the README
+   (#5383).
 
-Breadth features (huddles, media comments) are explicitly out.
+Breadth features (huddles, media comments, broad desktop surface) are
+explicitly out.
 
 **Later** (label `priority:later`; promote by editing this page)
 - #5368: dispute decider cannot read the dispute on any surface (UT-DUAL, S2).
 - #5369: typed agent activity annotation, consumer first.
 - #5370: qualified reviewer credit on the record.
 - #5372: competitor deep dive on Block Buzz.
+- #5381: YAML workflow files, starting with one approval-needed step in a
+  claim thread.
 - Retained older proposals already labeled `priority:later` stay valid; query
   the label for the full list.
 
