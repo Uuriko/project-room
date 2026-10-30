@@ -43,6 +43,31 @@ const decodeItem = text => {
   return item;
 };
 
+// Exact board version per (db, roomId), bumped by every registry mutation
+// below (the same points that fire onChange). Derived readers that cache
+// board state (needs-me's memo) key on this counter: unlike an updated_at
+// aggregate it cannot collide when two writes land inside one millisecond
+// or a rewrite preserves a row's length.
+//
+// Single-writer assumption (explicit, NM-CURE disposition of the memo
+// critic's Defect 2): this counter is process-local — a WeakMap keyed by
+// the db handle. A writer reaching the same SQLite file through a
+// different db handle or a second process cannot bump THIS process's
+// counter, so a reader memoised on it here would not see that write.
+// Production serving is single-store — one RoomStore owns the registry
+// and every registry write path goes through its set/delete/configure —
+// which is what makes the counter exact today. A future multi-process
+// writer would need a durable in-table version, not this counter.
+const boardVersions = new WeakMap();
+export function workClaimBoardVersion(db, roomId) {
+  return boardVersions.get(db)?.get(roomId) ?? 0;
+}
+function bumpBoardVersion(db, roomId) {
+  let perDb = boardVersions.get(db);
+  if (!perDb) { perDb = new Map(); boardVersions.set(db, perDb); }
+  perDb.set(roomId, (perDb.get(roomId) ?? 0) + 1);
+}
+
 export const workClaimSchema = `
   CREATE TABLE IF NOT EXISTS work_claims (
     room_id TEXT NOT NULL,
@@ -199,6 +224,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());
+      bumpBoardVersion(db, roomId);
       if (typeof onChange === "function") onChange(roomId);
       return item;
     },
@@ -225,12 +251,14 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       // a later claim reusing the id can never inherit a predecessor's
       // stamps through the reunion read.
       if (spillAvailable()) deleteSpill.run(roomId, id);
+      bumpBoardVersion(db, roomId);
       if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
         upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
+        bumpBoardVersion(db, roomId);
       }
       return roomWorkClaimConfig({ workClaims: rawConfig(roomId) });
     },
