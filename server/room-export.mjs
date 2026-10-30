@@ -509,6 +509,8 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
+  "board_vtwo_claims", "board_vtwo_events", "board_vtwo_idempotency",
+  "board_vtwo_mirror",
   "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
 ]);
 
