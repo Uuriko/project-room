@@ -525,6 +525,12 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
     }
   }
 
+  // The processed prefix has not received its cross-batch idempotency check.
+  // Keep cursor, shadows and findings unchanged so a later tick retries it;
+  // committing this prefix would permanently skip that verification. Do not
+  // start an unbounded historical lookup after the deadline has expired.
+  if (budgetExceeded) return { checked: 0, fresh: [], budgetExceeded: 1 };
+
   // Idempotency look-back: a key first used before this batch must not be
   // re-used inside it. A JSON binding keeps even large batches within SQL's parameter limit.
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
