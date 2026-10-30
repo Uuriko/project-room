@@ -1,0 +1,70 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "work-item/working",
+  "machine": "work-item",
+  "legacyState": "working",
+  "provenance": {
+    "harvestedFrom": [
+      "src/events.js proposeWork/acceptWork/acquireClaim/blockWork/recordWorkCompletion reducers",
+      "tests/work-item-session.test.js"
+    ],
+    "census": "design §1.6: items not directly countable via member API; board mirror is the countable shadow"
+  },
+  "legacy": {
+    "id": "wi_u1_working",
+    "title": "Carry the unified object",
+    "definitionOfDone": "U2 reads one shape",
+    "accountableMemberId": "member-owner",
+    "verifierMemberId": "member-verifier",
+    "independentVerificationRequired": false,
+    "ownerDecisionRequired": false,
+    "humanDecisionMakerId": null,
+    "mode": "write",
+    "sourceMessageId": null,
+    "proposedById": "member-owner",
+    "state": "working",
+    "revision": 0,
+    "claim": {
+      "holderId": "member-owner",
+      "repository": "Uuriko/project-room",
+      "ref": "main",
+      "paths": [
+        "server/"
+      ],
+      "acquiredAt": "2025-10-18T01:00:00.000Z",
+      "expiresAt": "2025-10-25T01:00:00.000Z"
+    },
+    "receipt": null,
+    "receiptHistory": [],
+    "verification": null,
+    "verificationHistory": [],
+    "decision": null,
+    "decisionHistory": [],
+    "blocker": null,
+    "supersededBy": null,
+    "createdAt": "2025-10-18T00:00:00.000Z",
+    "updatedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "mcp-room": {
+      "surface": "room work verbs / list+read work (MCP room profile)",
+      "statePath": "state",
+      "state": "working",
+      "excerpt": {
+        "state": "working"
+      }
+    },
+    "commands": {
+      "surface": "/commands event projection state.workItems[id]",
+      "statePath": "state",
+      "state": "working",
+      "excerpt": {
+        "state": "working"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "in_progress"
+  }
+}

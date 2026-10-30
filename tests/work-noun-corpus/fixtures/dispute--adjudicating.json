@@ -1,0 +1,55 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "dispute/adjudicating",
+  "machine": "dispute",
+  "legacyState": "adjudicating",
+  "provenance": {
+    "harvestedFrom": [
+      "server/bounty-disputes.mjs createDisputes (open/challenge/evidence/seat/decide/finalize)",
+      "tests/bounty-disputes.test.js"
+    ],
+    "census": "design §1.2: dispute machine extracted by HUNT-STATE-MACHINE"
+  },
+  "legacy": {
+    "disputeId": "dsp_u1_adjudicating",
+    "bountyId": "bty_u1_disputed",
+    "state": "adjudicating",
+    "tier": 0,
+    "raisedBy": "member-poster",
+    "reason": "criterion-unmet",
+    "bondSnapshot": 1250,
+    "maxDisputeCost": 1250,
+    "evidence": [
+      {
+        "by": "member-poster",
+        "summary": "Delivery digest does not match the brief"
+      }
+    ],
+    "decider": "member-decider",
+    "challengedBy": "member-claimant",
+    "resolution": null
+  },
+  "doors": {
+    "rest": {
+      "surface": "POST /rooms/{id}/bounties/{bid}/dispute[/decide]; dispute object carried on the escrow record",
+      "statePath": "state",
+      "state": "adjudicating",
+      "excerpt": {
+        "state": "adjudicating"
+      }
+    },
+    "mcp-full": {
+      "surface": "bounty dispute tool (MCP full profile)",
+      "statePath": "state",
+      "state": "adjudicating",
+      "excerpt": {
+        "state": "adjudicating"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "carried",
+    "state": null,
+    "home": "dispute child machine (§2.5)"
+  }
+}
