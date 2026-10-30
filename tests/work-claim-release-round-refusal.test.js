@@ -47,11 +47,12 @@ const claimedByHolder = async registry => {
 test("stale-only 409 (truncated list round) carries currentRound and a verbatim retry that succeeds", async () => {
   const registry = createWorkClaimRegistry();
   const claimed = await claimedByHolder(registry);
-  // Four note appends: the stored history is now 6 entries, while a board
+  // Four note appends: the stored history is now 7 entries (create, claim,
+  // the claim's retention_ack stamp, and the four notes), while a board
   // list read would show only the last 3 — the false-409 shape from F-S4b-1.
   for (let i = 0; i < 4; i += 1) await call(registry, "holder", "update", "lane", { note: `progress ${i}` });
   const full = registry.get("room1", "lane");
-  assert.equal(full.history.length, 6);
+  assert.equal(full.history.length, 7);
 
   const listShaped = { expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: 3 };
   const refused = await call(registry, "owner", "release", "lane", { ...listShaped, reason: "stuck" });
@@ -62,7 +63,7 @@ test("stale-only 409 (truncated list round) carries currentRound and a verbatim 
   assert.equal(body.subcode, "round_stale");
   assert.deepEqual(body.claim, { id: "lane", state: "claimed", owner: "holder", claimRound: 1 });
   assert.deepEqual(body.callerRound, listShaped);
-  assert.deepEqual(body.currentRound, { expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: 6 });
+  assert.deepEqual(body.currentRound, { expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: 7 });
   assert.equal(body.stateChanged, false);
   assert.equal(body.stateChange, undefined);
   assert.equal(body.retryable, true);
