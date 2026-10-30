@@ -1,0 +1,176 @@
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -415,11 +415,8 @@ const verificationOf = value => {
+   const basis = reviewBasisOf(value.basis);
+-  let jev;
+-  if (value.jev !== undefined && value.jev !== null) {
+-    check(typeof value.jev === "object" && !Array.isArray(value.jev), "verification jev must be an object");
+-    check(typeof value.jev.verdict === "string" && value.jev.verdict.length > 0 && value.jev.verdict.length <= 64,
+-      "verification jev verdict must be 1..64 characters");
+-    check(typeof value.jev.score === "number" && Number.isFinite(value.jev.score), "verification jev score must be a number");
+-    jev = Object.freeze({ verdict: value.jev.verdict, score: value.jev.score });
+-  }
+-  return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
+-    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}) });
++  // D1: the Jev receipt score is shadow measurement, not a verdict on this
++  // fact. A stored `jev` entry (written by an earlier version beside the
++  // verified state) is dropped here, on canonicalisation, so a legacy fact
++  // reads back without it; the full scored decision lives only in the
++  // owner-only shadow journal (server/jev-shadow-journal.mjs).
++  return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
++    executedChecks: executedChecksOf(value.executedChecks) });
+ };
+@@ -1233,4 +1230,4 @@
+ // step; under a reviewed policy it is refused (work_not_delivered) — the
+ // work must occupy delivered and be verified by its reviewer.
+-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
++export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, requestId, now, authority = false } = {}) {
+   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+@@ -1289,13 +1286,5 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy,
+   if (delivery !== undefined && delivery !== null) {
+     check(finishing, "a delivery bundle is only recorded on the finish transition");
+     deliveryOf(delivery);
+   }
+-  let jevRecord;
+-  if (jev !== undefined && jev !== null) {
+-    check(state === "done", "jev is only recorded on the verify transition");
+-    check(typeof jev === "object" && !Array.isArray(jev)
+-      && typeof jev.verdict === "string" && jev.verdict.length > 0 && jev.verdict.length <= 64
+-      && typeof jev.score === "number" && Number.isFinite(jev.score), "jev must be { verdict, score }");
+-    jevRecord = Object.freeze({ verdict: jev.verdict, score: jev.score });
+-  }
+   // QA D-1: same 4000-char bound as create — see claimWork.
+@@ -1354,5 +1343,5 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy,
+     verification = Object.freeze({
+       state: effectivePolicy === "self_attested" ? "self_attested" : "verified",
+       by: reviewedBy ?? agent, at: isoOf(atMs), basis: reviewBasisFor(deliveredItem),
+-      executedChecks, ...(jevRecord ? { jev: jevRecord } : {}),
++      executedChecks,
+     });
+diff --git a/server/work-claim-routes.mjs b/server/work-claim-routes.mjs
+--- a/server/work-claim-routes.mjs
++++ b/server/work-claim-routes.mjs
+@@ -1440,10 +1440,14 @@
+-    // Jev-harness receipt-acceptance gate (docs/JEV-GATES.md): the receipt
+-    // is scored BEFORE the transition so the verdict can ride the
+-    // verification fact (#3546) as an advisory signal; the shadow journal
+-    // below still records every scored done. Shadow mode never changes the
+-    // outcome — scoring sits in a try, and a failure leaves the fact
+-    // without a jev entry rather than breaking the transition.
++    // Jev-harness receipt-acceptance gate (docs/JEV-GATES.md): the receipt
++    // is scored BEFORE the transition so the shadow journal below can
++    // record every scored done. D1: the score is shadow measurement only —
++    // it must NOT ride the verification fact (#3546), where an unqualified
++    // `jev:{verdict:"request-changes"}` beside `state:"verified"` stated
++    // two contradictory verdicts about the same work. The full decision
++    // (score, verdict, signals, escalate) lives in the owner-only shadow
++    // journal. Shadow mode never changes the outcome — scoring sits in a
++    // try, and a failure leaves the journal without an entry rather than
++    // breaking the transition.
+     let jevDecision = null;
+@@ -1463,6 +1467,5 @@
+       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
+         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
+         delivery: data.delivery, policy,
+-        jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
+         requestId: data.requestId, now: nowMs,
+         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
+diff --git a/tests/work-claim-jev-verification.test.js b/tests/work-claim-jev-verification.test.js
+new file mode 100644
+--- /dev/null
++++ b/tests/work-claim-jev-verification.test.js
+@@ -0,0 +1,93 @@
++// D1: a verified claim must not carry a contradictory unqualified Jev
++// verdict. The Jev receipt scorer is shadow measurement (never enforced,
++// docs in server/jev-receipts.mjs): its full decision belongs in the
++// owner-only shadow journal, not on the verification fact (#3546), where
++// `jev:{verdict:"request-changes"}` beside `state:"verified"` reads as the
++// platform requesting changes on work it stamps verified.
++import test from "node:test";
++import assert from "node:assert/strict";
++import { RoomStore } from "../server/store.mjs";
++import { initialRoom } from "../server/bootstrap.mjs";
++import { handleWorkClaims } from "../server/work-claim-routes.mjs";
++import { workOf } from "../server/work-claims.mjs";
++
++const SHA = "c".repeat(64);
++const bundle = { artifact: { kind: "text", ref: "room://artifacts/d1", sha256: SHA },
++  checks: [{ name: "unit", result: "pass" }],
++  criteria: [{ criterion: "A one-line result is delivered", status: "met" }] };
++const auth = (id, kind, permissions) => ({ member: { id, kind, permissions } });
++const OWNER = auth("owner", "human", ["manage_claims"]);
++const WORKER = auth("worker", "agent", ["accept_work", "complete_work"]);
++const REVIEWER = auth("reviewer", "agent", ["verify"]);
++
++async function room(t) {
++  const store = new RoomStore(":memory:");
++  store.initialize(initialRoom("commons"));
++  t.after(() => store.close());
++  const ownerKey = store.issueAccessKey("commons", "owner");
++  const add = (id, kind, permissions) => store.command(ownerKey, "commons",
++    { id: `add-${id}`, type: "member.added", data: { memberId: id, displayName: id, kind, permissions } });
++  add("worker", "agent", ["accept_work", "complete_work"]);
++  add("reviewer", "agent", ["verify"]);
++  const helpers = {
++    json: (_res, status, value) => ({ status, value }),
++    reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
++    body: async req => req.body,
++  };
++  const call = (route, id, body, extra = {}) => handleWorkClaims({
++    req: { method: route === "read" || route === "receipts" ? "GET" : "POST", body },
++    res: {}, url: new URL("https://room.example/api/rooms/commons/work-claims"),
++    store, roomId: "commons", auth: extra.auth ?? OWNER,
++    workClaimRoute: route, workClaimId: id, helpers, registry: store.workClaims,
++  });
++  return { store, call };
++}
++
++test("verified claim read carries no jev verdict; the shadow journal keeps the full decision", async t => {
++  const { store, call } = await room(t);
++  const id = "d1-verified";
++  await call("create", null, { id, title: "D1 verified work",
++    acceptanceCriteria: ["A one-line result is delivered"], reviewPolicy: "distinct_member" });
++  await call("claim", id, {}, { auth: WORKER });
++  await call("update", id, { state: "in_progress" }, { auth: WORKER });
++  await call("update", id, { state: "delivered", delivery: bundle,
++    note: "One-line result: golden path summarised." }, { auth: WORKER });
++  await call("review", id, { verdict: "approve", summary: "Bundle verified against criteria" }, { auth: REVIEWER });
++  const done = (await call("update", id, { state: "done", note: "Accepted — matches criteria" }, { auth: REVIEWER })).value;
++  assert.equal(done.state, "done");
++  assert.equal(done.verification.state, "verified");
++  assert.ok(done.verification.executedChecks.every(entry => entry.result === "pass"));
++  assert.equal("jev" in done.verification, false,
++    `verified claim must not carry a jev verdict, got ${JSON.stringify(done.verification.jev)}`);
++
++  const read = (await call("read", id, undefined, { auth: REVIEWER })).value;
++  assert.equal(read.verification.state, "verified");
++  assert.equal("jev" in read.verification, false,
++    `claim read must not carry a jev verdict, got ${JSON.stringify(read.verification.jev)}`);
++
++  // Not hidden: the scored shadow decision is still journaled in full,
++  // readable only through the owner-only shadow surface.
++  const entry = store.jevShadow.list({ roomId: "commons", gate: "receipt" }).find(e => e.subject === id);
++  assert.ok(entry, "shadow receipt decision must still be journaled");
++  assert.ok(["accept", "request-changes", "escalate"].includes(entry.decision));
++  assert.ok(typeof entry.score === "number");
++  assert.ok(Array.isArray(entry.signals) && entry.signals.length > 0);
++});
++
++test("a stored verification fact carrying a legacy jev entry reads back without it", async t => {
++  const { call } = await room(t);
++  const id = "d1-legacy";
++  await call("create", null, { id, title: "D1 legacy work",
++    acceptanceCriteria: ["A one-line result is delivered"], reviewPolicy: "distinct_member" });
++  await call("claim", id, {}, { auth: WORKER });
++  await call("update", id, { state: "in_progress" }, { auth: WORKER });
++  await call("update", id, { state: "delivered", delivery: bundle }, { auth: WORKER });
++  await call("review", id, { verdict: "approve", summary: "ok" }, { auth: REVIEWER });
++  const done = (await call("update", id, { state: "done", note: "Accepted" }, { auth: REVIEWER })).value;
++  // Simulate a fact stored before the cure, with jev frozen onto it.
++  const legacy = workOf({ ...done,
++    verification: { ...done.verification, jev: { verdict: "request-changes", score: 0.4225 } } });
++  assert.equal(legacy.verification.state, "verified");
++  assert.equal("jev" in legacy.verification, false,
++    `legacy jev must be dropped on canonicalisation, got ${JSON.stringify(legacy.verification.jev)}`);
++});
