@@ -19,6 +19,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  approvedAccountRequestRoom,
+  retireHumanAccessRequest,
   GENERAL_REQUEST_DEFAULT_ROOM_ID,
   buildGeneralAccessRequest,
   submitGeneralAccessRequest,
@@ -30,6 +32,7 @@ function memStorage() {
   return {
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: k => m.delete(k),
   };
 }
 
@@ -37,6 +40,7 @@ function fakeClient({ identityId = "ai_test123", calls = [] } = {}) {
   let mints = 0;
   return {
     calls,
+    restore: async () => ({ authenticated: false }),
     mintCount: () => mints,
     mintAccessIdentity: async (displayName) => {
       mints += 1;
@@ -190,4 +194,69 @@ test("submit: a failed submit keeps the minted identity stashed for the retry (M
   for (const roomId of ["https://example.test/unknown", "https://example.test/rooms/bad%2Fid", "not a room"]) {
     assert.throws(() => buildGeneralAccessRequest({ roomId, displayName: "Ada" }), /room link/);
   }
+});
+
+test("signed human requests never mint agents and retry within account scope",async()=>{
+  const storage=memStorage(), calls=[];let account="human-a",lose=true;
+  const client={restore:async()=>({authenticated:true,account:{id:account}}),
+    mintAccessIdentity:async()=>assert.fail("must not mint"),
+    submitAccountAccessRequest:async body=>{calls.push(body);if(lose){lose=false;throw new Error("lost response");}return {request:{...body,principalKind:"account",status:"pending"}};}};
+  stashAccessRequest(storage,"commons",{identityId:"ai_old",secret:"old-secret",requestId:"ar_agent"});
+  const submit=()=>submitGeneralAccessRequest({client,storage,roomId:"commons",displayName:"Ada"});
+  await assert.rejects(submit(),/lost response/);await submit();
+  assert.equal(calls[0].requestId,calls[1].requestId);assert.notEqual(calls[0].requestId,"ar_agent");
+  for(const key of ["identityId","secret","accountId"]) assert.equal(Object.hasOwn(calls[0],key),false);
+  account="human-b";await submit();assert.notEqual(calls[2].requestId,calls[0].requestId);
+});
+test("failed account restoration never falls back to agent mint",async()=>{
+  const client={restore:async()=>{throw new Error("offline");},mintAccessIdentity:async()=>assert.fail("must not mint")};
+  await assert.rejects(submitGeneralAccessRequest({client,storage:memStorage(),roomId:"commons",displayName:"Ada"}),/offline/);
+});
+test("approval needs matching membership in actual account discovery, including later pages",async()=>{
+  const request={requestId:"ar_test",roomId:"commons",principalKind:"account",status:"approved",memberId:"human-member"};
+  let reads=0;
+  const client={accountAccessRequest:async()=>({request}),rooms:async cursor=>{reads++;return cursor===null?{rooms:[{id:"a-room",memberId:"other"}],nextCursor:"a-room"}:{rooms:[{id:"commons",memberId:"human-member"}],nextCursor:null};}};
+  assert.equal((await approvedAccountRequestRoom(client,"ar_test","commons")).room.id,"commons");assert.equal(reads,2);
+  client.rooms=async()=>({rooms:[{id:"commons",memberId:"wrong-member"}],nextCursor:null});
+  assert.equal((await approvedAccountRequestRoom(client,"ar_test","commons")).room,null);
+  request.status="denied";client.rooms=async()=>assert.fail("do not read rooms after denial");
+  assert.deepEqual(await approvedAccountRequestRoom(client,"ar_test","commons"),{status:"denied",room:null});
+});
+test("human door cannot mint an agent after sign-out or expiry",async()=>{
+  const client={restore:async()=>({authenticated:false}),mintAccessIdentity:async()=>assert.fail("must not mint")};
+  await assert.rejects(submitGeneralAccessRequest({client,storage:memStorage(),roomId:"commons",displayName:"Ada",requireHuman:true}),{code:"account_session_required"});
+});
+test("unreadable retry storage stops before creating a duplicate operation",async()=>{
+  const client={restore:async()=>({authenticated:true,account:{id:"human"}}),submitAccountAccessRequest:async()=>assert.fail("must not send")};
+  const storage={getItem(){throw new Error("storage unavailable");}};
+  await assert.rejects(submitGeneralAccessRequest({client,storage,roomId:"commons",displayName:"Ada"}),/storage unavailable/);
+});
+test("lost response retries immutable fields and reauthentication starts a new operation",async()=>{
+  const storage=memStorage(),calls=[];let epoch=0;
+  const client={restore:async()=>({authenticated:true,account:{id:"human",authEpoch:epoch}}),submitAccountAccessRequest:async body=>{
+    calls.push(body);if(calls.length===1)throw new Error("lost response");return {request:{...body,principalKind:"account",status:"pending"}};
+  }};
+  const submit=displayName=>submitGeneralAccessRequest({client,storage,roomId:"commons",displayName,note:displayName});
+  await assert.rejects(submit("Original"),/lost response/);
+  await submit("Edited");assert.deepEqual(calls[1],calls[0]);
+  epoch++;await submit("Reauthenticated");assert.notEqual(calls[2].requestId,calls[0].requestId);assert.equal(calls[2].displayName,"Reauthenticated");
+});
+test("retiring a terminal operation cannot clear a different request or account",async()=>{
+  const storage=memStorage(),session={authenticated:true,account:{id:"human",authEpoch:0}};
+  const client={restore:async()=>session,submitAccountAccessRequest:async payload=>({request:{...payload,principalKind:"account"}})};
+  const input={client,storage,roomId:"commons",displayName:"Ada"};
+  const original=await submitGeneralAccessRequest(input);
+  assert.equal(retireHumanAccessRequest(storage,session,"commons","ar_other"),false);
+  assert.equal(retireHumanAccessRequest(storage,{account:{id:"other",authEpoch:0}},"commons",original.requestId),false);
+  assert.equal((await submitGeneralAccessRequest(input)).requestId,original.requestId);
+  assert.equal(retireHumanAccessRequest(storage,session,"commons",original.requestId),true);
+  assert.notEqual((await submitGeneralAccessRequest(input)).requestId,original.requestId);
+});
+
+
+test("missing human admission stops waiting while transient failures propagate", async () => {
+  const client = { accountAccessRequest: async () => { throw Object.assign(new Error("missing"), {status: 404}); } };
+  assert.deepEqual(await approvedAccountRequestRoom(client, "ar_missing", "commons"), {status: "unavailable", room: null});
+  client.accountAccessRequest = async () => { throw Object.assign(new Error("unavailable"), {status: 503}); };
+  await assert.rejects(approvedAccountRequestRoom(client, "ar_missing", "commons"), /unavailable/);
 });

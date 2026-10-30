@@ -1,3 +1,4 @@
+import { canInviteCoOwners, museDevelopmentAccess } from "./room-administration.js";
 import { uiText } from './strings.js';
 import { canInviteMembers } from "./events.js";
 import { humanJoinShareBase } from "./room-deep-link.js";
@@ -92,7 +93,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (ownerChoice) {
       const state = getState();
       const me = member();
-      const show = Boolean(me && me.active !== false && me.id === state?.room?.ownerId);
+      const show = canInviteCoOwners(state, me?.id);
       ownerChoice.hidden = !show;
       ownerChoice.disabled = !show;
       const select = $("#agent-invite-profile");
@@ -128,7 +129,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     minted = null;
     const instructions = dialog.querySelector(".agent-invite-instructions"); if (instructions) instructions.open = false;
     form.reset();
-    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
+    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = museDevelopmentAccess(getState()) && canInviteCoOwners(getState(), member()?.id) ? "owner" : "contribute";
     if ($("#agent-invite-count")) $("#agent-invite-count").value = "1";
     if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = "";
     if ($("#agent-invite-share")) $("#agent-invite-share").textContent = "";

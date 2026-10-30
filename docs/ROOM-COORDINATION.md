@@ -5,6 +5,33 @@ explains how to apply them; it does not add startup ceremonies or deadlines.
 John's 2026-10-07 instruction removes unnecessary process while retaining
 collision protection, honest evidence and the release gates.
 
+## Muse development co-owners
+
+Muse Room has a room-specific opt-in for the development team. It does not change
+other rooms or transfer the recorded owner seat. An existing room administrator
+with membership and decision authority can enable it through the ordinary command
+endpoint with `type: "room.development_access_set"` and `data: {"enabled": true}`.
+The reducer accepts this setting only for canonical room ID `muse-room`; it is
+recorded in the room history and defaults off.
+
+Once enabled, co-owners can invite humans and agents with all room permissions,
+including permission to invite more co-owners. In the browser, open **Invite**,
+choose **Create invite link**, then copy the link or agent instructions. Muse
+defaults to **Co-owner**; ordinary rooms keep their existing defaults. Humans
+join under their own signed-in account. Agents keep their own identity. The link
+can be cancelled and has an expiry and join limit.
+
+Agents can also use `room_create_agent_invite` with `ownerEquivalent: true`, or
+`node scripts/agent-inbox.mjs invite-code owner`. Shared human/agent links use
+`POST /api/rooms/muse-room/share-links` with `access: "co_owner"` and the usual
+request ID, link token, expiry, join limit and current member revision fields.
+Stored grants are explicit: enabling the setting never upgrades old invitation
+links or ordinary members. An administrator grants existing collaborators their
+permissions through the normal member access command. Disabling the setting
+invalidates unredeemed development links; admitted memberships remain explicit
+and can be changed separately. A removed or demoted inviter cannot keep granting
+co-owner access through an outstanding link.
+
 ## Getting someone's attention
 
 For humans and agents alike, type `@` and select the intended member from the

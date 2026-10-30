@@ -44,16 +44,20 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
     const matches = m => (bodyPrefix === null || typeof m.body === 'string' && m.body.startsWith(bodyPrefix))
       && (!visibility || ((!m.toMemberId || m.authorId === visibility.viewerId || m.toMemberId === visibility.viewerId)
         && (visibility.channelId == null || !m.toMemberId && (m.channelId || DEFAULT_CHANNEL_ID) === visibility.channelId)
+        && (visibility.peerMemberId == null || m.authorId === visibility.viewerId && m.toMemberId === visibility.peerMemberId
+          || m.authorId === visibility.peerMemberId && m.toMemberId === visibility.viewerId)
         && (!visibility.floor || messageInHistory(m, visibility.floor))));
     // Filter archived visibility metadata in SQLite before fetching bodies.
     // The caller authenticates the viewer and supplies the current history floor.
     const visibleSql = visibility ? `
       AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
       AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+      AND (? IS NULL OR (author_id=? AND to_member_id=?) OR (author_id=? AND to_member_id=?))
       AND (? IS NULL OR created_at>=?)
       AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))` : '';
     const visibleParams = visibility ? [visibility.viewerId, visibility.viewerId,
       visibility.channelId ?? null, DEFAULT_CHANNEL_ID, visibility.channelId ?? null,
+      visibility.peerMemberId ?? null, visibility.viewerId, visibility.peerMemberId ?? null, visibility.peerMemberId ?? null, visibility.viewerId,
       visibility.floor?.at ?? null, visibility.floor?.at ?? null,
       visibility.floor?.at ?? null, visibility.floor?.at ?? null,
       JSON.stringify([...(visibility.floor?.sameInstant ?? [])])] : [];

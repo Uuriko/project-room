@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { humanErrorMessage } from "./error-copy.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
@@ -257,6 +258,28 @@ export class AccountClient {
   previewInvitation(invitationToken) {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
+  }
+  submitAccountAccessRequest({ roomId, displayName, requestedPermissions, requestId, note, referredBy }) {
+    return this.accountAccessRequestOperation("/api/account/access-requests", {
+      method: "POST", data: { roomId, displayName, requestedPermissions, requestId, note, referredBy },
+    });
+  }
+  accountAccessRequest(requestId) {
+    return this.accountAccessRequestOperation("/api/account/access-requests/" + encodeURIComponent(requestId));
+  }
+  async accountAccessRequestOperation(path, options = {}) {
+    const session = this.currentSession(uiText("join.request.operation"), { authenticated: true });
+    const generation = this.generation;
+    try {
+      const value = await this.request(path, { ...options, session });
+      return this.owns(generation, session) ? value : null;
+    } catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) {
+        this.invalidate(generation, session);
+      }
+      throw error;
+    }
   }
   // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
   // dead invitation mints a self-serve identity (an identity alone grants

@@ -449,6 +449,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_code_checks",
   // share_link_access: member / co-admin link options. A missing row is a guest link.
   "share_link_access",
+  "development_co_owner_links",
   // projection_bodies: Phase 1a message bodies at rest. Older writers have no
   // path to it; rooms.projection rows they write carry full bodies.
   "projection_bodies",
