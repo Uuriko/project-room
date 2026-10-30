@@ -61,6 +61,7 @@ import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
+import { collectRoomSince } from "./room-since.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "./room-entry.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -3626,6 +3627,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, collectNeedsMe(store, secret, { since, roomId }), req.method === "HEAD");
       }
       if (url.pathname === "/api/needs-me") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+      }
+      // Cross-room delta since a cursor. Same read as MCP room_since.
+      if (url.pathname === "/api/room-since" && (req.method === "GET" || req.method === "HEAD")) {
+        rate(`room-since:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (secret && secret.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
+        if (!secret || !(isIdentitySecret(secret) || secret.startsWith("rak_"))) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const sinceParam = url.searchParams.get("since");
+        let since;
+        if (sinceParam == null || sinceParam === "") since = undefined;
+        else if (/^\d+$/.test(sinceParam)) since = Number(sinceParam);
+        else {
+          try { since = JSON.parse(sinceParam); }
+          catch { reject(422, "invalid_cursor", "since must be a sequence number or a cursor object"); }
+        }
+        const roomId = url.searchParams.has("roomId") ? url.searchParams.get("roomId") : undefined;
+        return json(res, 200, collectRoomSince(store, secret, { since, roomId }), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/room-since") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
       }
       // UPDATES — one projection of what needs the caller now. Room lists and

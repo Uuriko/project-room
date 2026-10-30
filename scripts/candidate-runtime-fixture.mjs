@@ -81,6 +81,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)
   paths.add('server/read-cursor.mjs'); // safe scalar foundation
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
+  paths.add('server/room-since.mjs'); // cross-room room_since delta read (imported by server/mcp-room-profile.mjs and server/http.mjs)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)

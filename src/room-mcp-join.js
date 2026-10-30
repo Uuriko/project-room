@@ -37,6 +37,7 @@ export const MCP_TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_check_access",
   "room_needs_me",
+  "room_since",
   "room_create",
   "room_join",
   "room_merge_members",
