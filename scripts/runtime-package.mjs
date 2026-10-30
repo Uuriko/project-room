@@ -192,6 +192,7 @@ optional.push("src/work-announcements.js"); // #3687: screen-reader work-arrival
 optional.push("src/chat-suggestions.js"); // one-tap replies and task nudge above the composer (imported by src/app.js)
 optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
+optional.push("server/room-mode.mjs"); // dev-mode slice 1: ROOM_LAB_MODE_ENABLED gate + creation mode resolver (imported by server/room-lifecycle.mjs and server/agent-rooms.mjs)
 optional.push("server/attachment-schema.mjs");
 optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
 optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)

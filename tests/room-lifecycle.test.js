@@ -245,7 +245,7 @@ test("account rooms: discovery carries kind and archive state; creation is bound
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 1);
   assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, request({ title: "Two\nlines" })), { status: 422, code: "invalid_room_request" }, "a room name is one line");
   const created = f.store.createAccountRoom(admin.token, admin.binding, request({ title: " Alpha " }));
-  assert.deepEqual(created.room, { id: "room-a", title: "Alpha", memberId: "owner", kind: "organization", archived: false, archivedAt: null });
+  assert.deepEqual(created.room, { id: "room-a", title: "Alpha", memberId: "owner", kind: "organization", mode: "production", archived: false, archivedAt: null });
   assert.equal(created.duplicate, false); assert.equal(created.viewer.accountId, "admin-account");
   assert.equal(f.store.createAccountRoom(admin.token, admin.binding, request()).duplicate, true, "the client-chosen id is the idempotency key");
   assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, request({ title: "Beta" })), { status: 409, code: "room_exists" });
