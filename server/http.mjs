@@ -1,5 +1,6 @@
 import { renderInviteOAuthPage } from "./routes/mcp-invite-oauth.mjs";
-import { createMcpInviteOAuth } from './mcp-invite-oauth.mjs';
+import { createMcpInviteOAuth } from "./mcp-invite-oauth.mjs";
+import { createMcpEventsRuntime } from "./mcp-events-runtime.mjs";
 import { mcpOAuthResourceMetadata, listMcpOAuthAgents, validateMcpOAuthBinding } from './mcp-oauth.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
@@ -387,6 +388,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
+  mcpEventTransport, mcpEventDnsResolvers,
   mcpOAuthClients = [], // Explicit verified public-client registrations; empty disables native MCP OAuth.
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
@@ -721,10 +723,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       "X-RateLimit-Bucket": kind === "write" ? "write" : "read",
     });
   }
+  const nativeEvents = createMcpEventsRuntime({ store, accountProvider: oauthProvider,
+    inviteProvider: inviteOAuth?.provider, resource: oauthResource,
+    transport: mcpEventTransport, dnsResolvers: mcpEventDnsResolvers });
+  if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
+    nativeHandler: nativeEvents?.handler,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });
+  hostedRoomMcp.nativeEvents = Boolean(nativeEvents);
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -5663,6 +5671,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       json(res, httpStatus, errorBody);
     }
   });
+  server.on('close', () => {
+    nativeEvents?.stop();
+    if (store.enqueueNativeMcpEvent === nativeEvents?.emit) delete store.enqueueNativeMcpEvent;
+  });
+  server.drainMcpEvents = () => nativeEvents?.drain();
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;

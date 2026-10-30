@@ -81,6 +81,7 @@ export class WorkWakes {
         event: "suppressed_policy", kind: "work", subjectId: memberId });
       return;
     }
+    this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id });
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
     if (!agentId || !this.optedIn(agentId, roomId)) {
       recordWakeEvent(this.db, { at, roomId, store: "work",

@@ -1,3 +1,4 @@
+import { modernMcpRequest, dispatchModernMcp } from './mcp-modern.mjs';
 import { mcpOAuthChallenge } from './mcp-oauth.mjs';
 import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 // Streamable HTTP MCP. Without Authorization this is the public join surface
@@ -127,7 +128,7 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -154,9 +155,16 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
   return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
 }
 
-export function mcpRpcStatus(reply) {
+export async function dispatchRoomMcp(message, options = {}) {
+  const modern = modernMcpRequest(message, options.headers);
+  if (!modern) return dispatchLegacyRoomMcp(message, options);
+  if (Object.hasOwn(modern, 'reply')) return modern.reply;
+  return dispatchModernMcp(message, options, dispatchLegacyRoomMcp);
+}
+
+export function mcpRpcStatus(reply, modern = false) {
   if (!reply) return 202;
-  return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : 200;
+  return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : modern && [-32600, -32602, -32020, -32022].includes(reply.error?.code) ? 400 : 200;
 }
 
 // RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
@@ -170,7 +178,7 @@ export function mcpJoinCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, Deprecation, Link",
     "MCP-Protocol-Version": MCP_VERSION
   };
@@ -238,9 +246,12 @@ export async function roomMcpFetchPost(request, options = {}) {
       status: 400, headers
     });
   }
+  const modern = modernMcpRequest(message, request.headers);
+  if (modern) headers['MCP-Protocol-Version'] = modern.version;
   let reply;
   try {
     reply = await dispatchRoomMcp(message, {
+      headers: request.headers,
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
@@ -257,7 +268,7 @@ export async function roomMcpFetchPost(request, options = {}) {
     });
   }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply, Boolean(modern)), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
 export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl } = {}) {
@@ -299,9 +310,12 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       category: "input",
     })));
   }
+  const modern = modernMcpRequest(message, req.headers);
+  if (modern) cors['MCP-Protocol-Version'] = modern.version;
   let reply;
   try {
     reply = await dispatchRoomMcp(message, {
+      headers: req.headers,
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
       roomMcp,
@@ -323,7 +337,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     return res.end();
   }
   const bytes = Buffer.from(JSON.stringify(reply));
-  res.writeHead(mcpRpcStatus(reply), {
+  res.writeHead(mcpRpcStatus(reply, Boolean(modern)), {
     ...cors,
     ...mcpAuthHeaders(reply, oauthMetadataUrl),
     ...legacyMcpHeaders(req.headers.authorization),

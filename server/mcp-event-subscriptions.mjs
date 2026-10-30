@@ -48,7 +48,7 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
     if (!row || row.state !== "active" || row.expires_at <= now()) return false;
     return Boolean(await authorize(JSON.parse(row.principal)));
   };
-  async function subscribe({ principal, name, arguments: args, delivery, cursor = null }) {
+  async function subscribe({ principal, name, arguments: args, delivery, cursor = null, ttlMs: requestedTtl }) {
     sweep();
     const key = principalKey(principal);
     if (name !== "room.requested" || !args || Object.keys(args).sort().join(",") !== "memberId,roomId" || args.roomId !== principal.roomId || args.memberId !== principal.memberId || cursor !== null) fail("Event scope must match the authenticated agent");
@@ -63,7 +63,8 @@ export function createMcpEventSubscriptions({ store, authorize, transport, dnsRe
     if (!get(id) && db.prepare("SELECT count(*) AS n FROM mcp_event_subscriptions WHERE principal=?").get(key).n >= 20) fail("Event subscription limit exceeded");
     const old = get(id), previous = old && JSON.parse(old.document);
     const generation = randomUUID();
-    const expiresAt = now() + ttlMs;
+    if (requestedTtl !== undefined && requestedTtl !== null && (!Number.isSafeInteger(requestedTtl) || requestedTtl < 0)) fail("Invalid subscription ttlMs");
+    const expiresAt = now() + (requestedTtl == null ? ttlMs : Math.max(1000, Math.min(ttlMs, requestedTtl)));
     const document = { id, name, arguments: canonicalArgs, url: url.href, secret: delivery.secret, expiresAt };
     if (old?.state === "active" && old.expires_at > now() && previous.secret !== delivery.secret) {
       document.previousSecret = previous.secret;
