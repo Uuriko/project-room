@@ -950,7 +950,7 @@ summary { overflow-wrap: anywhere; }
 /* Private setup stays within narrow mobile dialogs; never show it by default. */
 #agent-connect-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
-#agent-connect-dialog #agent-connect-done { position: sticky; bottom: 0; z-index: 1; width: 100%; margin-top: 0.75rem; background: var(--surface, #fff); box-shadow: 0 -8px 12px -8px rgba(0,0,0,.25); }
+#agent-connect-dialog #agent-connect-done { position: sticky; bottom: 0; z-index: 1; width: 100%; margin-top: var(--space-3); background: var(--surface); box-shadow: var(--shadow); }
 .agent-roster { display: flex; flex-wrap: wrap; gap: .45rem; margin: .45rem 0 .2rem; }
 .agent-roster .button { width: auto; min-height: 44px; padding: 0 .7rem; }
 .agent-type-catalog { margin: .45rem 0 .2rem; }
