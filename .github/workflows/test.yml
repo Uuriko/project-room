@@ -243,7 +243,7 @@ jobs:
     # diff explicitly does not touch browser paths.
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CI_BROWSER_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'full' }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
