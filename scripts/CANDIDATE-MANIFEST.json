@@ -163,7 +163,7 @@
     "src/service-origin.js": "sha256:cb4ac28e46f80308f243d39b6ad68412c55a2cacb5bb79a50215d1e362e51414",
     "src/session-expiry.js": "sha256:4215ee5fd849272d6ffede7c1f68da7c93f1ed82f0e4455b82fe24796baa5196",
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
-    "src/share-links.js": "sha256:b8adc9e17163beb1d8df9593a7e26b0191765d88c469c7dfe26fdf2c776eb89c",
+    "src/share-links.js": "sha256:bce5030030b48e729adb9420c542a49be495a2b9db50ffc1fd846790c9319e95",
     "src/signin-entry.js": "sha256:c797b5df7ed8961ce43bb812725d6ac27ec38401ef4d320e74480d40f05c7b42",
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
@@ -181,7 +181,7 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:7a7b57700bea2aa06ee4135d7c1d58d48daca1a5f95fe44910242bd0d7284b52",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
-    "strings/en.js": "sha256:321cf8d9e3f957bce15a6141495ffcc379fbc49512dacb653c66f779b447daa9",
+    "strings/en.js": "sha256:d657e7695189fd58f83901d3c10cf39e4e49212ee6af2527219292ceb598dd5c",
     "strings/en.json": "sha256:77f7271d1d8f23ba194c773f94ab0994df9603e58f262d69d45f15cadfcd38a1"
   },
   "deployment": {
