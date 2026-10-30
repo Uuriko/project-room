@@ -79,7 +79,17 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       document.previousSecret = previous.previousSecret;
       document.previousSecretExpiresAt = previous.previousSecretExpiresAt;
     }
-    db.prepare(`INSERT INTO mcp_event_subscriptions VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document,generation=excluded.generation,state=excluded.state,expires_at=excluded.expires_at`).run(id, key, JSON.stringify(document), generation, "verifying", expiresAt);
+    // A refresh is not a disconnect. Keep the already verified key and expiry
+    // active while proving the replacement; requests arriving meanwhile must
+    // still enter the outbox. The pending marker fences concurrent refreshes
+    // without invalidating an in-flight delivery under the verified generation.
+    const renewing = old?.state === "active" && old.expires_at > now();
+    if (renewing) {
+      db.prepare("UPDATE mcp_event_subscriptions SET document=? WHERE id=? AND generation=?")
+        .run(JSON.stringify({ ...previous, pendingRefresh: generation }), id, old.generation);
+    } else {
+      db.prepare(`INSERT INTO mcp_event_subscriptions VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document,generation=excluded.generation,state=excluded.state,expires_at=excluded.expires_at`).run(id, key, JSON.stringify(document), generation, "verifying", expiresAt);
+    }
     try {
       // A short persisted cache avoids repeated challenges on refresh. A new
       // signing key always proves callback ownership again before activation.
@@ -89,10 +99,16 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       if (!cached) await verifyMcpEventCallback({ subscriptionId: id, secret: delivery.secret, url: url.href, transport, dnsResolvers, now: now() });
       document.verifiedAt = cached ? previous.verifiedAt : now();
       if (!await authorize(JSON.parse(key)) || now() >= expiresAt) throw new Error("Event grant expired during verification");
-      const result = db.prepare("UPDATE mcp_event_subscriptions SET state='active',document=? WHERE id=? AND generation=? AND state='verifying'").run(JSON.stringify(document), id, generation);
+      const result = renewing
+        ? db.prepare("UPDATE mcp_event_subscriptions SET document=?,expires_at=? WHERE id=? AND generation=? AND state='active' AND json_extract(document,'$.pendingRefresh')=?")
+          .run(JSON.stringify(document), expiresAt, id, old.generation, generation)
+        : db.prepare("UPDATE mcp_event_subscriptions SET state='active',document=? WHERE id=? AND generation=? AND state='verifying'").run(JSON.stringify(document), id, generation);
       if (!result.changes) throw new Error("Event subscription superseded");
     } catch (error) {
-      db.prepare("UPDATE mcp_event_subscriptions SET state='inactive',document='{}' WHERE id=? AND generation=?").run(id, generation);
+      if (renewing) {
+        db.prepare("UPDATE mcp_event_subscriptions SET document=json_remove(document,'$.pendingRefresh') WHERE id=? AND generation=? AND state='active' AND json_extract(document,'$.pendingRefresh')=?")
+          .run(id, old.generation, generation);
+      } else db.prepare("UPDATE mcp_event_subscriptions SET state='inactive',document='{}' WHERE id=? AND generation=?").run(id, generation);
       throw error;
     }
     return { id, refreshBefore: new Date(expiresAt).toISOString(), cursor: null, truncated: false };

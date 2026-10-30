@@ -123,3 +123,59 @@ test("event policy is rechecked after DNS resolution immediately before sending"
   await manager.drain(); assert.equal(x.seen.length, 0);
   assert.equal(x.db.prepare("SELECT state FROM mcp_event_outbox").get().state, "dead");
 });
+
+for (const failed of [false, true]) test(`renewal keeps verified delivery active while challenge is pending (failure=${failed})`, async t => {
+  const x = setup(t); await x.manager.subscribe(input); x.advance(60001);
+  let release, arrived;
+  const waiting = new Promise(resolve => { arrived = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const original = x.options.transport;
+  const manager = createMcpEventSubscriptions({ ...x.options, transport: async (...args) => {
+    if (JSON.parse(args[2].body).type === 'verification') { arrived(); await blocked; if (failed) throw new Error('challenge unavailable'); }
+    return original(...args);
+  } });
+  const renewing = manager.subscribe({ ...input, delivery: { ...input.delivery, secret: `whsec_${Buffer.alloc(32, 9).toString('base64')}` } });
+  const outcome = renewing.then(() => null, error => error);
+  await waiting;
+  assert.equal(manager.enqueueRequested(event), 1, 'renewal must not lose a new request');
+  await manager.drain(); assert.equal(x.seen.length, 1);
+  assert.equal(JSON.parse(x.db.prepare('SELECT document FROM mcp_event_subscriptions').get().document).secret, secret, 'unverified replacement key must not be active');
+  release(); const error = await outcome; assert.equal(Boolean(error), failed);
+  assert.equal(manager.enqueueRequested({ ...event, eventId: 'after-renewal' }), 1);
+  await manager.drain(); assert.equal(x.seen.length, 2);
+});
+
+for (const interruption of ['unsubscribe', 'revoke', 'expiry']) test(`pending renewal cannot bypass ${interruption}`, async t => {
+  const x = setup(t); const sub = await x.manager.subscribe(input); x.advance(60001);
+  let release, arrived;
+  const waiting = new Promise(resolve => { arrived = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const original = x.options.transport;
+  const manager = createMcpEventSubscriptions({ ...x.options, transport: async (...args) => {
+    if (JSON.parse(args[2].body).type === 'verification') { arrived(); await blocked; }
+    return original(...args);
+  } });
+  const renewing = manager.subscribe(input);
+  const outcome = renewing.then(() => null, error => error);
+  await waiting;
+  if (interruption === 'unsubscribe') manager.unsubscribe({ principal, id: sub.id });
+  if (interruption === 'revoke') x.deny();
+  if (interruption === 'expiry') x.advance(3600001);
+  release(); assert.ok(await outcome);
+  manager.enqueueRequested(event); await manager.drain(); assert.equal(x.seen.length, 0);
+});
+
+test('a slower renewal cannot replace the latest successfully verified key', async t => {
+  const x = setup(t); await x.manager.subscribe(input); x.advance(60001);
+  let release, arrived;
+  const waiting = new Promise(resolve => { arrived = resolve; });
+  const blocked = new Promise(resolve => { release = resolve; });
+  const original = x.options.transport;
+  const slow = createMcpEventSubscriptions({ ...x.options, transport: async (...args) => { arrived(); await blocked; return original(...args); } });
+  const first = slow.subscribe({ ...input, delivery: { ...input.delivery, secret: `whsec_${Buffer.alloc(32, 8).toString('base64')}` } });
+  const outcome = first.then(() => null, error => error); await waiting;
+  const latest = `whsec_${Buffer.alloc(32, 9).toString('base64')}`;
+  await x.manager.subscribe({ ...input, delivery: { ...input.delivery, secret: latest } });
+  release(); assert.match((await outcome).message, /superseded/);
+  assert.equal(JSON.parse(x.db.prepare('SELECT document FROM mcp_event_subscriptions').get().document).secret, latest);
+});
