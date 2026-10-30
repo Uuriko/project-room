@@ -429,7 +429,7 @@ optional.push(...operatorConsoleAssets);
 // DX-1a end
 optional.push("src/room-administration.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "server/room-assistant.mjs", "server/routes/room-assistant.mjs", "client/assistant-tools.mjs");
 
-optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
+optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs", "server/minor-units.mjs");
 
 optional.push("src/work-dependencies.js", "src/work-reducers.js", "src/message-reducers.js", "src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
 optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
