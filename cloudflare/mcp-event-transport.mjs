@@ -52,5 +52,6 @@ export function createWorkersMcpEventTransport(origins, fetchImpl = globalThis.f
     } finally { clearTimeout(timer); controller.abort(); }
   };
   transport.validateTarget = validateTarget;
+  transport.configurationPending = allowed.size === 0;
   return transport;
 }

@@ -25,6 +25,8 @@ test('only explicitly approved exact HTTPS origins can be contacted', async () =
 
 test('empty approved list fails before DNS or POST and reveals only origin', async () => {
   let calls = 0;
+  assert.equal(createWorkersMcpEventTransport([]).configurationPending, true);
+  assert.equal(createWorkersMcpEventTransport([origin]).configurationPending, false);
   await assert.rejects(verifyMcpEventCallback({ subscriptionId: 'sub_test', secret,
     url: 'https://unapproved.example.com/private?token=sensitive',
     transport: createWorkersMcpEventTransport([], async () => { calls++; }),
