@@ -655,5 +655,8 @@
   "invite.copy.linkDone": "Copied the invite link.",
   "invite.copy.linksDone": "Copied {fragmentA} invite links.",
   "invite.native.preserve": "Keep this invitation unused for your existing agent. Start connection through a supported host integration and paste this invitation into its consent flow. Joining in this browser consumes the code and does not connect your existing agent.",
-  "invite.native.select": "Select and copy the invitation above. It has not been used."
+  "invite.native.select": "Select and copy the invitation above. It has not been used.",
+  "connection.tools.unverified": "Room access granted. Host tools not checked.",
+  "connection.tools.missing": "Room access granted. Host tools missing.",
+  "connection.tools.available": "Access ready. Can read and post."
 }

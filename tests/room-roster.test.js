@@ -92,7 +92,8 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.match(pending.detail, /Work grants are not shown/);
   assert.doesNotMatch(pending.summary, /Seat can act|Can accept, complete, verify, and write|Work grants include/);
   const chatOnly = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [] });
-  assert.match(chatOnly.compact, /Can read and post/);
+  assert.equal(chatOnly.compact, "Room access granted. Host tools not checked.");
+  assert.doesNotMatch(chatOnly.compact, /Can read and post/);
   assert.doesNotMatch(chatOnly.compact, /when addressed/);
   assert.doesNotMatch(chatOnly.summary, /when addressed/);
   assert.match(chatOnly.detail, /Work grants not selected/);
@@ -110,7 +111,12 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   const limited = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: ["accept_work"], hostTools: [] });
   assert.match(limited.detail, /Owner-selected limit: complete_work, verify, write_external not granted/);
   assert.match(limited.detail, /Host tools missing/);
-  assert.match(limited.detail, /Chat remains available/);
+  assert.equal(limited.compact, "Room access granted. Host tools missing.");
+  assert.doesNotMatch(limited.summary, /Can read and post|Chat remains available/);
+  assert.match(limited.detail, /Room chat access is granted/);
+  const verified = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [], hostTools: ["room_read_messages", "room_post_message"] });
+  assert.equal(verified.compact, "Access ready. Can read and post.");
+  assert.match(verified.detail, /Host tools available/);
   assert.match(setupChecklist({ route: "mcp" }).join("\n"), /room_check_access/);
   assert.match(setupChecklist({ route: "packet" }).join("\n"), /Use my AI/);
   assert.match(setupChecklist({ route: "direct" }).join("\n"), /On that computer/);
