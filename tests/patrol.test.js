@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { patrolPending, patrolStatus } from "../server/patrol.mjs";
+import { PATROL_INVARIANTS, patrolPending, patrolStatus } from "../server/patrol.mjs";
 import { operatorStatus } from "../server/operator-status.mjs";
 import { jobByName } from "../server/jobs.mjs";
 import { applyOutcomes, jobHealthView, runCronJobs } from "../cloudflare/job-heartbeat.mjs";
@@ -205,6 +205,19 @@ test("receipt leg: a done claim must keep its owner and exactly one done stamp",
     assert.ok(stamped, "the double-stamped done claim is named");
     assert.equal(stamped.detail.stamps, 2);
   } finally { store.close(); }
+});
+
+test("HC-M12: the published invariant list names all four legs the patrol files under", () => {
+  // PATROL_INVARIANTS is the patrol's contract surface: the registry of
+  // legs other surfaces trust the patrol to run. The receipt leg's
+  // behaviour is pinned by the finding test above; the registry itself
+  // is the only thing LAB-MUTATION HC-M12 changed (dropping
+  // "receipt_linkage" from the list), and no test asserted the list —
+  // the contract could lose a leg silently. This assertion is the
+  // cheapest independent guard on that contract: it fails exactly when
+  // the published list changes.
+  assert.deepEqual([...PATROL_INVARIANTS],
+    ["sequence", "messages_parity", "claim_legality", "receipt_linkage"]);
 });
 
 test("job wiring: fresh findings surface in job health as a named patrol failure", async () => {
