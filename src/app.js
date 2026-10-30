@@ -550,7 +550,7 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
-        activeDirectMemberId = saved.directMemberId ?? roomDirectPeer(conversation.byId.get(saved.threadId));
+        activeDirectMemberId = saved.directMemberId ?? directMessagePeer(conversation.byId.get(saved.threadId), session.member.id);
         if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
         syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
@@ -2351,18 +2351,7 @@ function visibleConversationMessages() {
     : activeDirectMemberId ? [...conversation.byId.values()] : conversation.roots;
   return messages.filter(message => activeDirectMemberId
     ? directMessagePeer(message, self) === activeDirectMemberId
-    // Plain addressed messages live in the direct window (#5322). Room threads
-    // keep their addressed replies, and reply requests and their answers stay
-    // in the channel where they were asked, as before #5322.
-    : currentThreadId ? true : (!message.toMemberId || isRequestRecord(message)) && messageChannelId(message) === activeChannelId);
-}
-// Reply requests stay in their channel; only plain addressed messages open a direct window.
-function roomDirectPeer(message) {
-  return message && !isRequestRecord(message) ? directMessagePeer(message, session?.member?.id) : null;
-}
-function isRequestRecord(message) {
-  if (message.requestKind || message.responseToRequestId || state?.replyRequests?.[message.id]) return true;
-  return Object.values(state?.replyRequests ?? {}).some(request => request.responseMessageId === message.id);
+    : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
 }
 function openDirectMessage(memberId) {
   if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
@@ -3279,7 +3268,7 @@ function revealMessage(id) {
   if ($("#later-dialog")?.open) $("#later-dialog").close();
   workspaceUI?.showRooms();
   const message = conversation.byId.get(id);
-  const peer = roomDirectPeer(message);
+  const peer = directMessagePeer(message, session.member.id);
   if (peer) {
     openDirectMessage(peer);
     if (message.replyToId) switchThread(conversation.rootById.get(id));
