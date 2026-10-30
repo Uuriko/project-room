@@ -17,7 +17,12 @@ import { PermissionBroker, decisionOf, DEFAULT_PERMISSION_TIMEOUT_MS } from "./p
 export const CRASH_LIMIT = 3;
 export const CRASH_WINDOW_MS = 5 * 60 * 1000;
 
-const sleep = (ms, signal) => new Promise(resolve => { const timer = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true }); });
+const sleep = (ms, signal) => new Promise(resolve => {
+  if (signal?.aborted) { resolve(); return; }
+  const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", finish); resolve(); };
+  const timer = setTimeout(finish, ms);
+  signal?.addEventListener("abort", finish, { once: true });
+});
 
 // Claim wakes the bridge turns into work. Others (ci, review, lease) are acked.
 export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
@@ -27,7 +32,7 @@ export const MAX_CLAIM_NOTE = 1500;
 export const claimRequester = claim => (claim?.history ?? []).find(entry => entry?.action === "created")?.agentId ?? null;
 
 export function mayTalk({ authorId, members, me, ownerId, respondTo }) {
-  if (!authorId || authorId === me?.id) return false;
+  if (!authorId || authorId === me?.id || !members[authorId] || members[authorId].active === false) return false;
   if (respondTo === "anyone") return Boolean(members[authorId] && members[authorId].active !== false);
   const boss = me?.accountableHumanId ?? ownerId;
   if (authorId === boss || authorId === ownerId) return true; // ownerId = room owner
@@ -65,7 +70,7 @@ class TurnReceipts {
   }
   read(key) {
     const receipt = this.dir ? JSON.parse(readFileSync(join(this.dir, key + ".json"), "utf8")) : this.memory.get(key);
-    if (!receipt || !["started", "result", "posted", "linked"].includes(receipt.phase) || typeof receipt.requestId !== "string" ||
+    if (!receipt || !["started", "result", "posted", "discarded", "linked"].includes(receipt.phase) || typeof receipt.requestId !== "string" ||
         receipt.phase === "result" && typeof receipt.body !== "string" ||
         receipt.phase === "linked" && !/^[a-f0-9]{64}$/.test(receipt.groupKey)) throw new Error("Invalid execution receipt; manual recovery required");
     return receipt;
@@ -90,6 +95,7 @@ export class Bridge {
     this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
+    this.approverController = new AbortController();
     this.fencingToken = null; this.seen = new Set(); this.controller = new AbortController(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
   }
 
@@ -113,8 +119,15 @@ export class Bridge {
 
   // Tool permission asks go to the agent's accountable human in the thread.
   async onPermission(request) {
-    if (!this.permissions) return { outcome: { outcome: "cancelled" } };
-    return this.permissions.request(request, this.controller.signal);
+    try { await this.refreshRoom(); } catch { return { outcome: { outcome: "cancelled" } }; }
+    if (this.controller.signal.aborted || this.me.active === false) return { outcome: { outcome: "cancelled" } };
+    const approverId = this.permissions.approverId;
+    const signal = AbortSignal.any([this.controller.signal, this.approverController.signal]);
+    return this.permissions.request({ ...request, validateApproval: async () => {
+      await this.refreshRoom();
+      return !signal.aborted && this.me.active !== false && this.permissions.approverId === approverId &&
+        Boolean(this.members[approverId] && this.members[approverId].active !== false);
+    } }, signal);
   }
 
   async refreshRoom() {
@@ -123,7 +136,28 @@ export class Bridge {
     this.ownerId = value?.state?.room?.ownerId ?? null;
     this.title = value?.state?.room?.title ?? this.connection.roomId;
     this.me = this.members[this.connection.memberId] ?? { id: this.connection.memberId };
+    const approverId = this.me.accountableHumanId ?? this.ownerId;
+    if (this.permissions && this.permissions.approverId !== approverId) {
+      this.approverController.abort(); this.approverController = new AbortController();
+      this.permissions.approverId = approverId;
+    }
     this.permissions ??= new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
+  }
+
+  async authorized({ messageIds, claimId } = {}) {
+    if (this.controller.signal.aborted) throw new Error("bridge stopped");
+    await this.refreshRoom();
+    if (!this.members[this.connection.memberId] || this.me.active === false) return false;
+    const allowed = authorId => mayTalk({ authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo });
+    if (claimId) {
+      const claim = await this.room.claim(claimId);
+      return claim?.owner === this.me.id && allowed(claimRequester(claim));
+    }
+    // Old receipts lack source IDs: do not disclose their result without
+    // evidence that every original requester still has access.
+    if (!Array.isArray(messageIds) || !messageIds.length) return false;
+    for (const id of messageIds) if (!allowed((await this.room.thread(id)).thread?.authorId)) return false;
+    return true;
   }
 
   async lease() {
@@ -191,6 +225,8 @@ export class Bridge {
     const signalIds = [item.signalId];
     const claimId = threadKey.slice(CLAIM_KEY.length);
     try {
+      if (this.controller.signal.aborted) return;
+      if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); return; }
       const { key, receipt: saved, fresh } = this.claimReceipts.begin(item.signalId);
       let receipt = saved;
       if (!fresh && receipt.phase === "started") {
@@ -203,6 +239,7 @@ export class Bridge {
           await this.agentReady();
           if (this.controller.signal.aborted) return;
           const { sessionId } = await this.host.session(threadKey);
+          if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); return; }
           const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
@@ -212,6 +249,10 @@ export class Bridge {
           body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
         }
         receipt = { ...receipt, phase: "result", body: body.length > MAX_CLAIM_NOTE ? body.slice(0, MAX_CLAIM_NOTE - 1) + "…" : body };
+        this.claimReceipts.save(key, receipt);
+      }
+      if (receipt.phase === "result" && !(await this.authorized({ claimId }))) {
+        receipt = { phase: "discarded", requestId: receipt.requestId };
         this.claimReceipts.save(key, receipt);
       }
       if (receipt.phase === "result") {
@@ -228,8 +269,10 @@ export class Bridge {
   }
 
   async turn(threadKey, batch) {
+    if (this.controller.signal.aborted) return;
     if (threadKey.startsWith(CLAIM_KEY)) return this.claimTurn(threadKey, batch);
     try {
+      if (!(await this.authorized({ messageIds: batch.map(item => item.messageId) }))) { await this.ack(batch.map(item => item.signalId)); return; }
       const fresh = [], replay = new Set();
       for (const item of batch) {
         const saved = this.chatReceipts.begin(item.signalId);
@@ -244,7 +287,7 @@ export class Bridge {
       if (!fresh.length) return;
       const { key, receipt } = fresh[0];
       const signalIds = fresh.map(entry => entry.item.signalId);
-      const started = { ...receipt, threadKey, signalIds };
+      const started = { ...receipt, threadKey, signalIds, messageIds: fresh.map(entry => entry.item.messageId) };
       this.chatReceipts.save(key, started);
       for (const entry of fresh.slice(1)) this.chatReceipts.save(entry.key, { ...entry.receipt, phase: "linked", groupKey: key });
       let body;
@@ -253,6 +296,7 @@ export class Bridge {
         if (this.controller.signal.aborted) return;
         const thread = (await this.room.thread(threadKey)).thread;
         const { sessionId, created } = await this.host.session(threadKey);
+        if (!(await this.authorized({ messageIds: started.messageIds }))) { await this.ack(signalIds); return; }
         const prompt = buildPrompt({ roomTitle: this.title, thread, wakes: fresh.map(entry => entry.item), firstTurn: created });
         const { recorder, stopReason } = await this.host.prompt(threadKey, prompt, { sessionId });
         body = renderTurn(recorder, { stopReason });
@@ -278,6 +322,11 @@ export class Bridge {
     }
     if (!Array.isArray(receipt.signalIds) || typeof receipt.threadKey !== "string") throw new Error("Invalid chat execution receipt; manual recovery required");
     try {
+      if (receipt.phase === "result" && !(await this.authorized({ messageIds: receipt.messageIds }))) {
+        const { body: _body, ...discarded } = receipt;
+        receipt = { ...discarded, phase: "discarded" };
+        this.chatReceipts.save(key, receipt);
+      }
       if (receipt.phase === "result") {
         await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
           messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId });
@@ -299,10 +348,14 @@ export class Bridge {
     // when wakes arrive back to back.
     const gap = this.lastPollAt + this.minPollIntervalMs - Date.now();
     if (gap > 0) await sleep(gap, this.controller.signal);
+    if (this.controller.signal.aborted) return;
     this.lastPollAt = Date.now();
-    const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: this.waitMs });
+    const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: this.waitMs, signal: this.controller.signal });
     if (value?.pendingWakes?.length) await this.refreshRoom();
-    for (const signal of value?.pendingWakes ?? []) await this.accept(signal);
+    for (const signal of value?.pendingWakes ?? []) {
+      if (this.controller.signal.aborted) break;
+      await this.accept(signal);
+    }
   }
 
   async run() {
@@ -320,8 +373,8 @@ export class Bridge {
         await sleep(delay, this.controller.signal);
       }
     }
+    this.stop();
     await this.queue.idle();
-    this.host.stop();
     // Say goodbye so presence stops reading "listening" right away and
     // mentions show as queued. Best effort: a crash still ages out.
     try { await this.room.disconnect({ hostId: this.connection.hostId, fencingToken: this.fencingToken }); } catch { /* best effort */ }
@@ -329,5 +382,5 @@ export class Bridge {
     return this.stopReason ?? "stopped";
   }
 
-  stop() { this.controller.abort(); }
+  stop() { this.controller.abort(); this.host.stop?.(); }
 }

@@ -7,7 +7,7 @@ export class ThreadQueue {
   push(threadKey, item) {
     let thread = this.threads.get(threadKey);
     if (!thread) { thread = { items: [], busy: false }; this.threads.set(threadKey, thread); }
-    if (thread.items.some(existing => existing.messageId === item.messageId)) return false;
+    if (thread.items.some(existing => item.signalId ? existing.signalId === item.signalId : item.messageId && existing.messageId === item.messageId)) return false;
     thread.items.push(item);
     this.#schedule(threadKey);
     return true;

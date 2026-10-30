@@ -12,11 +12,11 @@ export class RoomClient {
     this.apiBase = apiBase; this.roomId = roomId; this.memberId = memberId; this.#token = credential; this.#fetch = fetchImpl;
   }
 
-  async request(path, { body, timeoutMs = 15000, auth = true } = {}) {
+  async request(path, { body, timeoutMs = 15000, auth = true, signal } = {}) {
     let response;
     try {
       response = await this.#fetch(this.apiBase + path, {
-        method: body === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(timeoutMs),
+        method: body === undefined ? "GET" : "POST", redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         headers: { "user-agent": "room-acp", ...(auth && this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
           ...(body === undefined ? {} : { "content-type": "application/json", origin: new URL(this.apiBase).origin }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -50,8 +50,8 @@ export class RoomClient {
   heartbeat({ hostId, cadenceSeconds = 30 }) {
     return this.request("/api/agent-heartbeats", { body: { hostId, mode: "wakeable", cadenceSeconds, listenerLease: { roomId: this.roomId } } });
   }
-  poll({ hostId, waitMs = 25000 }) {
-    return this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}`, { timeoutMs: waitMs + 15000 });
+  poll({ hostId, waitMs = 25000, signal }) {
+    return this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}`, { timeoutMs: waitMs + 15000, signal });
   }
   ack({ signalIds, fencingToken }) {
     return this.request("/api/agent-heartbeats/ack", { body: { signalIds, ...(fencingToken ? { fencingToken } : {}) } });

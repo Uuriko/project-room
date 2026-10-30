@@ -18,6 +18,7 @@ function setup(t) {
       session: async () => ({ sessionId: "s", created: true }),
       prompt: async (_key, prompt) => { counts.prompts.push(prompt); return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
     } });
+    bridge.room.room = async () => ({ state: { room: { ownerId: "owner" }, members: { owner: { id: "owner", kind: "human", active: true }, [bridge.connection.memberId]: { id: "agent", active: true } } } });
     bridge.room.thread = async () => ({ thread: { id: "root", authorId: "owner", body: "Original request", replies: [] } });
     bridge.room.post = async args => { counts.posts.push(args); };
     bridge.room.ack = async args => { counts.acks.push(args.signalIds); };
