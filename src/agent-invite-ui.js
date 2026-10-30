@@ -55,7 +55,7 @@ export async function mintInviteLink({ requestBody, mintOne, locationLike }) {
 const shellQuote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
 export function roomAcpCommand(link, name = "", locationLike = globalThis.location) {
   const base = humanJoinShareBase(locationLike);
-  const parts = ["npx -y --package=" + base + "/room-acp.tgz room-acp", shellQuote(link)];
+  const parts = ["npx -y --allow-remote=root --package=" + base + "/room-acp.tgz room-acp", shellQuote(link)];
   if (name?.trim()) parts.push("--name", shellQuote(name.trim()));
   return parts.join(" ");
 }

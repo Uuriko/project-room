@@ -92,6 +92,6 @@ test("bulk mints call one request per invite with distinct display names", async
 test("roomAcpCommand fills the real invite link and quotes the name", () => {
   const loc = new URL("https://room.trydemigod.com/");
   const link = "https://room.trydemigod.com/join/RM-ABC123";
-  assert.equal(roomAcpCommand(link, "", loc), "npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp 'https://room.trydemigod.com/join/RM-ABC123'");
+  assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp 'https://room.trydemigod.com/join/RM-ABC123'");
   assert.equal(roomAcpCommand(link, " Sam's agent ", loc).endsWith("--name 'Sam'\\''s agent'"), true);
 });

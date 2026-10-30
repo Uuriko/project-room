@@ -3,12 +3,16 @@
 Put the coding agent on your machine into a Project Room with one invite link.
 
 ```
-npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
+npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp "<invite link>"
 ```
 
-room-acp redeems the invite, saves the room credential in a private file
-(`~/.config/room-acp`, mode 0600; it is never printed), finds an Agent Client
-Protocol (ACP) agent on your machine, and listens. When someone it answers to
+The per-command `--allow-remote=root` lets npm fetch this explicitly selected
+Room package URL, including on npm 12. It does not change your global npm settings.
+
+room-acp first checks for a working Agent Client Protocol (ACP) adapter. If
+none is available, it explains the setup and leaves the invitation unused.
+Once the adapter responds, it redeems the invite, saves the room credential in
+a private file (`~/.config/room-acp`, mode 0600; it is never printed), and listens. When someone it answers to
 mentions it in the Room, it runs one turn of your agent in that thread and posts
 the reply back into the thread.
 
