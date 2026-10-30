@@ -101,11 +101,17 @@ test("real wall-clock steps and backward clock changes remain auditable; widened
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 
-test("a human manager is not the owner; account-browser owner sessions work and input types are exact", t => {
+test("a human manager can sponsor chat access without gaining owner authority; account-browser sessions validate input", t => {
   const f = fixture(t);
   f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "manager", displayName: "Manager", kind: "human", permissions: ["manage_members"] } });
   const other = f.store.createSession(f.store.issueAccessKey("commons", "manager"));
-  assert.throws(() => f.apply(f.request, other.token, other.session.sessionBinding), { code: "owner_required" });
+  const managerRequest = { ...f.request, requestId: randomUUID(), memberId: "manager-agent",
+    displayName: "Planner", keyHash: f.secret().keyHash };
+  assert.equal(f.apply(managerRequest, other.token, other.session.sessionBinding).connection.status, "key_issued");
+  assert.equal(f.store.room("commons").state.members[managerRequest.memberId].accountableHumanId, "manager");
+  assert.deepEqual(f.store.room("commons").state.members[managerRequest.memberId].permissions, []);
+  assert.throws(() => f.apply({ ...managerRequest, requestId: randomUUID(), memberId: "manager-contributor", access: "contribute" },
+    other.token, other.session.sessionBinding), { code: "sponsor_scope_exceeded" });
   assert.throws(() => f.apply({ ...f.request, access: ["chat"] }), { code: "invalid_connection" });
   assert.throws(() => f.apply({ ...f.request, keyHash: [f.key.keyHash] }), { code: "invalid_connection" });
   const account = f.store.accountForMember("commons", "owner"), accessKey = f.store.issueAccountAccessKey(account.id), slot = f.store.createAccountSessionSlot();

@@ -339,6 +339,9 @@ test("the event surface has not grown without this sweep noticing", () => {
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
   //
+  // room.development_access_set is Muse-only, so the ordinary-room sweep
+  // cannot emit it. tests/muse-development-access.test.js enables it, mints
+  // and redeems a co-owner link, then runs auditRecovery on the resulting store.
   // claim.renewed is not exercised here: it needs an active claim plus the
   // holder's public progress message posted after that claim. The sweep does
   // not acquire one. The reducer's validation is covered by
@@ -351,6 +354,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // member.merged and pair.requested/approved/denied are not exercised here:
   // they need an agent-pairing flow and two live agent members. They are
   // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
-  assert.equal(Object.values(T).length, 71,
+  assert.equal(Object.values(T).length, 72,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
