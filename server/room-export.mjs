@@ -59,6 +59,24 @@ function scrubTokens(value) {
   return value.replace(new RegExp(TOKEN_SOURCE, "g"), match => sha256Hex(match));
 }
 
+// MGMT-PANEL Slice 1 (MF-7): the recursive counterpart of scrubTokens for
+// parsed event JSON. scrubTokens above works on one flat string cell of the
+// whole-store NDJSON export; an event log is nested JSON, so the operator
+// per-room export walks objects, arrays, string values and string keys and
+// applies the same TOKEN_SOURCE pattern at any depth. Coverage is exactly
+// the three token shapes in TOKEN_SOURCE (pri_…, rak_…, ga1.…); any other
+// secret pasted into a room passes through verbatim.
+export function scrubEventTokens(value) {
+  if (typeof value === "string") return scrubTokens(value);
+  if (Array.isArray(value)) return value.map(item => scrubEventTokens(item));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[scrubTokens(key)] = scrubEventTokens(item);
+    return out;
+  }
+  return value;
+}
+
 export function sanitizeCell(table, column, value) {
   if (value === null || value === undefined) return null;
   if (isExportSecretColumn(table, column)) return sha256Hex(typeof value === "string" ? value : String(value));

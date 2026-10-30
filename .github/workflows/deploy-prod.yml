@@ -44,6 +44,10 @@ on:
         description: "Optional note for the receipt"
         required: false
         type: string
+      runtime_revision:
+        description: "Optional immutable runtime correction suffix, such as r2; existing assets are never replaced"
+        required: false
+        type: string
       probe_override:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
@@ -91,6 +95,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: Validate runtime correction suffix
+        env:
+          REVISION: ${{ inputs.runtime_revision }}
+        run: |
+          if [[ -n "$REVISION" && ! "$REVISION" =~ ^r([2-9]|[1-9][0-9]+)$ ]]; then
+            echo "::error::runtime_revision must be empty or r2, r3, ..."; exit 1
+          fi
       - name: Resolve the commit and check deployment policy
         id: gate
         env:
@@ -269,22 +280,30 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
+        id: smoke
         shell: bash
-        # One retry before recovery: after a Worker upload the Durable Object
-        # can keep answering /api/version with the previous build for more
-        # than the 5-minute window (run 37880461862 rolled back a healthy
-        # deploy that way; the identical redeploy passed). The retry waits
-        # SMOKE_RETRY_DELAY_SECONDS (default 150) and re-checks for 60s more;
-        # a broken build still fails and recovers, about 3.5 minutes later.
+        # Retry only verified propagation or complete timeout-only readiness evidence.
+        # Preserve the original report; observe within the existing 150s budget,
+        # then require a fresh complete strict smoke. No Worker re-upload.
         run: |
+          record_smoke_digest() {
+            if [ -n "${GITHUB_OUTPUT:-}" ] && [ -f "$RUNNER_TEMP/prod-smoke.json" ]; then
+              node --input-type=module -e 'import { readFileSync, appendFileSync } from "node:fs"; import { createHash } from "node:crypto"; const raw = readFileSync(process.env.RUNNER_TEMP + "/prod-smoke.json"); appendFileSync(process.env.GITHUB_OUTPUT, "report_sha256=" + createHash("sha256").update(raw).digest("hex") + "\n");'
+            fi
+          }
+          trap record_smoke_digest EXIT
           if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
             cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
           else
-            echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
-            sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
+            cp "$RUNNER_TEMP/prod-smoke-attempt1.log" "$RUNNER_TEMP/prod-smoke.json"
+            if ! node scripts/prod-smoke-retry.mjs "$RUNNER_TEMP/prod-smoke-attempt1.log" --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN"; then
+              cat "$RUNNER_TEMP/prod-smoke-attempt1.log"
+              exit 1
+            fi
             node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
+        id: live
         shell: bash
         env:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
@@ -296,6 +315,9 @@ jobs:
         env:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          SMOKE_REPORT_SHA256: ${{ steps.smoke.outputs.report_sha256 }}
+          SMOKE_REPORT_PATH: ${{ runner.temp }}/prod-smoke.json
         run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.pre.outcome == 'success'
@@ -312,7 +334,10 @@ jobs:
         continue-on-error: true
         env:
           ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
-          OUTCOME: ${{ job.status }}
+          PROD_OUTCOME: ${{ steps.prod.outcome }}
+          ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+          STRICT_OUTCOME: ${{ steps.smoke.outcome }}
+          LIVE_OUTCOME: ${{ steps.live.outcome }}
           PROD_NEW: ${{ steps.prod.outputs.version }}
           ENTRY_NEW: ${{ steps.entry.outputs.version }}
           PROD_PRE: ${{ steps.pre.outputs.prod }}
@@ -322,16 +347,18 @@ jobs:
           PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
+          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "WARNING: ROOM_RECEIPT_TOKEN not set; no Room receipt posted." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             import { recoveryDescription } from "./scripts/deploy-recovery.mjs";
             const e = process.env, s = v => (v || "?").slice(0, 8);
             let recovery = null;
             try { recovery = JSON.parse(readFileSync(`${e.RUNNER_TEMP}/deploy-recovery.json`, "utf8")); } catch {}
+            const outcome = value => ["success", "failure", "cancelled", "skipped"].includes(value) ? value : "unknown";
+            const phases = `prod upload step ${outcome(e.PROD_OUTCOME)} · entry upload step ${outcome(e.ENTRY_OUTCOME)} · strict smoke ${outcome(e.STRICT_OUTCOME)} · live smoke ${outcome(e.LIVE_OUTCOME)} · runtime publication not yet observed (separate job)`;
             const body = recovery
-              ? `PROD DEPLOY ${s(e.SHA)} FAILED · ${recoveryDescription(recovery)} · ${e.RUN_URL}`
-              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
+              ? `PROD DEPLOY ${s(e.SHA)} · ${phases} · ${recoveryDescription(recovery)} · ${e.RUN_URL}`
+              : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · ${phases} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
             const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
             const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
               method: "POST",
@@ -345,6 +372,10 @@ jobs:
       - name: Summary
         if: always()
         env:
+          PROD_OUTCOME: ${{ steps.prod.outcome }}
+          ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+          STRICT_OUTCOME: ${{ steps.smoke.outcome }}
+          LIVE_OUTCOME: ${{ steps.live.outcome }}
           PROD_NEW: ${{ steps.prod.outputs.version }}
           ENTRY_NEW: ${{ steps.entry.outputs.version }}
           PROD_PRE: ${{ steps.pre.outputs.prod }}
@@ -358,8 +389,8 @@ jobs:
             echo ""
             echo "| Worker | New version | Rollback target |"
             echo "|---|---|---|"
-            echo "| project-room (prod) | ${PROD_NEW:-not deployed} | ${PROD_PRE:-unknown} |"
-            echo "| project-room-staging (entry) | ${ENTRY_NEW:-not deployed} | ${ENTRY_PRE:-unknown} |"
+            echo "| project-room (prod) | ${PROD_NEW:-version not captured} | ${PROD_PRE:-unknown} |"
+            echo "| project-room-staging (entry) | ${ENTRY_NEW:-version not captured} | ${ENTRY_PRE:-unknown} |"
             echo ""
             node --input-type=module -e '
               import { readFileSync } from "node:fs";
@@ -371,6 +402,9 @@ jobs:
               console.log(recoveryDescription(report));
               console.log("Schema floor is necessary, not proof of same-schema row/runtime compatibility. Schema migrations are not reversed.");
             '
+            echo "Worker upload steps: prod ${PROD_OUTCOME:-unknown}; entry ${ENTRY_OUTCOME:-unknown}"
+            echo "Strict smoke: ${STRICT_OUTCOME:-unknown}; live smoke: ${LIVE_OUTCOME:-unknown}"
+            echo "Runtime publication: not yet observed (separate release-runtime job; see its summary)."
             echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -380,7 +414,13 @@ jobs:
   # GH_TOKEN is the job token. Never echo it, CLOUDFLARE_API_TOKEN, or ROOM_RECEIPT_TOKEN.
   release-runtime:
     needs: [gate, deploy]
-    if: needs.deploy.result == 'success' && needs.gate.outputs.go == 'true'
+    # The optional probe is a transitive ancestor through deploy. Override
+    # implicit success() so its intentional skip does not suppress publication.
+    if: >-
+      !cancelled() &&
+      needs.gate.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      needs.gate.outputs.go == 'true'
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -388,12 +428,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ needs.gate.outputs.sha }}
+          # Tools come from the immutable workflow revision, not an older target.
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: Package the deployed runtime
+        id: package
         env:
           SHA: ${{ needs.gate.outputs.sha }}
         run: |
@@ -405,25 +447,68 @@ jobs:
           OUT="$RUNNER_TEMP/project-room-runtime"
           node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
           node scripts/runtime-package.mjs verify "$OUT" "$SHA"
-          tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
+          python3 scripts/runtime-archive.py "$OUT" "$RUNNER_TEMP/project-room-runtime.tar.gz" --expected-commit "$SHA"
       - name: Publish the runtime release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.runtime_revision }}
           SHA: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           SHORT="${SHA:0:7}"
           DATE="$(date -u +%Y-%m-%d)"
-          TAG="runtime-${DATE}-${SHORT}"
+          TAG="runtime-${DATE}-${SHORT}${REVISION:+-${REVISION}}"
+          verify_release() {
+            python3 scripts/verify-runtime-release.py --repository "$GITHUB_REPOSITORY" \
+              --tag "$TAG" --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime" \
+              --receipt "$RUNNER_TEMP/runtime-publication-verification.json"
+          }
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            verify_release
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
-            echo "Release ${TAG} already exists; marked latest."
+            echo "Release ${TAG} already exists; target and asset verified before marking latest."
             exit 0
           fi
+          python3 scripts/verify-runtime-release.py --preflight-archive "$RUNNER_TEMP/project-room-runtime.tar.gz" \
+            --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime"
           gh release create "$TAG" \
-            "$RUNNER_TEMP/project-room-runtime.tar.gz#project-room-runtime.tar.gz" \
+            "$RUNNER_TEMP/project-room-runtime.tar.gz" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG" \
-            --latest \
+            --latest=false \
             --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."
+          verify_release
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
+      - name: Retain runtime publication verification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-publication-verification-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/runtime-publication-verification.json
+          if-no-files-found: ignore
+      - name: Runtime publication outcome
+        if: always()
+        continue-on-error: true
+        env:
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          SHA: ${{ needs.gate.outputs.sha }}
+          ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "Runtime packaging: ${PACKAGE_OUTCOME:-unknown}; publication (including remote verification and latest promotion): ${PUBLISH_OUTCOME:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "WARNING: ROOM_RECEIPT_TOKEN not set; no Room receipt posted." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          node --input-type=module -e '
+            const e = process.env;
+            const outcome = value => ["success", "failure", "cancelled", "skipped"].includes(value) ? value : "unknown";
+            const body = `RUNTIME ${e.SHA} · packaging ${outcome(e.PACKAGE_OUTCOME)} · publication (remote verification and latest promotion) ${outcome(e.PUBLISH_OUTCOME)} · ${e.RUN_URL}`;
+            const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
+            const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
+              method: "POST", redirect: "error", headers: { authorization: `Bearer ${e.ROOM_RECEIPT_TOKEN}`, "content-type": "application/json", origin: e.PROD_ORIGIN, "user-agent": "Mozilla/5.0 project-room-runtime-outcome" },
+              body: JSON.stringify(command), signal: AbortSignal.timeout(15000)
+            });
+            console.log(`receipt: HTTP ${res.status}`);
+            if (!res.ok) process.exit(1);
+          '

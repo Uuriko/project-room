@@ -27,6 +27,7 @@ import { stampNeedsMe } from "./content-trust.mjs";
 // when the caller does not pass a cursor.
 
 import { ServiceError } from "./store.mjs";
+import { visibleSequenceHorizon } from "./history-visibility.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
@@ -364,14 +365,16 @@ export function roomAttention(store, roomId, memberId, identityId, after) {
   if (!member || member.active === false) return [];
   if (!(authority.sequence > after)) return [];
   const state = store.room(roomId).state;
-  let through = mentionHorizon(store, roomId, memberId, after, sessionWatermark(after, authority.sequence));
+  const floor = store.historyFloor(roomId, memberId, authority.sequence);
+  const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
+  let through = mentionHorizon(store, roomId, memberId, messageAfter, sessionWatermark(after, authority.sequence));
   const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
   const kinds = [
-    mentionsOf(store, roomId, memberId, after, through),
-    roomDmsOf(store, roomId, memberId, after, state),
+    mentionsOf(store, roomId, memberId, messageAfter, through),
+    roomDmsOf(store, roomId, memberId, messageAfter, state),
     peerDmsOf(store, roomId, identityId, after),
     bondRequestsOf(store, roomId, pendingBonds, after),
-    directAsksOf(store, roomId, memberId, after, state),
+    directAsksOf(store, roomId, memberId, messageAfter, state),
     handoffsOf(store, roomId, memberId, after, state)
   ];
   const candidates = [];
@@ -700,17 +703,19 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
     const after = Math.min(roomWatermark(parsed, link.roomId), authority.sequence);
+    const floor = store.historyFloor(link.roomId, link.memberId, authority.sequence);
+    const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
     const landAfter = landWatermark(parsed, link.roomId);
-    let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
+    let through = mentionHorizon(store, link.roomId, link.memberId, messageAfter, sessionWatermark(after, authority.sequence));
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;
       const kinds = [
-        mentionsOf(store, link.roomId, link.memberId, after, through),
-        roomDmsOf(store, link.roomId, link.memberId, after, state),
+        mentionsOf(store, link.roomId, link.memberId, messageAfter, through),
+        roomDmsOf(store, link.roomId, link.memberId, messageAfter, state),
         peerDmsOf(store, link.roomId, identity.identityId, after),
         bondRequestsOf(store, link.roomId, pendingBonds, after),
-        directAsksOf(store, link.roomId, link.memberId, after, state),
+        directAsksOf(store, link.roomId, link.memberId, messageAfter, state),
         handoffsOf(store, link.roomId, link.memberId, after, state)
       ];
       for (const kind of kinds) {
@@ -726,7 +731,15 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
       }
       items.push(...candidates);
     }
-    rooms[link.roomId] = through;
+    // F-S6c-3: the reported cursor is the member's visible horizon, not
+    // the scanned horizon — the raw sequence counts private events the
+    // member cannot see and lets them compute how many hidden events
+    // exist. The internal `through` (and the pending check below) stays
+    // on the scanned horizon, so a hidden tail event does not pin
+    // hasMore on forever: the next poll rescans from the reported
+    // cursor, finds nothing new for this member, and completes.
+    rooms[link.roomId] = visibleSequenceHorizon(store.db, link.roomId, link.memberId, through,
+      authority.ownerId === link.memberId);
     const changes = landChangesOf(store, link.roomId, link.memberId, landAfter, landIds[link.roomId]);
     const selected = changes.slice(0, Math.min(MAX_PER_KIND, MAX_ITEMS - items.length));
     items.push(...selected);

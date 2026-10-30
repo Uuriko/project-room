@@ -363,3 +363,11 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Agent orientation reader reconciliation (2026-10-29)
+
+The pinned source census includes `server/agent-orientation.mjs`. Its read-only
+orientation projection maps the existing room work items through
+`orientationRecord`; it does not write work or alter board synchronization.
+This reader was present in source but omitted from the census. Recording it
+does not close reader-migration debt: it still enumerates the room's work items.

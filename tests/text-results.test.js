@@ -29,6 +29,62 @@ async function setup(t) {
   return { ...f, origin, config, client: new RoomAgentClient(config), workItemId, send, item, mutate, post, input, signEvidence: makeTestSigner(f.store) };
 }
 
+for (const mode of ['inline', 'body-ref', 'entity']) test(`selected result HTTP avoids full room hydration with ${mode} messages`, async t => {
+  const f = await setup(t);
+  let now = Date.now(); f.store.now = () => now;
+  f.store.bodiesAtRest = mode === 'body-ref';
+  if (mode === 'entity') {
+    f.store.maintainMessageCertification = true;
+    f.store.messageProjectionWindow = 200;
+    f.store.messageEntityProjection = true;
+    while (!f.store.backfillMessages({ limit: 1000 }).done) { /* qualify fixture */ }
+    assert.equal(f.store.checkMessagesParity().ok, true);
+  }
+  const posted = f.post('Exact selected evidence '.repeat(30));
+  f.mutate(T.WORK_STARTED);
+  const completion = f.mutate(T.WORK_COMPLETED, f.input(posted));
+  for (let i = 0; i < 30; i++) {
+    now += 2001;
+    f.send(T.MESSAGE_POSTED, { messageId: `unrelated-${i}`, body: `Unrelated private payload ${i} ` + 'x'.repeat(2000) }, 'owner');
+  }
+  if (mode === 'entity') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) { /* requalify after work mutations */ }
+    assert.equal(f.store.checkMessagesParity().ok, true);
+    now += 2001;
+    f.send(T.MESSAGE_POSTED, { messageId: 'qualified-tail', body: 'Qualified carrier tail' }, 'owner');
+  }
+  const carrier = JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection)
+    .messages.find(message => message.id === posted.event.data.messageId);
+  assert.ok(carrier);
+  if (mode === 'entity') assert.equal(carrier._entity, 1);
+  else if (mode === 'body-ref') assert.equal(typeof carrier.bodyRef, 'string');
+  else assert.equal(carrier.body, posted.event.data.body);
+  const expected = f.store.workResult(f.keys.producer, 'commons', f.workItemId);
+  f.store._dropProjectionCache();
+  const guard = t.mock.method(f.store, 'room', () => { throw Error('selected result hydrated full room'); });
+  const value = await f.client.workResult(f.workItemId);
+  assert.deepEqual(value, expected);
+  assert.equal(value.result.text.body, posted.event.data.body);
+  assert.equal(JSON.stringify(value).includes('Unrelated private payload'), false);
+  assert.equal((await f.client.workResult(f.workItemId, { completionEventId: completion.event.id })).result.text.body, posted.event.data.body);
+  assert.equal((await f.client.workResult(f.workItemId, { draftMessageId: posted.event.data.messageId })).result.text.body, posted.event.data.body);
+  assert.equal(guard.mock.callCount(), 0);
+});
+
+test('selected result reads keep same-millisecond join floors for drafts and completed text', async t => {
+  const f = await setup(t), now = Date.now(); f.store.now = () => now;
+  const old = f.post('Pre-join evidence');
+  f.mutate(T.WORK_STARTED); f.mutate(T.WORK_COMPLETED, f.input(old));
+  f.send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'since_join' }, 'owner');
+  f.send(T.MEMBER_ADDED, { memberId: 'late', displayName: 'Late', kind: 'human', permissions: [] }, 'owner');
+  const late = f.store.issueAccessKey('commons', 'late');
+  const fresh = f.post('Post-join draft');
+  assert.equal(old.event.at, fresh.event.at);
+  assert.throws(() => f.store.workResult(late, 'commons', f.workItemId), { code: 'result_unavailable' });
+  assert.throws(() => f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: old.event.data.messageId }), { code: 'result_unavailable' });
+  assert.equal(f.store.workResult(late, 'commons', f.workItemId, { draftMessageId: fresh.event.data.messageId }).result.text.body, 'Post-join draft');
+});
+
 test("native text preserves exact stored UTF-8 and old post/proposal provenance across restart", async t => {
   const f = await setup(t), body = "\uFEFF  Café e\u0301 🪷\r\n\tsecond line  \n";
   const posted = f.post(body, { packetId: "original-packet", basisRevision: 1 }, "guest");

@@ -124,9 +124,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: needs.changes.outputs.docs_only != 'true'
         with:
-          # Depth 2 gives the PR merge commit's first parent (the base branch
-          # tip), which the i18n ratchet scans as its base tree.
-          fetch-depth: 2
+          # PRs use the merge commit's first parent; manual branch runs need
+          # origin/main and its ancestry to resolve the i18n ratchet base.
+          # Preserve real base comparison instead of falling back to an old
+          # committed baseline when a shallow checkout hides that history.
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: needs.changes.outputs.docs_only != 'true'
         with:

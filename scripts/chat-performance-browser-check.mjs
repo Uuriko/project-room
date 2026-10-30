@@ -171,10 +171,11 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/request-runs')) runReads++; });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await signInFixture(page, f.keys.owner);
   const initialRuns = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/request-runs'));
-  await page.locator('[data-message-record-id="first-question"]').waitFor();
+  await signInFixture(page, f.keys.owner);
   await initialRuns;
+  await page.locator('[data-message-record-id="history-0"]').waitFor();
+  assert.equal(await page.locator('[data-message-record-id="first-question"]').count(), 0, 'private request is not shown in public chat');
   await page.waitForTimeout(200);
   await page.evaluate(() => {
     const stable = document.querySelector('[data-message-record-id="history-0"]');
@@ -197,8 +198,8 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   assert.equal(runReads, before, 'unrelated chat must not re-read run state');
   const newRuns = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/request-runs'));
   const questionReceipt = post('owner', 'second-question', { toMemberId: 'producer', requestKind: 'reply' });
-  await page.locator('[data-message-record-id="second-question"]').waitFor();
   await newRuns;
+  assert.equal(await page.locator('[data-message-record-id="second-question"]').count(), 0, 'new private request does not enter the public timeline');
   assert.equal(runReads, before + 1, 'new request immediately refreshes run labels');
   await openSettings(page, 'record-panel');
   await page.locator(`#event-list [data-event-record-id="${questionReceipt.event.id}"]`).waitFor({ state: 'visible' });
@@ -325,15 +326,11 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   assert.deepEqual(errors, []);
 });
 
-// QA-2026-10-07: measurable regression target for the unbounded renderMessages
-// finding. Keep opt-in while the renderer is unwindowed; remove the gate when
-// the fix lands. Workload retains 2,000 total history records and about 1.7 MB
-// of body text, including ten patch-dump-sized messages.
+// Initial root-timeline DOM budget, with 2,000 retained history records and
+// about 1.7 MB of body text including ten patch-dump-sized messages. This
+// checks initial rendering, not a permanent bound after paging or opening threads.
 test('large room history completes initial render with a bounded live message DOM', {
-  timeout: 90000,
-  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
-    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
-    : false
+  timeout: 90000
 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));

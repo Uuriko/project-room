@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-919 rows (878 distinct codes).
+923 rows (882 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -108,6 +108,10 @@ response's own `hint`/`next` when it names something more specific.
 | `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
 | `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
 | `archive_not_ready` | 409 | Message backfill or parity certification is not ready for archive | no | Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run. |
+| `money_bearing_room` | 422 | This room has money or proof rows, so purge would delete its ledger, settlements, or receipts | no | Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan. |
+| `export_required` | 409 | No fresh per-room export is on record for this room | no | Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export. |
+| `room_not_archived` | 422 | This room is not lifecycle-archived, so the panel cannot purge it | no | Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set. |
+| `confirmation_mismatch` | 422 | The typed confirmation does not match this room's title and id | fix+resend | Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again. |
 | `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
@@ -167,7 +171,7 @@ response's own `hint`/`next` when it names something more specific.
 | `attachment_conflict` | 409 | That attachment id is already stored for this identity | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `attachment_forbidden` | 403 | Only the uploader or the room owner can discard this file | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `attachment_not_found` | 404 | Attachment not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
-| `attachment_quota` | 409 | This identity cannot store another inbox attachment of that size | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `attachment_quota` | 409 | A file storage limit is full (room files or inbox attachments) | no | For room files, read error.detail.quota (limit, used, max, remaining) and send a part no larger than remaining, or stop: committed room files never expire, and staged files count until their staging deadline. |
 | `attachment_too_large` | 413 | File exceeds the inbox attachment size limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `attachment_unavailable` | 410 | Attachment bytes are no longer available | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `auth_required` | 401 | That identity secret does not match an identity. | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
@@ -545,7 +549,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_key` | internal | seed must be 64 lowercase hex characters (32-byte Ed25519 seed) | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_land_item` | 422 | repo and prNumber are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_land_tip` | 422 | itemId and a tip field are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
-| `invalid_limit` | 422 | limit must be an integer 1..100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_limit` | 422 | limit must be an integer within the route's stated range (1..100 on the original route; operator actions 1..200; operator rooms 1..500) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link` | 422 | Choose a short guest name | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_code_request` | 422 | roomId must name the existing room this code enrolls the identity into | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_access` | 422 | Choose guest, member or co_admin access | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

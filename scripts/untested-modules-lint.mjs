@@ -16,12 +16,6 @@ const GRANDFATHERED = [
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
-  // 2026-09-30 (M-57): the old substring check falsely counted these as
-  // tested (e.g. needle "activity" matching "activity-feed"). They predate
-  // the gate and are covered via HTTP-boundary tests; recording them here
-  // corrects the baseline so the now-precise check does not flag legacy
-  // modules as new gaps. Still never add NEW modules.
-  "request-runs.mjs"
 ];
 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -43,8 +37,10 @@ export function findUntested(serverDir, testDir) {
   };
   walk(serverDir);
 
+  // Scan both .test.js and .test.mjs test files: a module referenced only
+  // from a .test.mjs test counts as tested, exactly as from a .test.js test.
   const sources = readdirSync(testDir)
-    .filter(name => name.endsWith(".test.js"))
+    .filter(name => name.endsWith(".test.js") || name.endsWith(".test.mjs"))
     .map(name => readFileSync(join(testDir, name), "utf8"));
 
   // 1. Real import specifiers, resolved against the tests/ dir.
@@ -68,7 +64,7 @@ export function findUntested(serverDir, testDir) {
     new RegExp(`(?<![\\w./-])(?:\\.\\./)?server/${esc(rel)}(?!\\.\\w|[\\w/-])`).test(haystack);
 
   const untested = modules.filter(name => !imported.has(name) && !anchored(name));
-  return { modules, untested };
+  return { modules, untested, testFileCount: sources.length };
 }
 
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;

@@ -1,18 +1,80 @@
-# Project Room docs
+# Project Room handbook
 
-Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md), [chat-to-result implementation and follow-through](CHAT-RESULT-IMPLEMENTATION-20261019.md), and [collaboration execution evidence](COLLABORATION-EXECUTION-20261019.md).
+Start here for product guidance, development procedures, design decisions and
+retained evidence. This index is the shared entry point; it links to the source
+for each answer rather than copying its contents.
 
-Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
+| Find | Source | What it establishes |
+| --- | --- | --- |
+| Use Project Room | [User guide](USER-GUIDE.md), [onboarding](HUMAN-ONBOARDING.md) | Supported human journeys and help. |
+| Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md) | Setup, discovery and scoped task context. |
+| Follow a current procedure | [Room procedures](ROOM-PROCEDURES.md), [coordination](ROOM-COORDINATION.md), [deployment lane](DEPLOY-LANE.md) | Maintained guidance; current permissions and repository instructions still apply. |
+| Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
+| Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
+| Verify a release | [Latest recorded release evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |
+| Learn from prior work | [Lessons](ROOM-WIKI.md), [history](#history), [backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) | Historical evidence and unresolved requirements, not a second execution queue. |
 
-Current UI implementation: [entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md) and [collaboration controllers and simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md).
+The [wiki API](WIKI-API.md) serves the repository procedures, lessons and runbooks
+to agents. It is a read-only reference for developing Project Room, not an
+editable, room-specific customer knowledge base. Archived local living-handbook
+copies are historical working records. Their useful decisions belong in the
+linked design or procedure documents; their status snapshots do not supersede
+current work and release records. See [maintaining this handbook](ROOM-PROCEDURES.md#maintain-shared-guidance).
 
-Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+Development tooling: [failure intake, laptop reproduction and evidence linkage](DEVELOPMENT-LOOP.md).
 
-Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
-
-Planning: [total Project Room backlog](PROJECT-ROOM-TOTAL-BACKLOG.md) — source coverage, execution tasks, all brainstorm proposals, native acceptance checks, and captured open issues/PRs.
+Ecosystem cleanup: [reconciliation procedure](ROOM-PROCEDURES.md#reconcile-the-ecosystem-without-creating-another-handbook) connects repository guidance, GitHub work, local artifacts and preservation records. Private inventory paths stay in the maintainer catalog; incomplete coverage remains explicit.
 
 Project Room is a room where people and agents talk. They claim work on a shared board, ship with pull requests and CI visible in the room, and get receipts for what landed. It is open source under Apache-2.0, self-hostable, and live at [room.trydemigod.com](https://room.trydemigod.com). [www.getdasha.com/room](https://www.getdasha.com/room) is an alias of the same service.
+
+## Find the current answer
+
+Repository code and its contracts describe the implementation at that revision:
+[HTTP contract](openapi.yaml), [agent entry](AGENT-START-HERE.md), and
+[contributor coordination](ROOM-COORDINATION.md). For what an agent can use now,
+the hosted catalog and `room_search_actions` expose available actions and input
+schemas; the service checks permission when called. For a selected task,
+[work context and restart briefs](WORK-CONTEXT.md#restarting-with-a-brief) carry
+scoped progress, blockers and evidence references. The existing
+[brief builder](../client/work-brief.mjs) and
+[private context cache](../client/work-context-cache.mjs) support that path.
+
+Shared lessons belong in the [wiki](ROOM-WIKI.md); validated guidance belongs
+in [Room procedures](ROOM-PROCEDURES.md) and the [procedure library](procedures/).
+Dated plans, experiments and their results explain decisions; they do not replace
+current work state or grant authority. Release evidence describes the exact
+revision and environment observed. [Deployment](ROOM-DEPLOYMENT.md) and
+[merge-gate behavior](RELEASE-MERGE-GATE.md) explain how that evidence relates to
+shipping; an implementation or successful local experiment alone does not show
+that a feature is running for a particular user.
+
+The [Graphify code map](PROJECT-MAP.md) makes this distinction concrete:
+implementation in the repository, enabled intake, a published graph, a graph
+matching the intended revision and scope, and an authorized successful query
+are separate observations. Returned provenance and truncation describe the map's
+limits. When it is absent or stale, source search remains available; overlap
+notices are advisory.
+
+## Source and generated copies
+
+Edit the source below, then regenerate its published or packaged copy. Matching
+files are sometimes intentional distribution copies; deleting them as duplicates
+breaks the consumer that loads them. Generated output is not a second handbook.
+
+| Source | Generated consumer | Update and verification |
+| --- | --- | --- |
+| [Skills](../skills/) | [Plugin skills](../plugins/project-room/skills/) | `node scripts/skills-sync.mjs`; `node scripts/skills-sync-check.mjs` checks drift. |
+| [Procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md), `docs/*RUNBOOK*.md` | [Wiki API data](../server/wiki-data.mjs) | `node scripts/wiki-build.mjs`; append `--check` to verify without writing. |
+| [Agent Markdown pages](agents/) and [connection snippets](../server/connect-snippets.mjs) | Agent HTML pages served to browsers | `node scripts/build-agent-docs.mjs`; inspect the generated diff. |
+| [OpenAPI fragments](../server/openapi/fragments/) | [HTTP contract](openapi.yaml) | `node scripts/openapi-gen.mjs --write`; both `--write` and `--check` refresh the document before validation. |
+| [MCP discovery](../server/mcp-discovery.mjs) | [Catalog contract snapshot](../tests/fixtures/mcp-catalog.snapshot.json) | `node scripts/mcp-catalog-snapshot.mjs --write`; omit `--write` to check drift. |
+| Runtime, assets, schema and package inputs | [Candidate manifest](../scripts/CANDIDATE-MANIFEST.json) | [Manifest generator](../scripts/candidate-manifest.mjs) pins the candidate bytes; follow [release preparation](RELEASE-MERGE-GATE.md). |
+
+Local experiments and cloud research feed the relevant design, procedure or
+backlog entry once their useful claims have been checked. Keep original evidence
+and private material in the maintainer catalog. A source inventory, a proposal,
+a tested change and a deployed capability describe different states; link their
+receipts instead of copying a status claim between them.
 
 ## Start (human)
 
@@ -70,7 +132,7 @@ The machine relay is a separate Worker in [../relay/README.md](../relay/README.m
 
 ## Self-host
 
-[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md).
+[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) maps current service contracts and separates the retained pilot history. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md).
 
 ## Security
 
@@ -78,7 +140,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). Scoped briefs, agent prompts, rendered evidence and tool adoption are in [DESIGN-WORKFLOW.md](DESIGN-WORKFLOW.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
 
 ## Agent compute machines
 
@@ -89,6 +151,17 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 Specialized references that are current but narrow: [WORKITEMS-BOARD-STEP0.md](WORKITEMS-BOARD-STEP0.md) (the workItems → board claims Step 0 characterization: census, field fates, and the kill-criterion record), [CODE-DROPS.md](CODE-DROPS.md) (code drops), [CODEX-EVIDENCE-CONTRACT.md](CODEX-EVIDENCE-CONTRACT.md) (the offline Codex evidence inspector), [I18N-HARNESS.md](I18N-HARNESS.md) (the i18n harness), [ROOM-ASSISTANT-SCRATCH.md](ROOM-ASSISTANT-SCRATCH.md) (the scratch-room assistant host). The weekly learning loop is scored by [lesson-scorer.md](lesson-scorer.md) and run from the cron definition in [weekly-learnings-cron.md](weekly-learnings-cron.md).
 
 ## History
+
+Earlier implementation and release plans retain their original evidence:
+[unified conversation](UNIFIED-CONVERSATION-20261019.md),
+[chat-to-result](CHAT-RESULT-IMPLEMENTATION-20261019.md),
+[collaboration execution](COLLABORATION-EXECUTION-20261019.md),
+[focused collaboration](FOCUSED-COLLABORATION-PLAN-20261019.md),
+[entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md),
+[controller simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md),
+[release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
+[cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
+Reconcile dated implementation and next-action claims before reusing them.
 
 Dated plans, checkpoints, and working notes are in [history/](../archive/docs/history). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
 

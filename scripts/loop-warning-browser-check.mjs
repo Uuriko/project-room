@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -48,17 +49,27 @@ test("loop warning: duplicate drafts and acknowledgement chains pause-hint on th
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  const openWork = async title => {
+    await openSearch(page);
+    await page.locator('#message-search').fill(title);
+    await page.locator('#search-list [data-open-work]').filter({ hasText: title }).click();
+  };
+  await openWork('prepare an agenda');
   const duplicates = page.locator('[data-work-record-id="test-handoff"] .loop-warning');
   await duplicates.waitFor({ state: "visible" });
   assert.equal(await duplicates.getAttribute("data-loop-kind"), "duplicate_proposals");
   assert.match(await duplicates.innerText(), /2 identical drafts/);
   assert.match(await duplicates.innerText(), /Pause automatic drafting/);
+  await openWork('Test: settle the venue question');
   const chain = page.locator('[data-work-record-id="loop-talk"] .loop-warning');
   await chain.waitFor({ state: "visible" });
   assert.equal(await chain.getAttribute("data-loop-kind"), "ack_chain");
   assert.match(await chain.innerText(), /alternating between the same two members/);
   // Calm work carries no pause hint; the hint never blocks the work's actions.
+  await openWork('Test: ordinary converging work');
+  await page.locator('[data-work-record-id="loop-clean"]').waitFor({ state: 'visible' });
   assert.equal(await page.locator('[data-work-record-id="loop-clean"] .loop-warning').count(), 0);
+  await openWork('prepare an agenda');
   const flagged = page.locator('[data-work-record-id="test-handoff"]');
   if (!await flagged.locator(".work-details").evaluate(node => node.open)) await flagged.locator(".work-details > summary").click();
   assert.equal(await flagged.getByRole("button", { name: "Use my AI", exact: true }).isEnabled(), true);

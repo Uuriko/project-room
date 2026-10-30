@@ -3,7 +3,8 @@
 // with 409 plan_changed when the counts moved, and deletes inside one writer
 // transaction. The integrity snapshot is rewritten in that same transaction.
 
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { issueApprovalToken, consumeApprovalToken } from "./approval-tokens.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
@@ -18,6 +19,39 @@ const FIND_LIMIT = 50;
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const LATE = Object.freeze(["commands", "cursors", "projection_checkpoints", "events"]);
 const BUILTIN_PROTECTED = Object.freeze(["invite-only-pilot"]);
+
+// G-1 (MGMT-PANEL Slice 2, MF-1/MF-2): money/proof clearance. A room with any
+// rows in these tables cannot be purged at all — by ANY caller of this
+// module (panel, shipped console, or direct API call) — because purge would
+// delete the bounty ledger, settlements, receipts, and claim history the
+// rows are proof of. Such rooms route to decision brief DB-1. The set is
+// defined once here; tests/operator-room-purge.test.js parses the purge
+// registry and fails if a future registry table in these families is not
+// added here. `public_work_receipts` is deliberately absent: its registry
+// entry matches identity only, so a room count for it is always 0 and it
+// survives a room purge.
+export const MONEY_PROOF_TABLES = Object.freeze([
+  "bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
+  "bounty_flakes", "bounty_idempotency", "bounty_reputation_packets",
+  "bounty_review_packets", "bounty_rubric_versions", "bounty_sequences",
+  "bounty_sybil_flags", "bounty_watchers",
+  "public_work_settlements", "public_work_tasks", "public_work_reviews",
+  "public_work_review_requests", "public_work_review_versions",
+  "public_work_successors", "public_work_successor_requests",
+  "public_receipts",
+  "spend_authorizations", "spend_grant_terms", "spend_room_reservations",
+  "work_claims", "work_claim_history", "work_claim_config",
+  "stitch_receipts", "room_vetting_receipts", "external_receipts",
+  "demigod_contracts", "demigod_contract_requests"
+]);
+
+// Nonzero money/proof rows for one room, from a countPurge() result.
+export function moneyProofHits(counts) {
+  const byTable = new Map(counts.map(row => [row.table, row.rows]));
+  return MONEY_PROOF_TABLES
+    .filter(table => (byTable.get(table) ?? 0) > 0)
+    .map(table => ({ table, rows: byTable.get(table) }));
+}
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const q = name => {
@@ -130,6 +164,14 @@ function roomGuards(store, targets, allowActiveMembers) {
   for (const target of targets) {
     if (target.kind !== "room") continue;
     if (protectedIds.has(target.id)) fail(403, "protected_room", "This room is protected and cannot be purged");
+    // G-1: recount this room's money/proof tables at guard time. Plan calls
+    // this before issuing a plan; execute calls it again inside its writer
+    // transaction (MF-3), so a money/proof row arriving after the plan is
+    // refused here even before the plan-hash recount is consulted.
+    const hits = moneyProofHits(countPurge(store, [target]));
+    if (hits.length) {
+      fail(422, "money_bearing_room", `Room ${target.id} has money or proof rows (${hits.map(hit => `${hit.table}: ${hit.rows}`).join(", ")}) and cannot be purged`);
+    }
     const humans = activeHumanCount(store, target.id);
     if (humans > 1) {
       warnings.push({
@@ -191,29 +233,6 @@ function likePrefix(text) {
   return `${text.replace(/[\\%_]/g, char => `\\${char}`)}%`;
 }
 
-function issueToken(secret, planId, planHash, exp) {
-  const body = Buffer.from(JSON.stringify({ planId, planHash, exp })).toString("base64url");
-  const signature = createHmac("sha256", secret).update(body).digest("base64url");
-  return `${body}.${signature}`;
-}
-
-function readToken(secret, token) {
-  if (typeof token !== "string" || !token.includes(".")) return null;
-  const dot = token.indexOf(".");
-  const body = token.slice(0, dot);
-  const signature = token.slice(dot + 1);
-  const expected = createHmac("sha256", secret).update(body).digest();
-  let presented;
-  try { presented = Buffer.from(signature, "base64url"); }
-  catch { return null; }
-  if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (!claims || typeof claims.planId !== "string" || typeof claims.planHash !== "string" || typeof claims.exp !== "number") return null;
-    return claims;
-  } catch { return null; }
-}
-
 function liftDeleteGuards(db, tables) {
   const wanted = new Set(tables);
   const saved = [];
@@ -259,12 +278,11 @@ function audit(store, row) {
 }
 
 export function createOperatorPurge(store) {
-  const secret = randomBytes(32);
   const plans = new Map();
 
   function remember(plan) {
     const now = store.now();
-    for (const [id, saved] of plans) if (saved.exp <= now || saved.used) plans.delete(id);
+    for (const [id, saved] of plans) if (saved.exp <= now) plans.delete(id); // used plans stay until expiry so a replay reads "already used"
     if (plans.size >= 100) plans.delete(plans.keys().next().value);
     plans.set(plan.planId, plan);
   }
@@ -347,12 +365,14 @@ export function createOperatorPurge(store) {
         const planHash = hashPurgeCounts(counts);
         const planId = `plan_${randomBytes(9).toString("base64url")}`;
         const exp = store.now() + TOKEN_TTL_MS;
-        const saved = { planId, planHash, exp, targets, reason, allowActiveMembers, counts, used: false };
+        // #5384: the confirm token is stored only as a hash and burns on first use.
+        const { token: confirmToken, tokenHash } = issueApprovalToken();
+        const saved = { planId, planHash, exp, targets, reason, allowActiveMembers, counts, used: false, tokenHash };
         remember(saved);
         const response = {
           planId,
           planHash,
-          confirmToken: issueToken(secret, planId, planHash, exp),
+          confirmToken,
           expiresAt: exp,
           reason,
           warnings,
@@ -385,17 +405,19 @@ export function createOperatorPurge(store) {
           fail(422, "invalid_purge", "Supply the planId and confirmToken from the plan");
         }
         const saved = plans.get(body.planId);
-        const claims = readToken(secret, body.confirmToken);
-        if (!saved || !claims || claims.planId !== saved.planId || claims.planHash !== saved.planHash) {
-          fail(401, "invalid_confirmation", "That confirmation is not valid. Request a fresh plan");
-        }
-        if (claims.exp <= store.now()) fail(401, "invalid_confirmation", "That confirmation expired. Request a fresh plan");
-        if (saved.used) fail(409, "confirm_used", "That confirmation was already used");
+        const outcome = consumeApprovalToken(saved, body.confirmToken, store.now(), { burn: false }); // burned after commit below
+        if (outcome === "invalid") fail(401, "invalid_confirmation", "That confirmation is not valid. Request a fresh plan");
+        if (outcome === "expired") fail(401, "invalid_confirmation", "That confirmation expired. Request a fresh plan");
+        if (outcome === "used") fail(409, "confirm_used", "That confirmation was already used");
         const value = store.transaction(() => {
+          // MF-3: guards re-run first, inside this BEGIN IMMEDIATE
+          // transaction, so G-1's money/proof re-check (roomGuards recounts)
+          // is an in-transaction check; the plan-hash recount below is the
+          // backstop for every other drift.
+          roomGuards(store, saved.targets, saved.allowActiveMembers);
           const counts = countPurge(store, saved.targets);
           const planHash = hashPurgeCounts(counts);
           if (planHash !== saved.planHash) fail(409, "plan_changed", "Rows changed after the plan was confirmed. Nothing was deleted");
-          roomGuards(store, saved.targets, saved.allowActiveMembers);
           for (const target of saved.targets) assertTargetExists(store, target);
           store.db.exec("PRAGMA defer_foreign_keys=ON");
           const permit = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_claim_writer_permit'").get();

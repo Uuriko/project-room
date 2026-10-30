@@ -296,3 +296,29 @@ test("host answer survives closing the requester and returning in an independent
   assert.equal(f.state().messages.filter(message => message.id === answer.id).length, 1);
   assert.deepEqual(f.errors, []);
 });
+
+test("restored cancellation draft does not submit by keyboard after another session closes the request", { timeout: 60000 }, async t => {
+  const f = await setup(t); f.request("cancel-history");
+  const first = await f.login("owner"), second = await f.login("owner");
+  await mode(first, "cancel-history", "cancelled");
+  await input(first).fill("My unsent cancellation reason");
+  await first.goto(`${f.origin}/privacy`);
+  await mode(second, "cancel-history", "cancelled");
+  await input(second).fill("The winning cancellation reason");
+  await input(second).press("Enter"); await saved(second);
+  await first.goBack(); await first.locator("#main").waitFor({ state: "visible" });
+  await first.goForward(); await first.goBack();
+  await first.locator("#main").waitFor({ state: "visible" }); await idle(first);
+  await first.waitForFunction(() => document.querySelector('#message-form button[type=submit]').disabled
+    && document.querySelector('#request-mode-label').textContent.includes('Context changed'));
+  assert.equal(await input(first).inputValue(), "My unsent cancellation reason");
+  const commands = [];
+  await first.route("**/api/rooms/commons/commands", async route => { commands.push(route.request().postDataJSON()); await route.continue(); });
+  await input(first).press("Enter");
+  // Allow the event/HTTP path to settle: this must be no command, not a server refusal.
+  await first.waitForTimeout(300);
+  assert.equal(commands.length, 0, "a disabled terminal cancellation cannot be submitted with Enter");
+  assert.equal(await input(first).inputValue(), "My unsent cancellation reason");
+  assert.equal(f.state().replyRequests['cancel-history'].reason, "The winning cancellation reason");
+  assert.deepEqual(f.errors, []);
+});

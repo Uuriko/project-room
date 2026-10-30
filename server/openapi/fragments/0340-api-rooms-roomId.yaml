@@ -7,12 +7,17 @@
         caught-up marker that event resume starts from. `catchUpCursor` (full
         view) is the read-only Catch up boundary: that marker moved past the
         viewer's own unbroken run of events, the same boundary the return
-        brief uses. Reading it never writes a marker. `?view=work` (the only view) returns the
+        brief uses. Reading it never writes a marker. `?view=work` returns the
         work-focused snapshot (`snapshotView`, `snapshotVersion`). Header
         `x-project-room-help-context: 1` (with `view=work`) adds help
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
+        `?view=orientation` returns `snapshotView: orientation`, version 1,
+        with room metadata, members, current work records and bounded handoff
+        history for default agent orientation. Full nested current evidence
+        records are retained; messages, event history, prior receipts/checks,
+        halts and read markers are omitted. It accepts no context headers.
         The default full-view read and `?messages=recent` (no other filters)
         are the same window: the newest 100 visible messages that fit the
         byte budget, in `state.messages`, plus `messagesWindow`
@@ -28,11 +33,18 @@
         appear in the projection). The response declares
         `auditView: activity` and `auditVersion: 1`. Omit the header for
         the default audit tail. Older servers may ignore it.
+        `?view=identity` returns `snapshotView: identity`, `snapshotVersion: 1`,
+        roomId, viewer identity/session binding fields, and only
+        `state.room.ownerId` plus the authenticated member's id, kind, active,
+        revision, permissions and delegatedAdmin flag. It includes no history,
+        other members or work. It performs fresh authorization on each read;
+        it is not a cached grant for a later operation. Context/audit headers
+        and other query filters cannot be combined with this view.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
-          schema: { type: string, enum: [work] }
+          schema: { type: string, enum: [work, identity, orientation] }
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }
@@ -73,6 +85,10 @@
         - name: before
           in: query
           schema: { type: integer, minimum: 0 }
+        - name: beforeId
+          in: query
+          description: Message ID tie-break paired with before; continue using both cursor values returned by the previous page.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }

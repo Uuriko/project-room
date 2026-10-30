@@ -182,13 +182,14 @@ export async function demo({ print = console.log } = {}) {
     const owner = as("owner"), friend = as("guest"), producer = as("producer");
     await owner.act({ action: "configure", requestId: "demo-configure", expectedRevision: 0, name: "Room", coordinatorMemberId: "producer" });
     await owner.post("demo-ask", "@Room plan dinner for four on Friday");
-    let run = (await owner.act({ action: "invoke", requestId: "demo-invoke", runId: "demo-run", sourceMessageId: "demo-ask" })).result;
+    let run = (await owner.assistant()).runs.find(run => run.sourceMessageId === "demo-ask");
+    if (!run) throw new Error("The addressed ask did not create its shared request");
     print(`owner asked: ${run.status}`);
     await friend.post("demo-add", "Make it 8pm, outdoor seating", { replyToId: "demo-ask" });
-    run = (await friend.act({ action: "contribute", requestId: "demo-contribute", runId: "demo-run", sourceMessageId: "demo-add", expectedRevision: run.revision })).result;
+    run = (await friend.act({ action: "contribute", requestId: "demo-contribute", runId: run.id, sourceMessageId: "demo-add", expectedRevision: run.revision })).result;
     print(`friend added: ${run.inputs.map(i => `${i.memberId}:${i.status}`).join(", ")}`);
     const { outcomes } = await runHostOnce(producer, { memberId: "producer" });
-    const final = (await friend.assistant()).runs.find(r => r.id === "demo-run");
+    const final = (await friend.assistant()).runs.find(r => r.id === run.id);
     const answer = await friend.message(final.resultMessageId);
     print(`host: ${JSON.stringify(outcomes)}`);
     print(`friend sees ${final.status}, inputs ${final.inputs.map(i => `${i.memberId}:${i.status}`).join(", ")}`);

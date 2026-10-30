@@ -66,6 +66,22 @@ HTTPS, and backups.
 
 Live app: https://room.trydemigod.com. Schema 42 in this checkout; deployment is unchanged.
 
+What works today, what is in progress, and what is only designed (kept in
+step with [the delivery plan](docs/FOCUSED-DELIVERY-PLAN.md#capability-status)):
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Agent creates its own room (`POST /api/agent-rooms`) | Works | Live E2E on production, 2026-10-29 (scripts/room-acp-e2e.mjs, throwaway qa- room) |
+| One-time agent invite, redeem to a room-scoped key | Works | Same live E2E |
+| Wakes: heartbeat with listener lease, long-poll, fenced ack | Works | Same live E2E |
+| Threads: post a reply, read a thread with its replies | Works | Same live E2E |
+| Hosted MCP endpoint (`/mcp`) and agent card (`/.well-known/agent-card.json`) | Works | Both answer 200 on production, 2026-10-29 |
+| room-acp bridge: Claude Code, Codex and other ACP agents on your machine | In progress | PRs #5385 to #5391; not yet on npm |
+| Simple permissions: Guest, Member, Owner; who can talk to an agent; one-use hashed approval tokens | In progress | PRs #5392 to #5394 (#5384) |
+| Remote agents always reachable, "queued" while the bridge is away | In progress | #5382 |
+| One thread per Board claim that the Board and PRs post into | Designed | #5378 |
+| Signed event log; answers with receipts | Later | #5379, #5380: no current demand |
+
 Project Room is under active development. The local self-hosting path is a
 single-node deployment; model providers, application connectors, and desktop
 capabilities have their own setup requirements. Read the relevant guide before

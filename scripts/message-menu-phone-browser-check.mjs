@@ -11,8 +11,10 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, viewport, mobile) {
-  const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
+async function setup(t, viewport, mobile, prepare = () => {}) {
+  const f = createAcceptanceFixture({ managedProducer: false });
+  prepare(f);
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -85,4 +87,58 @@ test("own mid-timeline message's ⋯ menu is fully tappable (phone 390)", { time
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 150)));
   assert.ok(await page.locator("details.message-more[open] [data-message-action='delete']").count(), "own message offers Delete");
   assert.deepEqual(await blockedActions(page), [], "every action in the menu can be tapped");
+});
+
+
+test('message action names identify author and second while retaining keyboard menu behavior', { timeout: 60000 }, async t => {
+  const page = await setup(t, { width: 1440, height: 900 }, false, f => {
+    const clock = f.store.now;
+    const base = Math.floor(Date.now() / 60000) * 60000;
+    for (const [index, body] of ['First named message', 'Second named message'].entries()) {
+      f.store.now = () => base + (index + 1) * 1000;
+      f.store.command(f.keys.owner, 'commons', { id: `named-cmd-${index}`, type: 'message.posted', data: { messageId: `named-${index}`, body } });
+    }
+    f.store.now = clock;
+  });
+  const labels = [];
+  for (const index of [0, 1]) {
+    const row = page.locator(`[data-message-record-id="named-${index}"]`);
+    await row.waitFor({ state: 'visible' });
+    const label = await row.locator('.message-more summary').getAttribute('aria-label');
+    const author = await row.locator('.message-meta strong').textContent();
+    assert.ok(label.includes(author)); assert.ok(label.startsWith('More actions'));
+    labels.push(label);
+  }
+  assert.notEqual(labels[0], labels[1], 'same author within a minute remains distinguishable');
+  const menu = page.locator('[data-message-record-id="named-1"] .message-more summary');
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send('DOM.getDocument');
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '[data-message-record-id="named-1"] .message-more summary' });
+  const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+  assert.equal(nodes[0].name.value, labels[1]);
+  assert.equal(nodes[0].ignored, false);
+  assert.equal(await menu.count(), 1);
+  await menu.focus(); await page.keyboard.press('Enter');
+  await page.locator('[data-message-record-id="named-1"] .message-more-menu').waitFor({ state: 'visible' });
+  await page.locator('[data-message-record-id="named-1"] [data-message-action="save"]').click();
+  await page.locator('[data-message-record-id="named-1"] [data-message-action="save"][aria-pressed="true"]').waitFor({ state: 'attached' });
+});
+
+
+test('item action names preserve visible verbs and escape hostile titles in browser DOM', { timeout: 60000 }, async t => {
+  const page = await setup(t, { width: 1440, height: 900 }, false);
+  const title = 'Repair "door" <img src=x onerror="window.injected=true"> & roof';
+  await page.evaluate(async title => {
+    const { boardHtml } = await import('/src/board-ui.js');
+    const item = { id: 'name-test', title, state: 'unclaimed', owner: null, kind: 'task', files: [], dependsOn: [], tags: [], reviews: [], attestations: [], history: [] };
+    const container = document.createElement('section'); container.id = 'accessible-name-fixture';
+    container.innerHTML = boardHtml([item], null, { id: 'viewer', manage: false, owner: false, write: true }, { viewer: { id: 'viewer', kind: 'human', active: true, permissions: ['accept_work'] } }, Date.now(), {});
+    document.body.append(container);
+  }, title);
+  const fixture = page.locator('#accessible-name-fixture');
+  const claim = fixture.getByRole('button', { name: `Claim — ${title}`, exact: true });
+  assert.equal(await claim.count(), 1);
+  assert.equal((await claim.textContent()).trim(), 'Claim');
+  assert.equal(await fixture.locator('img').count(), 0);
+  assert.equal(await page.evaluate(() => window.injected), undefined);
 });

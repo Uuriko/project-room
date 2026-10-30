@@ -11,6 +11,13 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
+async function openDirectConversation(page, memberId) {
+  await openComposerOptions(page);
+  await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
+  await page.locator(`#new-direct-people [data-direct-member="${memberId}"]`).click();
+  await page.locator('#new-direct-dialog').waitFor({ state: 'hidden' });
+}
+
 async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false, olderResult = false } = {}) {
   const f = createResultsFixture();
   if (olderResult) {
@@ -230,11 +237,10 @@ test("a delayed result response cannot restore withdrawn text", { timeout: 30000
 
 test("returning from a result preserves an uncertain send's exact target and retry", { timeout: 30000 }, async t => {
   const f = await setup(t, { expectedWrites: 2 }), p = f.p;
-  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
-  f.send("producer", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", replyToId: resultId });
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", toMemberId: "guest" });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await openDirectConversation(p, 'guest');
   await messageAction(p, "result-peer-reply", "reply");
-  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
   await p.locator("#message-input").fill("Please expand the second point");
   const attempts = [];
   await p.route("**/rooms/commons/commands", route => {
@@ -271,6 +277,9 @@ test("creating new work from the composer requires explicit confirmed submission
   await p.locator("#verifier-select").selectOption("reviewer");
   await p.locator("#create-work-button").click();
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
+  await p.locator('#topbar-search-toggle').click();
+  await p.locator('#message-search').fill('Follow up on the result');
+  await p.locator('#search-list [data-open-work]').first().click();
   await p.locator('#message-list [data-work-timeline]').first().waitFor();
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
 });
@@ -339,14 +348,14 @@ for (const mobile of [false, true]) test(`public result preserves an authored pr
   const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
   f.send("producer", T.MESSAGE_POSTED, { messageId: "private-draft-thread", body: "Discuss the result here", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
-  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
+  await openDirectConversation(p, 'guest');
   await p.locator("#message-input").fill("Private follow-up for the guest");
-  await p.locator("#thread-back").click();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
-  assert.equal(await p.locator("#result-dialog").isVisible(), true, "protected destination draft refuses the handoff");
-  await p.locator("#close-result").click(); await p.locator("#clear-search").click();
-  await p.locator(`[data-message-record-id="${resultId}"] [data-message-action="thread"]`).click();
+  await p.locator('#thread-bar').waitFor({ state: 'visible' });
+  assert.equal(await p.locator("#message-input").inputValue(), '', 'private draft is never copied into the public thread');
+  assert.equal(await p.locator("#message-to-select").inputValue(), '');
+  await openDirectConversation(p, 'guest');
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
 });
@@ -481,6 +490,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
     summary: "Local transport result", nextAction: "Read and continue", evidenceMessageId: draft.messageId,
     evidenceMessageEventId: draft.eventId, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: f.connection.memberId };
   const completed = await call(first, "room_submit_text_result", completion);
+  await p.locator(`#message-list [data-open-work="${task.id}"]`).first().click();
   const card = p.locator(`[data-work-record-id="${task.id}"]`);
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);

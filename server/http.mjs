@@ -1418,7 +1418,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           expectedRevision = created.session.sessionRevision;
           setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
         }
-        const started = signIn.begin({ slotToken, expectedRevision });
+        const started = signIn.begin({ slotToken, expectedRevision, selectAccount: url.searchParams.get("switch") === "1" });
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();
@@ -1480,7 +1480,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // the room list, invite redemption, and "New room" creation live.
           // The error path is reserved for genuine failures (denied consent,
           // bad state), which the client surfaces with a real message.
-          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
+          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}&google=signed-in` : "/?account=1&google=signed-in");
         } catch (error) {
           // Log only a bounded error identifier, never callback URLs, tokens,
           // provider bodies, emails, or arbitrary exception messages.
@@ -2224,13 +2224,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // image proxies may cache it. The TTL is minutes, the read above
           // re-checks the owner toggle on every origin fetch, and both
           // images restate the receipt's own public verdict line.
-          res.setHeader("Cache-Control", "public, max-age=300");
           if (receiptCard[2] === "badge.svg") {
             const svg = Buffer.from(receiptBadgeSvg(receipt));
+            res.setHeader("Cache-Control", "public, max-age=300");
             res.writeHead(200, { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Length": svg.length });
             return res.end(req.method === "HEAD" ? undefined : svg);
           }
-          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
+          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt), { loadAsset }));
+          res.setHeader("Cache-Control", "public, max-age=300");
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);
         }
@@ -2397,7 +2398,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               `${counts.artifactHashRecorded} artifact-hash ${counts.artifactHashRecorded === 1 ? "record" : "records"}`,
             ],
             footer: "Project Room proof · hashes are stored values, not re-verified",
-          }));
+          }, { loadAsset }));
           res.setHeader("Cache-Control", "public, max-age=300");
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);
@@ -2476,7 +2477,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
-        else if (path === "src/styles.css") res.setHeader("Cache-Control", "public, max-age=3600");
+        // This URL is not content-hashed; fresh markup must not use an hour-old stylesheet.
+        else if (path === "src/styles.css") res.setHeader("Cache-Control", "no-cache");
         else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
@@ -4111,6 +4113,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // Fresh identity preflight ends before history/DM/work projection reads.
+      // The normal room authentication, rate and API-key scope gates above apply.
+      if (route === "" && req.method === "GET" && url.searchParams.get("view") === "identity") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1)
+            || (params.has("auth") && !["room", "account"].includes(params.get("auth")))
+            || ["x-project-room-help-context", "x-project-room-offer-context", "x-project-room-audit-view"].some(key => req.headers[key] !== undefined))
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const { ownerId } = store.roomAuthority(roomId);
+        const member = auth.member;
+        return json(res, 200, {
+          snapshotView: "identity", snapshotVersion: 1, roomId,
+          viewerId: member.id, viewerAccountId: auth.account?.id ?? null,
+          viewerAuthEpoch: auth.account?.authEpoch ?? null,
+          viewerSessionBinding: auth.sessionBinding ?? null, viewerSessionRevision: auth.sessionRevision ?? null,
+          state: { room: { ownerId }, members: { [member.id]: {
+            id: member.id, kind: member.kind, active: member.active, revision: member.revision,
+            permissions: [...member.permissions], delegatedAdmin: member.delegatedAdmin === true,
+          } } },
+        });
+      }
       if (route === "public-work-review") {
         if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
         // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.
@@ -4170,20 +4193,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // A since_join reader also loses messages and events from before their
       // join (server/history-visibility.mjs). null for everyone else.
       const historyFloor = store.historyFloor(roomId, viewerId);
-      const historyMessages = historyFloor ? messageRepository(store, roomId) : null;
+      let historyMessages;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
-      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
-      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      let dmPartyVisible;
+      const dmEventVisible = event => {
+        // Work-only reads have no message events to filter. Resolve history
+        // only when a route actually consumes it.
+        historyMessages ??= historyFloor ? messageRepository(store, roomId) : null;
+        dmPartyVisible ??= dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
+        return eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      };
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
       const peerContext = {
         memberId: viewerId,
         identityId: store.bonds.identityForMember(roomId, viewerId),
-        isOwner: viewerId === store.room(roomId).state.room.ownerId
+        isOwner: viewerId === store.roomAuthority(roomId).ownerId
       };
       const roomEventVisible = event => dmEventVisible(event) && dmConsentEventVisible(event, viewerId, peerContext.isOwner)
         && peerEventVisible(event, peerContext);
@@ -4400,11 +4429,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "peerMemberId", "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
         return json(res, 200, readConversation(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
-          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), expectedSessionBinding: fence
+          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), peerMemberId: params.get("peerMemberId"), expectedSessionBinding: fence
         }));
       }
       if (route === "thread" && req.method === "GET") {
@@ -4435,15 +4464,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+        if (params.has("view") && (params.getAll("view").length !== 1 || !["work", "orientation"].includes(params.get("view"))
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
-        if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
+        if (helpContext !== undefined && (helpContext !== "1" || params.get("view") !== "work")) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
-        const snapshotView = params.has("view") ? "work" : "full";
+        const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         if (fullRead) {
@@ -4509,11 +4538,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const params = url.searchParams;
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
-        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["workItemId", "includeSource", "sourceObservation", "auth"].includes(key) || params.getAll(key).length !== 1)
           || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
           reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
         }
+        let sourceObservation;
+        if (params.has("sourceObservation")) {
+          const raw = params.get("sourceObservation");
+          if (raw.length > 1024) reject(422, "invalid_source_observation", "Source observation is too large");
+          try { sourceObservation = JSON.parse(raw); } catch { reject(422, "invalid_source_observation", "Invalid source observation"); }
+        }
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
+          sourceObservation,
           includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
         }));
       }
@@ -4652,9 +4688,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId, fence) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
-          const scopes = ["permissions", "profile", "ownerEquivalent"].filter(key => Object.hasOwn(data, key));
-          if (scopes.length < 1 || keys.some(key => !["permissions", "profile", "ownerEquivalent", "expiresInMinutes", "displayName"].includes(key)))
-            reject(422, "invalid_invite", "exactly one of permissions, profile, or ownerEquivalent is required; optional: expiresInMinutes, displayName");
+          // #5384: no scope at all is allowed and means the Member level.
+          if (keys.some(key => !["permissions", "profile", "ownerEquivalent", "expiresInMinutes", "displayName"].includes(key)))
+            reject(422, "invalid_invite", "allowed fields: one of permissions, profile (guest, member, owner, or a legacy name), or ownerEquivalent (none means member); optional: expiresInMinutes, displayName");
           return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate
@@ -4846,9 +4882,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "read-horizon" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["threadId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional threadId");
+        if ([...params.keys()].some(key => !["threadId", "peerMemberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional thread or private conversation");
         return json(res, 200, getReadHorizon(store, selected.token, roomId, {
-          ...(params.has("threadId") ? { threadId: params.get("threadId") } : {})
+          ...(params.has("threadId") ? { threadId: params.get("threadId") } : {}),
+          ...(params.has("peerMemberId") ? { peerMemberId: params.get("peerMemberId") } : {})
         }, fence));
       }
       if (route === "read-horizon" && req.method === "POST") {

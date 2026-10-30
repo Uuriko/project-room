@@ -196,15 +196,16 @@ console.log(JSON.stringify(same(production) ? recorded.prod : recorded.entry));
   const start = job.steps.findIndex(step => step.name === "Roll back") + 1;
   const end = job.steps.findIndex(step => step.name === "Receipt to muse-room");
   assert.ok(start > 0 && end >= start, "known post-rollback boundary");
-  let result = { code: 0 }, readbackOutcome = "skipped";
+  let result = { code: 0 }, readbackOutcome = "skipped", smokeOutcome = "skipped";
   for (const step of job.steps.slice(start, end).filter(step => step.run)) {
     const flags = step.shell === "bash" ? ["--noprofile", "--norc", "-e", "-o", "pipefail"] : ["-e"];
     result = await run("bash", [...flags, "-c", step.run], { env, cwd: join(root, step["working-directory"] ?? "") });
     if (step.id === "readback") readbackOutcome = result.code === 0 ? "success" : "failure";
+    if (step.id === "smoke") smokeOutcome = result.code === 0 ? "success" : "failure";
     if (result.code !== 0) break;
   }
   const receipt = await run("bash", ["-e", "-c", job.steps[end].run], { cwd: root, env: { ...env,
-    ROOM_RECEIPT_TOKEN: "synthetic-local-token", RECEIPT_ROOM: "local-room", OUTCOME: result.code === 0 ? "success" : "failure",
+    ROOM_RECEIPT_TOKEN: "synthetic-local-token", RECEIPT_ROOM: "local-room", ROLLBACK_OUTCOME: "success", STRICT_OUTCOME: smokeOutcome,
     READBACK_OUTCOME: readbackOutcome, PREFLIGHT_OUTCOME: 'success', REASON: "local rollback verification test", RUN_URL: "https://example.invalid/run/1" } });
   assert.equal(receipt.code, 0, receipt.stderr);
   return { ...result, work, http };

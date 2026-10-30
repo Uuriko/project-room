@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { OutsideAgents } from '../server/outside-agents.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { readMessagePage } from '../server/snapshot-window.mjs';
 import { messageRepository } from '../server/message-repository.mjs';
 
 function setup(t) {
@@ -23,6 +24,29 @@ test('ordered repository scans merge archive and retained exceptions across mult
  const first=f.repo().firstPostedAtByAuthor();f.certify();
  assert.equal(f.s.archiveMessages('commons',{keepNewest:3,dryRun:false}).ok,true);
  const repo=f.repo();
+ // Page response bounds must also bound historical body decoding. The old
+ // route returned five records after reading all 267 archived bodies.
+ let bodyRows=0;
+ const prepare=f.s.db.prepare.bind(f.s.db);
+ t.mock.method(f.s.db,'prepare',sql=>{
+  const statement=prepare(sql);
+  if(!/SELECT message_id,seq,record_json,body FROM messages/.test(sql))return statement;
+  return new Proxy(statement,{get(target,key){
+   if(key==='all')return(...args)=>{const rows=target.all(...args);bodyRows+=rows.length;return rows;};
+   const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+  }});
+ });
+ const newest=readMessagePage(f.s,f.token,'commons',{limit:5});
+ assert.deepEqual(newest.messages.map(m=>m.id),ids.slice(-5));
+ assert.ok(bodyRows<=128,`five-record page loaded ${bodyRows} archived bodies`);
+ const seen=[...newest.messages.map(m=>m.id)];let page=newest;
+ while(page.messagesPage.hasMore){
+  page=readMessagePage(f.s,f.token,'commons',{limit:17,before:page.messagesPage.before});
+  seen.unshift(...page.messages.map(m=>m.id));
+ }
+ assert.deepEqual(seen,ids,'paging traverses archive and retained exceptions exactly once');
+ t.mock.restoreAll();
+
  assert.deepEqual([...repo.records()].map(m=>m.id),ids);
  assert.deepEqual([...repo.records({descending:true})].map(m=>m.id),[...ids].reverse());
  assert.deepEqual([...repo.records({bodyPrefix:'typed.v1\n'})].map(m=>m.id),before.filter(m=>m.body?.startsWith('typed.v1\n')).map(m=>m.id));
@@ -97,7 +121,26 @@ test('partial message backfill after prefix archive preserves snapshots and seek
  assert.deepEqual(f.repo().recent(3).map(m=>m.id),expected.slice(-3));
  assert.deepEqual([...f.repo().records({afterId:'partial-8'})].map(m=>m.id),expected.slice(9));
  assert.deepEqual([...f.repo().records({afterId:'partial-10',descending:true})].map(m=>m.id),expected.slice(0,10).reverse());
- assert.deepEqual(f.s.snapshot(f.token,'commons').state.messages.map(m=>m.id),expected);
+ // #4265 ruling: a bare snapshot on an archived room returns the live window
+ // only; this assertion wants full history, so it asks for it explicitly.
+ assert.deepEqual(f.s.snapshot(f.token,'commons',null,'full',false,false,'full',null,true).state.messages.map(m=>m.id),expected);
  assert.deepEqual(f.s.snapshot(f.token,'commons',null,'full',false,false,'full',3).state.messages.map(m=>m.id),expected.slice(-3));
  assert.equal(f.s.db.prepare('SELECT count(*) n FROM messages WHERE message_id=?').get('partial-8').n,0,'read does not mutate or certify the partial table');
+});
+
+
+test('paging recovers posting sequences for unindexed replies and channel copies',t=>{
+ const f=setup(t);
+ f.post('root','Root');
+ f.post('reply','Reply',{replyToId:'root',alsoSendToChannel:true});
+ f.post('tail','Tail');
+ const seq=f.s.db.prepare("SELECT sequence FROM events WHERE room_id='commons' AND json_extract(body,'$.data.messageId')='tail'").get().sequence;
+ f.s.db.prepare("DELETE FROM messages WHERE room_id='commons'").run();
+ const page=readMessagePage(f.s,f.token,'commons',{before:seq,limit:2});
+ assert.deepEqual(page.messages.map(m=>m.id),['reply','reply:channel']);
+ assert.equal(page.messagesPage.hasMore,true);
+ assert.ok(Number.isSafeInteger(page.messagesPage.before));
+ const older=readMessagePage(f.s,f.token,'commons',{before:page.messagesPage.before,limit:2});
+ assert.deepEqual(older.messages.map(m=>m.id),['root']);
+ assert.equal(older.messagesPage.hasMore,false);
 });

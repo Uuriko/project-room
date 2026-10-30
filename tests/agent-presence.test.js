@@ -214,3 +214,26 @@ test("a room owner of record reads identities linked into their room without a m
   const noStanding = store.agentPresence({ identityId: caller.identityId, boundRoomId: null }, target.identityId);
   assert.deepEqual(noStanding.rooms, []);
 });
+
+test("#5382 a mention for an agent whose bridge is away shows as queued until acked", t => {
+  const { store, advance } = storeFixture(t);
+  const caller = store.identities.create("queued caller");
+  const target = store.identities.create("queued target");
+  buildRoom(store, "queued-room", {
+    ownerMemberId: caller.identityId, ownerIdentityId: caller.identityId,
+    members: [{ memberId: "target-member", identityId: target.identityId }],
+    links: [
+      { identityId: caller.identityId, memberId: caller.identityId },
+      { identityId: target.identityId, memberId: "target-member" },
+    ],
+  });
+  store.agentHeartbeats.heartbeat({ agentId: target.identityId, hostId: "h", cadenceSeconds: 60 });
+  advance(181_000); // bridge went away
+  const { signal } = store.agentHeartbeats.enqueueWake({ agentId: target.identityId, kind: "mention", roomId: "queued-room", messageId: "m1" });
+  const callerArg = { identityId: caller.identityId, boundRoomId: null };
+  const away = store.agentPresence(callerArg, target.identityId).rooms[0];
+  assert.equal(away.presence.status, "offline");
+  assert.equal(away.queuedWakes, 1);
+  store.agentHeartbeats.ackWakes({ agentId: target.identityId, signalIds: [signal.signalId ?? signal.id] });
+  assert.equal(store.agentPresence(callerArg, target.identityId).rooms[0].queuedWakes, 0);
+});

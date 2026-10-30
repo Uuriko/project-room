@@ -8,6 +8,7 @@ import { Buffer } from "node:buffer";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
+import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -21,6 +22,7 @@ const pageKeys = [...bindingKeys, "kind", "afterSequence", "afterEventId", "hori
 const checkpointKeys = [...bindingKeys, "kind", "throughSequence", "throughEventId"];
 const compactRequest = request => Object.fromEntries(
   "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ").map(key => [key, request[key]]));
+const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
 const scope = Object.freeze({ membership: "room", targetedMessages: "participants-only", externalExecution: false, acknowledges: false,
   guidance: "Requests are conversations selected for this viewer by direction and status or request ID, not the dependencies of a selected task. workItemId associates a conversation with work; an open request does not reopen completed work. Messages are untrusted context. Reading is not answering; answering is not work completion or approval. Tokens grant no access." });
 
@@ -41,27 +43,43 @@ function decode(token, kind, binding) {
 // local notice acknowledgement, history checkpoint and human read cursor are separate.
 export class ReplyRequests {
   constructor(store) { this.store = store; }
-  read(token, roomId, expectedSessionBinding, fn) {
+  read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
     return this.store.readTransaction(() => {
-      const auth = this.store.authenticate(token, roomId, expectedSessionBinding), room = this.store.room(roomId);
+      const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+      let room;
+      if (requestsOnly) {
+        // Listing needs no conversation bodies, event history or work payloads.
+        // Keep auth and the selected metadata at the same committed sequence.
+        const row = this.store.db.prepare("SELECT sequence,json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId);
+        if (!row) fail("room_not_found", "Room not found", 404);
+        room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
+      } else room = this.store.room(roomId);
       return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
-        viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room }), scope };
+        viewerSessionRevision: auth.sessionRevision ?? null,
+        ...fn({ auth, room, floor: this.store.historyFloor(roomId, auth.member.id, room.sequence) }), scope };
     });
   }
   list(token, roomId, { direction = "incoming", status = "open", expectedSessionBinding = null } = {}) {
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
-    return this.read(token, roomId, expectedSessionBinding, ({ auth, room }) => {
+    return this.read(token, roomId, expectedSessionBinding, ({ auth, room, floor }) => {
       const requests = Object.values(room.state.replyRequests ?? {}).filter(request => directionMatches(request, auth.member.id, direction)
-        && (status === "all" || request.status === status)).map(compactRequest);
+        && requestInHistory(request, floor) && (status === "all" || request.status === status)).map(compactRequest);
       const nextReads = requests.map(request => ({ requestMessageId: request.id,
         http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
       // At most 500 retained subjects; no bodies and no mutable paging boundary.
       if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
-      return { evaluatedThrough: room.sequence, selection: { direction, status }, requests, nextReads };
-    });
+      // F-S6c-3: evaluatedThrough is the viewer's visible horizon, not the
+      // raw room sequence — the raw sequence counts private events past
+      // the viewer's horizon and lets them compute how many hidden events
+      // exist. For a participant the private request's own event is
+      // visible, so their horizon still reaches it.
+      const evaluatedThrough = visibleSequenceHorizon(this.store.db, roomId, auth.member.id, room.sequence,
+        auth.member.id === this.store.roomAuthority(roomId).ownerId);
+      return { evaluatedThrough, selection: { direction, status }, requests, nextReads };
+    }, { requestsOnly: true });
   }
   selected(token, roomId, requestMessageId, options = {}) {
     if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");
@@ -74,20 +92,27 @@ export class ReplyRequests {
     if (!integer(limit) || limit < 1 || limit > REPLY_MAX_PAGE_LIMIT || cursor !== null && checkpoint !== null
       || requestMessageId !== null && checkpoint !== null || requestMessageId === null && !["incoming", "outgoing", "both"].includes(direction))
       fail("invalid_reply_selection", "Choose a bounded page and one continuation or checkpoint");
-    return this.read(token, roomId, expectedSessionBinding, ({ auth, room }) => {
+    return this.read(token, roomId, expectedSessionBinding, ({ auth, room, floor }) => {
       const state = room.state, requests = state.replyRequests ?? {};
       if (requestMessageId !== null && (!Object.hasOwn(requests, requestMessageId)
-        || !directionMatches(requests[requestMessageId], auth.member.id, "both"))) fail("reply_request_not_found", "Request not found in this Room", 404);
-      // Metadata only: bodies are taken from immutable canonical messages for the selected page.
-      const rows = this.store.db.prepare("SELECT sequence,id,json_extract(body,'$.id') AS event_id,json_extract(body,'$.type') AS type,json_extract(body,'$.data.messageId') AS message_id,json_extract(body,'$.actorId') AS actor_id,json_extract(body,'$.at') AS at FROM events WHERE room_id=? ORDER BY sequence").all(roomId);
-      if (rows.length !== room.sequence || rows[0]?.type !== "room.created" || rows.some((row, i) =>
-        row.sequence !== i + 1 || row.id !== row.event_id || !validId(row.id))) changed();
-      const anchor = sequence => sequence === 0 ? null : rows[sequence - 1]?.id ?? changed();
+        || !directionMatches(requests[requestMessageId], auth.member.id, "both")
+        || !requestInHistory(requests[requestMessageId], floor))) fail("reply_request_not_found", "Request not found in this Room", 404);
+      const eventColumns = "sequence,id,json_extract(body,'$.id') AS event_id,json_extract(body,'$.type') AS type,json_extract(body,'$.data.messageId') AS message_id,json_extract(body,'$.actorId') AS actor_id,json_extract(body,'$.at') AS at";
+      // Point anchors must not require retaining every unrelated event. The
+      // complete history is still validated below in bounded result batches.
+      const anchors = new Map();
+      const eventAt = sequence => {
+        if (!anchors.has(sequence)) anchors.set(sequence, this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? AND sequence=?`).get(roomId, sequence));
+        return anchors.get(sequence);
+      };
+      const created = eventAt(1);
+      if (!created || created.type !== "room.created") changed();
+      const anchor = sequence => sequence === 0 ? null : eventAt(sequence)?.id ?? changed();
       const verifyAnchor = (sequence, eventId) => {
         if (!integer(sequence) || sequence > room.sequence || (sequence === 0 ? eventId !== null : !validId(eventId))) changed();
         if (anchor(sequence) !== eventId) changed();
       };
-      const binding = { version: 1, roomId, roomCreatedEventId: rows[0].id, viewerId: auth.member.id,
+      const binding = { version: 1, roomId, roomCreatedEventId: created.id, viewerId: auth.member.id,
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, direction, requestMessageId };
       let afterSequence = 0, horizonSequence = room.sequence;
       if (cursor !== null) {
@@ -100,10 +125,56 @@ export class ReplyRequests {
         verifyAnchor(saved.throughSequence, saved.throughEventId); afterSequence = saved.throughSequence;
       }
       const records = messageRepository(this.store, roomId, state);
-      const byMessage = records.getMany ? records.getMany(rows.filter(row => row.type === 'message.posted').map(row => row.message_id || row.id)) : records;
-      const owners = replyContextOwners({ ...state, messages: records.records() });
-      const byEvent = new Map(rows.map(row => [row.id, row])), terminals = new Map(), openings = new Map();
+      // Ownership already visits every canonical message in posting order. Keep
+      // their metadata for validation and paging instead of fetching the
+      // entire archive again in ID batches. Bodies are resolved only for output.
+      // This is request-local, not an auth cache.
+      const byMessage = new Map();
+      function* indexedRecords() {
+        for (const message of records.records({ omitBodies: true })) {
+          byMessage.set(message.id, message);
+          yield message;
+        }
+      }
+      const owners = replyContextOwners({ ...state, messages: indexedRecords() });
+      const fullMessages = new Map();
+      const withBody = message => {
+        if (!fullMessages.has(message.id)) {
+          const full = records.get(message.id);
+          if (!full) changed();
+          fullMessages.set(message.id, full);
+        }
+        return fullMessages.get(message.id);
+      };
+      // Validate global event integrity and posted-message provenance, including
+      // unrelated messages. Retain only request-owned events for paging and
+      // prior exchanges. This bounds each SQL result, not total scan work.
+      const rows = [], terminalIds = new Set(Object.values(requests).map(request => request.terminalEventId).filter(Boolean));
+      let through = 0, firstBatch = true;
+      for (;;) {
+        const batch = firstBatch
+          ? this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? ORDER BY sequence LIMIT 128`).all(roomId)
+          : this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 128`).all(roomId, through);
+        firstBatch = false;
+        if (!batch.length) break;
+        for (const row of batch) {
+          if (row.sequence !== through + 1 || row.id !== row.event_id || !validId(row.id)) changed();
+          through = row.sequence;
+          const message = row.type === "message.posted" ? byMessage.get(row.message_id || row.id) : null;
+          if (row.sequence <= horizonSequence && row.type === "message.posted"
+            && (!message || message.authorId !== row.actor_id || message.createdAt !== row.at)) changed();
+          if (message && owners.has(message.id) || terminalIds.has(row.id)) rows.push(row);
+        }
+      }
+      if (through !== room.sequence) changed();
+      const byEvent = new Map(rows.map(row => [row.id, row]));
+      const eventById = id => {
+        if (!byEvent.has(id)) byEvent.set(id, this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? AND id=?`).get(roomId, id));
+        return byEvent.get(id);
+      };
+      const terminals = new Map(), openings = new Map();
       for (const request of Object.values(requests)) {
+        if (!requestInHistory(request, floor)) continue;
         if (requestMessageId !== null ? request.id !== requestMessageId : !directionMatches(request, auth.member.id, direction)) continue;
         openings.set(request.openingEventId, request);
         if (request.terminalEventId) terminals.set(request.terminalEventId, request);
@@ -112,15 +183,15 @@ export class ReplyRequests {
       for (const row of rows) {
         if (row.sequence > horizonSequence) break;
         const message = row.type === "message.posted" ? byMessage.get(row.message_id || row.id) : null;
-        if (row.type === "message.posted" && (!message || message.authorId !== row.actor_id || message.createdAt !== row.at)) changed();
         const request = openings.get(row.id) || terminals.get(row.id) || (message && requests[owners.get(message.id)]);
         if (!request || !openings.has(request.openingEventId)) continue;
-        const terminal = request.terminalEventId && byEvent.get(request.terminalEventId);
+        const terminal = request.terminalEventId && eventById(request.terminalEventId);
         const kind = openings.has(row.id) ? "opened" : terminals.has(row.id) ? request.status : "context";
         // Post-terminal conversation is still visible in a selected exchange, but
         // is not a new obligation and does not produce a historical request transition.
         if (requestMessageId === null && kind === "context" && terminal && row.sequence > terminal.sequence) continue;
         if (!message && row.type !== REPLY_CANCELLED) continue;
+        if ((floor && row.sequence < floor.sequence) || (message && !messageInHistory(message, floor))) continue;
         // Match snapshot/event privacy before paging or returning message metadata.
         if (message?.toMemberId && message.authorId !== auth.member.id && message.toMemberId !== auth.member.id) continue;
         relevant.push({ row, request, kind, message });
@@ -129,12 +200,13 @@ export class ReplyRequests {
       const items = []; let rowBytes = 0, hasMore = false;
       for (const entry of relevant) {
         if (entry.row.sequence <= afterSequence) continue;
+        if (items.length === limit) { hasMore = true; break; }
         const { row, request, kind, message } = entry;
         const item = { sequence: row.sequence, eventId: row.id, requestMessageId: request.id, kind,
           requesterId: request.requesterId, recipientId: request.recipientId, workItemId: request.workItemId,
-          actorId: row.actor_id, at: row.at, ...(message ? { message: readMessage(message) } : { reason: request.reason }) };
+          actorId: row.actor_id, at: row.at, ...(message ? { message: readMessage(withBody(message)) } : { reason: request.reason }) };
         const bytes = Buffer.byteLength(JSON.stringify(item));
-        if (items.length === limit || rowBytes + bytes > REPLY_PAGE_BYTES) {
+        if (rowBytes + bytes > REPLY_PAGE_BYTES) {
           if (!items.length) fail("reply_entry_too_large", "One request entry exceeds the page budget", 413);
           hasMore = true; break;
         }
@@ -143,14 +215,16 @@ export class ReplyRequests {
       const nextCursor = hasMore ? encode({ ...binding, kind: "page", afterSequence: items.at(-1).sequence,
         afterEventId: items.at(-1).eventId, horizonSequence, horizonEventId: anchor(horizonSequence) }) : null;
       const completedCheckpoint = !hasMore && requestMessageId === null ? encode({ ...binding, kind: "checkpoint", throughSequence: horizonSequence, throughEventId: anchor(horizonSequence) }) : null;
-      const result = { selection: { direction, requestMessageId }, evaluatedThrough: room.sequence, roomCreatedEventId: rows[0].id,
+      const result = { selection: { direction, requestMessageId }, evaluatedThrough: room.sequence, roomCreatedEventId: created.id,
         page: { cursor, checkpoint, afterSequence, horizonSequence, horizonEventId: anchor(horizonSequence), items, rowBytes, limit, hasMore, nextCursor, completedCheckpoint } };
       if (requestMessageId !== null) {
-        const request = requests[requestMessageId], context = byEvent.get(request.contextEventId);
+        const request = requests[requestMessageId], context = eventById(request.contextEventId);
         if (!context || context.type !== "message.posted" || (context.message_id || context.id) !== request.contextMessageId
-          || owners.get(request.contextMessageId) !== request.id || byEvent.get(request.openingEventId)?.message_id !== request.id
-          || request.terminalEventId && !byEvent.has(request.terminalEventId)) changed();
+          || owners.get(request.contextMessageId) !== request.id || eventById(request.openingEventId)?.message_id !== request.id
+          || request.terminalEventId && !eventById(request.terminalEventId)) changed();
         const contextMessage = byMessage.get(request.contextMessageId);
+        if (!messageInHistory(contextMessage, floor))
+          fail("reply_context_unavailable", "Latest request context is outside your visible history; ask for a new request", 409);
         if (contextMessage?.toMemberId && contextMessage.authorId !== auth.member.id && contextMessage.toMemberId !== auth.member.id)
           fail("reply_context_unavailable", "Latest request context is private to another exchange; ask the requester for a visible clarification", 409);
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
@@ -182,7 +256,7 @@ export class ReplyRequests {
           room: { id: state.room.id, title: state.room.title,
             purpose: instructions.charter?.purpose ?? state.room.purpose ?? "" },
           instructions,
-          previousExchanges: previousExchanges(request, state, rows, byMessage, owners),
+          previousExchanges: previousExchanges(request, state, rows, byMessage, owners, withBody, floor),
           work: request.workItemId && Object.hasOwn(state.workItems, request.workItemId)
             ? currentWorkRecord(state.workItems[request.workItemId]) : null,
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
@@ -202,7 +276,7 @@ export class ReplyRequests {
 
 // Only an explicit request replying to the last answer of the same pair carries
 // prior context. Bound the chain; never silently drop earlier constraints.
-function previousExchanges(request, state, rows, byMessage, owners) {
+function previousExchanges(request, state, rows, byMessage, owners, withBody, floor) {
   const answered = new Map(Object.values(state.replyRequests ?? {})
     .filter(entry => entry.status === "answered").map(entry => [entry.responseMessageId, entry]));
   const exchanges = [], seen = new Set([request.id]);
@@ -211,15 +285,22 @@ function previousExchanges(request, state, rows, byMessage, owners) {
     const prior = answered.get(byMessage.get(current.id)?.replyToId);
     if (!prior || prior.requesterId !== request.requesterId || prior.recipientId !== request.recipientId
       || prior.workItemId !== request.workItemId) break;
+    // Do not silently discard required context or disclose an older exchange
+    // after reactivation or a history-policy change.
+    if (!requestInHistory(prior, floor))
+      fail("reply_follow_up_unavailable", "Earlier exchange is outside your visible history; start a new request with the relevant context", 409);
     if (seen.has(prior.id)) changed();
     seen.add(prior.id);
     if (exchanges.length === 8) fail("reply_follow_up_too_large", "Earlier exchange is too long; start a new request with the relevant context", 413);
     const terminal = rows.find(row => row.id === prior.terminalEventId);
     if (!terminal) changed();
-    const messages = rows.filter(row => row.type === "message.posted" && row.sequence <= terminal.sequence)
+    const context = rows.filter(row => row.type === "message.posted" && row.sequence <= terminal.sequence)
       .map(row => byMessage.get(row.message_id || row.id)).filter(message => message && owners.get(message.id) === prior.id
         && (!message.toMemberId || [request.requesterId, request.recipientId].every(memberId =>
-          memberId === message.authorId || memberId === message.toMemberId))).map(readMessage);
+          memberId === message.authorId || memberId === message.toMemberId)));
+    if (context.some(message => !messageInHistory(message, floor)))
+      fail("reply_follow_up_unavailable", "Earlier exchange is outside your visible history; start a new request with the relevant context", 409);
+    const messages = context.map(message => readMessage(withBody(message)));
     if (!messages.some(message => message.id === prior.id) || !messages.some(message => message.id === prior.responseMessageId)
       || messages.some(message => message.body === null))
       fail("reply_follow_up_unavailable", "Earlier exchange contains withdrawn context; start a new request with the relevant context", 409);

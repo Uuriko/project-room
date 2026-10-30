@@ -27,6 +27,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
+import { ownerHeldClaimCopy } from "../src/agent-error.mjs";
 
 const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -545,10 +546,10 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     files: scope.files,
     fileBlocks: scope.fileBlocks,
     blobs,
-    // Dependencies are board-native structure (or lineage from a phantom
-    // card this item grew into): the work item cannot express them, so
-    // an existing row's list is preserved verbatim.
-    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [],
+    // A proposal seeds dependencies on its first Board card. Thereafter the
+    // Board owns the list, including lineage and explicit deletion waivers;
+    // replaying the original declaration must not restore waived edges.
+    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [...(item.dependsOn ?? [])],
     parentClaimId: existing?.parentClaimId ?? null,
     evidenceRefs,
     premiseFlag: null,
@@ -990,10 +991,14 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
   // both lazy tables, which is what the purge registry's optional entry
   // and the health reader assume.
   store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
-  const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
-  const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
-  for (const roomId of roomIds) {
-    if (!force && markers.get(roomId) === WORK_ITEM_BOARD_BACKFILL_VERSION) continue;
+  // A shared store can contain many settled rooms. Keep their IDs/markers
+  // in SQLite; only pending rooms need projection reads and JS allocation.
+  // This still scans room metadata and probes the marker primary-key index.
+  const rooms = force ? store.db.prepare("SELECT id FROM rooms").all()
+    : store.db.prepare(`SELECT rooms.id FROM rooms LEFT JOIN ${WORK_ITEM_BOARD_BACKFILL_TABLE} AS marker
+        ON marker.room_id = rooms.id WHERE marker.version IS NULL OR marker.version != ?`)
+      .all(WORK_ITEM_BOARD_BACKFILL_VERSION);
+  for (const { id: roomId } of rooms) {
     const report = store.transaction(() => backfillRoomWorkItems(store, roomId, { nowMs }));
     aggregate.rooms += 1;
     aggregate.items += report.items;
@@ -1098,7 +1103,18 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // itself is never rewritten here.
   const claimTaking = incoming.type === "claim.acquired" || incoming.type === "claim.renewed";
   if (claimTaking && current && SYNC_ACTIVE.has(current.state) && current.owner && current.owner !== actorId) {
-    refuse(409, "work_claim_conflict", `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`);
+    // DC1-A1: when the claim-taking actor is the room owner and the holder
+    // is a current member, serve the owner-release copy instead of the
+    // "reassign" prescription (same builder as the work-claim routes).
+    let boardRefusal = `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`;
+    try {
+      const authority = typeof store?.roomAuthority === "function" ? store.roomAuthority(roomId) : null;
+      const holder = authority?.members?.[current.owner] ?? null;
+      if (authority?.ownerId && actorId === authority.ownerId && holder && holder.active !== false) {
+        boardRefusal = ownerHeldClaimCopy({ holder: current.owner, leaseExpiresAt: current.leaseExpiresAt ?? null, roomId, claimId });
+      }
+    } catch { /* authority unavailable: keep the generic refusal */ }
+    refuse(409, "work_claim_conflict", boardRefusal);
   }
 
   const events = roomEvents(store, roomId);
