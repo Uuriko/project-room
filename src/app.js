@@ -3271,7 +3271,12 @@ function revealMessage(id) {
   const peer = directMessagePeer(message, session.member.id);
   if (peer) {
     openDirectMessage(peer);
-    if (message.replyToId) switchThread(conversation.rootById.get(id));
+    if (message.replyToId) {
+      switchThread(conversation.rootById.get(id));
+      // A private reply under a public root stays in its direct conversation's
+      // thread: the public thread view never lists addressed messages.
+      if (activeDirectMemberId !== peer) { activeDirectMemberId = peer; syncChannelChrome(); renderMessages(); }
+    }
   }
   else {
     if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
