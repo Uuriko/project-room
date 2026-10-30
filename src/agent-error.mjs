@@ -136,6 +136,64 @@ export const ERROR_REGISTRY = {
       "recovery": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
     }
   },
+  // Operator panel purge (MGMT-PANEL Slice 2): the money/proof clearance
+  // guard and the panel Path-A wrapper refusals.
+  money_bearing_room: {
+    "status": "action_required",
+    "hint": "This room has money or proof rows, so purge would delete its ledger, settlements, or receipts.",
+    "next": [
+      {
+        "command": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+    }
+  },
+  export_required: {
+    "status": "action_required",
+    "hint": "No fresh per-room export is on record for this room.",
+    "next": [
+      {
+        "command": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+    }
+  },
+  room_not_archived: {
+    "status": "action_required",
+    "hint": "This room is not lifecycle-archived, so the panel cannot purge it.",
+    "next": [
+      {
+        "command": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+    }
+  },
+  confirmation_mismatch: {
+    "status": "action_required",
+    "hint": "The typed confirmation does not match this room's title and id.",
+    "next": [
+      {
+        "command": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+    }
+  },
   // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
   // of the dedicated branch #3026 landed for #3021.
   agent_not_registered: {

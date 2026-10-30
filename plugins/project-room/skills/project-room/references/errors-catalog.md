@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-919 rows (878 distinct codes).
+923 rows (882 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -108,6 +108,10 @@ response's own `hint`/`next` when it names something more specific.
 | `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
 | `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
 | `archive_not_ready` | 409 | Message backfill or parity certification is not ready for archive | no | Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run. |
+| `money_bearing_room` | 422 | This room has money or proof rows, so purge would delete its ledger, settlements, or receipts | no | Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan. |
+| `export_required` | 409 | No fresh per-room export is on record for this room | no | Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export. |
+| `room_not_archived` | 422 | This room is not lifecycle-archived, so the panel cannot purge it | no | Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set. |
+| `confirmation_mismatch` | 422 | The typed confirmation does not match this room's title and id | fix+resend | Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again. |
 | `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
