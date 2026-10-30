@@ -11,9 +11,11 @@
 //        node scripts/unit-ci.mjs --affected --base=<sha>
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 import { parseFailingTests } from "./failing-tests.mjs";
 
@@ -117,9 +119,9 @@ export function readJunitFileDurations(path, options = {}) {
  * sidecar when `options.junitPath` is given ({} otherwise or when the
  * sidecar is missing/unparseable).
  *
- * The spec reporter stays on stdout exactly as before — an additional
- * junit reporter writes only to its sidecar file, so the stdout shape
- * scripts/failing-tests.mjs parses and the job log are unchanged.
+ * The spec reporter streams to stdout and a sidecar for failure parsing. A
+ * progress sidecar records unordered starts/completions, and the optional
+ * junit sidecar retains duration evidence. Interrupted runs cannot pass.
  */
 export function runTestFiles(files, options = {}) {
   // A child `node --test` spawned from inside a test-runner process refuses
@@ -129,36 +131,46 @@ export function runTestFiles(files, options = {}) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   const junitPath = options.junitPath ?? null;
-  const args = ["--test"];
-  if (junitPath) {
-    mkdirSync(dirname(resolve(junitPath)), { recursive: true });
-    rmSync(junitPath, { force: true });
-    args.push(
-      "--test-reporter=spec", "--test-reporter-destination=stdout",
-      "--test-reporter=junit", `--test-reporter-destination=${junitPath}`
-    );
+  // Keep the synchronous public helper, but let Node's reporters stream directly
+  // to inherited stdout and durable sidecars instead of buffering in spawnSync.
+  // A cancelled CI job still uploads progress even when JUnit never closes.
+  const temporary = junitPath ? null : mkdtempSync(resolve(tmpdir(), "unit-ci-"));
+  const outputPath = junitPath ? `${junitPath}.spec.log` : resolve(temporary, "output.log");
+  const progressPath = junitPath ? `${junitPath}.progress.ndjson` : resolve(temporary, "progress.ndjson");
+  for (const path of [outputPath, progressPath, junitPath].filter(Boolean)) {
+    mkdirSync(dirname(resolve(path)), { recursive: true });
+    rmSync(path, { force: true });
   }
+  const args = ["--test",
+    "--test-reporter=spec", "--test-reporter-destination=stdout",
+    "--test-reporter=spec", `--test-reporter-destination=${outputPath}`,
+    `--test-reporter=${fileURLToPath(import.meta.url)}`, `--test-reporter-destination=${progressPath}`,
+  ];
+  if (junitPath) args.push("--test-reporter=junit", `--test-reporter-destination=${junitPath}`);
   args.push(...files);
-  // Pipe (not inherit) so failing test names can be parsed out of the
-  // reporter stream for the shard receipt; tee both streams to the console
-  // so the job log keeps its exact old shape.
-  const result = spawnSync(process.execPath, args, {
-    stdio: ["inherit", "pipe", "pipe"],
-    maxBuffer: 256 * 1024 * 1024,
-    env,
-  });
-  if (result.error) throw result.error;
-  const stdout = result.stdout?.toString("utf8") ?? "";
-  const stderr = result.stderr?.toString("utf8") ?? "";
-  process.stdout.write(stdout);
-  process.stderr.write(stderr);
-  const status = result.status ?? 1;
-  // Failing names are advisory: a red shard must still produce its receipt so
-  // the merge gate fails closed on the receipt, and the PR comment step names
-  // the failures instead of pointing at the log.
-  const failures = status === 0 ? [] : parseFailingTests(stdout);
-  const fileDurationsMs = junitPath ? readJunitFileDurations(junitPath) : {};
-  return { status, signal: result.signal, failures, fileDurationsMs };
+  try {
+    const result = spawnSync(process.execPath, args, { stdio: "inherit", env });
+    if (result.error) throw result.error;
+    const stdout = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
+    const status = result.status ?? 1;
+    // Advisory names never override the actual child exit status.
+    const failures = status === 0 ? [] : parseFailingTests(stdout);
+    const fileDurationsMs = junitPath ? readJunitFileDurations(junitPath) : {};
+    return { status, signal: result.signal, failures, fileDurationsMs };
+  } finally {
+    if (temporary) rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+// Completion events arrive independently of the ordered human-readable report,
+// so a stalled early file cannot hide progress from other concurrent files.
+export default async function* progressReporter(source) {
+  for await (const event of source) {
+    if (!["test:dequeue", "test:complete"].includes(event.type)) continue;
+    const { file, name, nesting, details } = event.data;
+    yield JSON.stringify({ at: new Date().toISOString(), type: event.type, file, name, nesting,
+      ...(event.type === "test:complete" ? { passed: event.data.passed, durationMs: details?.duration_ms } : {}) }) + "\n";
+  }
 }
 
 function selectUnitRun(argv, plan) {
