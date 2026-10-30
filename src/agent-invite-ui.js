@@ -52,10 +52,10 @@ export async function mintInviteLink({ requestBody, mintOne, locationLike }) {
 
 // One command the friend runs: room-acp served by this Room, with the real
 // invite link and the chosen name filled in. Single quotes are POSIX-escaped.
-const shellQuote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
+const shellQuote = value => ["'", String(value).replace(/'/g, "'\\''"), "'"].join("");
 export function roomAcpCommand(link, name = "", locationLike = globalThis.location) {
   const base = humanJoinShareBase(locationLike);
-  const parts = ["npx -y --allow-remote=root --package=" + base + "/room-acp.tgz room-acp", shellQuote(link)];
+  const parts = [["npx -y --allow-remote=root --package=", base, "/room-acp.tgz room-acp"].join(""), shellQuote(link)];
   if (name?.trim()) parts.push("--name", shellQuote(name.trim()));
   return parts.join(" ");
 }
@@ -70,6 +70,7 @@ export function installAgentInvites({ client, getState, getSession }) {
   const result = $("#agent-invite-result");
   const button = $("#invite-agents-button");
   if (!dialog || !form || !button) return { sync() {}, reset() {} };
+  if ($("#agent-invite-acp-hint")) $("#agent-invite-acp-hint").textContent = uiText("invite.acp.hint");
 
   let owner = null, generation = null, busy = false, copying = false, minted = null;
   const member = () => getState()?.members[getSession()?.member?.id];
@@ -85,7 +86,7 @@ export function installAgentInvites({ client, getState, getSession }) {
 
   function render() {
     // The sidebar control stays in the DOM so its listener can mint a
-    // permissioned code. The Invite dialog's #growth-agent-code is the
+    // permissioned code. The #growth-agent-code in the Invite dialog is the
     // entry point that reaches it.
     button.hidden = true;
     form.hidden = Boolean(minted);

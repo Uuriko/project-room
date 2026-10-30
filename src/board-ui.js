@@ -665,14 +665,14 @@ export function claimThreadHtml(thread, statusKey = "board.thread.empty") {
       .filter(value => typeof value === "string" && value).join(" · ");
     const kind = escapeHtml(entry.kind ?? "");
     const at = escapeHtml(entry.at ?? "");
-    return `<li data-thread-kind="${kind}"><time>${at}</time> ${escapeHtml(detail)}</li>`;
+    return uiText("board.thread.entry", { kind, at, detail: escapeHtml(detail) });
   }).join("");
 }
 
 function claimThreadDisclosure(item) {
   const id = escapeHtml(item.id);
   const label = escapeHtml(uiText("board.thread.summary"));
-  const summary = `<summary data-claim-action="thread" data-claim-id="${id}">${label}</summary>`;
+  const summary = uiText("board.thread.disclosureSummary", { id, label });
   return `<details class="claim-thread">${summary}<ol class="claim-thread-entries" aria-live="polite"></ol></details>`;
 }
 
@@ -1234,7 +1234,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       const list = details?.querySelector(".claim-thread-entries");
       if (!details || details.open || !list) return; // closing, or nothing to fill
       list.innerHTML = claimThreadHtml(null, "board.thread.loading");
-      client.request(`${client.path("/work-claims")}/${encodeURIComponent(id)}/thread`)
+      client.request([client.path("/work-claims"), encodeURIComponent(id), "thread"].join("/"))
         .then(thread => { list.innerHTML = claimThreadHtml(thread); })
         .catch(() => { list.innerHTML = claimThreadHtml(null, "board.thread.failed"); });
       return;

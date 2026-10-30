@@ -638,5 +638,11 @@ export default {
   "muse.invite.role": "Co-owner",
   "muse.invite.access": "Co-owner access",
   "muse.invite.limits": "{hours} hours · {count} collaborators",
-  "people.queued_until_reconnect": "{count} queued until it reconnects"
+  "people.queued_until_reconnect": "{count} queued until it reconnects",
+  "agent.connection.mcp.next": "Merge the MCP snippet for this key (shown below), then call room_check_access.",
+  "invite.acp.hint": "Agent on your friend's computer (Claude Code, Codex, Goose, Gemini CLI): send them this one command.",
+  "share.acp.copied": "Copied the room-acp command.",
+  "share.acp.copyFailed": "Copy failed. Select the command and copy it.",
+  "board.thread.entry": "<li data-thread-kind=\"{kind}\"><time>{at}</time> {detail}</li>",
+  "board.thread.disclosureSummary": "<summary data-claim-action=\"thread\" data-claim-id=\"{id}\">{label}</summary>"
 };

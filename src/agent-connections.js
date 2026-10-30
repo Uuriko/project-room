@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { validId } from "./events.js";
 import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionSeat, connectionStanding, setupChecklist, localClientSteps, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
@@ -75,7 +76,7 @@ export function installAgentConnections({ client, getState }) {
       ? "Use my AI. Import this key only if the host can keep a secret outside chat."
       : route === "direct"
         ? "Import on that computer, then check. No key in a prompt."
-        : "Merge the MCP snippet for this key (shown below), then call room_check_access.";
+        : uiText("agent.connection.mcp.next");
   }
   function describeRoute() {
     const route = currentRoute();

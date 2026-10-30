@@ -535,8 +535,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#share-acp-copy")?.addEventListener("click", async () => {
     const command = $("#share-acp-command")?.textContent ?? "";
     if (!command) return;
-    try { await navigator.clipboard.writeText(command); status("Copied the room-acp command."); }
-    catch { status("Copy failed. Select the command and copy it."); }
+    try { await navigator.clipboard.writeText(command); status(uiText("share.acp.copied")); }
+    catch { status(uiText("share.acp.copyFailed")); }
   });
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
