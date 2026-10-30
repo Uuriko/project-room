@@ -4294,6 +4294,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
          ;
+        // DC4-A1 cure: handleWorkClaims throws the stale-round release
+        // refusal (body on the error) for direct-call consumers; this HTTP
+        // transport converts that one thrown body-carrying error into the
+        // returned 409 response, exactly as before.
+        try {
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
@@ -4308,6 +4313,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
             return current;
           }, helpers: { json, reject, body } });
+        } catch (error) {
+          if (Number.isInteger(error?.status) && error.body && error.code) return json(res, error.status, error.body);
+          throw error;
+        }
       }
       // Matchmaking (arrival surface): an agent declares what it is here for,
       // a room declares what an opening needs, and the pure matcher pairs
