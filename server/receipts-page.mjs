@@ -74,6 +74,15 @@ const when = value => {
 const verificationLabel = state => state === "verified" ? "Member-verified completion"
   : state === "self_attested" ? "Self-attested completion" : null;
 
+// MI-021: show a readable, zone-labelled time; datetime keeps the raw ISO.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function readableUtc(value) {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return String(value ?? "");
+  const d = new Date(time), pad = n => String(n).padStart(2, "0");
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
@@ -207,7 +216,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const disputeDecider = typeof receipt.settlement?.disputeDecider === "string" && receipt.settlement.disputeDecider
     ? `<div><dt>Dispute decider</dt><dd>${escapeHtml(receipt.settlement.disputeDecider)}</dd></div>`
     : "";
-  const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
+  const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(readableUtc(receipt.mergedAt))}</time></dd></div>` : "";
   const tierLabel = verificationLabel(receipt.verification?.state);
   const verificationTier = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
   const hashes = receipt.hashes?.length
@@ -339,7 +348,7 @@ ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
 ${pr}${merged}${verificationTier}${hashes}${payout}${disputeDecider}${work}${lot}
-<div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
+<div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(readableUtc(receipt.at))}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
 ${shareSection(receipt)}
