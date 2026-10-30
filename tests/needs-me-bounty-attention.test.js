@@ -15,6 +15,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
+import { createRoomServer } from '../server/http.mjs';
 import { collectNeedsMe, bountyAttentionOf } from '../server/needs-me.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -44,7 +45,7 @@ test('decider leg: exactly one row for the seated decider, with dispute age and 
   assert.equal(row.poster, POSTER);
   assert.equal(row.claimant, WORKER);
   assert.equal(row.amount, 4);
-  assert.match(row.next, /bounties\/B-1\/dispute-decide$/);
+  assert.match(row.next, /bounties\/B-1\/dispute\/decide$/);
   // Grounds-free (charter §3): no evidence, criteria, or grounds content.
   assert.equal(row.evidence, undefined);
   assert.equal(row.criteria, undefined);
@@ -263,6 +264,67 @@ test('UT2 window: decider/poster/worker needs-me during and after a live ruling'
     const rows = collectNeedsMe(store, identity.secret, {}).bountyAttention?.flatMap(s => s.top) ?? [];
     assert.deepEqual(rows.map(r => r.why), [`bounty_${settled.state}`], 'outcome recorded once');
   }
+});
+
+test('HTTP end-to-end: the decider row\'s emitted next routes and executes dispute/decide', async t => {
+  // Cure pin for the route-string drift: the decider row used to emit
+  // `POST .../bounties/{id}/dispute-decide`, a URL no registered route
+  // matches (the registered route is .../dispute/decide), so a client
+  // following the emitted next got the router's 404. This test does not
+  // string-match a constant: it drives the real needs-me code path over
+  // the real HTTP surface, takes the emitted `next` verbatim, issues it
+  // against the running server, and asserts the dispute-decide HANDLER
+  // executed (200 + the ruling landed), not the router's 404.
+  const { store, poster, worker, decider, memberOf } = setup(t);
+  const escrow = store.bountyEscrow;
+  escrow.ensureGenesis('board');
+  const { bounty: posted } = escrow.postBounty('board', {
+    poster: memberOf(poster), title: 'HTTP bounty', criteria: 'do it', amount: 4,
+    deadline: new Date(T0 + 3 * 24 * 3600000).toISOString(), disputeDeciderId: memberOf(decider),
+  });
+  escrow.fundBounty('board', posted.bountyId, { funder: memberOf(poster) });
+  escrow.claimBounty('board', posted.bountyId, { claimant: memberOf(worker) });
+  escrow.submitWork('board', posted.bountyId, { claimant: memberOf(worker),
+    evidence: { evidenceUrl: 'https://example.com/1', summary: 'done' } });
+  escrow.acceptWork('board', posted.bountyId, { acceptor: memberOf(poster), verifierAttestation: attest() });
+  escrow.disputeBounty('board', posted.bountyId, { challenger: memberOf(poster), grounds: 'not complete', bond: 1 });
+  assert.equal(escrow.getBounty('board', posted.bountyId).state, 'disputed');
+
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  // Obtain the actual decider row from the real needs-me HTTP read.
+  const pageRes = await fetch(`${origin}/api/needs-me`, {
+    headers: { authorization: `Bearer ${decider.secret}` },
+  });
+  assert.equal(pageRes.status, 200);
+  const page = await pageRes.json();
+  const rows = page.bountyAttention?.flatMap(s => s.top) ?? [];
+  const row = rows.find(r => r.why === 'dispute_awaiting_ruling');
+  assert.ok(row, 'decider row present over HTTP');
+  const [method, path] = row.next.split(' ');
+  assert.equal(method, 'POST');
+  assert.ok(path.startsWith(`/api/rooms/board/bounties/${posted.bountyId}/`), 'emitted path names this bounty');
+
+  // Issue the emitted string verbatim, authenticated as the decider.
+  const deciderKey = store.issueAccessKey('board', memberOf(decider));
+  const decideRes = await fetch(`${origin}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${deciderKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ outcome: 'upheld', reasonCodes: ['receipt-incomplete'] }),
+  });
+  const decideBody = await decideRes.json().catch(() => null);
+  assert.notEqual(decideRes.status, 404, 'emitted next must route, not 404');
+  assert.equal(decideRes.status, 200, `handler executed, got ${decideRes.status}: ${JSON.stringify(decideBody)}`);
+  // The handler's ruling landed: the bounty left `disputed` for a terminal state.
+  const settled = escrow.getBounty('board', posted.bountyId);
+  assert.ok(['paid', 'refunded'].includes(settled.state), `decision landed, bounty now ${settled.state}`);
+  assert.equal(decideBody?.bounty?.state, settled.state);
 });
 
 test('bountyAttention never moves the needs-me cursor', t => {

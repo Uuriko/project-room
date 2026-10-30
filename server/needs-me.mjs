@@ -721,7 +721,7 @@ export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowM
       };
       if (isDecider) {
         add({ ...base, role: "decider", why: "dispute_awaiting_ruling", ...dispute,
-          next: `POST /api/rooms/${encodeURIComponent(roomId)}/bounties/${encodeURIComponent(bounty.bountyId)}/dispute-decide` });
+          next: `POST /api/rooms/${encodeURIComponent(roomId)}/bounties/${encodeURIComponent(bounty.bountyId)}/dispute/decide` });
       }
       if (isPoster) add({ ...base, role: "poster", why: "dispute_open", ...dispute, next: listNext });
       if (isWorker) add({ ...base, role: "worker", why: "dispute_open", ...dispute, next: listNext });
