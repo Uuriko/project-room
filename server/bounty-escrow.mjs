@@ -2184,6 +2184,15 @@ export class BountyEscrow {
       // criterion with a pass|fail verdict. The citations name the rubric
       // version that governed the work, so arbiters can re-check against it.
       const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
+      // Register row 5 (F-S2a-2): acceptance is the approval verdict — a
+      // cited `fail` is a negative verdict, not an approval, and must not
+      // attribute or pay. Refuse here, before any movement; the work stays
+      // submitted and the fail path remains rejectWork (worker settles at
+      // zero). The dispute arbiter's rubric re-check is a different call
+      // site and may still record fail citations.
+      const failedCitations = citations.filter(c => c.verdict !== "pass");
+      check(failedCitations.length === 0, "verdict_not_pass",
+        `acceptance requires a pass verdict on every pinned rubric criterion; criterion(s) ${failedCitations.map(c => c.criterionId).join(", ")} cited "fail" — reject the work instead of accepting it`);
       const at = isoNow(this.nowMs());
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
