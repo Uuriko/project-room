@@ -9,7 +9,7 @@ on:
   issue_comment:
     types: [created]
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *" # CI-DIET C4: was */10 — the poll is a backstop; the issue_comment trigger is the real door and is unchanged.
   workflow_dispatch:
 
 permissions:
