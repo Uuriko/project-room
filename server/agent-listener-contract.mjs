@@ -75,3 +75,14 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   }
   return { ...result, listener };
 }
+
+// Graceful disconnect (#5382 follow-up): resolve the stored host id the same
+// way a heartbeat does, then mark it gone and release the caller's lease.
+export function disconnectWithListener(store, auth, data, { roomKey = false } = {}) {
+  let hostId = data.hostId;
+  if (roomKey) hostId = roomKeyHostId(auth, data.hostId);
+  else if (auth.scopedKey) hostId = scopedKeyHostId(auth, data.hostId);
+  const fencingToken = data.disconnect === true ? null : data.disconnect.fencingToken ?? null;
+  const roomId = auth.roomId ?? (data.listenerLease && data.listenerLease !== true ? data.listenerLease.roomId : null);
+  return store.agentHeartbeats.disconnectHost({ agentId: auth.identityId, hostId, roomId, fencingToken });
+}

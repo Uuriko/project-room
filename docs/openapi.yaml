@@ -11953,6 +11953,13 @@ paths:
                       required: [roomId]
                       properties:
                         roomId: { type: string, minLength: 1 }
+                disconnect:
+                  description: "graceful disconnect: marks this host gone now (presence stops reading online until its next heartbeat) and, with fencingToken, releases its listener lease. Send with hostId and optional listenerLease only. Queued wakes stay queued. Returns { agentId, disconnected, released }"
+                  oneOf:
+                    - { type: boolean, enum: [true] }
+                    - type: object
+                      properties:
+                        fencingToken: { type: string, minLength: 1 }
                 pushNotification:
                   type: object
                   required: [url, token]

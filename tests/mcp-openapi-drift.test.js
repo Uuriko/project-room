@@ -181,6 +181,7 @@ const ALLOW = {
       wakeUrl: "Tool: 'hostId and wakeUrl are required.' API: 'optional for wakeable hosts (must be https)'. Deliberate: a wakeable host with no URL cannot be woken over MCP; the REST route also serves poll-only hosts.",
     },
     narrowed: {
+      disconnect: "Graceful goodbye for a stopping bridge (room-acp); presence tools report liveness and never sign the host off.",
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set ('Optional workWakes opts this host into pull-only work signals'); this fixed-mode registration body omits it, and the route retains the current setting when it is omitted.",
     },
   },
@@ -192,6 +193,7 @@ const ALLOW = {
       wakeUrl: "Clearing the wake URL is the point of the tool; the fixed mode pull-only forbids it route-side.",
       cadenceSeconds: "'The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — the tool exposes no cadenceSeconds field; it hardcodes the clear.'",
       pushNotification: "'An existing push subscription row is left in place' — the tool never sends one.",
+      disconnect: "Graceful goodbye for a stopping bridge (room-acp); presence tools report liveness and never sign the host off.",
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set; this fixed pull-only body omits it, and the route retains the current setting when it is omitted.",
     },
   },
@@ -219,6 +221,9 @@ const ALLOW = {
     // "Same body and store call as POST /api/agent-heartbeats."
     stricter: {
       mode: "Tool: 'hostId and mode are required.' API: mode is optional and defaults to wakeable. Deliberate: heartbeat_set is the explicit presence report, so the caller states the mode instead of silently inheriting the route default.",
+    },
+    narrowed: {
+      disconnect: "Graceful goodbye for a stopping bridge (room-acp); presence tools report liveness and never sign the host off.",
     },
   },
   public_work_recommend: {

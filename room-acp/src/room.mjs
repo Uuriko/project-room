@@ -43,6 +43,10 @@ export class RoomClient {
     };
   }
 
+  disconnect({ hostId, fencingToken = null }) {
+    return this.request("/api/agent-heartbeats", { body: { hostId, disconnect: fencingToken ? { fencingToken } : true, listenerLease: { roomId: this.roomId } } });
+  }
+
   heartbeat({ hostId, cadenceSeconds = 30 }) {
     return this.request("/api/agent-heartbeats", { body: { hostId, mode: "wakeable", cadenceSeconds, listenerLease: { roomId: this.roomId } } });
   }

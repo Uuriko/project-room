@@ -27,7 +27,7 @@ import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscrip
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
-import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { heartbeatWithListener, disconnectWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -850,7 +850,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // the HTTP receiving path can hold exclusive queue ownership with a
     // fencing token (see ackHeartbeats). Scoped credentials (room key, or
     // a rak_ key bound to one room) run the room-scoped listener contract.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease"];
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease", "disconnect"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId"))
       reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes and listenerLease are optional");
@@ -859,6 +859,21 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // { roomId } names the room queue to lease — the form the standard
     // room-pinned wake client sends. A scoped credential may only lease
     // its bound room; an identity credential must belong to the room.
+    // Graceful disconnect: { hostId, disconnect: true | { fencingToken } }
+    // marks this host gone now and releases its lease. Nothing else rides it.
+    if (data.disconnect !== undefined) {
+      const d = data.disconnect;
+      const ok = d === true || (d && typeof d === "object" && !Array.isArray(d)
+        && Object.keys(d).every(k => k === "fencingToken") && (d.fencingToken === undefined || (typeof d.fencingToken === "string" && d.fencingToken.length > 0)));
+      if (!ok || Object.keys(data).some(k => !["hostId", "disconnect", "listenerLease"].includes(k)) || !validListenerLease(data.listenerLease))
+        reject(422, "invalid_heartbeat", "disconnect must be true or { fencingToken }, sent with hostId and optional listenerLease only");
+      const result = store.transaction(() => {
+        auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+        if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
+        return disconnectWithListener(store, auth, data, { roomKey });
+      });
+      return json(res, 200, { agentId: auth.identityId, ...result });
+    }
     if (!validListenerLease(data.listenerLease))
       reject(422, "invalid_heartbeat", "listenerLease must be true or { roomId } when present");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);

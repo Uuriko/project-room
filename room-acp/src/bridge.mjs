@@ -168,6 +168,10 @@ export class Bridge {
     }
     await this.queue.idle();
     this.host.stop();
+    // Say goodbye so presence stops reading "listening" right away and
+    // mentions show as queued. Best effort: a crash still ages out.
+    try { await this.room.disconnect({ hostId: this.connection.hostId, fencingToken: this.fencingToken }); } catch { /* best effort */ }
+    this.fencingToken = null;
     return this.stopReason ?? "stopped";
   }
 
