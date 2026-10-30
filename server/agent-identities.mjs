@@ -342,7 +342,7 @@ const SIGNUP_NEXT = Object.freeze([
   // Burs-IA steal A1: the mint response names the tools-list surface so a
   // cold agent learns its capabilities without reading llms.txt.
   Object.freeze({ action: "list-tools", method: "POST", path: "/mcp",
-    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile." }),
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\", params: { profile: \"full\" } } to /mcp with Authorization: Bearer <secret> — profile full lists every tool this identity can call, including room_join and room_create; the default profile is the short core list. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile." }),
 ]);
 
 export class AgentIdentities {
