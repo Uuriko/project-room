@@ -41,6 +41,23 @@ data into public artifacts or third-party design tools.
 
 ## Capture and review
 
+Generate the local gallery with the existing Playwright installation:
+
+```sh
+node scripts/design-evidence-gallery.mjs --out test-results/design-review
+```
+
+Use a new output directory for each run. Open `index.html` in that directory;
+`manifest.json` contains screenshot digests, source provenance and test outcomes.
+The command runs selected existing browser journeys against disposable local
+stores. It neither contacts production nor updates visual baselines. Its overall
+result describes capture/test completion; inspect accessibility findings separately.
+Agent discovery and handoff have a direct tool check:
+
+```sh
+node --test tests/agent-handoff.test.js tests/agent-discovery-transport.test.js
+```
+
 Reuse existing browser checks and the [visual helper](../scripts/visual-regression-helper.mjs).
 Record commit and dirty-tree status, browser/version, viewport, theme, fixture and
 command. Keep source fixtures with code and generated captures in test artifacts.
