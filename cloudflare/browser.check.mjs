@@ -87,7 +87,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
       }), { times: 1 });
       await guest.goto(returnUrl);
       await guest.locator('#connection-status[data-state="connected"]').waitFor({ state: 'visible' }).catch(async error => {
-        const state = await guest.evaluate(() => ({ mainHidden: document.querySelector('#main')?.hidden, connection: document.querySelector('#connection-status')?.textContent, state: document.querySelector('#connection-status')?.dataset.state, status: document.querySelector('#status')?.textContent }));
+        const state = await guest.evaluate(() => ({ mainHidden: globalThis.document.querySelector('#main')?.hidden, connection: globalThis.document.querySelector('#connection-status')?.textContent, state: globalThis.document.querySelector('#connection-status')?.dataset.state, status: globalThis.document.querySelector('#status')?.textContent }));
         throw new Error(`Guest return ${visit + 1}: ${JSON.stringify({ streamStatuses, requestFailures, pageErrors, state })}`, { cause: error });
       });
       if (visit === 0) assert.deepEqual(streamStatuses, [429, 200], 'a closed stream recovers automatically after a temporary refusal');

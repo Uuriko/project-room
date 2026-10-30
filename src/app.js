@@ -417,6 +417,11 @@ let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
+let startupRestoreController = null;
+function cancelStartupRestore() { startupRestoreController?.abort(); }
+window.addEventListener("pagehide", cancelStartupRestore);
+window.addEventListener("popstate", cancelStartupRestore);
+window.addEventListener("hashchange", cancelStartupRestore);
 let snapshotAuditView = "full", recordLoading = null, recordLoadFailed = false;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
 let accessEndContext = null;
@@ -699,6 +704,10 @@ const client = new RoomClient({
     $("#rb-ack-button").textContent = "Mark caught up"; $("#return-brief-panel").open = false;
     renderReturnBrief();
     if (keepAccount) {
+      // Startup's bounded restore owns transport failure recovery. Its catch
+      // decides whether to retry or show account access; do not navigate away
+      // from the requested room while that decision is pending.
+      if (startupRestoreController && !startupRestoreController.signal.aborted) return;
       showAccountWorkspace();
       if (!["accepted-room-switch", "invited-room-switch"].includes(endedContext)) confirmAccount();
       // The room credential died while the account is still signed in: say so, and
@@ -4401,6 +4410,7 @@ $("#signout-button").addEventListener("click", async () => {
   }
 });
 $("#refresh-button").addEventListener("click", async () => {
+  cancelStartupRestore();
   if (!state && accountClient.session?.authenticated) {
     if (await confirmAccount()) { showAccountWorkspace(); if (!$("#account-rooms-panel").hidden) loadAccountRooms(); }
     return;
@@ -8092,6 +8102,39 @@ configureAuthPanel();
   }
 }
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
+// Retry only startup's read-only session restoration. Authentication, invite
+// redemption and other landing effects must never be replayed by this loop.
+async function restoreAtStartup(roomId = null) {
+  const controller = new AbortController(), destination = location.href;
+  startupRestoreController?.abort(); startupRestoreController = controller;
+  const cancelled = () => Object.assign(new Error("Startup restore superseded"), { startupCancelled: true });
+  let waited = 0;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      if (controller.signal.aborted || location.href !== destination) throw cancelled();
+      try {
+        const restored = await client.restore(roomId);
+        if (!restored || controller.signal.aborted) throw cancelled();
+        return restored;
+      } catch (error) {
+        if (error.startupCancelled || controller.signal.aborted || location.href !== destination) throw cancelled();
+        const delay = Math.max(250, error.retryAfterMs ?? 1000) * 2 ** attempt;
+        if (error.status !== 429 || attempt >= 3 || !Number.isFinite(delay) || waited + delay > 10000) throw error;
+        // restore's own failure cleanup may advance generation. Capture after
+        // it, then refuse to overwrite any newer sign-in, room or refresh.
+        const generation = client.generation, refreshId = refreshOperationId;
+        waited += delay;
+        setConnectionStatus(uiText("connection.connecting"));
+        await new Promise(resolve => {
+          const finish = () => { clearTimeout(timer); controller.signal.removeEventListener("abort", finish); resolve(); };
+          const timer = setTimeout(finish, delay);
+          controller.signal.addEventListener("abort", finish, { once: true });
+        });
+        if (controller.signal.aborted || client.generation !== generation || refreshOperationId !== refreshId || location.href !== destination) throw cancelled();
+      }
+    }
+  } finally { if (startupRestoreController === controller) startupRestoreController = null; }
+}
 const ready = (async () => {
   const initialResult = await initialSignin;
   // Returning members land on ?room=... after OAuth. Their pending native
@@ -8108,7 +8151,7 @@ const ready = (async () => {
     return;
   }
   if (await resumeEmailVerification()) return;
-  if (restoreRoomSession) { await client.restore(); return; }
+  if (restoreRoomSession) { await restoreAtStartup(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
     resetJourneyPending = true;
@@ -8153,7 +8196,7 @@ const ready = (async () => {
     // different room is dropped and the account flow decides as before.
     if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
       try {
-        const joined = await client.restore();
+        const joined = await restoreAtStartup();
         if (joined?.roomId === requestedRoom) return;
         client.endAccess();
       } catch (error) {
@@ -8182,7 +8225,7 @@ const ready = (async () => {
     }
     if (!requestedRoom) showAccountWorkspace();
     else {
-      try { await client.restore(requestedRoom); }
+      try { await restoreAtStartup(requestedRoom); }
       catch (error) {
         if (![401, 403].includes(error.status)) throw error;
         showAccountWorkspace();
@@ -8210,7 +8253,7 @@ const ready = (async () => {
     }
     if (readLastRoom()) {
       try {
-        await client.restore();
+        await restoreAtStartup();
         return;
       } catch (error) {
         if (![401, 403].includes(error.status)) throw error;
@@ -8220,6 +8263,7 @@ const ready = (async () => {
   syncSessionMenu();
   throw Object.assign(new Error("sign in required"), { status: 401 });
 })().catch(error => {
+  if (error.startupCancelled) return;
   if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
     showAccountWorkspace();
     if (selectedRoomFromLocation()) showRoomAccessNotice();
