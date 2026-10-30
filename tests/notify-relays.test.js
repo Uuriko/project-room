@@ -2,7 +2,8 @@
 // Fetch is injected. Webhook URLs are not echoed in errors.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RelayError } from "../server/channel-adapters/webhook-secret.mjs";
+import net from "node:net";
+import { RelayError, postWebhook } from "../server/channel-adapters/webhook-secret.mjs";
 import {
   validateSlackWebhookUrl, sealSlackWebhookUrl, openSlackWebhookUrl, slackPayload, send as sendSlack
 } from "../server/channel-adapters/slack-webhook.mjs";
@@ -113,6 +114,45 @@ test("a 429 waits out a short Retry-After and reports a long one", async () => {
   assert.equal(deferred.delivered, false);
   assert.equal(deferred.status, 429);
   assert.equal(deferred.retryAt, now + 30_000);
+});
+
+test("a webhook POST dials the address from the DNS check when the name would rebind", async () => {
+  const dialed = [];
+  const original = net.Socket.prototype.connect;
+  net.Socket.prototype.connect = function connect(options) {
+    const lookup = options && typeof options.lookup === "function" ? options.lookup : null;
+    if (lookup) {
+      lookup(options.host, { all: true }, (err, addresses) => {
+        dialed.push({
+          host: options.host,
+          addresses: Array.isArray(addresses) ? addresses.map(item => item.address) : [],
+          error: err ? err.message : null,
+        });
+      });
+    } else {
+      dialed.push({ host: options?.host ?? null, addresses: [], error: "no pinned lookup" });
+    }
+    const error = Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+    process.nextTick(() => this.destroy(error));
+    return this;
+  };
+  let fetched = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetched = true; throw new Error("fetch re-resolved the name"); };
+  try {
+    const result = await postWebhook({
+      url: "https://rebind.invalid/hook",
+      body: { n: 1 },
+      timeoutMs: 500,
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    assert.equal(result.delivered, false);
+    assert.equal(fetched, false);
+    assert.deepEqual(dialed, [{ host: "rebind.invalid", addresses: ["93.184.216.34"], error: null }]);
+  } finally {
+    net.Socket.prototype.connect = original;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("a webhook name that resolves to a private address is not posted", async () => {

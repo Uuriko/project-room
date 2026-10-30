@@ -3,7 +3,7 @@
 //
 // Contract under test: an agent never holds a raw signing secret. Every
 // agent-visible read carries only the opaque sentinel
-// `pr_sentinel_<subscriptionId>`; the single trusted boundary
+// `not-a-secret:<subscriptionId>`; the single trusted boundary
 // (resolveSentinel) swaps it for the real value at dispatch/verify time,
 // server-side; unknown sentinels fail closed. The dispatch path signs
 // with the real value; server-side verification answers valid/invalid.
@@ -18,7 +18,8 @@ const SECRET = "signing-secret-0123456789";
 // The sentinel format is a user-facing handle contract: hardcode the
 // literal prefix, not the module's own helper, so the test fails if the
 // format changes.
-const sentinel = subscriptionId => `pr_sentinel_${subscriptionId}`;
+const sentinel = subscriptionId => `not-a-secret:${subscriptionId}`;
+const legacySentinel = subscriptionId => `pr_sentinel_${subscriptionId}`;
 const SUB = { subscriptionId: "sub_one", agentId: "ai_agent1",
   url: "https://agents.example/hook", events: ["message.posted"], secret: SECRET };
 
@@ -82,6 +83,13 @@ test("server-side verification answers valid/invalid without the raw secret", ()
     subs.verifyDelivery("sub_one",
       { eventType: "message.posted", data: { threadId: "t-1" }, signature: "0".repeat(64) }),
     false, "forged signature fails");
+});
+
+test("a legacy pr_sentinel_ handle still resolves to the same signing secret", () => {
+  const subs = fresh();
+  subs.subscribe(SUB);
+  assert.equal(subs.resolveSentinel(legacySentinel("sub_one")), SECRET);
+  assert.equal(subs.resolveSentinel(sentinel("sub_one")), SECRET);
 });
 
 test("unknown or malformed sentinels fail closed — never null, empty, or another secret", () => {

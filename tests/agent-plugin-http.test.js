@@ -431,7 +431,7 @@ test("subscribe/list/unsubscribe roundtrip; signing secret never returned (senti
   // RC-2026-09-27-2729: the raw signing secret is never returned — not
   // even once. The 201 carries the opaque sentinel instead.
   assert.ok(!("secret" in sub), "no raw signing secret in the 201 body");
-  assert.equal(sub.secretRef, `pr_sentinel_${sub.subscriptionId}`, "sentinel handle on the view");
+  assert.equal(sub.secretRef, `not-a-secret:${sub.subscriptionId}`, "sentinel handle on the view");
   // RC-2026-09-18-039: the 201 names the secret's job and the debugging path.
   assert.deepEqual(sub.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
   assert.equal(sub.next[0].method, "POST");
@@ -445,7 +445,7 @@ test("subscribe/list/unsubscribe roundtrip; signing secret never returned (senti
   const supplied = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/other", events: ["*"], secret: ownSecret }, identity.secret)).json();
   assert.ok(!("secret" in supplied), "caller-supplied secret is not echoed");
-  assert.equal(supplied.secretRef, `pr_sentinel_${supplied.subscriptionId}`);
+  assert.equal(supplied.secretRef, `not-a-secret:${supplied.subscriptionId}`);
   assert.deepEqual(supplied.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
 
   const listed = await (await get(origin, "/api/agent-webhooks", identity.secret)).json();
@@ -484,7 +484,7 @@ test("verify-delivery verifies HMAC server-side; cross-identity reads 404", asyn
   const sub = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/verify", events: ["message.posted"], secret: ownSecret },
     identity.secret)).json();
-  assert.equal(sub.secretRef, `pr_sentinel_${sub.subscriptionId}`);
+  assert.equal(sub.secretRef, `not-a-secret:${sub.subscriptionId}`);
   assert.ok(!("secret" in sub), "no raw secret in the 201");
   const row = f.store.db.prepare("SELECT secret FROM agent_webhook_subs WHERE subscription_id=?").get(sub.subscriptionId);
   assert.equal(row.secret, ownSecret, "the secret persists server-side for signing");

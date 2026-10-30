@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
-import { validAttachmentData, base64DecodedLength } from "./room-attachment-bytes.mjs";
+import { validAttachmentData, base64DecodedLength, mediaTypeToStore } from "./room-attachment-bytes.mjs";
 import { validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -73,11 +73,11 @@ function checkedFile(filename, mediaType, bytes) {
     fail(error.code === "file_too_large" ? 413 : 422, error.code, error.message);
   }
   if (!validated.filename.isWellFormed()) fail(422, "invalid_attachment", "filename must be well-formed text");
-  const type = validated.mimeType.toLowerCase();
-  if (!MEDIA_TYPE.test(type) || BLOCKED_MEDIA_TYPES.has(type) || type.startsWith("application/x-ms") || type.startsWith("application/x-dos")) {
+  const declared = validated.mimeType.toLowerCase();
+  if (!MEDIA_TYPE.test(declared) || BLOCKED_MEDIA_TYPES.has(declared) || declared.startsWith("application/x-ms") || declared.startsWith("application/x-dos")) {
     fail(422, "blocked_media_type", "That media type is not accepted for an inbox attachment");
   }
-  return { filename: validated.filename, mediaType: type };
+  return { filename: validated.filename, mediaType: mediaTypeToStore(declared, bytes) };
 }
 
 function view(row) {
