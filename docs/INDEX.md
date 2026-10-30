@@ -173,6 +173,8 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
 
+[Per-room storage sharding](design/ROOM-SHARDING.md) is the design for one Durable Object per room: current layout, dual-read cutover, routing, and the metrics that decide success. It does not flip the flag.
+
 [Per-room Durable Object cutover](design/ROOM-SHARD-CUTOVER.md) is the operator runbook for the dark `RoomShard` path. The flag stays off until Potter says go, and Codex deploys.
 
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
