@@ -186,6 +186,10 @@ export const hostedRoomTools = [
     buildId: { type: "string", minLength: 1, maxLength: 200 },
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "itemId"]), false),
+  tool("room_work_claim_thread", "Read one Board claim's thread: its claim, PR, CI, review, merge and deploy steps in order, each tagged with a kind. Read-only; same visibility as the claim read, never includes chat. Same data as GET /api/rooms/:roomId/work-claims/:claimId/thread.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, maxLength: 128, description: "Work-claim id whose thread to read." }
+  }, ["roomId", "claimId"])),
   tool("room_work_claim_provenance", "Walk the work-claim provenance graph: given a claim id, return the claims and receipts that build on it directly or transitively through parentClaimId edges, with depth, state, owner and title. Read-only. Same data as GET /api/rooms/:roomId/work-claims/:claimId/provenance. Use it to find what depends on a claim before changing its premise.", schema({
     roomId: roomIdField,
     claimId: { ...idField, maxLength: 128, description: "Work-claim id to walk downstream from." }
