@@ -787,3 +787,21 @@ test("the live-close exemption is kind-scoped: an ordinary claimed -> done still
     assert.ok(store.patrolFindings().some(f => f.kind === "illegal_transition"));
   } finally { store.close(); }
 });
+
+// Delta's replay disproof on #5334: after a live close, land-queue removal
+// deletes the registry row; the first patrol replay must not file the
+// earlier claimed -> done as illegal because the row's kind is gone.
+for (const stamped of [true, false]) {
+  test(`a live-closed land claim whose row was deleted replays clean (${stamped ? "kind on the receipt" : "legacy unstamped receipt"})`, () => {
+    const store = openStore();
+    try {
+      const { item, now } = landClaim(store, `task-live-gone-${stamped}`);
+      const closed = closeWhenLive(item, REV, now + 5);
+      driveClaim(store, stamped ? closed : { ...closed, kind: undefined }, "state_changed", now + 5);
+      store.workClaims.delete("alpha", closed.id);
+      emitWorkClaimEvent(store, "alpha", { actorId: "owner", item: closed, action: "deleted", atMs: now + 6 });
+      assert.equal(store.patrolTick().fresh, 0);
+      assert.deepEqual(store.patrolFindings().filter(f => f.kind === "illegal_transition"), []);
+    } finally { store.close(); }
+  });
+}
