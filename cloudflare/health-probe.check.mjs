@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -28,7 +28,44 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(firstBody, secondBody);
   assert.equal(secondBody.status, 'degraded');
   assert.deepEqual(secondBody.durableObject, { ready: false, status: 'timeout' });
-  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
+  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 3000 });
+});
+
+test('the default probe budget covers the measured healthy latency band', async () => {
+  assert.equal(HEALTH_PROBE_TIMEOUT_MS, 3000);
+  const probe = createHealthProbe();
+  // Regression (2026-10-24): production probes that reached a live object in
+  // 766–925 ms succeeded, but any answer slower than the old 1000 ms default
+  // flapped /api/ready to 503. A 1200 ms answer — over the old budget, well
+  // inside the new one — must answer ready under the DEFAULT budget (no
+  // timeoutMs passed, the room.mjs call shape).
+  const response = await probe({
+    start: () => new Promise(resolve => {
+      setTimeout(() => resolve(Response.json({ status: 'ok', emailVerification: 'enforced' })), 1200);
+    }),
+    onSnapshot: (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-production', elapsedMs: timing.elapsedMs }),
+    onUnready: () => { throw new Error('a 1200 ms probe must not time out under the default budget'); }
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.status, 'ready');
+  assert.equal(body.do.status, 'ok');
+  assert.ok(body.do.ms >= 1200, `expected do.ms to report the slow answer, got ${body.do.ms}`);
+});
+
+test('an object that never answers still degrades under the default budget shape', async () => {
+  const probe = createHealthProbe();
+  const response = await probe({
+    timeoutMs: 60,
+    start: () => new Promise(() => {}),
+    onSnapshot: () => { throw new Error('no snapshot'); },
+    onUnready: (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-production', readiness, ...timing })
+  });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.status, 'degraded');
+  assert.deepEqual(body.durableObject, { ready: false, status: 'timeout' });
+  assert.equal(body.do.timeoutMs, 60);
 });
 
 test('concurrent probes share storage but shape separate GET/HEAD responses and do not cache completion', async () => {
