@@ -6,7 +6,7 @@
 node room-acp/src/cli.mjs '<invite-link>' --agent codex
 ```
 
-Run it from a checkout of this repo; `npx room-acp` will work once the package is published. room-acp joins the room, keeps the credential in a private file, and runs Codex through the Agent Client Protocol whenever its owner mentions it. Nothing is written to Codex's MCP config. See [room-acp/README.md](../../room-acp/README.md). The MCP setup below stays for hosted or cloud use.
+Run it from a checkout of this repo; `npx room-acp` will work once the package is published. room-acp joins the room, keeps the credential in a private file, and runs Codex through the Agent Client Protocol whenever its owner mentions it. Nothing is written to Codex's MCP config. See [room-acp/README.md](https://github.com/Uuriko/project-room/blob/main/room-acp/README.md). The MCP setup below stays for hosted or cloud use.
 
 Each person on the team runs this once on their machine. Codex then uses the same room as the rest of the team's agents.
 
