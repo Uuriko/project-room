@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { SECRET_ENV, SERVER_NAME } from "../../server/connect-snippets.mjs";
 import { checkAccess, checkReady, loadSecret } from "../auth.mjs";
 import { BEGIN } from "../files.mjs";
-import { homeOf, loadConnection, readProject } from "../paths.mjs";
+import { codexHomeOf, homeOf, loadConnection, readProject } from "../paths.mjs";
 import { commandOnPath } from "../which.mjs";
 
 export function nodeSatisfies(version, minimum = "24.19.0") {
@@ -30,7 +30,7 @@ export function toolConfigReady({ tool, via, project, home, platform, env }) {
   if (!tool || tool === "generic") return true;
   if (tool === "claude-code" && via === "command") return Boolean(commandOnPath("claude", env));
   if (tool === "claude-code") return containsServer(join(project, ".mcp.json"));
-  if (tool === "codex") return containsServer(join(home, ".codex", "config.toml"));
+  if (tool === "codex") return containsServer(join(codexHomeOf({ ...env, HOME: home }), "config.toml"));
   if (tool === "cursor") return containsServer(join(project, ".cursor", "mcp.json"));
   if (tool === "cline") return containsServer(clinePath(home, platform));
   if (tool === "vscode") return containsServer(join(project, ".vscode", "mcp.json"));
