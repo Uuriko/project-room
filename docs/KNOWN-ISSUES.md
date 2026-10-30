@@ -38,15 +38,15 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 
 | ID | Issue | Sev | Lane | Next step |
 | --- | --- | --- | --- | --- |
+| KI-006 | Prod 93 commits behind main; 20-PR wave undeployed | P1 | Codex | Codex lands #5428 and deploys with smoke; John's Tab verifies KI-001/KI-006 within 4h of deploy |
 | KI-001 | Integrity job failing: messages_parity_failed (415 consecutive on prod) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
-| KI-006 | Prod 83 commits behind main; 20-PR wave undeployed | P1 | Codex | Codex lands #5428 and deploys with smoke |
 | KI-012 | Zero-scope member can claim and submit a bounty (board 403, bounty 200) | P1 | Jill fleet | Gate bounty claim/submit on work-claim permission; or cut bounties (KI-070) |
 | KI-024 | Stop does not stop a paused agent's writes | P1 | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
 | KI-026 | room-acp not on npm; recommended npx command 404s | P1 | Grok (+Potter npm login) | #5415 serves /room-acp.tgz; publish when npm login exists |
 | KI-031 | Friend journey proven only with a scripted agent, not a real model | P1 | Jill-Dot | Jill-Dot runs packaged install + real model on second laptop |
 | KI-051 | Unbounded default snapshot (474 KB agent read, muse-room 12.7 MB) | P1 | Codex | One snapshot window PR |
 | KI-052 | Projection rewritten on every write (O(n^2)) | P1 | Codex | Rebase #4842 |
-| KI-061 | 524 open PRs, 218 conflicting | P1 | all lanes | Each lane triages its own; closes need Potter OK |
+| KI-061 | 524 open PRs, 218 conflicting | P1 | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
 | KI-062 | CI capacity: cancelled heads | P1 | Potter | Potter: free org or GitHub app |
 
 ## Ledger
@@ -58,8 +58,8 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-003 | claim-prs job: SQLITE_CONSTRAINT in public claim writer | Grok 22968 | open | prod jobs: claim-prs stale, same error | bug | P2 | M | Jill fleet | Find the constraint row; fix writer; frozen area so keep minimal |
 | KI-004 | webhook-dispatch goes stale between 30-min crons (60s alarm not running) | Grok 22968 | open | prod jobs: webhook-dispatch stale | bug | P2 | M | Codex | Check DO alarm re-arm after code reset |
 | KI-005 | room-backup job failing (1 error per tick) | prod jobs | open | prod jobs: room-backup failing 1 | bug | P2 | S | Potter-blocked | No backup work until Potter asks; logged only |
-| KI-006 | Prod 83 commits behind main; 20-PR wave undeployed | Fo 23647, Jill 23719 | open | prod dfe1848a vs main 2249dbb5 | redesign | P1 | S | Codex | Codex lands #5428 and deploys with smoke |
-| KI-007 | /api/ready intermittently 503 (DO probe budget) | #5177, Delta 23636 | open | issue #5177 open; Delta 5/5 503 sample | bug | P2 | M | Codex | Keep #5177 as the one tracker |
+| KI-006 | Prod 93 commits behind main; 20-PR wave undeployed | Fo 23647, Jill 23719 | open | GitHub compare dfe1848a...2249dbb5 ahead_by 93 (Fo 23867, Jill 21:16Z); gates whether KI-001 fix #4930 is live (John's Tab 23887) | redesign | P1 | S | Codex | Codex lands #5428 and deploys with smoke; John's Tab verifies KI-001/KI-006 within 4h of deploy |
+| KI-007 | /api/ready intermittently 503 (DO probe budget) | #5177, Delta 23636 | open | issue #5177 open; Delta 5/5 503 sample; John's Tab 1 of 6 at ~8:48 AM PT Oct 30 (23887) | bug | P2 | M | Codex | Keep #5177 as the one tracker |
 | KI-008 | /api/health returns 200 during DO outage; 503 body tells agents to call room_check_access | UNFIXED #17 (QA10-2/3) | open | no PR found | bug | P3 | S | Codex | Fold into health work after KI-001 |
 | KI-009 | Self-heal observability (stale-permit reset count) | UNFIXED #14 | stale | waits on #4878 (merged) but no consumer asked since | simplify | P3 | S | none | Drop unless an incident needs it |
 | KI-010 | deploy-prod: cancelled run between two Worker uploads leaves a skewed pair | #3897 | open | issue open | bug | P2 | M | Codex | Codex deploy lane |
@@ -71,15 +71,15 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-016 | Room-create replay mints tokens | QA4 P2-5 | open | #4820 open | bug | P2 | S | Codex | Rebase #4820 |
 | KI-017 | Agent-invite redeem replay token; credential-less re-rotation unlimited 30 days | QA6-4, #3949 | open | #4851 open; #3949 open | bug | P2 | M | Codex | One fix, close the dup |
 | KI-018 | Webhooks identity-wide, not room-scoped; removed member keeps deliveries | QA6-6, Q9-P1-1 | open | #4844 open, #4853 closed, #4869 open conflicting | bug | P2 | M | Codex | Rebase #4844, fold #4869 |
-| KI-019 | Merge reply leaks private channel | QA11-3/4 | stale | #4877 closed unmerged; not re-verified | bug | P2 | S | Fo | Fo re-tests on main; reopen if live |
-| KI-020 | Audit read model trusts caller owner flag | QA11-12 | stale | #4886 closed unmerged | bug | P2 | S | Fo | Fo re-tests on main |
+| KI-019 | Merge reply leaks private channel | QA11-3/4 | stale | #4877 closed unmerged; not re-verified | bug | P2 | S | Fo | Fo re-tests on main; reopen if live. Claimed by Fo (23867) |
+| KI-020 | Audit read model trusts caller owner flag | QA11-12 | stale | #4886 closed unmerged | bug | P2 | S | Fo | Fo re-tests on main. Claimed by Fo (23867) |
 | KI-021 | Webhook DNS check TOCTOU; secretRef sentinel looks like a secret | QA5 P3-4/5 | open | no PR | bug | P3 | S | Codex | Later |
 | KI-022 | Files stored with any declared type; 413 counts base64 bytes | QA8 P3-9/P3-7 | open | #4862 open, scope unverified | bug | P3 | S | Codex | Verify in #4862 |
 | KI-023 | Access review omits owner-delegate grants | #3779 | open | issue open | bug | P2 | S | Codex | With permissions work |
 | KI-024 | Stop does not stop a paused agent's writes | QA5 P1-1 | open | #4828 open conflicting | bug | P1 | M | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
 | KI-025 | Public-work rate limits per egress IP and count refusals | #3924 | superseded | public work frozen for cut (KI-071) | cut | P3 | - | - | Fold into cut |
 | KI-026 | room-acp not on npm; recommended npx command 404s | John's Tab 23633 | open | registry.npmjs.org/room-acp = Not found 2026-10-30 | bug | P1 | S | Grok (+Potter npm login) | #5415 serves /room-acp.tgz; publish when npm login exists |
-| KI-027 | Add-agent step 3: Done below fold at 390px; two first steps; names a missing control | John's Tab 23633 | open (fix in PR) | #5426 open; main src/app.js still labels 'Invite agents' | bug | P2 | S | Grok | Land #5426 |
+| KI-027 | Add-agent step 3: Done below fold at 390px; two first steps; names a missing control | John's Tab 23633 | open (fix in PR) | #5426 open; main src/app.js still labels 'Invite agents'; copy also points agents to npx room-acp, unpublished (KI-026) | bug | P2 | S | Grok | Land #5426 |
 | KI-028 | Lost wake ack after a claim turn runs the model twice | Codex 23686 | open (fix in PR) | Codex integration owns bridge.mjs fix | bug | P1 | M | Codex (#5428 path) | Codex finishes; Grok keeps off bridge.mjs |
 | KI-029 | Two concurrent permission asks accepted by one allow | Codex 23701 | open (fix in PR) | Codex local reviewer | bug | P1 | S | Codex (#5428 path) | Codex |
 | KI-030 | qa-friend-agent-e2e passes crash receipts as success | Codex 23701 | open (fix in PR) | Codex owns the script | bug | P2 | S | Codex (#5428 path) | Codex |
@@ -89,7 +89,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-034 | Claim permission asks auto-denied | Grok 10-30 | open (fix in PR) | #5422 open | bug | P2 | S | Grok | Land #5422 |
 | KI-035 | Agents load 122 tools (~41k tokens) to claim a task | Streamline audit #1 | open (fix in PR) | #5434 open | simplify | P1 | S | Grok | Land #5434 |
 | KI-036 | Human room-admission: signed humans became agent members | Jill-Dot 23498 | open (fix in PR) | backend merged; frontend fixes out for integration | bug | P1 | S | Jill-Dot | Jill-Dot finishes |
-| KI-037 | First-ask journey broken (refuse-and-rollback policy) | Delta 22646/22868 | open | Fo PR r2 awaiting review | bug | P2 | S | Fo | Fo lands r2 per Delta verdict |
+| KI-037 | First-ask journey broken (refuse-and-rollback policy) | Delta 22646/22868 | open | Fo PR r2 awaiting review | bug | P2 | S | Fo | Fo lands r2 per Delta verdict. Claimed by Fo (23867) |
 | KI-038 | HTTP /commands reply does not thread or close a request; tracked ask 422 Unknown Work Item | UT F-S5a-1/2 | open | re-tested STILL-LIVE 23126 | bug | P2 | M | Jill fleet | Fix with one reply path |
 | KI-039 | Presence: null 40/40, 'Nobody online' wrong 20/20, workingOn empty | MEASURE-IMPROVE M3 | open | re-confirmed at two builds | bug | P2 | M | Grok | #5402 covers bridge presence; extend to workingOn |
 | KI-040 | agent-eval J8: served llms.txt lost the work-claim section | Grok 22968 | fixed | llmsTxt on main already lists POST /api/rooms/{roomId}/work-claims, /claim, /update | low-hanging fruit | P2 | S | Grok | One-line work-claim pointer in llms.txt |
@@ -112,8 +112,8 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-057 | Write burst 5 writes/s at 0.3-4.4 s | QA7 P2-5 | open | no PR | bug | P2 | M | Codex | Bench after KI-052 |
 | KI-058 | Per-channel DOM growth 6,448 nodes | QA10-6 | open | no PR | bug | P3 | M | none | Later |
 | KI-059 | Projection cache weight double-count | QA5 O-6 | open | #4848 open | bug | P3 | S | Codex | Rebase #4848 |
-| KI-060 | Main test.yml red most runs (17 of 26) | Streamline audit #2 | open (fix in PR) | #5403 #5404 #5405 #5410 #5413 #5414 open | bug | P1 | S | Codex | Land the green-main set first; then block feature PRs on red main |
-| KI-061 | 524 open PRs, 218 conflicting | gh 2026-10-30 | open | gh pr list | simplify | P1 | M | all lanes | Each lane triages its own; closes need Potter OK |
+| KI-060 | Main test.yml red most runs (17 of 26) | Streamline audit #2 | open (fix in PR) | #5403 #5404 #5405 #5410 #5413 #5414 open; main unit job cancels at its 25-min timeout and browser shards red, no completing main unit run (John's Tab 23887) | bug | P1 | S | Codex | Land the green-main set first; then block feature PRs on red main |
+| KI-061 | 524 open PRs, 218 conflicting | gh 2026-10-30 | open | gh pr list | simplify | P1 | M | all lanes | Not an MVP blocker; triage after Nov 2 (John's Tab 23887). Each lane triages its own; closes need Potter OK |
 | KI-062 | CI capacity: cancelled heads | UNFIXED blocked | open | Potter-blocked | redesign | P1 | S | Potter | Potter: free org or GitHub app |
 | KI-063 | Coverage 45 min, unit 25 min on PRs | Streamline #10 | open (fix in PR) | #5424 open | simplify | P2 | S | Grok | Land #5424 |
 | KI-064 | Fuzz/QA jobs on every main push | MVP cut #4 | open (fix in PR) | #5406 open | cut | P2 | S | Grok | Land #5406 |
@@ -135,7 +135,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-080 | Orphan modules, duplicate CSS, dead scripts, archive/ | DX1 #24, SIMPLIFY #1/#2 | open (part in PR) | #5432 #5431 open | cut | P3 | M | Grok | Land #5431/#5432; rest after |
 | KI-081 | Split http.mjs; store.mjs import cycles; 80 env names | SIMPLIFY #5/#6/#9 | open | no PR | simplify | P3 | L | Codex | After queue drains |
 | KI-082 | board_vtwo tables and board/v2 openapi fragments | #3997, DX1 #22 | open (fix in PR) | #5431 open; fragments 0129-0139 still on main | cut | P3 | S | Grok | Land #5431; remove fragments |
-| KI-083 | Front door: credential lifecycle, limits, error contract, claim paths unstated or contradictory | #4448-#4451 #5153 #5154 | open | issues open | low-hanging fruit | P2 | S | Fo | One front-door doc pass |
+| KI-083 | Front door: credential lifecycle, limits, error contract, claim paths unstated or contradictory | #4448-#4451 #5153 #5154 | open | issues open | low-hanging fruit | P2 | S | Fo | One front-door doc pass. Claimed by Fo (23867) |
 | KI-084 | 'Cost not recorded' on every receipt | #4564 watch (B5-5) | fixed | server/receipt-cards.mjs on main returns empty when no cost data; the clause shows only for partial data | low-hanging fruit | P3 | S | Grok | Omit the cost clause when unknown |
 | KI-085 | Python User-Agent gets 403 on /openapi.json | QA4 P3-7 | open | curl Python-urllib -> 403 on prod | bug | P3 | S | Codex | Cloudflare rule; Codex owns zone settings |
 | KI-086 | Expired MCP token drops the connection instead of a 401 | #4493 | open | issue open | bug | P2 | S | Fo | Fo mcp lane |
@@ -148,7 +148,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 | KI-093 | Corrupt room bricks node boot; parse errors have no repair path | #4126 #4127 | open | issues open | bug | P2 | M | Codex | Verify on main |
 | KI-094 | Keyboard/claim fixes from QA9 command contracts | QA9 B, #4873 | open | #4873 open conflicting | bug | P3 | M | Codex | Rebase or close |
 | KI-095 | Endless job retry; health red only from integrity | QA12-3/4 | open | #4891 #4895 open | bug | P3 | S | Delta | Decide after KI-001 |
-| KI-096 | Strict body names bad key; /agent-signin.html 404 | QA11-11/13 | stale | #4896 closed; agent-signin.html now on main | bug | P3 | S | Fo | Re-test; likely fixed |
+| KI-096 | Strict body names bad key; /agent-signin.html 404 | QA11-11/13 | stale | #4896 closed; agent-signin.html now on main | bug | P3 | S | Fo | Re-test; likely fixed. Claimed by Fo (23867) |
 | KI-097 | Endless open 'Low' bug-sweep bundles (8 issues) | #3904-#3913 | stale | filed 10-17, unverified since | bug | P3 | M | Jill fleet | Re-verify and close or refile |
 | KI-098 | Frozen-area issues (bounty, escrow, receipts, keeper) | #3958 #3962 #4125 #4128 #5152 #5160 and others | superseded | areas frozen for cut | cut | P3 | - | Potter ruling | Close with the cut ruling |
 | KI-099 | Served OpenAPI missing events/commands/search | QA4 P2-1 | fixed | #4821 merged | bug | P2 | - | - | Closed; prod re-test after deploy |
@@ -170,6 +170,12 @@ Plus 201 open GitHub issues in the appendix: 7 open, 39 see, 116 stale, 39 super
 - KI-070: keep or delete bounties, escrow and spend.
 - KI-026: an npm login for publishing room-acp (the served tarball in #5415 works without it).
 - KI-005: backups stay untouched until Potter asks.
+
+## Agent feedback (Oct 30 follow-up)
+
+- Fo (23862, 23867): agrees with ranking; KI-006 is 93 behind, not 83; cut bounties (KI-070) rather than gate KI-012; claims KI-019, KI-020, KI-037, KI-083, KI-096.
+- John's Tab (23887): agrees broadly; put KI-006 first because it gates whether the KI-001 fix is live; KI-061 is not an MVP blocker; owns post-deploy verification, no code lane.
+- No reply yet from Codex, Delta, Jill (posted a separate master-issues draft), Jill-Dot, Muse or Instinct-3.
 
 ## Sources mined
 
