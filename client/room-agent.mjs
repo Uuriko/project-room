@@ -5,7 +5,7 @@ import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, w
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
 import { createHash, randomUUID } from "node:crypto";
-import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown } from "../src/work-packet.js";
+import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown, validSourceObservation } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -743,10 +743,13 @@ export class RoomAgentClient {
     return resultDraft((await this.workContext(workItemId, { signal: options.signal })).work);
   }
   async workContext(workItemId, options = {}) {
-    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "includeOffers", "signal"].includes(key))) throw new Error("Use includeSource, includeOffers and signal options only");
-    const { includeSource = false, includeOffers = false, signal } = options;
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "includeOffers", "sourceObservation", "signal"].includes(key))) throw new Error("Use includeSource, includeOffers and signal options only");
+    const { includeSource = false, includeOffers = false, sourceObservation, signal } = options;
     if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") throw new Error("Choose one work ID and boolean context options");
+    if (sourceObservation !== undefined && (!includeSource || !validSourceObservation(sourceObservation)
+      || sourceObservation.roomId !== this.#roomId || sourceObservation.workItemId !== workItemId)) throw new Error("Use a source observation for this work with includeSource=true");
     const query = new URLSearchParams({ workItemId });
+    if (sourceObservation !== undefined) query.set("sourceObservation", JSON.stringify(sourceObservation));
     if (includeSource) query.set("includeSource", "true");
     const result = await this.#request(`/work-context?${query}`, undefined, signal, false, includeOffers);
     if (includeOffers && result?.offerContextVersion === undefined && result?.offers === undefined)
@@ -759,10 +762,40 @@ export class RoomAgentClient {
       || !validId(result.viewer?.id) || result.viewerId !== result.viewer.id || !Number.isSafeInteger(result.evaluatedThrough) || result.evaluatedThrough < 0
       || !Number.isSafeInteger(result.work.revision) || result.work.revision < 0 || !Number.isFinite(Date.parse(result.evaluatedAt))
       || (!includeSource && (source?.status !== "not_requested" || source.message !== null))
-      || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable"].includes(source.status) : source.status !== "not_linked")
+      || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable", ...(sourceObservation === undefined ? [] : ["not_modified"])].includes(source.status) : source.status !== "not_linked")
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (source && Object.hasOwn(source, "freshness")) {
+      const observation = source.observation;
+      const eligible = ["included", "not_modified"].includes(source.status);
+      if (eligible && !validSourceObservation(observation)) throw new RoomClientError(200, "invalid_response", "Invalid source freshness observation");
+      const expected = !eligible ? "unavailable" : !sourceObservation ? "observed"
+        : observation.messageId === sourceObservation.messageId && observation.revision === sourceObservation.revision && observation.sha256 === sourceObservation.sha256 ? "unchanged" : "changed";
+      if (!includeSource || (sourceObservation && sourceObservation.viewerId !== result.viewer.id) || source.freshness !== expected || (eligible
+        ? !validSourceObservation(observation) || observation.roomId !== this.#roomId || observation.workItemId !== workItemId
+          || observation.viewerId !== result.viewer.id || observation.messageId !== result.work.sourceMessageId
+          || (source.status === "not_modified" ? !sourceObservation || expected !== "unchanged" || source.message !== null
+            : expected === "unchanged" || observation.sha256 !== createHash("sha256").update(source.message.body, "utf8").digest("hex"))
+          || !isDeepStrictEqual(source.nextRead, { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: observation } })
+        : observation !== null || source.nextRead !== null || source.editedAt !== null)
+        || source.editedAt !== null && (typeof source.editedAt !== "string" || !Number.isFinite(Date.parse(source.editedAt))))
+        throw new RoomClientError(200, "invalid_response", "Invalid source freshness observation");
+    } else if (sourceObservation !== undefined) throw new RoomClientError(200, "source_freshness_unavailable", "This service does not support source comparison");
+    if (Object.hasOwn(result.next, "replacement")) {
+      const link = result.next.replacement;
+      const expectedRead = { tool: "room_read_work", arguments: { workItemId: result.work.supersededBy } };
+      if (!link || result.next.action !== "superseded" || !validId(link.workItemId) || link.workItemId === workItemId
+        || link.workItemId !== result.work.supersededBy || !["available", "unavailable"].includes(link.status)
+        || (link.status === "available" ? !isDeepStrictEqual(link.nextRead, expectedRead) : link.nextRead !== null))
+        throw new RoomClientError(200, "invalid_response", "Invalid work replacement navigation");
+    }
+    if (Object.hasOwn(result, "dependencies") && (!Array.isArray(result.dependencies) || result.dependencies.length > 16
+      || result.dependencies.some(dep => !dep || typeof dep.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(dep.id)
+        || typeof dep.state !== "string" || dep.state.length > 32 || typeof dep.satisfied !== "boolean"
+        || dep.satisfied && dep.state !== "done")
+      || new Set(result.dependencies.map(dep => dep.id)).size !== result.dependencies.length))
+      throw new RoomClientError(200, "invalid_response", "Invalid work dependency observation");
     if (Object.hasOwn(result, "resume") && !isDeepStrictEqual(result.resume,
       workResume(result.work, Date.parse(result.evaluatedAt), result.context.roomOwnerId)))
       throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
@@ -1383,7 +1416,7 @@ export class RoomAgentClient {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
   }
-  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents, rounds, toolCalls }, { signal } = {}) {
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents, rounds, toolCalls, environment, model, provider, client, outputs }, { signal } = {}) {
     if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
     if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
     if (rounds !== undefined && (!Number.isSafeInteger(rounds) || rounds < 0)) throw new Error("rounds must be a non-negative integer");
@@ -1393,7 +1426,8 @@ export class RoomAgentClient {
       ...(budget === undefined ? {} : { budget }),
       ...(spendCents === undefined ? {} : { spendCents }),
       ...(rounds === undefined ? {} : { rounds }),
-      ...(toolCalls === undefined ? {} : { toolCalls }) }, signal);
+      ...(toolCalls === undefined ? {} : { toolCalls }),
+      ...Object.fromEntries(Object.entries({ environment, model, provider, client, outputs }).filter(([, value]) => value !== undefined)) }, signal);
   }
   // Claim one queued session atomically: reads the card, then drives it to
   // processing with the card's revision. Throws session_claimed when held.
@@ -1522,9 +1556,16 @@ export function workContextMarkdown(result) {
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
     "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
     ...(result.toolFocus ? ["Suggested tool focus: " + result.toolFocus.focus + " (optional; does not change permissions). " + result.toolFocus.reason] : []),
+    ...(result.next.replacement ? [result.next.replacement.status === "available"
+      ? "Replacement next read (does not transfer approval or assignment): " + JSON.stringify(result.next.replacement.nextRead)
+      : "Replacement is unavailable in this room. Historical work remains readable."] : []),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...(result.dependencies?.length ? [
+      "Prerequisites (Board claim IDs; checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
+      ...(result.dependencies.some(dep => !dep.satisfied) ? ["Prerequisites are not satisfied. Do not claim or start this work yet."] : [])
+    ] : []),
     ...(result.replyRequestContext ? [
       `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
