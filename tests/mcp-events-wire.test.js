@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { deliverMcpEvent, eventSigningKey, signedEventRequest, verifyMcpEventCallback } from "../server/mcp-events-wire.mjs";
+import { deliverMcpEvent, eventSigningKey, signedEventRequest, verifyMcpEventCallback, postMcpEvent } from "../server/mcp-events-wire.mjs";
 
 const secret = `whsec_${Buffer.alloc(32, 7).toString("base64")}`;
 const now = 1793390400000;
@@ -78,4 +78,32 @@ test("signing-secret rotation sends both keys only within its bounded window", a
     assert.equal(result.classification, "delivered");
     assert.equal(observed, count);
   }
+});
+
+
+test("expiry during authorization or DNS prevents delivery", async () => {
+  for (const stage of ["authorization", "dns"]) {
+    let calls = 0;
+    const wait = () => new Promise(resolve => setTimeout(resolve, 30));
+    const result = await deliverMcpEvent({ subscription: { ...subscription, expiresAt: now + 5 }, event, now,
+      authorize: async () => { if (stage === "authorization") await wait(); return true; },
+      dnsResolvers: { lookup: async () => { if (stage === "dns") await wait(); return [{ address: "8.8.8.8", family: 4 }]; } },
+      transport: async () => { calls++; return response(200); },
+    });
+    assert.equal(result.classification, "expired"); assert.equal(calls, 0);
+  }
+});
+
+test("deadline includes DNS and does not send after a slow resolution", async () => {
+  let calls = 0;
+  await assert.rejects(postMcpEvent({ url: subscription.url, request: {}, timeoutMs: 5,
+    dnsResolvers: { lookup: async () => { await new Promise(resolve => setTimeout(resolve, 30)); return [{ address: "8.8.8.8", family: 4 }]; } },
+    transport: async () => { calls++; return response(200); },
+  }), error => error.code === "event_timeout");
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(calls, 0);
+});
+
+test("event occurrence timestamp requires a full timezone-qualified instant", async () => {
+  await assert.rejects(deliverMcpEvent({ subscription, event: { ...event, timestamp: "2026-10-30" }, now, authorize: async () => true }), /Invalid event envelope/);
 });

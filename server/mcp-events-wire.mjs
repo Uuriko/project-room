@@ -34,14 +34,31 @@ export function signedEventRequest({ subscriptionId, secret, previousSecret, eve
 // An injected transport must connect to these validated addresses, preserve
 // TLS hostname verification, bound response size/time, and NEVER redirect.
 // Workers has no DNS-pinning API: do not silently weaken this contract there.
-export async function postMcpEvent({ url, request, dnsResolvers, transport, timeoutMs = 10000 }) {
+export async function postMcpEvent({ url, request, dnsResolvers, transport, timeoutMs = 10000, beforeSend }) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000) throw new TypeError("Invalid delivery timeout");
   if (!transport && isWorkersRuntime()) throw new Error("MCP Events requires a vetted egress transport on Workers");
-  const checked = await resolveWebhookTarget(url, dnsResolvers ?? {});
-  const response = await (transport ?? pinnedDispatchPost)(checked.url, checked.addresses, { ...request, timeoutMs });
-  // No redirect follow-up: a 3xx is a permanent rejection, even to a public IP.
-  const status = Number(response.status);
-  return { response, status, classification: classifyHttpStatus(status) };
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => {
+    const ms = deadline - Date.now();
+    if (ms <= 0) throw Object.assign(new Error("Event delivery timed out"), { code: "event_timeout" });
+    return ms;
+  };
+  let timer;
+  try {
+    return await Promise.race([
+      (async () => {
+        const checked = await resolveWebhookTarget(url, dnsResolvers ?? {});
+        remaining();
+        if (beforeSend) await beforeSend();
+        const response = await (transport ?? pinnedDispatchPost)(checked.url, checked.addresses, { ...request, timeoutMs: remaining() });
+        remaining();
+        // No redirect follow-up, even to a public IP.
+        const status = Number(response.status);
+        return { response, status, classification: classifyHttpStatus(status) };
+      })(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("Event delivery timed out"), { code: "event_timeout" })), timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 export async function verifyMcpEventCallback({ subscriptionId, secret, url, dnsResolvers, transport, now = Date.now() }) {
@@ -69,19 +86,26 @@ function callbackError(reason) {
 }
 
 export async function deliverMcpEvent({ subscription, event, authorize, now = Date.now(), dnsResolvers, transport }) {
+  const startedAt = Date.now();
+  const currentTime = () => now + Date.now() - startedAt;
   // Revalidate before every attempt; a successful old subscription grants no
   // enduring permission after account/room membership or consent is revoked.
   if (typeof authorize !== "function" || !await authorize(subscription)) return { classification: "revoked" };
-  if (!Number.isSafeInteger(subscription.expiresAt) || subscription.expiresAt <= now) return { classification: "expired" };
-  if (!event || typeof event.name !== "string" || event.name !== subscription.name || !Number.isFinite(Date.parse(event.timestamp)) || !event.data || typeof event.data !== "object" || Array.isArray(event.data)) throw new TypeError("Invalid event envelope");
+  if (!Number.isSafeInteger(subscription.expiresAt) || subscription.expiresAt <= currentTime()) return { classification: "expired" };
+  if (!event || typeof event.name !== "string" || event.name !== subscription.name || typeof event.timestamp !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(event.timestamp) || !Number.isFinite(Date.parse(event.timestamp)) || !event.data || typeof event.data !== "object" || Array.isArray(event.data)) throw new TypeError("Invalid event envelope");
   const body = JSON.stringify({ eventId: event.eventId, name: event.name, timestamp: event.timestamp, data: event.data, cursor: event.cursor ?? null });
   const request = signedEventRequest({ subscriptionId: subscription.id, secret: subscription.secret,
     previousSecret: subscription.previousSecretExpiresAt > now ? subscription.previousSecret : undefined,
     eventId: event.eventId, body, now });
   try {
-    const { status, classification } = await postMcpEvent({ url: subscription.url, request, dnsResolvers, transport });
+    const { status, classification } = await postMcpEvent({ url: subscription.url, request, dnsResolvers, transport, beforeSend: async () => {
+      if (!await authorize(subscription)) throw Object.assign(new Error("Event access revoked"), { code: "event_revoked" });
+      if (subscription.expiresAt <= currentTime()) throw Object.assign(new Error("Event subscription expired"), { code: "event_expired" });
+    } });
     return { status, classification }; // 2xx means receipt, never agent execution.
   } catch (error) {
+    if (error?.code === "event_revoked") return { classification: "revoked" };
+    if (error?.code === "event_expired") return { classification: "expired" };
     return { status: 0, classification: error?.code === "webhook_url_not_public" || error?.code === "invalid_webhook" ? "dead" : "retry" };
   }
 }
