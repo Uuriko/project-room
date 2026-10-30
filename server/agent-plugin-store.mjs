@@ -1364,6 +1364,12 @@ export class AgentPluginStore {
       // for this room is not a member and hears nothing.
       const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId, this.store.now());
       if (!memberId) continue;
+      // A wake-census member who has not been wakeable in this room for 24h
+      // does not get another delivery row. A subscriber with no host and no
+      // poll stamp is push-only and still receives the event.
+      const beats = this.store.agentHeartbeats;
+      if (beats?.wakeableInRoom && !beats.wakeableInRoom(row.agentId, roomId)
+        && beats.registeredForWake?.(row.agentId)) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;

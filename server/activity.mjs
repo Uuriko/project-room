@@ -25,6 +25,7 @@ import { messageRepository } from "./message-repository.mjs";
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
@@ -128,11 +129,25 @@ function identityNamesFor(store, roomId) {
   return identityNamesForRoom(store.db, roomId);
 }
 
+// Linked agents outside the room's 24h wake window are not written. Humans
+// and agents the wake census cannot name keep their rows.
+function quietLinkedAgent(store, roomId, members, memberId) {
+  const member = members?.[memberId];
+  if (!member || member.kind !== "agent") return false;
+  const identityId = identityIdForWakeMember(store.db, roomId, memberId);
+  if (!identityId || !store.agentHeartbeats?.wakeableInRoom) return false;
+  return !store.agentHeartbeats.wakeableInRoom(identityId, roomId);
+}
+
 // Write-time fan-out. Called inside the command transaction after the event
 // is persisted. One row per recipient per triggering message; when a
 // recipient qualifies for several types, the most direct one wins
 // (mention > reply > thread_reply). Muted threads generate no thread_reply
-// rows. DM scoping: a DM's events only ever reach the DM's two parties.
+// rows. A linked agent who has not polled or heartbeated in this room
+// within 24h gets no row. Humans always do: they are not wake targets.
+// An agent with no identity link keeps the row, because the wake census
+// cannot name them. DM scoping: a DM's events only ever reach the DM's
+// two parties.
 //
 // #3261: the fan-out is atomic per call. Store transaction semantics
 // differ across runtimes (the Durable Object adapter does not nest the
@@ -219,6 +234,7 @@ function applyActivityFanOut(store, roomId, state, senderId, command, incoming, 
        (room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
        VALUES(?,?,?,?,?,?,?,?,NULL)`);
     for (const [userId, info] of recipients) {
+      if (quietLinkedAgent(store, roomId, members, userId)) continue;
       const result = insert.run(roomId, info.type, senderId, actorName, messageId, info.threadId, userId, now);
       if (result.changes > 0) applied.inserted.push(result.lastInsertRowid);
     }

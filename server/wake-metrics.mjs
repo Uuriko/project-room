@@ -23,7 +23,9 @@
 //                           claim path silently enqueued these under the
 //                           bare memberId, creating undrainable stock
 //   suppressed_policy       pause / readonly tier / trust / mute / opt-out
-//                           gates refused the wake (by design)
+//                           gates refused the wake, or the identity is in
+//                           the wake census and has not been wakeable in
+//                           this room for 24h (by design)
 //   failed                  the emission threw on a path that swallows
 //                           (journaled) — the attempt was owed and lost
 // Delivery is a signal's inclusion in a page/batch served on a door

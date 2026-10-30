@@ -6802,7 +6802,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = wakeForAgent(this, {
+        const { woken, signal } = this.wakeListeningAgent({
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
@@ -7050,6 +7050,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return next;
   }
 
+  // Queue a mention or DM wake only when the identity has been wakeable
+  // in this room within 24h. A census member outside that window gets a
+  // policy suppression and no signal row. An identity that never joined
+  // the census still goes through wakeForAgent, so the no-host suppression
+  // and the hostless sleeper flag stay as they are. Humans are not targets.
+  wakeListeningAgent({ agentId, kind, roomId, messageId }) {
+    const beats = this.agentHeartbeats;
+    if (beats?.wakeableInRoom && !beats.wakeableInRoom(agentId, roomId)
+      && beats.registeredForWake?.(agentId)) {
+      recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "suppressed_policy", kind, subjectId: agentId });
+      return { woken: false, signal: null };
+    }
+    return wakeForAgent(this, { agentId, kind, roomId, messageId });
+  }
+
   // Wake-on-mention for message.posted: resolve @mentions and the DM target
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
@@ -7085,7 +7101,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = wakeForAgent(this, {
+      const { woken, signal } = this.wakeListeningAgent({
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
