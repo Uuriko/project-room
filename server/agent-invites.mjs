@@ -39,6 +39,14 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const hash = text => createHash("sha256").update(text).digest("hex");
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// memberOwnerId also returns an agent room owner when no human exists. Only
+// stamp a proven human here; omission preserves the established agent-owned
+// room grouping. The event actor/referral still records the actual grantor.
+const humanSponsorData = (state, actorId) => {
+  const id = memberOwnerId(state, actorId);
+  return id && Object.hasOwn(state.members, id) && state.members[id].kind === "human"
+    ? { accountableHumanId: id } : {};
+};
 
 const CODE_PREFIX = "RM-";
 // v2 codes: 16 symbols from a 32-symbol alphabet = 80 bits of entropy.
@@ -558,7 +566,7 @@ export class AgentInvites {
           kind: "agent",
           permissions,
           identityId: identity.identityId,
-          accountableHumanId: memberOwnerId(room.state, row.created_by),
+          ...humanSponsorData(room.state, row.created_by),
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           ...(ownerLevel ? { ownerEquivalent: true } : {}),
           // Referral attribution: the invite minter is the referrer. The
@@ -651,7 +659,7 @@ export class AgentInvites {
       const incoming = event({ id: eventId, idempotencyKey: eventId, roomId, actorId,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
           identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions,
-          accountableHumanId: memberOwnerId(room.state, actorId),
+          ...humanSponsorData(room.state, actorId),
           // A guest link admits the agent as a link guest: it reads from its join
           // under the room's default history setting, like a human link guest.
           ...(historyGuest ? { historyGuest: true } : {}),
