@@ -28,7 +28,7 @@
 // Idempotency: every mutating route accepts an idempotency key via the
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
-import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
+import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor, ACCEPT_ATTESTATION_CONTRACT } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
@@ -380,8 +380,13 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "accept" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
+    // DC3-P3 (R1/R2): permission before shape. A seat that may not accept
+    // gets the 403 power refusal and never sees the attestation contract;
+    // only the authorised seat reaches the shape check, whose 422 teaches
+    // the complete contract (R4).
+    runPure(reject, () => escrow.assertMayAccept(roomId, bountyId, caller));
     if (!shape(payload, { required: ["verifierAttestation"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{verifierAttestation, idempotencyKey?}");
+      invalidInput(reject, ACCEPT_ATTESTATION_CONTRACT);
     return idem(payload, "bounty.accept", 200, () => {
       const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
         { acceptor: caller, verifierAttestation: payload.verifierAttestation, actor });
@@ -404,6 +409,16 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
         { rejector: caller, reason: payload.reason, actor });
       return { roomId, bounty, settlement, alreadySettled, receipt };
     });
+  }
+  // The dispute case file (UT2 candidate 2): GET on the same path the
+  // dispute opens on. Before this, GET here fell through to 405 for every
+  // party and the challenger's grounds appeared in no read at all. Party
+  // scoping (poster / worker / challenger / seated decider) is enforced in
+  // escrow.getDisputeCase; a bounty with no dispute is a plain 404.
+  if (escrowRoute === "dispute" && req.method === "GET") {
+    const caseFile = runPure(reject, () => escrow.getDisputeCase(roomId, bountyId, { viewer: caller }));
+    if (caseFile === null) reject(404, "not_found", "this bounty has no dispute");
+    return json(res, 200, { roomId, dispute: caseFile });
   }
   if (escrowRoute === "dispute" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);

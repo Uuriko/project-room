@@ -276,11 +276,34 @@ export function enforceAnonymousMintLimits(identities, { name, buckets, proof, r
   const addressMinute = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
   ).get(buckets.address, now - MINT_MINUTE_MS).n;
-  const limited = (message, retryAfter) => fail(429, limitCode, message, { "Retry-After": String(retryAfter) });
-  if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
-  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached", 3600);
-  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached", 3600);
-  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached", 3600);
+  // Retry-After truth (UT2 L1): the budgets are rolling windows over counted
+  // rows, so the earliest instant a retry can succeed is when the OLDEST
+  // counted mint in the tripped tier leaves the window — up to 24h for the
+  // day tiers, not the hard-coded 3600s the day tiers used to advertise (a
+  // caller that waited it out was still refused). The refusal also carries
+  // the wait and the budget's scope/limit/window as error detail, so the
+  // value survives doors with no headers: the HTTP error body merges detail
+  // at top level, and the MCP mint forwards detail in structuredContent.
+  const oldestCounted = (column, value, since) => db.prepare(
+    `SELECT min(created_at) AS t FROM agent_identities WHERE ${column}=? AND created_at>=?`
+  ).get(value, since).t;
+  const limited = (message, scope, limit, windowMs, oldestAt) => {
+    const resetAt = oldestAt + windowMs;
+    const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
+    fail(429, limitCode, message, { "Retry-After": String(retryAfterSeconds) }, {
+      retryAfterSeconds,
+      mintBudget: { scope, limit, windowMs, retryAfterSeconds, resetAt },
+    });
+  };
+  if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address",
+    "address", identities.addressMinuteLimit, MINT_MINUTE_MS, oldestCounted("mint_address", buckets.address, now - MINT_MINUTE_MS));
+  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached",
+    "address", identities.addressDailyLimit, IDENTITY_MINT_WINDOW_MS, oldestCounted("mint_address", buckets.address, dayStart));
+  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached",
+    "network", identities.networkDailyLimit, IDENTITY_MINT_WINDOW_MS, oldestCounted("mint_network", buckets.network, dayStart));
+  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached",
+    "global", identities.anonymousDailyLimit, IDENTITY_MINT_WINDOW_MS,
+    db.prepare("SELECT min(created_at) AS t FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?").get(dayStart).t);
 }
 
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {

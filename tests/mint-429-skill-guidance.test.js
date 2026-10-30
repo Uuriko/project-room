@@ -3,9 +3,10 @@
 // QA-200 found four drift points here: the minute tier was undocumented, the
 // doc said Retry-After: 3600 was always sent (the outer per-address endpoint
 // limiter 429s without it, and the minute tier sends 60), the wait location
-// (header only — the body carries no retry time) was never stated, and only
-// the network tier was named. These assert on the rendered skill text so a
-// doc edit cannot silently drop a tier or re-introduce the "always 3600" claim.
+// was never stated, and only the network tier was named. The UT2 cure made
+// Retry-After the true computed wait and put it in the body too
+// (retryAfterSeconds + mintBudget). These assert on the rendered skill text
+// so a doc edit cannot silently drop a tier or re-introduce the "always 3600" claim.
 // Companion to tests/mint-budget-docs.test.js, which covers only
 // docs/COLD-AGENT-WALKTHROUGH.md — a different boundary.
 import test from "node:test";
@@ -38,19 +39,24 @@ test("served SKILL.md names all four anonymous mint budget tiers and their messa
 });
 
 test("served SKILL.md gets Retry-After semantics right per tier", () => {
-  // Minute tier sends Retry-After: 60, day tiers send 3600. The old doc claimed
-  // "always sends Retry-After: 3600", which is false for the minute tier.
-  assert.ok(/Retry-After:?\s*60\b/.test(skill), "names the 60s Retry-After for the minute tier");
-  assert.ok(/Retry-After:?\s*3600\b/.test(skill), "names the 3600s Retry-After for the day tiers");
+  // Retry-After is computed per refusal: seconds until the oldest counted
+  // mint leaves its rolling window (minute tier at most 60, day tiers up to
+  // a day). The old doc's fixed 3600s for the day tiers was the UT2 defect:
+  // a caller that waited it out was still refused.
+  assert.ok(/Retry-After:?\s*60\b/.test(skill), "names the 60s Retry-After for the outer limiter");
+  assert.ok(/true wait in seconds/.test(skill), "states Retry-After is the true computed wait");
+  assert.ok(!/Retry-After:?\s*3600\b/.test(skill), "never claims the day tiers send a fixed 3600s Retry-After");
   assert.ok(!/always\s+sends\s+[`']?Retry-After:?\s*3600/.test(skill), "never claims Retry-After: 3600 is always sent");
 });
 
-test("served SKILL.md says the wait lives in the header, not the body", () => {
-  // Mint 429 bodies are { error: { code, message }, ... } with no retryAfterMs/
-  // resetAt (server/service-error.mjs + http.mjs error envelope); the wait is
-  // header-only. A stranger must not go hunting for machine-readable fields.
+test("served SKILL.md says the wait lives in the header and in the body", () => {
+  // Mint 429 refusals carry the wait twice: the Retry-After header and the
+  // body's retryAfterSeconds + mintBudget detail (which is also how the
+  // value reaches MCP callers, who never see headers).
   assert.ok(/Retry-After/i.test(skill), "names the Retry-After header");
   assert.ok(/header/i.test(skill) && /body/i.test(skill), "contrasts header vs body");
+  assert.ok(/retryAfterSeconds/.test(skill), "names the body's retryAfterSeconds field");
+  assert.ok(/mintBudget/.test(skill), "names the body's mintBudget scope disclosure");
 });
 
 test("served SKILL.md covers the outer per-address limiter 429", () => {
