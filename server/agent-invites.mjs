@@ -617,10 +617,12 @@ export class AgentInvites {
       // a new identity under a new name. A caller that presented its own
       // identity secret already holds the durable credential, so nothing
       // is revealed for it.
+      // #3379: the fork is signaled, not implied — the mint branch returns
+      // identityMinted: true; the link branch returns duplicate: false.
       const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
         identityId: identity.identityId, roomId: row.room_id, label: name
       });
-      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { identitySecret: identity.secret }), mcpToken,
+      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { identityMinted: true, identitySecret: identity.secret }), mcpToken,
         roomId: row.room_id, memberId, displayName: name, permissions,
         next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) });
     });
