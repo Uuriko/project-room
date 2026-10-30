@@ -1,3 +1,4 @@
+import { assertListenerFence, LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 // HTTP routes for the Lane D agent plug-in surface (server/agent-plugin-store.mjs).
 //
 // Mutating routes authenticate the caller's agent credential: the pri_
@@ -935,9 +936,15 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     }));
   });
 
-  const readHeartbeats = translate(async (req, res) => {
+  const readHeartbeats = translate(async (req, res, { url }) => {
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-heartbeats-read:${auth.identityId}`, 120);
+    if (req.headers[LISTENER_TOKEN_HEADER] !== undefined) {
+      const roomId = url.searchParams.get("roomId") ?? auth.roomId;
+      if (!roomId || auth.roomId && auth.roomId !== roomId) reject(403, "room_mismatch", "The listener check must name the credential's room");
+      store.transaction(() => assertListenerFence(store, heartbeatActor(req, requiredScope("heartbeats:read")), roomId, req.headers[LISTENER_TOKEN_HEADER]));
+      return json(res, 200, { listener: { valid: true } });
+    }
     return json(res, 200, auth.scopedKey ? scopedKeyPresenceView(store, auth)
       : auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
   });
@@ -1143,7 +1150,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
     // RC-2026-09-18-051: wakeable agent presence.
     if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }
-    if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res); return true; }
+    if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res, { url }); return true; }
     if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
     // RC-2026-09-28-3602: room-hosted wake poll (before any regex routes).
     if (pathname === "/api/agent-wakes/poll" && method === "GET") { await pollWakes(req, res, { url }); return true; }

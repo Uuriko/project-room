@@ -19,6 +19,8 @@ function setup(t) {
       prompt: async () => { counts.prompts++; return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
     } });
     bridge.me = { id: "agent" }; bridge.ownerId = "owner"; bridge.members = { owner: { kind: "human", active: true } };
+    bridge.fencingToken = "test-listener";
+    bridge.room.checkListener = async () => ({ listener: { valid: true } });
     bridge.room.room = async () => ({ state: { room: { ownerId: "owner" }, members: { owner: { id: "owner", kind: "human", active: true }, [bridge.connection.memberId]: { id: "agent", active: true } } } });
     bridge.room.claim = async () => ({ id: "work", owner: "agent", history: [{ action: "created", agentId: "owner" }] });
     bridge.room.claimNote = async (...args) => { counts.notes.push(args); };

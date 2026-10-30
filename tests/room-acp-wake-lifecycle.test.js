@@ -11,7 +11,9 @@ function fixture() {
     prompt: async () => { counts.prompts++; return { recorder: { text: 'done', tools: new Map() }, stopReason: 'end_turn' }; },
     stop() {},
   } });
-  bridge.room.room = async () => ({ state });
+  bridge.fencingToken = "test-listener";
+    bridge.room.checkListener = async () => ({ listener: { valid: true } });
+    bridge.room.room = async () => ({ state });
   bridge.room.thread = async id => ({ thread: { id, authorId: 'owner', body: 'work', replies: [] } });
   bridge.room.post = async () => { counts.posts++; };
   bridge.room.ack = async () => { counts.acks++; };

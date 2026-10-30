@@ -12,12 +12,12 @@ export class RoomClient {
     this.apiBase = apiBase; this.roomId = roomId; this.memberId = memberId; this.#token = credential; this.#fetch = fetchImpl;
   }
 
-  async request(path, { body, timeoutMs = 15000, auth = true, signal } = {}) {
+  async request(path, { body, timeoutMs = 15000, auth = true, signal, listenerToken } = {}) {
     let response;
     try {
       response = await this.#fetch(this.apiBase + path, {
         method: body === undefined ? "GET" : "POST", redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-        headers: { "user-agent": "room-acp", ...(auth && this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
+        headers: { "user-agent": "room-acp", ...(listenerToken === undefined ? {} : { "x-room-listener-token": listenerToken }), ...(auth && this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
           ...(body === undefined ? {} : { "content-type": "application/json", origin: new URL(this.apiBase).origin }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
@@ -56,18 +56,21 @@ export class RoomClient {
   ack({ signalIds, fencingToken }) {
     return this.request("/api/agent-heartbeats/ack", { body: { signalIds, ...(fencingToken ? { fencingToken } : {}) } });
   }
+  checkListener(fencingToken) {
+    return this.request(`/api/agent-heartbeats?roomId=${encodeURIComponent(this.roomId)}`, { listenerToken: fencingToken });
+  }
   room() { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}`); }
   claim(claimId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}`); }
   // A claim note lands in the claim's history and its work_claim.updated
   // event, so it shows in the claim thread (GET work-claims/{id}/thread).
-  claimNote(claimId, note, requestId = randomUUID()) {
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId } });
+  claimNote(claimId, note, requestId = randomUUID(), listenerToken = this.listenerToken) {
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId }, listenerToken });
   }
   thread(messageId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread`); }
-  async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID() }) {
+  async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}`, requestId = randomUUID(), listenerToken = this.listenerToken }) {
     const parent = replyToId ? (await this.thread(replyToId)).thread : null;
     const toMemberId = !parent && directTo ? directTo : parent?.toMemberId ? (parent.authorId === this.memberId ? parent.toMemberId : parent.authorId) : null;
-    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: requestId, type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}) } } })
+    return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: requestId, type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}) } }, listenerToken })
       .then(() => ({ messageId }));
   }
 }

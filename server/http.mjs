@@ -5499,7 +5499,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
         try {
           if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
-          const result = store.command(selected.token, roomId, command, fence);
+          const result = store.command(selected.token, roomId, command, fence, { listenerToken: req.headers["x-room-listener-token"] });
           if (!result?.duplicate && result?.event?.type === "message.posted") clearBeat(typingBeats, roomId, result.event.actorId);
           const messageId = result?.event?.data?.messageId ?? result?.event?.id;
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);

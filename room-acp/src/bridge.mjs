@@ -121,10 +121,12 @@ export class Bridge {
   async onPermission(request) {
     try { await this.refreshRoom(); } catch { return { outcome: { outcome: "cancelled" } }; }
     if (this.controller.signal.aborted || this.me.active === false) return { outcome: { outcome: "cancelled" } };
+    try { await this.assertListener(); } catch { return { outcome: { outcome: "cancelled" } }; }
     const approverId = this.permissions.approverId;
     const signal = AbortSignal.any([this.controller.signal, this.approverController.signal]);
     return this.permissions.request({ ...request, validateApproval: async () => {
       await this.refreshRoom();
+      await this.assertListener();
       return !signal.aborted && this.me.active !== false && this.permissions.approverId === approverId &&
         Boolean(this.members[approverId] && this.members[approverId].active !== false);
     } }, signal);
@@ -144,9 +146,16 @@ export class Bridge {
     this.permissions ??= new PermissionBroker({ room: this.room, approverId: this.me.accountableHumanId ?? this.ownerId, timeoutMs: this.permissionTimeoutMs, pollMs: this.permissionPollMs, log: this.log });
   }
 
+  async assertListener() {
+    if (!this.fencingToken || this.controller.signal.aborted) throw new RoomError(409, "stale_listener", "No active runtime lease");
+    const result = await this.room.checkListener(this.fencingToken);
+    if (result?.listener?.valid !== true) throw new RoomError(409, "stale_listener", "Listener validation failed");
+  }
+
   async authorized({ messageIds, claimId } = {}) {
     if (this.controller.signal.aborted) throw new Error("bridge stopped");
     await this.refreshRoom();
+    await this.assertListener();
     if (!this.members[this.connection.memberId] || this.me.active === false) return false;
     const allowed = authorId => mayTalk({ authorId, members: this.members, me: this.me, ownerId: this.ownerId, respondTo: this.respondTo });
     if (claimId) {
@@ -166,6 +175,7 @@ export class Bridge {
     if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    this.room.listenerToken = this.fencingToken;
     const expires = Number(value?.listener?.leaseExpiresAt);
     this.leaseRenewAt = Math.min(Date.now() + this.cadenceSeconds * 1000 / 2, Number.isFinite(expires) ? expires - 20000 : Infinity);
     if (!this.fencingToken) this.log(`another room-acp listener holds this room's wake queue (${value?.listener?.activeListenerId ?? "unknown"}); waiting`);
@@ -256,7 +266,7 @@ export class Bridge {
         this.claimReceipts.save(key, receipt);
       }
       if (receipt.phase === "result") {
-        await this.room.claimNote(claimId, receipt.body, receipt.requestId);
+        await this.room.claimNote(claimId, receipt.body, receipt.requestId, this.fencingToken);
         this.stats.posted++;
         receipt = { phase: "posted", requestId: receipt.requestId };
         this.claimReceipts.save(key, receipt);
@@ -329,7 +339,7 @@ export class Bridge {
       }
       if (receipt.phase === "result") {
         await this.room.post({ body: receipt.body, replyToId: receipt.threadKey,
-          messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId });
+          messageId: `acp-${receipt.requestId}`, requestId: receipt.requestId, listenerToken: this.fencingToken });
         this.stats.posted++;
         const { body: _body, ...delivered } = receipt;
         receipt = { ...delivered, phase: "posted" };

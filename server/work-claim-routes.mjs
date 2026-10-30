@@ -1,3 +1,4 @@
+import { assertListenerFence, LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 import { messageRepository } from "./message-repository.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
@@ -645,7 +646,7 @@ function retire(reject, item, caller, verb, reason, authority, nowMs) {
 
 // MCP room_close_work_claim: the same close/cancel as the REST routes, in one
 // transaction, with the same access checks as room_link_work_claim_pr.
-export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
+export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize, listenerToken }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
     const current = reauthorize ? reauthorize() : auth;
@@ -678,10 +679,11 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
   return registry.transaction ? registry.transaction(run) : run();
 }
 
-export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
+export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize, listenerToken }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
     const current = reauthorize ? reauthorize() : auth;
+    assertListenerFence(store, current, roomId, listenerToken);
     if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
     if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
     if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
@@ -741,7 +743,7 @@ export async function handleWorkClaims(options) {
     && requestData && typeof requestData === "object" && Object.hasOwn(requestData, "appendPullRequest")) {
     try {
       const item = linkWorkClaimPullRequest({ store: options.store, roomId: options.roomId,
-        auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
+        auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize, listenerToken: req.headers?.[LISTENER_TOKEN_HEADER] });
       return helpers.json(res, 200, withProjectMapOverlap(options.store, options.roomId, item));
     } catch (error) {
       if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
@@ -862,6 +864,7 @@ function memoizeList(registry) {
 function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
+  if (req.method !== "GET" && req.method !== "HEAD") assertListenerFence(store, auth, roomId, req.headers?.[LISTENER_TOKEN_HEADER]);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });

@@ -2,6 +2,11 @@
     post:
       summary: Update claimed work or append a PR link
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). A note/state update may carry the optional round
         preconditions `expectedClaimedAt` + `expectedHistoryLength` (same

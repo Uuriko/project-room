@@ -1,4 +1,5 @@
 import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
+import { assertListenerFence } from "./listener-fence.mjs";
 import { isWriteSql } from './sql-write-classification.mjs';
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
@@ -6424,7 +6425,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false } = {}) {
+  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false, listenerToken } = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
     // command transaction cannot roll back, so remember the spend and refund
@@ -6434,6 +6435,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      assertListenerFence(this, auth, roomId, listenerToken);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
       // polls; drafts (message.posted carrying a workItemId) need the
