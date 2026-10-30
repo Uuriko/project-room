@@ -56,4 +56,36 @@ test("POST /a2a and /room/a2a answer over HTTP without credentials", async t => 
   const get = await fetch(`${origin}/a2a`);
   assert.equal(get.status, 405);
   assert.equal((await fetch(`${origin}/a2a`, { method: "POST", body: "{not json" })).status, 400);
+  const notifyBatch = await fetch(origin + "/a2a", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([{ jsonrpc: "2.0", method: "message/send", params: send("message/send").params }]) });
+  assert.equal(notifyBatch.status, 204);
+  const reqBatch = await fetch(origin + "/a2a", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([send("message/send"), { ...send("message/send"), id: 2 }]) });
+  assert.equal(reqBatch.status, 200);
+  assert.equal((await reqBatch.json()).length, 2);
+});
+
+test("A2A v1.0 capability validation: streaming and extended-card operations answer -32004", () => {
+  const msgParams = { message: { role: "user", messageId: "m1", parts: [{ kind: "text", text: "hello" }] } };
+  for (const method of ["message/stream", "SendStreamingMessage", "tasks/resubscribe", "SubscribeToTask"]) {
+    const reply = handleA2aRpc({ jsonrpc: "2.0", id: 9, method, params: msgParams });
+    assert.equal(reply.error.code, -32004, method);
+    assert.match(reply.error.message, /UnsupportedOperationError/, method);
+    assert.equal(handleA2aRpc({ jsonrpc: "2.0", method, params: msgParams }), null, `${method} notification`);
+  }
+  for (const method of ["agent/getAuthenticatedExtendedCard", "GetExtendedAgentCard"]) {
+    const reply = handleA2aRpc({ jsonrpc: "2.0", id: 10, method });
+    assert.equal(reply.error.code, -32004, method);
+    assert.match(reply.error.message, /UnsupportedOperationError/, method);
+  }
+});
+
+test("JSON-RPC 2.0 batches answer with an array of responses", () => {
+  const one = send("message/send");
+  const batch = handleA2aRpc([one, { jsonrpc: "2.0", method: "message/send", params: one.params }]);
+  assert.equal(batch.length, 1, "a notification inside a batch contributes no entry");
+  assert.equal(batch[0].id, "1");
+  const two = handleA2aRpc([one, { ...one, id: 2 }]);
+  assert.equal(two.length, 2);
+  assert.equal(two[1].id, 2);
+  assert.equal(handleA2aRpc([]).error.code, -32600);
+  assert.equal(handleA2aRpc([["nested"]])[0].error.code, -32600);
 });
