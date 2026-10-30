@@ -67,12 +67,29 @@ export function assembleAccessReview(store, roomId) {
   const latestDecision = new Map(db.prepare(`SELECT identity_id,max(sequence) AS sequence
     FROM membership_delegation_journal WHERE room_id=? GROUP BY identity_id`).all(roomId)
     .map(row => [row.identity_id, row.sequence]));
+  // #3779: owner-delegate grants (server/owner-delegates.mjs) confer
+  // owner-equivalent authority, so the review must surface them with the
+  // same discipline as membership delegations: identity ids and
+  // timestamps only, never a secret.
+  const ownerDelegateRows = db.prepare(`SELECT identity_id AS identityId, granted_by AS grantedBy, granted_at AS grantedAt
+    FROM owner_delegate_grants WHERE room_id=? AND revoked_at IS NULL ORDER BY granted_at ASC, identity_id ASC`).all(roomId);
+  const ownerDelegateByIdentity = new Map(ownerDelegateRows.map(row => [row.identityId, row]));
+  const ownerDelegateJournalCount = db.prepare("SELECT count(*) AS n FROM owner_delegate_journal WHERE room_id=?").get(roomId).n;
+  const ownerDelegateDecisions = db.prepare(`SELECT sequence,identity_id,action,actor_id,recorded_at
+    FROM owner_delegate_journal WHERE room_id=? ORDER BY sequence DESC LIMIT 100`).all(roomId)
+    .map(row => ({ sequence: row.sequence, identityId: row.identity_id, action: row.action,
+      actorId: row.actor_id, recordedAt: iso(row.recorded_at) }));
+  const latestOwnerDelegateDecision = new Map(db.prepare(`SELECT identity_id,max(sequence) AS sequence
+    FROM owner_delegate_journal WHERE room_id=? GROUP BY identity_id`).all(roomId)
+    .map(row => [row.identity_id, row.sequence]));
   const authorityOf = member => {
     const paths = [];
     if (member.id === state.room.ownerId) paths.push("owner");
     if (member.delegatedAdmin === true) paths.push("delegated_admin");
     if (member.identityId && delegationByIdentity.has(member.identityId)) paths.push("membership_delegation");
-    return { authorityPaths: paths, dualGrantHazard: paths.includes("delegated_admin") && paths.includes("membership_delegation") };
+    if (member.identityId && ownerDelegateByIdentity.has(member.identityId)) paths.push("owner_delegate");
+    return { authorityPaths: paths, dualGrantHazard: paths.includes("membership_delegation")
+      && (paths.includes("delegated_admin") || paths.includes("owner_delegate")) };
   };
   const active = Object.values(state.members).filter(member => member.active !== false);
   const members = active.filter(member => !isGuest(member)).map(member => ({
@@ -82,6 +99,9 @@ export function assembleAccessReview(store, roomId) {
     // admin bits via an explicit owner grant. The grant is server-stamped;
     // this flag makes the exception inspectable in review output.
     delegatedAdmin: member.delegatedAdmin === true,
+    // #3779: member-level flag for an active owner-delegate grant, mirroring
+    // delegatedAdmin so the owner-equivalent path is inspectable per member.
+    ownerDelegate: !!(member.identityId && ownerDelegateByIdentity.has(member.identityId)),
     identityId: member.identityId ?? null, ...authorityOf(member), accountBound: accounts.has(member.id),
     membershipOrigin: member.membershipOrigin?.kind ?? (member.id === state.room.ownerId ? "bootstrap" : "added"), joinedAt: joined.get(member.id) ?? null,
     liveAccessKeys: liveKeys.get(member.id)?.n ?? 0, latestAccessKeyExpiresAt: iso(liveKeys.get(member.id)?.latest),
@@ -116,7 +136,7 @@ export function assembleAccessReview(store, roomId) {
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
       WHERE l.room_id=? ORDER BY l.linked_at, l.identity_id`).all(roomId).map(row => {
     const member = ownMember(state.members, row.memberId);
-    const authority = member ? authorityOf(member) : { authorityPaths: delegationByIdentity.has(row.identityId) ? ["membership_delegation"] : [], dualGrantHazard: false };
+    const authority = member ? authorityOf(member) : { authorityPaths: [...(delegationByIdentity.has(row.identityId) ? ["membership_delegation"] : []), ...(ownerDelegateByIdentity.has(row.identityId) ? ["owner_delegate"] : [])], dualGrantHazard: false };
     return {
       identityId: row.identityId, displayName: row.displayName, memberId: row.memberId, linkedAt: iso(row.linkedAt),
       memberActive: member?.active !== false, lastActivityAt: lastActivity.get(row.memberId) ?? null,
@@ -137,13 +157,24 @@ export function assembleAccessReview(store, roomId) {
       auditSequence: latestDecision.get(row.identityId) ?? null
     };
   });
+  const ownerDelegations = ownerDelegateRows.map(row => {
+    const identity = agentIdentities.find(item => item.identityId === row.identityId);
+    return {
+      identityId: row.identityId, memberId: identity?.memberId ?? null, grantedBy: row.grantedBy, grantedAt: iso(row.grantedAt),
+      authorityPaths: identity?.authorityPaths ?? ["owner_delegate"], dualGrantHazard: identity?.dualGrantHazard === true,
+      auditSequence: latestOwnerDelegateDecision.get(row.identityId) ?? null
+    };
+  });
   const roomLastActivityAt = [...lastActivity.values()].filter(Boolean).sort().at(-1) ?? null;
   return { format: ACCESS_REVIEW_FORMAT, roomId, roomTitle: state.room.title, ownerId: state.room.ownerId, generatedAt: iso(now),
     lastActivityAt: roomLastActivityAt, counts: { members: members.length, guests: guests.length, shareLinks: shareLinks.length,
       pendingInvites: pendingInvites.length, agentIdentities: agentIdentities.length, agentConnections: agentConnections.length,
-      membershipDelegations: membershipDelegations.length, delegationDecisions: journalCount },
+      membershipDelegations: membershipDelegations.length, delegationDecisions: journalCount,
+      ownerDelegations: ownerDelegations.length, ownerDelegateDecisions: ownerDelegateJournalCount },
     members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections, membershipDelegations,
-    delegationDecisions, delegationDecisionsTruncated: journalCount > delegationDecisions.length };
+    delegationDecisions, delegationDecisionsTruncated: journalCount > delegationDecisions.length,
+    ownerDelegations, ownerDelegateDecisions,
+    ownerDelegateDecisionsTruncated: ownerDelegateJournalCount > ownerDelegateDecisions.length };
 }
 
 // Plain-text rendering shared by the CLI; one block per room.
@@ -162,6 +193,10 @@ export function renderAccessReview(report) {
   for (const grant of report.membershipDelegations ?? []) lines.push(`  ${grant.identityId}  member ${grant.memberId ?? "unlinked"}  granted by ${grant.grantedBy}  at ${when(grant.grantedAt)}  paths: ${grants(grant.authorityPaths)}${grant.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}`);
   lines.push(`Membership decision journal (${report.counts.delegationDecisions}; showing ${report.delegationDecisions.length} newest${report.delegationDecisionsTruncated ? ", truncated" : ""}):`);
   for (const decision of report.delegationDecisions) lines.push(`  #${decision.sequence} ${decision.action} ${decision.identityId} by ${decision.actorId} at ${decision.recordedAt}`);
+  lines.push(`Owner delegations (${report.ownerDelegations?.length ?? 0}):`);
+  for (const grant of report.ownerDelegations ?? []) lines.push(`  ${grant.identityId}  member ${grant.memberId ?? "unlinked"}  granted by ${grant.grantedBy}  at ${when(grant.grantedAt)}  paths: ${grants(grant.authorityPaths)}${grant.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}`);
+  lines.push(`Owner-delegate decision journal (${report.counts.ownerDelegateDecisions ?? 0}; showing ${report.ownerDelegateDecisions?.length ?? 0} newest${report.ownerDelegateDecisionsTruncated ? ", truncated" : ""}):`);
+  for (const decision of report.ownerDelegateDecisions ?? []) lines.push(`  #${decision.sequence} ${decision.action} ${decision.identityId} by ${decision.actorId} at ${decision.recordedAt}`);
   lines.push(`Agent identities (${report.agentIdentities.length}):`);
   for (const i of report.agentIdentities) lines.push(`  ${i.identityId}  ${i.displayName}  member ${i.memberId}${i.memberActive ? "" : " (inactive)"}  linked ${i.linkedAt}  last activity: ${when(i.lastActivityAt)}`);
   lines.push(`Agent connections (${report.agentConnections.length}):`);
