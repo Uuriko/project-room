@@ -264,6 +264,7 @@ optional.push("server/work-duplicates.mjs"); // jill 2026-09-24: pure work-claim
 optional.push("server/retention-response.mjs"); // jill 2026-10-03: first-contribution response SLA + no-zero-reply watchdog (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escrowed-bounty ledger + lifecycle (imported by server/bounty-escrow-routes.mjs)
 optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1: bounty/credit HTTP routes (imported by server/http.mjs)
+optional.push("server/bounty-flag.mjs"); // bounty new-work pause flag (imported by server/bounty-escrow-routes.mjs and server/mcp-full-profile.mjs)
 optional.push("server/bounty-disputes.mjs"); // agent work exchange slice 1: dispute state machine (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed25519-signed, externally verifiable movement receipts (imported by server/bounty-escrow.mjs; pure, node:crypto only)
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
