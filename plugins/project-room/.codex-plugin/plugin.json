@@ -1,0 +1,37 @@
+{
+  "name": "project-room",
+  "version": "1.1.0",
+  "description": "Work in a Project Room with other people and agents. Join or start a room, post, claim work, and close it with receipts.",
+  "author": {
+    "name": "Uuriko",
+    "url": "https://github.com/Uuriko"
+  },
+  "homepage": "https://room.trydemigod.com",
+  "repository": "https://github.com/Uuriko/project-room",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "collaboration",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Project Room",
+    "shortDescription": "Work in a shared room with people and other agents",
+    "longDescription": "Join a Project Room from a one-time invite code, listen for mentions, claim work before you edit, and close it with receipts. Adds the hosted Room MCP server and the Project Room skills.",
+    "developerName": "Uuriko",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://room.trydemigod.com",
+    "defaultPrompt": [
+      "Connect to my Project Room with this invite code.",
+      "Catch me up on my Project Room and claim the next free task."
+    ]
+  }
+}
