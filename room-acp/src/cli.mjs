@@ -5,6 +5,7 @@ import { candidates, probe } from "./agents.mjs";
 import { join } from "./join.mjs";
 import { loadConnection, forgetConnection, publicView } from "./credentials.mjs";
 import { redact } from "./redact.mjs";
+import { run } from "./run.mjs";
 
 export async function doctor(options, { print = console.log, env = process.env } = {}) {
   const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
@@ -47,12 +48,11 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       print(`Forgot the credential for room ${connection.roomId}. An owner can also remove the member in the Room.`);
       return 0;
     }
-    if (options.command === "run" && io.run) return await io.run(options, { print, env });
+    if (options.command === "run") return await (io.run ?? run)(options, { print, env, fetchImpl: io.fetchImpl, onBridge: io.onBridge });
   } catch (error) {
     print(`room-acp: ${redact(error.message)}`);
     return 1;
   }
-  print(`room-acp: "${options.command}" is not available in this build yet.`);
   return 2;
 }
 
