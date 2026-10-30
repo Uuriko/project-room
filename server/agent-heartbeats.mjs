@@ -127,6 +127,10 @@ export const wakeListenerLeaseSchema = `
     redelivered INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS agent_wake_signal_claims_agent ON agent_wake_signal_claims(agent_id, claimed_at);
+  CREATE TABLE IF NOT EXISTS agent_host_disconnects (
+    agent_id TEXT NOT NULL, host_id TEXT NOT NULL, disconnected_at INTEGER NOT NULL,
+    PRIMARY KEY(agent_id, host_id)
+  );
 `;
 // A claim is abandoned when its fencing token no longer holds a live lease;
 // redelivery replays the batch with redelivered=true.
@@ -579,6 +583,9 @@ export class AgentHeartbeats {
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
+    // A fresh heartbeat after a graceful disconnect brings the host back.
+    try { this.db.prepare("DELETE FROM agent_host_disconnects WHERE agent_id=? AND host_id=?").run(agentId, hostId); }
+    catch (error) { if (!isMissingTable(error)) throw error; }
     // plan-wake-live: heartbeat activity proves the host is listening.
     // CX5-FIX: a room-scoped credential's heartbeat (activityRoomId set by
     // the route) stamps room activity only — never the global stamp.
@@ -1000,6 +1007,24 @@ export class AgentHeartbeats {
     return Object.freeze({ signals: Object.freeze(signals) });
   }
 
+  // Graceful disconnect: the bridge is stopping. Release its listener lease
+  // (when it presents the token) and mark the host gone now, so presence
+  // stops reading "listening" without waiting out the 180s window. Queued
+  // signals stay queued for the next heartbeat.
+  disconnectHost({ agentId, hostId, roomId = null, fencingToken = null }) {
+    checkAgentId(agentId);
+    check(typeof hostId === "string" && hostId.length > 0, 422, "invalid_heartbeat", "hostId is required");
+    this.ensureListenerSchema();
+    const known = this.db.prepare("SELECT last_seen_at AS at FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId);
+    if (!known) return Object.freeze({ disconnected: false, released: false });
+    const released = typeof fencingToken === "string" && fencingToken.length > 0
+      ? this.releaseListenerLease({ agentId, roomId, fencingToken }).released : false;
+    const at = Math.max(this.now(), known.at);
+    this.db.prepare(`INSERT INTO agent_host_disconnects(agent_id, host_id, disconnected_at) VALUES(?,?,?)
+      ON CONFLICT(agent_id, host_id) DO UPDATE SET disconnected_at=excluded.disconnected_at`).run(agentId, hostId, at);
+    return Object.freeze({ disconnected: true, released });
+  }
+
   // Release a listener lease. The holder's unacked claims are freed at once —
   // marked redelivered so the next claim replays them immediately (flagged).
   // A wrong token releases nothing.
@@ -1252,6 +1277,11 @@ export class AgentHeartbeats {
       // Older database without the push table: every host reads the
       // default window (read-only never migrates).
     }
+    let disconnects = new Map();
+    try {
+      disconnects = new Map(this.db.prepare("SELECT host_id AS hostId, disconnected_at AS at FROM agent_host_disconnects WHERE agent_id=?")
+        .all(agentId).map(row => [row.hostId, row.at]));
+    } catch (error) { if (!isMissingTable(error)) throw error; }
     const withState = hosts.map(row => {
       // BUILD-HEARTBEAT-CADENCE: the stored value is read as the host's
       // standing hint and the ASSIGNED value governs — so a row stored
@@ -1261,7 +1291,11 @@ export class AgentHeartbeats {
       const cadenceSeconds = assignedCadenceSeconds(cadences.get(row.host_id) ?? null);
       const windowMs = this.windowFor(cadenceSeconds);
       const view = hostView(row, cadenceSeconds);
-      return Object.freeze({ ...view, state: at - view.lastSeenAt <= windowMs ? "online" : "stale" });
+      // A host that said goodbye (graceful disconnect) is stale at once,
+      // until its next heartbeat. lastSeenAt is left as observed.
+      const goneAt = disconnects.get(row.host_id);
+      const gone = Number.isFinite(goneAt) && goneAt >= view.lastSeenAt;
+      return Object.freeze({ ...view, state: !gone && at - view.lastSeenAt <= windowMs ? "online" : "stale" });
     });
     const online = withState.some(host => host.state === "online");
     return Object.freeze({
