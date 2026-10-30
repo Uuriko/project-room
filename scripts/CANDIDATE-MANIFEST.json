@@ -62,6 +62,7 @@
     "project-room-mark.svg": "sha256:abc1e95e4d76b7e84d1c3eb2c004da6e6225e616b765bc0c02e4658cc04ec08a",
     "push-sw.js": "sha256:dd274367cfbe1ec861c0605f1f996773b0e80267c06aecdac8e4a42b1c173a28",
     "scripts/build-agent-docs.mjs": "sha256:d59c5bf8371e98e2f6a12ff7dc2cc28c4d9183d1efa0cd4d0982ed0ca110763a",
+    "scripts/build-room-acp-pack.mjs": "sha256:de4d4c6c98e741263192c290d2d26af941c7f0ef04c43082082823da41361df7",
     "scripts/install.sh": "sha256:60c5c2c00587efd2c0ba6cde42ced715bd7d445d6ec5143691ee8415a856c74b",
     "server/connect-snippets.mjs": "sha256:f410492dbce80b22683e1dbddb9a88b1a8a6a03be5b790ecf8d2d72a6ba2b49f",
     "skills/project-room-setup/SKILL.md": "sha256:44d201c16af5d71c7c453b94ea00ec7690e7e2051b4087442aaf9920b25ced12",
