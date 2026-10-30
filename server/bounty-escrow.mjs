@@ -666,6 +666,17 @@ const isoNow = ms => new Date(ms).toISOString();
 const RUBRIC_MAX_CRITERIA = 50;
 const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
 
+// The complete accept contract (DC3-P3, R4): taught in one response to the
+// seat authorised to accept, and never to a forbidden seat. Outer body is
+// {verifierAttestation, idempotencyKey?}; the attestation is a non-empty
+// object with an optional `at` ISO timestamp string and required citations —
+// one {criterionId, verdict} per pinned rubric criterion, every criterionId
+// from the pinned rubric, verdict pass or fail.
+export const ACCEPT_ATTESTATION_CONTRACT =
+  "{verifierAttestation, idempotencyKey?} — verifierAttestation is a non-empty object: " +
+  "citations (required) is an array of {criterionId, verdict} with one citation per pinned rubric criterion, " +
+  "every criterionId from the pinned rubric and verdict pass or fail; at is an optional ISO timestamp string";
+
 export function canonicalRubric(rubric) {
   check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
     "invalid_input", `rubric must be an array of 1..${RUBRIC_MAX_CRITERIA} criteria`);
@@ -2122,6 +2133,28 @@ export class BountyEscrow {
     return false;
   }
 
+  _acceptDenialMessage(bounty) {
+    return bounty.approvalMode === "agent"
+      ? "only the designated agent verifier may accept an agent-approved bounty"
+      : bounty.approvalMode === "legacy"
+        ? "only the poster or designated verifier may accept a legacy bounty"
+        : "only the poster may accept a human-approved bounty";
+  }
+
+  // Permission pre-check for the accept doors (DC3-P3, R1/R2): the doors run
+  // this BEFORE any body/argument shape validation, so a seat that may not
+  // accept is refused on power alone and never sees the attestation
+  // contract. acceptWork re-checks the same predicates inside its
+  // transaction; this read-only pass only decides which refusal comes first.
+  assertMayAccept(roomId, bountyId, acceptor) {
+    this._ensure();
+    const lane = this._requireLane(roomId, acceptor, "acceptor");
+    const bounty = this._getBounty(roomId, bountyId);
+    check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
+    check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
+    return bounty;
+  }
+
   acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -2131,12 +2164,7 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
-      check(this._mayApprove(bounty, lane), "not_authorized",
-        bounty.approvalMode === "agent"
-          ? "only the designated agent verifier may accept an agent-approved bounty"
-          : bounty.approvalMode === "legacy"
-            ? "only the poster or designated verifier may accept a legacy bounty"
-            : "only the poster may accept a human-approved bounty");
+      check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
       check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
       check(verifierAttestation !== null && typeof verifierAttestation === "object" && !Array.isArray(verifierAttestation)
         && Object.keys(verifierAttestation).length > 0, "invalid_input", "verifierAttestation must be a non-empty object");

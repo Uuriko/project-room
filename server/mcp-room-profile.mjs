@@ -21,7 +21,7 @@ import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
-import { EscrowError } from "./bounty-escrow.mjs";
+import { EscrowError, canonicalLane, ACCEPT_ATTESTATION_CONTRACT } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
@@ -892,7 +892,11 @@ function argumentFailure(requestId, name, args, schema) {
   if (!report.missing.length && !report.unexpected.length && !Object.keys(report.invalid).length) {
     report.invalid.arguments = "does not match the tool input";
   }
-  return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...report });
+  // bounty_accept reaches this failure only after the accept-authority
+  // pre-check below has passed, so its hint may teach the complete
+  // attestation contract (DC3-P3, R4) — holders only, never forbidden seats.
+  return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...report,
+    ...(name === "bounty_accept" ? { hint: `Fix the flagged arguments and retry. Accept requires ${ACCEPT_ATTESTATION_CONTRACT}.` } : {}) });
 }
 
 function queryFlag(searchParams, key) {
@@ -1005,6 +1009,21 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
         { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential });
+    }
+    // DC3-P3 (R1/R2), bounty_accept only: permission before shape at the
+    // transport. A seat that may not accept this bounty gets the escrow
+    // power refusal (403 form) instead of the argument-shape report naming
+    // the gated attestation fields; the authorised seat falls through to
+    // the normal validation below. Other tools keep the generic order.
+    if (name === "bounty_accept" && object(args) && validId(args.roomId)
+      && typeof args.bountyId === "string" && args.bountyId.length > 0) {
+      try {
+        const auth = store.authenticate(secret, args.roomId);
+        store.bountyEscrow.assertMayAccept(args.roomId, args.bountyId, canonicalLane(auth.member.id));
+      } catch (error) {
+        const value = failureValue(error);
+        if (value.status !== 500) return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
+      }
     }
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
