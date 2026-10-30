@@ -75,7 +75,7 @@ export function installAgentConnections({ client, getState }) {
       ? "Use my AI. Import this key only if the host can keep a secret outside chat."
       : route === "direct"
         ? "Import on that computer, then check. No key in a prompt."
-        : "Merge the MCP snippet, then call room_check_access.";
+        : "Merge the MCP snippet for this key (shown below), then call room_check_access.";
   }
   function describeRoute() {
     const route = currentRoute();
