@@ -4538,11 +4538,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const params = url.searchParams;
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
-        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["workItemId", "includeSource", "sourceObservation", "auth"].includes(key) || params.getAll(key).length !== 1)
           || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
           reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
         }
+        let sourceObservation;
+        if (params.has("sourceObservation")) {
+          const raw = params.get("sourceObservation");
+          if (raw.length > 1024) reject(422, "invalid_source_observation", "Source observation is too large");
+          try { sourceObservation = JSON.parse(raw); } catch { reject(422, "invalid_source_observation", "Invalid source observation"); }
+        }
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
+          sourceObservation,
           includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
         }));
       }
