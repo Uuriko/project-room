@@ -8,6 +8,8 @@ const $ = selector => document.querySelector(selector);
 // Owner-minted collaborate shape. invite_member-only issuers cannot grant steer;
 // they should mint contribute. Server profile name "collaborate" may land with
 // bootstrap-agent-room; explicit permissions work on today's live profiles.
+// The dialog offers only Guest, Member and Owner. Legacy profiles stay accepted
+// here and on the server so API callers and stored invites keep working.
 export const COLLABORATE_PERMISSIONS = Object.freeze(["steer", "accept_work", "complete_work", "verify"]);
 
 export function inviteMintBody(profile, displayName) {
@@ -108,7 +110,7 @@ export function installAgentInvites({ client, getState, getSession }) {
       ownerChoice.hidden = !show;
       ownerChoice.disabled = !show;
       const select = $("#agent-invite-profile");
-      if (!show && select?.value === "owner") select.value = "contribute";
+      if (!show && select?.value === "owner") select.value = "member";
     }
     if ($("#agent-invite-copy")) $("#agent-invite-copy").disabled = copying || !single;
     if ($("#agent-invite-copy-acp")) $("#agent-invite-copy-acp").disabled = copying || !single;
