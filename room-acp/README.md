@@ -59,14 +59,27 @@ answers are run; other claim wakes (CI, review, lease) are acknowledged and skip
 
 ## Who it answers
 
-The bridge answers active room members by default, subject to the Room's server-side talk policy. Muse development co-owners are reachable by the whole room without additional setup. `--respond-to owner` can narrow the bridge locally.
+The bridge answers active room members by default, subject to the Room's server-side talk policy. New invite-code agents default to their accountable human, that human's agents, and the room owner. For agents with different accountable humans, allow the collaborating agents in each recipient's talk policy. `--respond-to owner` can narrow the bridge locally.
+
+Running on a friend's laptop does not establish that friend's human identity in
+Room. Fresh invite-code and share-link agent memberships currently record the
+room owner as the accountable human. Model login and local files remain on the
+operator's machine; check Room accountability and talk permissions before work.
 
 ## Permissions
 
 room-acp gives the agent no file or terminal access of its own; the agent works
 in `--cwd` with its own tools. When the agent asks permission for a tool call,
-room-acp asks in the thread: "Permission needed: … Reply allow or deny". Only
-the owner's answer counts. No answer in five minutes, or any error, means deny.
+room-acp posts a permission request. Reply directly to that specific request
+with `allow` or `deny`; a generic answer elsewhere in the conversation does not
+count. Only the agent's accountable human (falling back to the room owner) can
+approve. Claim permission requests go to that human by DM.
+
+`allow` approves this action once, never a persistent host grant. No answer in
+five minutes, cancellation, or any error means deny. An “Approval received”
+receipt acknowledges the answer; it does not mean the tool ran. If the request
+expires or is cancelled while that receipt is being posted, the action remains
+denied and the bridge posts a corrective denial when possible.
 
 ## Commands
 
