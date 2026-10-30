@@ -40,14 +40,14 @@ test("owner allow in the thread selects the allow option", async t => {
   const guestKey = room.f.store.issueAccessKey("commons", "guest");
   room.f.store.command(guestKey, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: "g-allow", body: "allow", replyToId: ask.id } });
   await new Promise(resolve => setTimeout(resolve, 200));
-  assert.ok(!mine(room, rootId, connection.memberId).some(message => message.body.startsWith("Allowed")));
+  assert.ok(!mine(room, rootId, connection.memberId).some(message => message.body.startsWith("Approval received")));
   room.say("@Coder allow", { replyToId: rootId });
   await new Promise(resolve => setTimeout(resolve, 100));
-  assert.ok(!mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Allowed")), "generic root reply cannot approve");
+  assert.ok(!mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Approval received")), "generic root reply cannot approve");
   room.say("@Coder allow", { replyToId: ask.id });
   const final = await waitFor(() => mine(room, rootId, connection.memberId).find(message => /^permission: /.test(message.body)));
   assert.match(final.body, /permission: allow_once/);
-  assert.ok(mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Allowed:")));
+  assert.ok(mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Approval received:")));
 });
 
 test("no answer before the timeout denies", async t => {

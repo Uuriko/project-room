@@ -85,3 +85,44 @@ test("different claim DM asks remain independent while duplicate claim ask denie
   assert.deepEqual((await Promise.all([first, second])).map(choice), ["allow", "deny"]);
   assert.equal(broker.pending.size, 0); assert.equal(broker.askThreads.size, 0);
 });
+
+for (const ending of ["abort", "deadline"]) {
+  test(`${ending} during approval receipt post denies with truthful follow-up`, async () => {
+    const controller = new AbortController();
+    const receiptStarted = deferred(), receiptFinish = deferred();
+    const { broker, posts } = fixture({
+      thread: id => ({ thread: { replies: [{ id: "answer", authorId: "owner", replyToId: id, body: "allow" }] } }),
+      post: data => {
+        if (data.body.startsWith("Approval received:")) { receiptStarted.resolve(); return receiptFinish.promise; }
+      },
+    });
+    broker.timeoutMs = ending === "deadline" ? 50 : 1000;
+    const result = broker.request(request(), controller.signal);
+    await receiptStarted.promise;
+    if (ending === "abort") controller.abort();
+    else await new Promise(resolve => setTimeout(resolve, 60));
+    receiptFinish.resolve();
+    assert.equal(choice(await result), "deny");
+    assert.ok(posts.some(post => post.body.startsWith("Approval received:")));
+    assert.match(posts.at(-1).body, /^Denied: .*ended before approval could be forwarded/);
+    assert.ok(posts.every(post => !/^Allowed:/.test(post.body)));
+    assert.equal(broker.pending.size, 0);
+  });
+}
+
+test("plain Room allow never falls back to a persistent host grant", async () => {
+  const { broker, posts } = fixture();
+  const logs = []; broker.log = line => logs.push(line);
+  const result = await broker.request({ ...request(), options: [
+    { kind: "allow_always", optionId: "persistent" }, { kind: "reject_once", optionId: "deny" },
+  ] });
+  assert.equal(choice(result), "deny");
+  assert.equal(posts.length, 0);
+  assert.match(logs[0], /only persistent approval/);
+});
+
+test("one-time approval wins when persistent approval is also offered", async () => {
+  const { broker } = fixture({ thread: id => ({ thread: { replies: [{ id: "answer", authorId: "owner", replyToId: id, body: "allow" }] } }) });
+  const result = await broker.request({ ...request(), options: [{ kind: "allow_always", optionId: "persistent" }, ...options] });
+  assert.equal(choice(result), "allow");
+});

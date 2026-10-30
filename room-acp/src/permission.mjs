@@ -27,7 +27,10 @@ export class PermissionBroker {
 
   async request({ threadKey, toolCall, options }, signal) {
     const deny = pick(options, ["reject_once", "reject_always"]);
-    const allow = pick(options, ["allow_once", "allow_always"]);
+    // A plain Room "allow" authorizes this request only, never a persistent
+    // host grant. Persistent choices require a separate explicit consent UI.
+    const allow = pick(options, ["allow_once"]);
+    if (!allow && pick(options, ["allow_always"])) this.log("permission request denied: only persistent approval is offered");
     const outcome = option => (option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } });
     if (!threadKey || !allow || signal?.aborted || this.pending.has(threadKey)) return outcome(deny);
     // Reserve synchronously: two ACP requests may arrive before posting either
@@ -62,8 +65,14 @@ export class PermissionBroker {
           if (reply.authorId !== this.approverId || reply.replyToId !== messageId) continue;
           const decision = decisionOf(reply.body);
           if (decision) {
-            await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Allowed: ${title}` : `Denied: ${title}` }).catch(() => {});
-            return outcome(decision === "allow" && !signal?.aborted && Date.now() - askedAt < this.timeoutMs ? allow : deny);
+            // A receipt records the owner's answer, not a promise that the
+            // permission was forwarded or that the tool actually executed.
+            await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Approval received: ${title}` : `Denied: ${title}` }).catch(() => {});
+            if (decision === "allow" && (signal?.aborted || Date.now() - askedAt >= this.timeoutMs)) {
+              await this.room.post({ replyToId: askThread, body: `Denied: ${title}. The permission request ended before approval could be forwarded.` }).catch(() => {});
+              return outcome(deny);
+            }
+            return outcome(decision === "allow" ? allow : deny);
           }
         }
       }
