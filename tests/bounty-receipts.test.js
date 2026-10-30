@@ -198,6 +198,50 @@ test("verify rejects every tamper class", () => {
   assert.match(verifyBountyReceipt(dup).reason, /duplicate object key/);
 });
 
+// --- B1-5 pins (methods audit Phase B, mutant survivors BR2/BR5/BR15) --------
+// Each test below is the audit's distinguishing case, landed unweakened:
+// it passes on the pristine verifier and fails on the named mutant.
+
+test("B1-5 F1 pin: verifyBytes fails closed on a malformed pubkey — an exception never verifies", () => {
+  // Mutant pinned: verifyBytes catch { return false } -> return true (BR2).
+  // The catch is the only guard for malformed pubkey input: importPubkey
+  // throws on non-hex / wrong-length keys, and direct verifyBytes callers
+  // (e.g. server/signed-evidence.mjs) pass key material validateShape has
+  // not screened. Any input that makes the verifier throw must be rejected.
+  const bytes = Buffer.from("hello receipt", "utf8");
+  const sig = signBytes(bytes, TEST_SEED);
+  assert.equal(verifyBytes(bytes, sig, TEST_PUBKEY), true, "control: the genuine signature verifies");
+  assert.equal(verifyBytes(bytes, sig, "zz".repeat(32)), false, "non-hex pubkey must not verify");
+  assert.equal(verifyBytes(bytes, sig, "not-hex"), false, "non-hex short pubkey must not verify");
+  assert.equal(verifyBytes(bytes, sig, "ab".repeat(16)), false, "wrong-length pubkey must not verify");
+});
+
+test("B1-5 F2 pin: an uppercase-hex expected signer pin still authenticates a genuine receipt", () => {
+  // Mutant pinned: verifyBountyReceipt drops .toLowerCase() from the
+  // expected-signer comparison (BR5). All generated fixtures are lowercase
+  // hex, so without this case the normalisation is unpinned: a verifier
+  // presenting an uppercase hex pin would reject every genuine receipt.
+  const r = issueBountyReceipt(issueArgs("escrow-locked", PAYLOADS["escrow-locked"]));
+  assert.equal(verifyBountyReceipt(r, { expectedPubkey: TEST_PUBKEY }).ok, true,
+    "control: the lowercase pin verifies");
+  assert.equal(verifyBountyReceipt(r, { expectedPubkey: TEST_PUBKEY.toUpperCase() }).ok, true,
+    "the uppercase pin must verify the same genuine receipt");
+});
+
+test("B1-5 F3 pin: the number ban fires before any other shape fault", () => {
+  // Mutant pinned: assertNoNumbers || -> && (BR15). A receipt carrying a
+  // JSON number is rejected either way (canonicalJson backstops it), so
+  // only a double-fault receipt observes the precedence the module's spec
+  // states (dasha-receipt/1 §4: the ban fires "before anything else").
+  const r = issueBountyReceipt(issueArgs("escrow-locked", PAYLOADS["escrow-locked"]));
+  const v = verifyBountyReceipt({ ...r, amountMillis: 10000, schemaVersion: "bogus/9" });
+  assert.equal(v.ok, false, "the double-fault receipt is rejected");
+  assert.match(v.reason, /^number_ban/, "the number ban precedes the schemaVersion fault");
+  const v2 = verifyBountyReceipt({ ...r, amountMillis: 10000 });
+  assert.equal(v2.ok, false, "the single-fault receipt is rejected");
+  assert.match(v2.reason, /number_ban/, "a lone JSON number is a number_ban rejection");
+});
+
 test("verify rejects a valid signature from the wrong key", () => {
   const other = generateReceiptKeyPair();
   const r = issueBountyReceipt(issueArgs("escrow-locked", PAYLOADS["escrow-locked"], { seedHex: other.seedHex,
