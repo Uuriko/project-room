@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { boardHtml } from "../src/board-ui.js";
+import { boardHtml, claimReviewForm, claimDeliverForm } from "../src/board-ui.js";
 import { needsMeHtml } from "../src/board-mine.js";
 import { createNeedsAttentionCard } from "../src/needs-attention.js";
 
@@ -77,6 +77,45 @@ test("needs-attention: Approve/Deny buttons carry the item's title in their acce
   const html = elements["#attention-list"].innerHTML;
   assert.match(html, /aria-label="Approve — Sam asks to join"/, "Approve names its item");
   assert.match(html, /aria-label="Decline — Sam asks to join"/, "Decline names its item");
+});
+
+test("board cards: two Link PR submits on different items have distinct accessible names containing their titles", () => {
+  const members = { "viewer-1": { id: "viewer-1", kind: "human", active: true, permissions: ["accept_work"] } };
+  const viewer = { id: "viewer-1", manage: false, owner: false, write: true };
+  const item = (id, title) => ({ id, title, state: "claimed", owner: "viewer-1", kind: "task", files: [], dependsOn: [], tags: [], reviews: [], attestations: [], history: [] });
+  const html = boardHtml([item("wc_a", "Fix the roof"), item("wc_b", "Paint the door")], null, viewer, members, NOW, {});
+  const labels = [...html.matchAll(/<button type="submit" class="button secondary" aria-label="([^"]*)">Link PR<\/button>/g)].map(m => m[1]);
+  assert.equal(labels.length, 2, "both held cards render a Link PR submit");
+  assert.deepEqual(labels, ["Link PR — Fix the roof", "Link PR — Paint the door"]);
+});
+
+test("board cards: two Move submits on different items have distinct accessible names containing their titles", () => {
+  const members = {
+    "owner-1": { id: "owner-1", kind: "agent", active: true, permissions: ["accept_work"] },
+    "member-3": { id: "member-3", kind: "human", active: true, permissions: ["accept_work"] },
+  };
+  const viewer = { id: "manager-1", manage: true, owner: false, write: true };
+  const item = (id, title) => ({ id, title, state: "claimed", owner: "owner-1", kind: "task", files: [], dependsOn: [], tags: [], reviews: [], attestations: [], history: [] });
+  const html = boardHtml([item("wc_a", "Fix the roof"), item("wc_b", "Paint the door")], null, viewer, members, NOW, {});
+  const labels = [...html.matchAll(/<button type="submit" class="button secondary" aria-label="([^"]*)">Move<\/button>/g)].map(m => m[1]);
+  assert.equal(labels.length, 2, "both managed cards render a Move submit");
+  assert.deepEqual(labels, ["Move — Fix the roof", "Move — Paint the door"]);
+});
+
+test("claim review form: the Submit review button names its item", () => {
+  const labelOf = item => claimReviewForm(item).match(/<button type="submit" class="button secondary" aria-label="([^"]*)">Submit review<\/button>/)?.[1];
+  assert.equal(labelOf({ id: "wc_a", title: "Fix the roof" }), "Submit review — Fix the roof");
+  assert.equal(labelOf({ id: "wc_b", title: "Paint the door" }), "Submit review — Paint the door");
+  // No title: the name falls back to the item id (the button() builder's
+  // item.title || item.id rule).
+  assert.equal(labelOf({ id: "wc_c" }), "Submit review — wc_c");
+});
+
+test("claim deliver form: the Deliver button names its item", () => {
+  const labelOf = item => claimDeliverForm(item).match(/<button type="submit" class="button primary" aria-label="([^"]*)">Deliver<\/button>/)?.[1];
+  assert.equal(labelOf({ id: "wc_a", title: "Fix the roof" }), "Deliver — Fix the roof");
+  assert.equal(labelOf({ id: "wc_b", title: "Paint the door" }), "Deliver — Paint the door");
+  assert.equal(labelOf({ id: "wc_c" }), "Deliver — wc_c");
 });
 
 test("timeline overflow: the message-more summary names the message (author identity), not a bare generic label", () => {

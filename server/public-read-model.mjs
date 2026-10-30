@@ -144,6 +144,41 @@ const cleanName = value => {
   return name ? name.slice(0, 80) : null;
 };
 
+// Receipt titles are titles, not display names. cleanName's 80-char cut
+// is a display-name shape; applied to a title it silently truncated the
+// receipt face mid-word with no ellipsis (E3-F1), and its null fell back
+// to a fabricated generic title shared by unrelated works (E3-F2).
+// The control-char strip cleanName applies stays; the length cut does not.
+const cleanTitle = value => {
+  if (typeof value !== "string") return null;
+  const title = [...value].filter(char => {
+    const code = char.codePointAt(0);
+    return code > 31 && code !== 127;
+  }).join("").trim();
+  return title ? title : null;
+};
+
+const UNTITLED_RECEIPT_TITLE = "Untitled receipt";
+
+// The title a public-work receipt carries. The task face names the task
+// by its offer's title (public-work-claims packet(): offer.title, stored
+// in the project_offers terms), so a receipt whose own record carries no
+// title reaches the same title through its task link. With no real title
+// reachable, the receipt is explicitly untitled — never a fabricated
+// generic title.
+const publicWorkReceiptTitle = (store, body) => {
+  const own = cleanTitle(body?.title);
+  if (own) return own;
+  if (typeof body?.taskId === "string" && body.taskId) {
+    try {
+      const offer = store.db.prepare("SELECT json_extract(terms, '$.title') AS title FROM project_offers WHERE offer_id=?").get(body.taskId);
+      const taskTitle = cleanTitle(offer?.title);
+      if (taskTitle) return taskTitle;
+    } catch { /* no offer table/row (legacy receipt): the untitled marker below */ }
+  }
+  return UNTITLED_RECEIPT_TITLE;
+};
+
 const parseJson = (text, fallback) => {
   try {
     const value = JSON.parse(text);
@@ -627,7 +662,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   ].filter(Boolean));
   const row = {
     id: body.receiptId,
-    title: cleanName(body.title) ?? "Public work",
+    title: publicWorkReceiptTitle(store, body),
     source: "public-work",
     originRoomId: roomId,
     roomId,
@@ -995,7 +1030,7 @@ export function rederivePublicReceipt(store, id) {
     return {
       artifactHashOk,
       row: {
-        id, title: cleanName(body.title) ?? "Public work", source: "public-work",
+        id, title: publicWorkReceiptTitle(store, body), source: "public-work",
         agents: typeof body.agentName === "string" && body.agentName ? [body.agentName]
           : typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
         humans: [], pullRequest: null, mergedAt: null,
