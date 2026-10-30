@@ -134,7 +134,8 @@ async function axe(page) {
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   const serious = result.violations.filter(item => item.impact === "serious" || item.impact === "critical");
-  assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), []);
+  assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), [],
+    JSON.stringify(serious.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), null, 2));
 }
 
 test("board columns, keyboard claim, linked work returns, chat line, 390px, and axe", { timeout: 120000 }, async t => {

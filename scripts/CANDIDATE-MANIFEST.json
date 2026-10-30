@@ -98,7 +98,7 @@
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:846ca1cbc2b1bc9374dc3ac59321f8442e4af7596a3523dcc6cb782e6032bdc1",
     "src/board-ui.js": "sha256:7a59d695d47f1181272e4c12a2ed0c1c6e7009d6c3777e8b70e545691a1cbd9d",
-    "src/board.css": "sha256:57e7e44ee9939945f8a5220e1bb1c6541c49a222d2f5fc023ac36f139bbcce1f",
+    "src/board.css": "sha256:36db28cdb19e0d5c65f36003dead300597efb4034d4df864d8f435e6ee8da2d6",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/client.js": "sha256:172cbb5fef042ed29df1832c2165be0430f4dc2f698b45d1e4eb7224919322bb",
