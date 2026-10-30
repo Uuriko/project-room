@@ -983,7 +983,7 @@ export class AgentPluginStore {
         const link = linkOf.get(roomId, member.id);
         if (!link) { skipped.push({ memberId: member.id, reason: "no linked identity" }); continue; }
         if (liveCardOf.get(link.identityId)) { skipped.push({ memberId: member.id, reason: "card already published" }); continue; }
-        let slug = String(member.displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const slug = String(member.displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!/^[a-z][a-z0-9-]*$/.test(slug)) { skipped.push({ memberId: member.id, reason: "display name has no usable slug" }); continue; }
         let agentId = slug, n = 2;
         while (taken.has(agentId)) agentId = `${slug}-${n++}`;
