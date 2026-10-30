@@ -537,6 +537,9 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     claimedAt,
     leaseStartAt,
     leaseExpiresAt,
+    // The work-item claim stores this as expiresAt. Repeat it on the list
+    // when a lease exists, so the expiry is not a missing or null field.
+    ...(typeof leaseExpiresAt === "string" ? { expiresAt: leaseExpiresAt } : {}),
     deliveryMode: existing?.deliveryMode ?? null,
     reviewPolicy: item.independentVerificationRequired === true ? "independent_principal"
       : (typeof item.verifierMemberId === "string" && item.verifierMemberId.length > 0 ? "distinct_member" : null),

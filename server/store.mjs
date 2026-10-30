@@ -65,7 +65,7 @@ import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
 import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
-import { conflictingClaim } from "./claim-scopes.mjs";
+import { conflictingClaim, claimLeaseRefusal, claimMaxLeaseMs, wholeRepoClaimRefusal } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
@@ -6631,6 +6631,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
           : command.data
       });
+      // Live admission only. Replay of an older claim keeps the expiry and
+      // paths it was accepted with. CLAIM_MAX_LEASE_MS tunes the cap.
+      // ** reserves every path, so it needs decide.
+      const leaseRefusal = claimLeaseRefusal(incoming, claimMaxLeaseMs());
+      if (leaseRefusal) fail(422, "command_rejected", leaseRefusal);
+      const wholeRepoRefusal = wholeRepoClaimRefusal(incoming, memberCan(room.state, auth.member.id, "decide"));
+      if (wholeRepoRefusal) fail(422, "command_rejected", wholeRepoRefusal);
       // A display name is checked before the reducer stores it. Exact
       // duplicates stay allowed: identity link already accepts two members
       // with the same spelling. Reserved labels, confusable spellings, and
