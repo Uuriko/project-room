@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 // Simulated humans and scripted MCP over a disposable local room. No model use.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -34,6 +35,8 @@ async function setup(t, touch = false, duration = 3600000) {
     page.on("request", req => { if (req.url().endsWith("/commands") && req.method() === "POST") traffic.push({ actor, command: req.postDataJSON() }); });
     await page.goto(origin); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
+    await openSearch(page); await page.locator("#message-search").fill("Contributor guide");
+    await page.locator(`#search-list [data-open-work="${workItemId}"]`).click();
     const card = page.locator('[data-work-record-id="' + workItemId + '"]'), dialog = page.locator("#action-dialog");
     const action = async (name, offerId) => {
       const button = card.locator('[data-action="' + name + '"]' + (offerId ? '[data-offer-id="' + offerId + '"]' : ""));
@@ -163,6 +166,9 @@ for (const broken of ["legacy", "malformed"]) test("human offers do not infer su
     return route.fulfill({ response, json: body });
   });
   await guest.page.reload(); await guest.page.locator("#main").waitFor({ state: "visible" });
+  // The warm boot paint renders first; wait for the network read's render
+  // before opening, or a re-render closes the details again.
+  await guest.card.locator(".work-help .form-hint", { hasText: "Offers unavailable." }).waitFor({ state: "attached" });
   await guest.card.locator(".work-help").evaluate(node => { node.open = true; });
   assert.equal(await guest.card.locator('[data-action="offer-help"]').count(), 0);
   assert.equal(await guest.card.getByText("Offers unavailable.", { exact: true }).isVisible(), true);

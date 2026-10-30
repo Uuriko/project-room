@@ -1,5 +1,159 @@
 # Collaboration concept experiments
 
+## Measuring development inside Project Room — active protocol, 2026-10-29
+
+This section operationalizes F5 in [the delivery plan](FOCUSED-DELIVERY-PLAN.md).
+The older layout experiments below remain historical evidence. No comparative
+productivity win has been established. Room should earn its coordination cost;
+a simple task that one agent can finish directly may need no Room ceremony.
+
+### Decision and comparison
+
+Ask whether the same quality of work reaches acceptance with less human effort,
+less elapsed time, or lower total cost. Separate two effects with three conditions:
+
+- A: one agent, ordinary repository/terminal/tools, without Room coordination.
+- B: the same multi-agent team and laptops as C, using ordinary chat/files/Git.
+- C: that team using Room's scoped context, claims, handoffs and result records.
+
+B versus C estimates Room's incremental value; A versus B estimates the value
+and cost of additional workers. Keep tool access, models, versions, compute and
+budgets comparable for B/C. Record any unavoidable differences. Room does not
+get credit for extra workers, a better model, or a larger token budget.
+
+Freeze the enrolled task cohort, deadline and acceptance rubric before execution.
+Use matched but nonidentical tasks; randomize assignment and counterbalance order.
+Do not repeat a solved task with the same agent context. Grade against acceptance
+criteria fixed before assignment, with condition hidden from the reviewer where
+practical. Use the same measurement pipeline in all conditions, including tasks
+without Room records. Include a small direct fix, cold handoff, interrupted continuation,
+independent review, and cross-laptop integration. Report these strata separately;
+Room need not win every task class. Start with a formative pilot to estimate
+variance and logging cost, then size a held-out comparison. A handful of successful
+trials is not evidence of universal superiority.
+
+### Extending beyond development tasks
+
+The first continuation pilot remains bounded as described above. Before applying
+its conclusions to general consumer work, run held-out writing or analysis tasks
+with their own acceptance rubric, using the same A/B/C comparison and accounting
+for setup and review effort. The historical synthetic writing/analysis fixtures
+below establish scorer mechanics, not that real users understand or value the
+results.
+
+For that extension, check whether a returning person can identify the current
+result, its author, unresolved changes and the next permitted action without
+coaching. Record wrong-version decisions and clarification needs alongside task
+quality; a passing execution or review record does not prove comprehension.
+These observations serve the existing UI-15 and MET-07 backlog obligations, not a
+new launch gate or a requirement for independent review on every product task.
+
+### Measures and definitions
+
+One unit is a predeclared user-valued task, not a message, tool call, commit, PR,
+or agent-created subtask. Link subtasks and retries to that unit so splitting work
+does not inflate output. For release work, acceptance includes the predeclared live
+checks; merge alone is insufficient. Acceptance and seven-day durability are
+separate observations, and missing follow-up is not zero rework.
+
+| Measure | Definition and interpretation |
+| --- | --- |
+| Accepted outcomes per active human hour | Distinct accepted task units divided by total active human minutes / 60 for the assigned cohort, including setup, context preparation, review, corrections and coordination for unsuccessful tasks. Show counts and effort alongside the ratio. Zero measured human effort makes the ratio undefined, not infinite productivity. |
+| Elapsed time to acceptance | From task assignment with required inputs available to independently verified acceptance, including queue, coordination, execution, review and integration waits. Show median and tail only when sample size supports them; retain failures/timeouts and unfinished ages separately rather than silently dropping them. |
+| Total cost per accepted outcome | All attributed model/tool/compute costs plus human effort at an explicit rate, divided by accepted task units. Include failed attempts, reviewers, setup and instrumentation overhead. Also show cash cost and human minutes separately. Missing provider usage stays unknown; token guesses are not invoices. |
+| Seven-day rework guardrail | Accepted tasks needing defect-driven correction within seven days / accepted tasks with a complete seven-day observation window. Show repair minutes and severity. Distinguish requirement changes from defects; retain disputed classification. |
+| Correctness/privacy guardrail | Unauthorized disclosure, wrong-version approval, lost work and duplicate external effects are recorded individually with severity. A speed gain does not offset these failures. Functional acceptance remains independent of performance. |
+
+For the first continuation pilot, predeclare the primary decision measure as
+correct accepted continuation within the fixed time/token budget divided by all
+enrolled tasks. Include unstarted, abandoned, timed-out and instrument-failed trials;
+report missing observations separately. Elapsed time, effort and cost diagnose it.
+For later throughput trials predeclare which outcome determines adoption and the
+acceptable tradeoffs before observing results.
+
+The three outcome measures are jointly interpreted; do not compress them into an
+opaque score. Seven-day rework preserves the fourth existing F5 measure as a
+quality guardrail, not an optional omission. Do not set a universal percentage
+improvement target before baseline variability and operating costs are known.
+
+Use a few diagnostics only when they change the next decision:
+
+- Context recovery: fresh participant start to a correct next action; record
+  wrong source/version/owner selections and clarification requests.
+- Handoff delay: result ready to the receiver's first useful action; distinguish
+  delivery, acknowledgement and actual execution.
+- Coordination effort: measured human minutes and provider usage spent finding
+  status, claiming, posting, retrieving, reconciling and maintaining documentation.
+  Concurrent agent minutes are compute effort, not elapsed wall time.
+- Rework and duplication: repeated implementation, merge-conflict repair,
+  redundant runs and unknown-outcome retries; do not guess avoided work.
+- Review value: independently confirmed defects found before acceptance, review
+  effort, false alarms and defects missed. Counts alone reward noisy reviewers.
+
+### Reuse the product's records; fill the actual gaps
+
+Use existing task/attempt/result/acceptance IDs and exact source revisions.
+Join Room event timestamps, provider usage receipts, CI/deploy receipts and
+review decisions through those IDs. Store measurement metadata alongside the
+existing result/evidence record or an experiment export, not a competing work
+ledger. A minimum export has trial ID, task stratum, assigned condition, source
+revision, model/budget, task/result IDs, start/acceptance timestamps, outcome,
+human effort, reported cost and coverage, rework follow-up and evidence links.
+Automatic activity timestamps cannot establish active human time; a small
+opt-in start/stop log or end-of-task effort report is needed initially.
+
+Current `server/owner-overview.mjs` already reports recorded session spend and
+accepted work/bounty counts. It is not yet this experiment metric: work and bounty
+outcomes have no guaranteed deduplication link, current state/update time is not
+an immutable acceptance event, and reported completion can precede required
+verification/owner review. Reported spend can omit attempts. Preserve its
+existing API fields `acceptedOutcomes` and `costPerAcceptedOutcome` for compatibility,
+but label their displayed values as recorded outcomes and reported spend. Do not
+silently relabel the ratio as total causal cost per
+user-valued outcome. First implement/export the linkage and coverage needed for
+the selected pilot, then consider a compact view in the existing overview.
+Use `(roomId, workItemId, attempt ordinal)` for attempts and completion event ID
+plus exact evidence version for results; preserve the required review/decision
+event references. Current state alone cannot confer independent acceptance.
+
+The local living-doc measurement harness already retains frozen sources/rubrics,
+all enrolled trials, bounded reads, maintenance timers and clock-domain checks.
+Reuse its experiment export before building a product analytics subsystem. Its
+controller timing is not active human effort, and its source bytes are not tokens.
+
+Keep diagnostics bounded and off the synchronous action path. Record metadata
+and identifiers rather than private message bodies; existing access controls and
+retention apply. Measure collection/storage/review overhead too. Missing or stale
+measurements should be visibly unknown rather than a green success badge.
+
+### Close the improvement loop
+
+For each recurring friction: capture the failed journey and affected task ID;
+choose one bottleneck; record a predicted effect and regression guardrails;
+reproduce; change one bounded mechanism; compare equivalent trials; ship or revert;
+then check the live outcome and delayed rework. Tie the observation, experiment,
+code change and release to the same existing work/result record.
+
+At each release checkpoint inspect the slowest or most expensive task stratum and
+its largest delay component. Every small batch of enrolled matched tasks, including incomplete ones, should
+produce one keep/change/remove decision, not another permanent dashboard or queue.
+After a credible baseline, predeclare a practically worthwhile gain based on the
+measured cost of adoption; do not pick the threshold after seeing results. Expand
+instrumentation only when missing evidence blocks that decision.
+
+### Evidence so far and limits
+
+Observed benefits include cross-laptop delivery/recovery without duplicate execution
+in controlled trials, independent reviews finding concrete defects, and reuse of
+exact-source release evidence. These demonstrate mechanisms, not total productivity
+lift. Retain coordination failures, missed holds, stale documentation, and time
+spent rebuilding context in the same evaluation. The 2026-10-29 cold-handbook pilot
+was one unblinded pair and did not establish a net benefit after maintenance cost.
+Query row reductions and smaller Graphify payloads are component improvements;
+they do not establish faster accepted work. The next useful controlled trial is a
+fresh-agent continuation after a correction and interruption, using held-out task
+variants, equal budgets, and independent acceptance.
+
 ## Decision and scope
 
 Compare conversation, conversation plus a current-result panel, and work-first presentation before committing to a product redesign. This is a local research harness, not a production feature, live-model benchmark or human usability study. Existing work/result/reply contracts remain the migration target; no new production work system is introduced.
@@ -87,3 +241,37 @@ Observed serialized JSON bytes (not compression, token counts or a timing benchm
 Discussion grew slightly because the experiment adds one relevant follow-up between sizes. The correction remained available in linked discussion at every size; selected work intentionally omitted it. Each resumed checkpoint returned exactly the newly added reply. These findings support reusing existing bounded context and retrieval APIs, not asserting that the underlying server query cost is bounded or that a whole-system rewrite is unnecessary. There is no statistically established latency win and no comparison of live-model task quality.
 
 Round-2 artifacts are in the chat workspace's `outputs/collaboration-round2`: `report.json`, `recovery.json`, `production-context.json`, screenshots, per-trial exports and traces. The local experiment server must be restarted after scorer edits because server modules are cached; refresh the browser afterward.
+
+## Selected-work handoff mechanics (2026-10-29)
+
+The maintained `scripts/qualify-work-brief.mjs` now predeclares seven synthetic
+conditions: source edited, charter changed, work replaced, access revoked,
+unrelated traffic, source omitted, and private source. Each mutates a disposable
+RoomStore through real commands, then repeats authenticated selected-work reads.
+The three explicit adapters are minimal objective/acceptance, the current brief
+without source retrieval, and a source-observation-aware brief. No fixture
+projection is cloned and edited to manufacture a change.
+
+Run with supported Node from the repository root:
+
+```sh
+node scripts/qualify-work-brief.mjs /absolute/evaluator-report.json --packets-dir /absolute/fresh-solver-directory
+```
+
+Metrics are declared before retrieval: actual in-process authenticated read calls,
+serialized response bytes, adapter payload bytes, and monotonic elapsed time for
+retrieval plus adaptation. Setup and command mutations are excluded from elapsed
+time. These are single serial samples, not HTTP latency, SQL cost, model tokens,
+a speedup estimate or human effort. Errors and unknown source freshness are
+retained. An unchanged omitted-source brief cannot establish source freshness;
+a source-content observation cannot establish permission or plan validity.
+Every later mutation still needs fresh server authorization and revision checks.
+
+The report pins Git revision/tree, dirty status, relevant source hashes and Node
+runtime. Optional solver packets have opaque case IDs and omit evaluator
+expectations and mutation labels. Exports are synthetic and frozen by per-run
+hashes; fixture-generated IDs and timestamps can vary between runs. Use the
+existing private measurement logger for formative fresh-agent trials. Give a
+solver only its assigned packet and permitted observation files, not the report,
+hidden rubric or repository. File separation alone is not an isolation boundary.
+One trial per condition cannot support a statistical productivity claim.

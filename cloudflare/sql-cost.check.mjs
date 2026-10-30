@@ -27,6 +27,18 @@ test('production DO wiring is opt-in and records readiness plus partial request 
       const response=await mf.dispatchFetch('http://localhost/wired');
       assert.equal(response.status,200,await response.clone().text());
       const result=await response.json();assert.equal(result.ready.ok,true);assert.equal(result.status,200);
+      const initialized=result.startupRows.find(row=>row.event==='room.do_initialized');
+      const first=result.startupRows.find(row=>row.phase==='first_request');
+      assert.equal(initialized.clockSemantics,'io-bound');
+      assert.equal(initialized.cpuMeasured,false);
+      assert.equal(first.clockSemantics,'io-bound');
+      assert.equal(first.cpuMeasured,false);
+      assert.ok(Number.isFinite(initialized.initializationMs));
+      assert.ok(Number.isFinite(initialized.storeInitializationMs));
+      assert.ok(initialized.initializationMs>=initialized.storeInitializationMs);
+      assert.equal(first.durableObjectInitializationMs,initialized.initializationMs);
+      assert.equal(first.storeInitializationMs,initialized.storeInitializationMs);
+      assert.ok(first.storeInitializationMs>=first.constructMs);
       if(enabled==='0') assert.equal(result.rows.length,0);
       else {
         const readiness=result.rows.find(row=>row.scopeKind==='readiness');assert.equal(readiness.statements,1);

@@ -69,6 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { disputabilityFor } from "./bounty-disputability.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -106,7 +107,7 @@ const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credi
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
-const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
+export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
 
 // Journal kinds eligible for an Ed25519-signed, externally verifiable
@@ -133,7 +134,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-function stateGroup(state) {
+export function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
@@ -665,6 +666,17 @@ const isoNow = ms => new Date(ms).toISOString();
 // criterionId so the hash is stable.
 const RUBRIC_MAX_CRITERIA = 50;
 const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
+
+// The complete accept contract (DC3-P3, R4): taught in one response to the
+// seat authorised to accept, and never to a forbidden seat. Outer body is
+// {verifierAttestation, idempotencyKey?}; the attestation is a non-empty
+// object with an optional `at` ISO timestamp string and required citations —
+// one {criterionId, verdict} per pinned rubric criterion, every criterionId
+// from the pinned rubric, verdict pass or fail.
+export const ACCEPT_ATTESTATION_CONTRACT =
+  "{verifierAttestation, idempotencyKey?} — verifierAttestation is a non-empty object: " +
+  "citations (required) is an array of {criterionId, verdict} with one citation per pinned rubric criterion, " +
+  "every criterionId from the pinned rubric and verdict pass or fail; at is an optional ISO timestamp string";
 
 export function canonicalRubric(rubric) {
   check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
@@ -1302,7 +1314,19 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
-      disputeDecider: row.dispute_decider ?? null,
+      // Disclose the designated decider, falling back to the designated verifier.
+      // disputeBounty checks eligibility before seating; this read does not
+      // confirm an active seat. _mutable/_saveBounty preserve the raw column,
+      // including NULL for a verifier-only designation.
+      disputeDecider: row.dispute_decider ?? row.verifier ?? null,
+      // DA3-P3 (F-S1a-3): computed disputability, derived at read time from
+      // the same designation disputeBounty seats (the RAW dispute_decider
+      // column ?? verifier) plus the current claimant — see
+      // server/bounty-disputability.mjs for the mirrored derivation and
+      // its scope. Read-only: storage and the composed disputeDecider
+      // above are untouched.
+      disputability: disputabilityFor({ poster: row.poster, verifier: row.verifier,
+        disputeDecider: row.dispute_decider ?? null, claimant: row.claimant }),
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -2118,6 +2142,28 @@ export class BountyEscrow {
     return false;
   }
 
+  _acceptDenialMessage(bounty) {
+    return bounty.approvalMode === "agent"
+      ? "only the designated agent verifier may accept an agent-approved bounty"
+      : bounty.approvalMode === "legacy"
+        ? "only the poster or designated verifier may accept a legacy bounty"
+        : "only the poster may accept a human-approved bounty";
+  }
+
+  // Permission pre-check for the accept doors (DC3-P3, R1/R2): the doors run
+  // this BEFORE any body/argument shape validation, so a seat that may not
+  // accept is refused on power alone and never sees the attestation
+  // contract. acceptWork re-checks the same predicates inside its
+  // transaction; this read-only pass only decides which refusal comes first.
+  assertMayAccept(roomId, bountyId, acceptor) {
+    this._ensure();
+    const lane = this._requireLane(roomId, acceptor, "acceptor");
+    const bounty = this._getBounty(roomId, bountyId);
+    check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
+    check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
+    return bounty;
+  }
+
   acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -2127,12 +2173,7 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
-      check(this._mayApprove(bounty, lane), "not_authorized",
-        bounty.approvalMode === "agent"
-          ? "only the designated agent verifier may accept an agent-approved bounty"
-          : bounty.approvalMode === "legacy"
-            ? "only the poster or designated verifier may accept a legacy bounty"
-            : "only the poster may accept a human-approved bounty");
+      check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
       check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
       check(verifierAttestation !== null && typeof verifierAttestation === "object" && !Array.isArray(verifierAttestation)
         && Object.keys(verifierAttestation).length > 0, "invalid_input", "verifierAttestation must be a non-empty object");
@@ -2485,7 +2526,8 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
-      check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      check(dispute.decider === lane, "not_authorized",
+        `only the seated decider may rule (seated decider: ${dispute.decider})`);
       // Defense in depth: seating now refuses a challenger-designee, but a
       // dispute seated before that exclusion existed (or recorded by any
       // other path) still cannot be ruled on by the party who raised it.

@@ -104,6 +104,29 @@ test("closing kills a TERM-resistant descendant even after the app-server parent
 });
 
 
+test("denied process-group observation retains the profile lock and refuses cleanup success", async t => {
+  const { config } = setup(t), rpc = openCodexStdio(config);
+  await rpc.request("initialize", {});
+  const kill = process.kill.bind(process);
+  let denied = 0;
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (pid < 0 && signal === 0) {
+      denied++;
+      throw Object.assign(new Error("Synthetic denied group observation"), { code: "EPERM" });
+    }
+    return kill(pid, signal);
+  });
+  try {
+    await assert.rejects(rpc.close(), /process group is unresolved/);
+    assert.ok(denied > 0, "the real transport attempted the denied observation");
+    assert.equal(existsSync(join(config.codexHome, ".room-runtime.lock")), true);
+    assert.throws(() => openCodexStdio(config), /active or unresolved/);
+  } finally {
+    t.mock.restoreAll();
+    await rpc.close().catch(() => {});
+  }
+});
+
 test("activation CLI runs through a symlink entrypoint", t => {
   const { root } = setup(t);
   const alias = join(root, "room-host.mjs");

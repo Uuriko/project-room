@@ -1,4 +1,4 @@
-import { clickChrome, messageAction } from "./room-chrome.mjs";
+import { clickChrome, messageAction, openConversationWork } from "./room-chrome.mjs";
 // Simulated accountable human, actual scripted MCP helper and reviewer. No models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -119,7 +119,9 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.locator('#request-mode-bar').waitFor({ state: 'hidden' });
   assert.equal(state().workItems[workItemId].revision, 0, 'A conversational yes is not assignment, acceptance or completion');
   await page.locator('#thread-back').click();
-  const workCard = page.locator(`[data-work-record-id="${workItemId}"]`);
+  // Returning from a reply shows the conversation's compact work link.
+  // Open it as a person would before operating on the selected work card.
+  const workCard = await openConversationWork(page, workItemId);
   if (!await workCard.locator('.work-details').evaluate(node => node.open)) await workCard.locator('.work-details > summary').click();
   await page.locator(`[data-work-id="${workItemId}"][data-action="accept"]`).click();
   await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });

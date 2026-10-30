@@ -27,6 +27,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
   buildOpenApiJson,
+  discoverabilityErrorOverride,
   DISCOVERABILITY_ROUTES,
   MCP_DISCOVERY_BLOCK,
   nextActionsForIdentityMint,
@@ -665,4 +666,20 @@ test("cold walkthrough stranger surface: every documented no-credential endpoint
     assert.ok(route, `stranger endpoint documented: ${path}`);
     assert.equal(route.auth, "none", `${path} needs no credential`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Agent-keys hint route accuracy (regression guard).
+// ---------------------------------------------------------------------------
+// The 403 override for agent-credential routes told an under-scoped agent to
+// issue a key at POST /api/agent-api-keys — a path no dispatch serves. The
+// real issue route is POST /api/agent-keys (server/agent-plugin-routes.mjs,
+// documented as /api/agent-keys in docs/openapi.yaml). This probe pins the
+// hint and its next[] pointer to the real route.
+test("403 agent-credential hint names the real agent-keys route", () => {
+  const override = discoverabilityErrorOverride({ pathname: "/api/agent-webhooks", httpStatus: 403, code: "insufficient_scope" });
+  assert.ok(override, "403 on an agent-credential route returns an override");
+  assert.match(override.hint, /POST \/api\/agent-keys\b/, "hint names POST /api/agent-keys");
+  assert.ok(!override.hint.includes("/api/agent-api-keys"), "hint does not name the non-route /api/agent-api-keys");
+  assert.deepEqual(override.next[0], { path: "/api/agent-keys", method: "POST" }, "next[] points at POST /api/agent-keys");
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -13,10 +14,11 @@ const EVIDENCE_RECORDS = Object.freeze(["receipt", "verification", "decision", "
 // Current conversation pointers belong to their two participants, even when
 // linked to room-visible work. Neither a request body nor another member's
 // pending conversation is part of this selected task read.
-function openWorkReplies(state, workItemId, viewerId) {
+function openWorkReplies(state, workItemId, viewerId, floor) {
   const requests = Object.values(state.replyRequests ?? {}).filter(request =>
     request.workItemId === workItemId && request.status === "open"
-    && [request.requesterId, request.recipientId].includes(viewerId))
+    && [request.requesterId, request.recipientId].includes(viewerId)
+    && messageInHistory(request, floor))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   const shown = requests.slice(0, 25).map(request => ({
     ...pick(request, "id requesterId recipientId workItemId status revision createdAt"),
@@ -46,7 +48,7 @@ export function currentWorkRecord(item) {
   work.attempt_count = session.attempt_count;
   work.suspended_by = session.suspended_by;
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
-  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText");
+  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText attemptSnapshot");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
   work.blocker = pick(item.blocker, "reason nextAction eventId");
@@ -85,7 +87,7 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
@@ -95,10 +97,31 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     : state.messages.find(message => message.id === item.sourceMessageId)) : null;
   const linked = candidate && (!candidate.toMemberId || candidate.authorId === viewerId || candidate.toMemberId === viewerId)
     && messageInHistory(candidate, floor) ? candidate : null;
-  const message = includeSource ? linked : null;
+  const message = includeSource && linked && !linked.deletedAt ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
+  if (includeSource) {
+    // Canonical selected message was already audience/history filtered. Never
+    // distinguish why a source is unavailable or hash a hidden body.
+    const revision = message && !Object.hasOwn(message, "revision") ? 0 : message?.revision;
+    const observable = message && typeof message.body === "string" && Number.isSafeInteger(revision) && revision >= 0;
+    source.observation = observable ? { roomId: state.room.id, workItemId, viewerId, messageId: message.id,
+      revision, sha256: createHash("sha256").update(message.body, "utf8").digest("hex") } : null;
+    source.freshness = !observable ? "unavailable" : !sourceObservation ? "observed"
+      : sourceObservation.messageId === message.id && sourceObservation.revision === revision && sourceObservation.sha256 === source.observation.sha256 ? "unchanged" : "changed";
+    source.editedAt = observable && typeof message.editedAt === "string" ? message.editedAt : null;
+    if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
+    source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
+  }
   const next = nextWorkStep(item, now, state.room.ownerId);
+  // One link, not recursive traversal or target-content delivery. Work is
+  // room-visible; the subsequent selected read rechecks membership and source privacy.
+  const replacementId = item.supersededBy;
+  if (next.action === "superseded" && typeof replacementId === "string" && replacementId !== item.id) {
+    const available = replacementAvailable ?? Object.hasOwn(state.workItems, replacementId);
+    next.replacement = { status: available ? "available" : "unavailable", workItemId: replacementId,
+      nextRead: available ? { tool: "room_read_work", arguments: { workItemId: replacementId } } : null };
+  }
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
@@ -108,7 +131,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const value = {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
-    replyRequestContext: openWorkReplies(state, workItemId, viewerId),
+    replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
     resume: workResume(work, now, state.room.ownerId),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {

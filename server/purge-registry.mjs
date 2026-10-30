@@ -1586,6 +1586,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_talk_policies",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "room_mention_settings",
     "key": "room_id",
     "action": "delete",
@@ -1676,6 +1686,13 @@ const ROWS = [
         "scope": "room_id"
       }
     }
+  },
+  {
+    "table": "development_co_owner_links",
+    "key": "link_id",
+    "action": "delete",
+    "match": {},
+    "via": { "room": { "parent": "share_links", "parentKey": "id", "childKey": "link_id", "scope": "room_id" } }
   },
   {
     "table": "share_links",
@@ -1901,7 +1918,11 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  { table: "pairs", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "pair_code_locks", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "agent_member_keys", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "room_join_policy", key: "room_id", action: "delete", match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({

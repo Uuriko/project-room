@@ -7,6 +7,21 @@ import { runCronJobs } from "./job-heartbeat.mjs";
 export class JobsProbe extends ProjectRoom {
   constructor(ctx, env) {
     super(ctx, env);
+    this.eligibilityCount = 0;
+    const prepare = this.store.db.prepare.bind(this.store.db);
+    this.store.db.prepare = sql => {
+      if (sql.includes("SELECT 1 AS hit FROM pending_channel_updates LIMIT 1")) this.eligibilityCount++;
+      return prepare(sql);
+    };
+    const getAlarm = this.ctx.storage.getAlarm.bind(this.ctx.storage);
+    this.ctx.storage.getAlarm = async () => {
+      if (this.failAlarmRead) {
+        this.failAlarmRead = false;
+        this.alarmReadFailures = (this.alarmReadFailures ?? 0) + 1;
+        throw new Error("seeded alarm storage failure");
+      }
+      return getAlarm();
+    };
     this.gmailRuns = 0;
     this.channelRuns = 0;
   }
@@ -30,8 +45,13 @@ export class JobsProbe extends ProjectRoom {
     if (this.drainFailureArmed) throw new Error("seeded webhook drain failure");
     return super.drainWebhookDeliveries();
   }
+  takeEligibilityCount() { const count = this.eligibilityCount; this.eligibilityCount = 0; return count; }
   jobRunCounts() {
     return { gmailRuns: this.gmailRuns, channelRuns: this.channelRuns };
+  }
+  async clearJobAlarm() {
+    await this.ctx.storage.deleteAlarm();
+    return this.ctx.storage.getAlarm();
   }
   async readJobAlarm() {
     if (this.paused || !this.store) return null;
@@ -106,6 +126,8 @@ export class JobsProbe extends ProjectRoom {
     return { stamp };
   }
   runDrainTick() { return this.drainChannelBacklog(); }
+  failNextAlarmRead() { this.failAlarmRead = true; return { armed: true }; }
+  alarmReadFailureCount() { return this.alarmReadFailures ?? 0; }
   // One drain cron tick composed exactly as #runDueJobs composes it:
   // run the job, then record the outcomes.
   async runDrainTickAndRecord() {
@@ -131,6 +153,9 @@ function room(env, request) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === "/probe/eligibility-count") return Response.json({ count: await room(env, request).takeEligibilityCount() });
+    if (url.pathname === "/probe/fail-alarm-read") return Response.json(await room(env, request).failNextAlarmRead());
+    if (url.pathname === "/probe/alarm-read-failures") return Response.json({ count: await room(env, request).alarmReadFailureCount() });
     if (url.pathname === "/scheduled") {
       await worker.scheduled({ cron: "*/30 * * * *" }, env, ctx);
       const probe = env.ROOM.getByName("invite-only-pilot");
@@ -170,6 +195,20 @@ export default {
     }
     if (url.pathname === "/probe/drain-state") {
       return Response.json(await room(env, request).readDrainState());
+    }
+    if (url.pathname === "/probe/clear-alarm") {
+      return Response.json({ alarmAt: await room(env, request).clearJobAlarm() });
+    }
+    // Sends one request straight to ProjectRoom.fetch, the way the entry
+    // Worker does (it stamps the trusted visitor address).
+    if (url.pathname === "/probe/do-fetch") {
+      const method = url.searchParams.get("method") || "GET";
+      const body = method === "GET" ? undefined : await request.text();
+      const response = await room(env, request).fetch(new Request(url.origin + url.searchParams.get("path"), {
+        method, body, headers: { "content-type": "application/json", "origin": url.origin, "host": url.host, "x-room-visitor-ip": "203.0.113.5", ...(request.headers.get("authorization") ? { authorization: request.headers.get("authorization") } : {}) }
+      }));
+      const text = await response.text();
+      return Response.json({ status: response.status, body: text.slice(0, 4000) });
     }
     if (url.pathname === "/probe/alarm") {
       const target = room(env, request);

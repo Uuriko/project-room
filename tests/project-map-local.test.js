@@ -58,6 +58,12 @@ test('compact export preserves Room queries, exact caller targets and every supp
   ] };
   const compact = compactGraph(raw);
   assert.equal(compact.nodes.length, raw.nodes.length); assert.equal(compact.edges.length, 4);
+  const legacyEdges = compact.edges.map(edge => ({
+    source: edge.from ?? edge.source, target: edge.to ?? edge.target,
+    relation: edge.kind ?? edge.relation
+  }));
+  assert.equal(Buffer.byteLength(JSON.stringify(legacyEdges)) - Buffer.byteLength(JSON.stringify(compact.edges)),
+    10 * compact.edges.length, 'existing short edge aliases save ten bytes per edge without dropping values');
   assert.equal(compact.graph.raw_sha256.length, 64); assert.equal(compact.graph.source_scope, 'server');
   assert.equal(compact.built_at_commit, raw.built_at_commit);
   assert.equal(compact.graph.projection, 'room-files-symbols-imports-calls-v1');

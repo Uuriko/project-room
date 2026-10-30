@@ -158,3 +158,39 @@ test("share links carry the visible text and the canonical URL; the embed snippe
   assert.ok(snippet.includes(`src="${links.canonical}/badge.svg"`));
   assert.ok(snippet.includes("Server-verified merge"));
 });
+
+test("public delivery outcomes survive visible badges, previews, embeds and forwarding", () => {
+  for (const [state, label] of [
+    ["rejected", "Rejected by reviewer"],
+    ["revision_requested", "Changes requested"],
+    ["verified", "Accepted by reviewer"],
+    ["accepted", "Accepted by reviewer"],
+    ["submitted", "Submitted; awaiting review"],
+    ["future-state", "Outcome not recorded"],
+    [undefined, "Outcome not recorded"],
+  ]) {
+    const receipt = { ...publicWork, state };
+    const svg = receiptBadgeSvg(receipt);
+    // The outcome must be visible, not merely tucked into the SVG title.
+    const visible = [...svg.matchAll(/<text\b[^>]*>(.*?)<\/text>/g)].map(match => match[1]).join(" ");
+    assert.ok(visible.includes(label), `${state}: ${visible}`);
+    assert.ok(visible.includes("Artifact hash recorded"));
+    for (const text of [verdictLineOf(receipt), shareTextOf(receipt), receiptEmbedSnippet(receipt), receiptOgFields(receipt).subtitle,
+      decodeURIComponent(receiptShareLinks(receipt).email)]) {
+      assert.ok(text.includes(label), `${state}: ${text}`);
+      assert.ok(text.includes("not an acceptance"));
+    }
+    const properties = Object.fromEntries(receiptJsonLd(receipt).additionalProperty.map(p => [p.name, p.value]));
+    assert.equal(properties["Delivery outcome"], label);
+    assert.equal(properties["Proof level"], "Artifact hash recorded");
+  }
+});
+
+test("review checks cannot promote a submitted delivery, and negative review decisions remain visible", () => {
+  const checked = { ...publicWork, state: "submitted", review: { state: "verified", verificationVerdict: "PASS" } };
+  assert.match(verdictLineOf(checked), /Submitted; awaiting review/);
+  assert.doesNotMatch(verdictLineOf(checked), /Accepted by reviewer/);
+  assert.match(verdictLineOf(publicWorkRejected), /Rejected by reviewer/);
+  assert.match(verdictLineOf({ ...publicWorkRejected, state: "submitted" }), /Rejected by reviewer/);
+  assert.doesNotMatch(verdictLineOf({ ...merged, state: "rejected" }), /Rejected by reviewer/);
+});

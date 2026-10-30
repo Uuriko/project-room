@@ -10,12 +10,11 @@
 // packaging path, and it must not collide with in-flight export changes.
 //
 // What a restore is and is not:
-// - The export hashes every secret column (see room-export.mjs
-//   EXPORT_SECRET_COLUMNS), so a restore recovers data, never working
-//   credentials. Every agent key, token and secret must be re-issued
-//   after a restore. #3599: placeholders are never loaded as live values —
-//   sanitized cells resolve to safe substitutes and are counted in the
-//   result's sanitizedCells (see createSanitizedCellTracker).
+// - Raw secret columns are sanitized and substituted on restore; see
+//   EXPORT_SECRET_COLUMNS and sanitizedCells. Already-hashed credential
+//   verifiers are preserved, so existing credentials may still authenticate.
+//   Restore does not rotate credentials or fence delayed pre-restore requests.
+//   Reconcile authority before reopening access and replace sanitized secrets.
 // - Restore is fail-closed: it replays only into a store whose rooms table is
 //   empty. It never overwrites a live room.
 // - A restore resurrects authority exactly as it was at backup time. Anything
@@ -320,6 +319,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   let trailer = null;
   let carry = "";
   let settled = false;
+  let abortResult = null;
   // #3599: created when the watermark line lands (it names the sanitize
   // policy); a row arriving before it resolves under the legacy policy —
   // finish() refuses a watermark-less stream and aborts the replay anyway.
@@ -465,6 +465,9 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   }
 
   function abort() {
+    // finish() may already have attempted cleanup before the route handles
+    // its error. Preserve that result instead of reporting a false clean skip.
+    if (abortResult) return abortResult;
     if (settled) return { cleaned: true, skipped: true };
     settled = true;
     let cleanupError = null;
@@ -479,12 +482,13 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     } catch (error) { cleanupError = error; }
     try {
       if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
-    } catch { /* closing the permit must not mask the original failure */ }
-    db.exec("PRAGMA foreign_keys=ON");
+    } catch (error) { cleanupError ??= error; }
+    try { db.exec("PRAGMA foreign_keys=ON"); } catch (error) { cleanupError ??= error; }
     // The caller reports a failed cleanup: the store was verified empty
     // before the replay, but if these deletes failed it may now hold
     // partial data, and the operator must not treat it as retryable-empty.
-    return { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    abortResult = { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    return abortResult;
   }
 
   function finish() {
@@ -549,8 +553,8 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
-      settled = true;
       db.exec("PRAGMA foreign_keys=ON");
+      settled = true;
       return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
     } catch (error) {
       abort();
@@ -681,11 +685,11 @@ export async function operatorRestoreResponse(request, token, store) {
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
     sanitizedCells: result.sanitizedCells,
-    note: "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
+    note: RESTORE_NOTE,
   });
 }
 
-const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
+const RESTORE_NOTE = "Sanitized raw secrets were substituted and are counted in sanitizedCells. Credential hashes are preserved, so existing credentials may still authenticate; restore does not rotate them or fence delayed requests. Before reopening access, revoke and re-issue credentials, replace sanitized secrets, and re-apply post-backup revocations.";
 const BACKUP_KEY_PATTERN = /^room-backups\/\d{4}-\d{2}-\d{2}\.ndjson$/;
 
 function kvBytes(value) {

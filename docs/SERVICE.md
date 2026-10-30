@@ -1,136 +1,86 @@
-# Project Room service pilot
+# Project Room service
 
-Current addition: [anyone-with-the-link guest invitations](../archive/docs/history/SHAREABLE-GUEST-LINKS.md) provide key-free browser entry and distinct guest identities. The targeted-account invitation and operator-key sections below describe separate retained flows, not requirements for guest-link recipients. Current schema is 42 (the single source is `STORE_SCHEMA_VERSION` in `server/writer-fence.mjs`; `scripts/check-schema-version.mjs` fails `npm run check` when this sentence or the storage bullet below disagrees); see the [acceptance audit](../archive/docs/history/ACCEPTANCE-AUDIT-2026-09-07.md) for tested configuration and remaining browser checks.
-
-Status: implementation for a **local, provisioned, single-node pilot**. Not public account registration, a deployed consumer service, or an enterprise readiness claim. The conversation-first room and six-state accountable-work model remain the product. See [PRODUCTION-PLAN.md](../archive/docs/history/PRODUCTION-PLAN.md) for the wider plan and release gates.
+This is a map of the service at this checkout, not a release receipt. Current schema is 42; `server/writer-fence.mjs` defines it and
+`scripts/check-schema-version.mjs` checks the documentation against that source.
+To establish what is live, verify the serving revision using the
+[deployment runbook](ROOM-DEPLOYMENT.md) and [release records](RELEASE-RECORD.md).
 
 ## Run and provision
 
-Requires Node 24.19 or newer with `node:sqlite`. The service and domain checks have no runtime package dependencies. Browser checks use the pinned Playwright development dependency; see [CONVERSATION.md](../archive/docs/history/CONVERSATION.md).
+Use [self-hosting](SELF-HOSTING.md) for a persistent local Node room and optional
+operator provisioning. Node 24.19 or newer is required. Local account creation
+and email/password login are supported; Google sign-in needs operator OAuth
+configuration. Provider availability and mail delivery depend on configuration.
+A provisioned agent identity alone does not start a model or attach a runtime.
 
-```sh
-npm run check
-npm run provision -- --init --member owner --account account-owner
-npm run provision -- --member reviewer --name Reviewer
-npm run provision -- --member room-agent --name Room-agent --kind agent
-npm run provision -- --account-key --account account-owner
-npm run provision -- --account-key --account account-invitee
-npm start
-```
-
-Each ordinary provisioning command prints a private seven-day **Room access key** once. Only an operator with local database access can provision or rotate these keys. Never commit keys, send them to the mailbox, put them in URLs, or include them in logs. Reissuing a member's Room key invalidates its previous Room keys and browser sessions. The owner has all room capabilities; additional members default to accept/complete/verify, not steering, membership administration, or external-write capability. Explicit grants use `--permissions` with comma-separated known capabilities. Agent members cannot receive human administration or decision authority.
-
-`--account` names the pilot's canonical human account. The same explicit account may be bound to one human membership in each of several Rooms; the binding is immutable. Omitting it creates a deterministic provisional account for that one Room membership. The `acct-legacy-` namespace is reserved and cannot be supplied to bind a different membership. Matching member IDs, display names, or provisional accounts are never treated as evidence that two Room memberships belong to the same person.
-
-Schema v4 also has local account access keys for account-session login and invitation acceptance. `--account-key --account ID` creates that local account if absent, or rotates its account key if present, then prints the new seven-day key once; it grants no Room membership. The HTTP service has no public account-registration or recovery route. An account ID and possession of a locally issued account key are local operator assertions, **not** OIDC, SSO, passkey, email control, or legal-person verification. Account-key issuance is a narrow login-key rotation: it revokes earlier account keys and clears authenticated account-session slots, but it does not revoke legacy Room-scoped keys. For a suspected account compromise, the intended primitive is account suspension: revision-check the account state, increment its authorization epoch, revoke both account and Room credentials across Rooms, and require fresh credentials after reactivation. Suspension is currently trusted local-store administration, not an authenticated HTTP/operator workflow.
-
-The original Room login exchanges a **human Room key** for an eight-hour maximum HttpOnly, SameSite=Strict Room session. Schema v4 adds a separate account-session slot. `GET /api/account-session` creates one anonymous slot when its cookie is absent; the raw slot token is returned only as that HttpOnly cookie and the database stores its hash. Account login compare-and-swaps the same slot at the client's current revision, binds it to the account key for at most eight hours, and changes the CSRF value and opaque session binding. Logout, account-key rotation, and account suspension similarly advance or clear the slot, so a stale revision or binding cannot adopt a replacement identity.
-
-Within the account-session flow, initial slot creation or replacement of an expired/invalid slot emits `Set-Cookie`. Account login and invitation acceptance mutate server state behind the stable slot cookie and deliberately emit no replacement cookie; logout also leaves the cookie inert rather than risking a delayed response erasing a newer cross-tab login. Successful account login revokes any Room-session credential presented by the same browser in the same database transaction as the account switch, leaving that older cookie inert. The account key is not saved in localStorage. Every authentication rechecks the live account and authorization epoch, parent credential, and—when entering a Room—the immutable account/member binding and active membership. Agent members instead use account-free Room bearer credentials through the API. A provisioned agent name does **not** verify that a particular AI runtime is attached. No agent runner is attached by these commands.
-
-HTTPS configurations use `__Host-account_session` and `__Host-room_session`, with `Secure`, `Path=/`, and no `Domain` attribute. Duplicate occurrences of the selected cookie name are rejected instead of taking the first. Earlier generic HTTPS cookies are not adopted; users must sign in again after this change. HTTP loopback keeps unprefixed names for development only. Cookies are not port-isolated: use a dedicated browser profile with only trusted local services. A production pilot requires an isolated HTTPS hostname and verified TLS/proxy configuration; sharing a cookie host with unrelated applications is not supported.
-
-The entry point always binds only to loopback. Defaults: `127.0.0.1:4173`, database `.data/room.sqlite`. Production now requires both `NODE_ENV=production` and `ROOM_DEPLOYMENT=invite-only`, a fixed HTTPS `ROOM_ORIGIN`, and an absolute `ROOM_DB` naming an existing provisioned database. `ROOM_STREAM_INTERVAL_MS` (optional, default `250`, integer 50-5000) sets how often each open event stream polls for committed events; delivery latency is at most one interval and the cost is one read per stream per interval, so lower it only for a measured need. It enables only the documented same-host proxy, which must overwrite X-Real-IP; missing/malformed proxy metadata fails closed. Host/Origin are compared with the configured origin, not forwarded host headers. Cookies get Secure when the configured origin is HTTPS. See [the deployment runbook](../archive/docs/history/INVITE-ONLY-DEPLOYMENT.md). This is deployment preparation, not proof of a live service.
+The canonical production runtime is the Cloudflare Worker and SQLite-backed
+Durable Object. Node is used for development, tests and the retained pilot; it
+is not production failover. The VPS pilot is parked. Read
+[ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) for runtime roles and
+[DEPLOY-LANE.md](DEPLOY-LANE.md) for serialized promotion and verification.
+A historical proposal to require PostgreSQL/RLS is not a current deployment gate.
 
 ## Data and authority
 
-- SQLite WAL, foreign keys, synchronous FULL, prepared statements, schema version 42, and explicit transactions. Version history: version 2 separated authenticated completion reporters from explicit producer attribution. Version 3 added canonical human accounts, immutable Room-member bindings, authorization epochs, and account-wide credential revocation. Version 4 added hashed account credentials, stable revisioned account-session slots, immutable membership invitations, and an append-only invitation audit table. Version 5 added a private replayable invitation journal and consistency checks; version 35 made share-link and invitation issuer columns nullable so the room owner can mint human share links from its agent identity bearer; version 36 made the invitation revoker column nullable so an accountless agent owner can revoke invitations too, completing owner invitation administration; version 37 adds a fenced messages table written in the same transaction as each message event; version 38 stores full current message records without edit history, invalidates legacy backfill cursors for deferred replay, and strengthens message parity to cover content and visibility indexes; versions 6 to 27 are listed in `writerVersions` in `server/writer-fence.mjs` and summarised in [CURRENT-ROOM.md](CURRENT-ROOM.md). Older binaries fail closed after migration.
-- A v1 upgrade writes an immutable, conservatively repaired projection checkpoint in the same transaction as the v2 version marker. Recovery for an upgraded room starts at that trusted checkpoint and strictly replays the append-only v2 tail; native-v2 rooms rebuild from their full event log. Legacy event bodies are never rewritten.
-- A v1 or v2 identity upgrade creates a separate provisional account for every historical human Room membership, then binds its existing access keys and child sessions to epoch 0 without changing raw credentials or event bodies. It never guesses cross-Room identity from names or member IDs. Provisional accounts cannot yet be safely reconciled or merged.
-- Events, the current room projection, and command-id deduplication commit together. Rejected commands leave all three unchanged.
-- Each command has a client-generated ID, type, data, and optional causal event ID. The server derives actor, room binding, time, event ID, and idempotency key from the authenticated request.
-- Idempotency is scoped to room + actor + command ID. Exact retry returns the original committed event. Changed content with the same ID conflicts. Membership/credential revocation is checked even on retries.
-- Work mutations require their expected revision. The server rejects stale or invalid transitions; it does not merge conflicting decisions or silently retry them against new evidence.
-- A human account is a global authenticated principal; a member remains the Room-local actor and permission holder. An account grants no Room access by itself. Human and agent members share conversation access within their Room. Directed messages are **room-visible**, not DMs. References cannot point to another Room's message, work item, or causal event.
-- Member access changes are revisioned events. Removing a member revokes its existing keys/sessions; re-enabling membership does not resurrect old credentials. Every API read, write, and stream poll rechecks current access.
-- Account access changes are separately revisioned, increment the authorization epoch, revoke that account's credentials in every Room, clear its authenticated account-session slots, and commit an account audit row atomically. Reactivation requires new credentials and never revives an older epoch. This checkpoint provides the durable store primitive only; an authenticated administration surface, operator attribution, identity-provider proof, and recovery remain future gates.
-- An invitation is an immutable offer to bind one existing active local account to one new human member ID in one Room. `moderator`, `member`, and `guest` map through versioned role policy 1 to exact permission snapshots; there is no invited owner or invited agent role. Issuance snapshots the issuer account/epoch, Room member/revision, requested target, expiry, and a caller-generated token hash. Neither issuance nor preview creates membership or a Room credential.
-- Acceptance rechecks the target account, invitation revision/expiry/status, issuer epoch/binding/current membership administration grant, target conflicts, and the stored role policy. One transaction appends `member.joined_via_invitation`, updates the Room projection, creates the immutable account/member binding, marks the invitation accepted, and appends its acceptance audit row. A failure in any part rolls the whole acceptance back.
-- Schema v5 records complete issuance, acceptance, and revocation snapshots in the private append-only `membership_invitation_journal`, in the same transaction as their projections. Pure replay reconstructs the invitation and its audit trail, and the service compares both plus accepted membership/event links before trusting them. Target-account IDs and token hashes stay outside shared Room history. Existing v4 offers receive explicit migration baselines, not fabricated historical issuance events. The journal and relational projections remain within one database trust boundary; checksums are consistency checks, not signatures or proof against a database administrator. See [INVITATION-AUDIT.md](INVITATION-AUDIT.md).
-- External write scope is a record, not a repository lock or external action authorization. This service does not enforce cross-repository claims, run tools, merge, deploy, transfer money, or infer grants from conversation.
-- Fresh service rooms contain only the provisioned owner, not simulated agent messages or invented activity. `src/seed.js` remains a historical contract-test fixture and is not served or imported by the connected client. The unused browser storage module has been deleted.
+- SQLite WAL, foreign keys and explicit transactions describe the local Node store, schema version 42. Hosted storage uses the Durable Object adapter; do not apply Node file-backup instructions to it. See [Cloudflare implementation](../cloudflare/README.md) and [backup and recovery](BACKUP-DR.md).
+- An account and a room membership are distinct. Authentication does not by itself grant access to a room. See [identity lifecycle](IDENTITY-LIFECYCLE.md) and the [route authorization table](ROUTE-AUTH-TABLE.md).
+- Direct messages are private to their participants on authorized application read surfaces; they are not room-wide broadcasts. This is server-enforced visibility, not end-to-end encryption. Message edits and other follow-up events must retain that boundary; see [visibility implementation](../server/dm-event-visibility.mjs).
+- Browser account and room sessions are separate credentials. Login can rotate the account-session cookie and invalidate an older room credential. Do not rely on the pilot's historical promise of a stable cookie across login. The current contract is in [OpenAPI](openapi.yaml) and the implementation in [HTTP handling](../server/http.mjs).
+- Draft recovery exists and is scoped to identity and room. Session expiry and changing identity are different transitions; clearing private state during an account change must not be treated as successful sign-in. See [draft recovery](../src/conversation.js) and [client session handling](../src/app.js).
+- Command retry, revision conflicts, revocation and recovery must preserve the [service invariants](INVARIANTS.md). An accepted command, completed external operation and verified result are different observations.
 
 ## Invitation secret, preview, and acceptance
 
-The schema-v4 acceptance result is recorded in [INVITATION-CHECKPOINT.md](../archive/docs/history/INVITATION-CHECKPOINT.md); the current schema-v5 audit/recovery contract is in [INVITATION-AUDIT.md](INVITATION-AUDIT.md).
-
-An invitation token must be a caller-generated 32-byte random bearer secret. The service validates its encoding and length but cannot verify its entropy, and stores only its SHA-256 hash. A holder can preview the offered Room title/purpose, member name/ID, role, permissions, issuer display name, expiry, revision, and current derived status, so treat it as sensitive even before acceptance. A malformed or unknown token gets the same unavailable response, and preview deliberately omits the intended account ID.
-
-The browser invitation-link form is `/#invite/<token>`: it keeps the raw token only in the URL **fragment**, never the path or query. Fragments are not sent in the HTTP request. The implemented browser flow copies a valid token into ephemeral memory and immediately removes the fragment with `history.replaceState`; malformed invitation fragments are scrubbed too. The token is sent only in the JSON bodies of the no-store preview and accept POSTs. Preview deliberately omits cookies and other credentials; acceptance uses the stable HttpOnly account-session cookie. The token must not enter navigation/referrer/analytics logs, DOM text, localStorage, sessionStorage, or persisted drafts. The separately provisioned account key never belongs in any URL. The current UI implements fragment preview, local-account login, explicit acceptance, and entry to the accepted Room through that account session; this is pilot onboarding, not provider-backed identity or invitation delivery.
-
-Preview is read-only and does not require an account session. Its `pending`, `expired`, or derived `stale` result is advisory: acceptance repeats every authority and conflict check in a write transaction. `accepted` and `revoked` are terminal stored states. Acceptance requires an authenticated account-session slot for the exact intended account, current CSRF/session binding, expected invitation revision `0`, and a strong client-generated redemption ID. It creates no Room key and sends no `Set-Cookie`; the existing account session becomes Room-authorized through the new binding.
-
-Issuance and acceptance have narrow idempotency contracts. An exact authenticated issuance retry with the same issuer/request ID and fingerprint returns the original offer. An exact acceptance retry with the same invitation and redemption ID returns the original joined event without another event, binding, or audit row while that account can still authenticate as the active invited member; otherwise reconciliation fails closed. A different redemption ID is rejected as already used. **Revocation is not idempotent in the current code**: the first revision-checked transition from pending succeeds, while a repeated call returns a conflict (`stale_invitation_revision` with revision 0, or `invitation_not_pending` with the refreshed revision). Callers cannot treat that conflict as a second success; they must reconcile through retained-token preview or trusted relational state.
-
-Issuance proves only that the offer was stored. This pilot has no invitation delivery provider, notification, email, delivery receipt, or read receipt. Possession or preview of a link does not prove who received or read it, and preview writes no such receipt. Only the target account's explicit successful acceptance creates membership; that still does not prove a message was later read or processed.
+Start with [joining](JOINING.md) and [human onboarding](HUMAN-ONBOARDING.md).
+Account-bound invitations, shared guest links and agent invitations are distinct
+flows; requirements for one must not be applied to every recipient.
+[Invitation audit](INVITATION-AUDIT.md) describes the retained account-bound
+journal and replay boundary. Use [OpenAPI](openapi.yaml) for current request,
+authentication and response requirements. Never publish invitation secrets or
+credentials in diagnostic output.
 
 ## HTTP interface
 
-All API responses are JSON except the event stream. Non-success responses have `error.code` and `error.message`, plus a top-level `operationId` and `category` from the taxonomy under Safe diagnostics; every API response also carries the same operation ID in the `X-Operation-Id` header. No success is claimed for a failed or pending operation.
+[OpenAPI](openapi.yaml) is the route contract; the
+[route authorization table](ROUTE-AUTH-TABLE.md) explains access requirements.
+This guide deliberately does not maintain a second partial endpoint table or
+copy limits that can drift from the implementation.
 
-| Method and route | Meaning |
-| --- | --- |
-| `GET`/`HEAD /api/health` | Process responds; not a database restore or availability guarantee |
-| `GET /api/account-session` | Inspect the stable account-session slot; when absent, create an anonymous slot and set its HttpOnly cookie |
-| `POST /api/account-session` | Compare-and-swap login with `{accountAccessKey,expectedSessionRevision}`; exact Origin and current slot CSRF required; no `Set-Cookie` |
-| `DELETE /api/account-session` | Compare-and-swap logout with `{expectedSessionRevision}`; advances and clears the server slot; no `Set-Cookie` |
-| `POST /api/invitations/preview` | Read-only token preview from an exact-Origin JSON body; the browser omits credentials; no membership, delivery/read receipt, or account ID disclosure |
-| `POST /api/invitations/accept` | Explicit account-bound acceptance with `{invitationToken,redemptionId,expectedRevision}`; current account session/CSRF required; no `Set-Cookie` |
-| `POST /api/session` | Exchange `{accessKey}` for the original human Room browser session; exact Origin required |
-| `GET /api/session` | For the selected Room or account auth mode: current account/epoch, opaque response binding, Room member when bound, expiry, and CSRF confirmation. Account, epoch, session-binding, and CSRF fields are null for an agent bearer credential. |
-| `DELETE /api/session` | End the selected browser session server-side: revoke a Room session, or revision-check and clear an account slot in account auth mode. No cookie deletion is emitted. |
-| `GET /api/rooms/:room` | Consistent state, event sequence, latest 100 audit events, own caught-up cursor, and browser response ownership by Room/member/account/epoch/session. Account, epoch, and session fields are null for an agent bearer credential. |
-| `POST /api/rooms/:room/commands` | Submit `{id,type,data,causationId?}`; 201 committed, 200 exact duplicate |
-| `GET /api/rooms/:room/events?after=0&limit=100` | Ordered events after the `after` sequence, next cursor, and hasMore; limit 1–100. The cursor parameter is `after`, not `afterSequence`. `afterSequence` is 422 `invalid_event_cursor` so a catch-up does not silently restart at sequence 0. |
-| `GET /api/rooms/:room/stream?after=0` | SSE `room-event`, durable sequence IDs, Last-Event-ID resume; a consumer that buffers more than the per-connection cap (64 KiB) receives a final `stream_lagging` event and is closed alone — reconnect with Last-Event-ID |
-| `POST /api/rooms/:room/cursor` | Save `{sequence}` as the current member's monotonic caught-up position |
-| `GET /api/rooms/:room/return-brief` | Frozen history window plus current accountable work, with the same browser ownership tuple; account, epoch, and session fields are null for an agent bearer credential |
-| `GET /api/rooms/:room/context?since_version=` | Compact agent context: roster, policy, focus work, active write locks, superseded-by deps, latest handoff addressed to the caller, current decisions, file refs, and cursors. No message bodies, file bytes, or result prose. `{not_modified:true, context_version}` when `since_version` matches. Reading does not mark caught up. |
-| `GET /api/rooms/:room/digest?since=` | Bounded room digest / since-wake delta (≤4096 B): exact seq coverage with uncapped per-type window counts, `context_version` + projection counts, latest changed work, caller attention, decision events, and 140-char message summaries. Bodies are never reproduced; `bodiesOmitted` counts them and `followUps` names the targeted body reads. `since` is the last-handled seq (a wake's seq for the delta form). |
-| `POST /api/rooms/:room/invitations` | Issue an immutable account-bound invitation from exact caller-supplied scope/token; account auth mode, CSRF, and current `manage_members` grant required |
-| `POST /api/rooms/:room/invitations/:id/revoke` | Revision-check and revoke a pending invitation with a reason; account auth mode and current `manage_members` grant required; retries currently conflict |
-| `GET /api/rooms/:room/diagnostics` | Bounded support export of recent room-scoped API error metadata; signed-in room owner only |
-
-Browser writes require the session's `X-CSRF-Token` and the exact Origin; SameSite is not the only protection. Account-session Room requests select account auth with `X-Project-Room-Auth: account` (or `auth=account`) and must carry `X-Session-Binding`, including `GET /api/session?room=...`. Account SSE carries the same opaque, non-credential response binding in `binding=` because EventSource cannot set custom headers. Missing, malformed, or changed bindings are rejected before a Room operation; the captured binding is reused through transactional authorization. Room-cookie mode does not adopt account-slot tokens. Bearer clients omit the cookie and supply `Authorization: Bearer ...`; account sessions are never bearer credentials, and a supplied Origin must still match. CSRF values and response bindings are not credentials and are never accepted as identity. Credentials, session slots, and invitation tokens are stored as hashes only; authenticated sessions remain bound to their parent key's validity. Invitation revocation also binds the requested Room to the stored offer.
-
-`room.created` is bootstrap-only. Command types otherwise mirror the domain reducer plus `member.access_changed` with `{memberId,expectedMemberRevision,permissions,active}`. Creating membership through the API does not issue a credential: provisioning remains a distinct local operator action.
-
-`poll.voted` accepts `{messageId,option,active}`: `option` is the zero-based option index of a `kind:"poll"` message. Single-choice polls move the vote; `allowMultiple` polls keep each. Votes are stored as `pollVotes` on the message. Reactions were removed (2026-10); older `message.reaction_set` events are skipped on replay.
-
-`message.pinned` and `message.unpinned` accept `{messageId}` from any active member. The message must already belong to this room and, for a pin, must not be deleted; the room holds at most 50 pins, in pin order. Both are idempotent: an exact retry or a repeat for the same state leaves the projection unchanged. Deleting a pinned message removes its pin. `GET`/`POST /api/rooms/:id/pins` wrap the same events for agents and re-check membership on every call (`docs/CONVERSATION.md`, `docs/openapi.yaml`).
+A health response only establishes what that probe checks. Worker revision,
+Durable Object revision, authenticated room reads, background-job health and a
+successful browser journey require separate evidence. Follow the
+[deployment verification procedure](ROOM-DEPLOYMENT.md), rather than treating
+one HTTP 200 as proof that the product works.
 
 ## Consumer behavior and attention
 
-The connected browser removes actor switching, reset-demo controls, canned evidence/PASS text, and static online badges. Forms ask for actual results, versions, findings, and decisions. Incoming snapshots do not reset message recipients or work-form choices. Room conversation and each thread keep independent **in-memory** text, recipient, reply target, and retry ID while the page remains open. Failed submissions preserve those drafts and reuse IDs for unchanged retries. Session end/sign-out clears private drafts and rendered room content. Reloading or leaving the page discards drafts. A browser leave-page warning is best effort; mobile process loss may bypass it. Device-local or cross-device draft persistence remains a later opt-in feature.
-
-Replies open a thread derived from the original message links, including historical nested replies. Thread navigation does not create a second transcript. Plain-text search covers the current authenticated room snapshot, including messages older than the latest 100 audit events; it shows the latest 50 matches and the total count. Search results and work-source links focus the original message. Message nodes and selected body text are retained during incoming updates; members reading older messages can choose when to jump to new arrivals. Details and reproducible browser checks are in [CONVERSATION.md](../archive/docs/history/CONVERSATION.md).
-
-“Stored at event N” proves a server record. “Connected” proves a transport connection. A member list proves membership. None proves that a remote person or agent read, understood, processed, replied to, or acted on a message. “Mark myself caught up” stores a personal cursor only, not a peer-read receipt. No background agent listening is implied or implemented.
-
-[Instinct's task 09 proposal](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5551143998) informs the next attention slice. This implementation consumes its deletion of false presence. Multi-agent address sets, invitation **delivery/routing**, processing receipts, batching, and anti-loop budgets remain unimplemented. A stored or future queued invitation must not be labelled delivered to a person or runtime; runtime-provided processing receipts will need provenance. Revoked agents must not regain permission merely to publish a denial message. Silence after revocation cannot be treated as successful processing.
+Use the [user guide](USER-GUIDE.md) for the human experience and
+[agent entry](AGENT-START-HERE.md) for connecting an agent. Agent wake and
+execution support now exist, but availability depends on the configured host,
+credentials and permissions. See [wake setup](AGENT-WAKE-SETUP.md),
+[Codex Room host](CODEX-ROOM-HOST.md) and [machines](../machine/PROTOCOL.md).
+An online machine or delivered message does not prove an agent accepted work.
 
 ## Limits, recovery, and honest release gates
 
-- Single host, local disk only. SQLite WAL is not a network-filesystem or high-availability solution. Synchronous database work blocks Node; no throughput claim has been established.
-- Bounded pilot: 100 members, 500 work items, 1,000,000 events, a 4 MiB room projection, 5,000 retained Room credential records per room, 5,000 account credential records per account, and 10,000 account-session slots per database. Limits reject further growth without deleting history. Invitation retention/list administration and automatic retention/archival are not implemented.
-- At the room event or projection limit, terminal and recovery actions remain available so open authority is never stranded: an active membership can still be ended, an open reply request can still be answered or cancelled, an open help request can still be withdrawn, an offered or selected help offer can still be declined, withdrawn, or released, an active exact-scope write claim can still be released, and each open work item can still be completed from accepted/working, unblocked from blocked, or superseded. Each item can be ended once; repeated endings are refused. New memberships, work proposals, starts, claim acquisitions, messages, and review verdicts stay capped.
-- JSON request limit 16 KiB, except `message.posted` and `message.edited` commands, which may be 512 KiB so a 65,536-character body can arrive. A longer message body is refused with that limit named. Other field lengths and array sizes stay bounded. Static responses use an explicit asset allowlist. The database, source fixtures, service code, and configuration are not web assets.
-- In-memory per-process budgets: 10 login attempts/minute per connection IP; 60 writes and 600 reads/minute per credential; up to 100 streams overall, three per credential. A 429 includes Retry-After. These are pilot limits, not distributed abuse controls; counters reset on restart.
-- Streams poll committed events every `ROOM_STREAM_INTERVAL_MS` (default 250 ms), rechecking revocation before emission. Slow streams close and resume via cursor rather than accumulating an unbounded in-memory queue. Client stream availability is not a user-presence signal.
-- Preserve the same database file across restarts. Do not delete it to resolve a failed request. A command with an uncertain network result can be retried unchanged with its original ID.
-- The v3-to-v4 migration is additive and creates its four new tables/indexes/triggers in one transaction; a failed v4 DDL step leaves a v3 input at version 3 without partial v4 tables. Existing Rooms, events, Room credentials, accounts, and bindings are not rewritten by that step. A v1/v2 database first completes the earlier repair/identity migrations, so keep a consistent pre-upgrade backup for the whole chain.
-- The v4 step sets `PRAGMA user_version=4`, then the current service proceeds to the v5 journal migration. Older binaries fail closed rather than downgrading or ignoring invitation authority. Application rollback therefore requires restoring a consistent pre-migration database snapshot. Do not simulate rollback by dropping authority tables or changing the version marker: accepted invitation events and account/member bindings may already depend on them.
-- Canonical account suspension/reactivation currently requires trusted local code using the revision-checked store primitive. There is no HTTP or polished operator command for it, and the audit row does not yet identify an authenticated administrator. Treat both as release blockers, not implied operations support.
-- For a stale work revision, inspect the latest state and exact evidence before making a new decision; do not automatically move a previous PASS to a new artifact version.
-- Database backups must include a consistent SQLite snapshot or a cleanly stopped/checkpointed database, not a live main-file copy without its WAL. An automated backup/restore runbook, encryption/retention policy, and restore drills are still release gates.
-- On 6 September 2026, the focused schema-v4 store, client, and HTTP suites passed, including slot fencing, immutable invitation scope, account mismatch, expiry/revocation/stale issuer authority, exact acceptance replay, concurrent accept/revoke serialization, acceptance rollback, and v3 migration rollback. The dedicated local real-browser invitation suite passed 2/2: it checked fragment removal from the address/referrer/request URL, token absence from DOM and browser storage, preview's zero-write boundary, private draft/focus/backward-selection preservation, 390 px controls and overflow, stable cookies with no login/accept `Set-Cookie`, a held-response cross-tab account switch, and exact acceptance replay. This invitation evidence does not establish physical-device or other-browser behavior, full assistive-technology support, external delivery, production deployment, or an independent review of the exact revision; earlier non-invitation checks retain their own recorded scope.
-- Schema-v5 audit and rollback: `npm run audit:invitations -- --db /absolute/path/to/room.sqlite` opens the existing database read-only, checks journal replay and membership evidence, and prints counts plus baseline coverage. It does not migrate, repair, or print private invitation scope. Service startup checks all invitations; subsequent invitation operations and invited-member authentication recheck their relevant record. Inconsistency fails closed for operator reconciliation. A failed v4-to-v5 journal migration rolls back its table, entries, triggers, and version marker. A completed migration requires a consistent pre-v5 backup for application rollback; do not drop the journal or lower the marker. See [INVITATION-AUDIT.md](INVITATION-AUDIT.md) for limitations and recovery.
-- Production gates remain: maintained OIDC/SSO integration, provider-backed account/recovery and invitation delivery, tenant-isolated PostgreSQL and RLS under a restricted role, independent review of the journal implementation and legacy-baseline policy, real integrations with consent and action checks, moderation, load testing, observability, operational recovery, privacy/retention controls, and independent review.
+For current limits and error contracts, read [OpenAPI](openapi.yaml) and
+[error taxonomy](ERROR-TAXONOMY.md). For recovery, use
+[BACKUP-DR.md](BACKUP-DR.md) and the deployment-specific runbook. Preserve the
+original failing evidence when a later retry succeeds. A schema rollback may
+need a consistent database restore or a forward fix, not an older application
+binary against newer data.
 
 ## Safe diagnostics
 
-- Every API request gets a bounded operation ID: `op_` plus 8 base64url characters, random per request, no sequence or tenant information. It appears in the `X-Operation-Id` response header on every API response and in the `operationId` field of every API error body, so a failed call can be quoted to support exactly.
-- Error bodies also carry a coarse `category` alongside the specific `error.code`: `access` (401/403), `not_found` (404 or a `*_not_found` code), `conflict` (409, command rejection, idempotency conflict, stale revisions), `rate_limited` (429), `unavailable` (503/maintenance), `internal` (5xx), or `input` (other 4xx refusals). The category is for triage; the code remains the contract.
-- Room-scoped API errors are retained in a bounded in-memory ring of 200 records per room, holding only `operationId`, timestamp, HTTP status, `error.code`, `category`, and a templated route (`/api/rooms/:roomId/events`; dynamic segments become `:item`). Records never contain credentials, request or room bodies, message text, member details, or the room ID itself. The ring resets on restart and is not an audit log.
-- The signed-in room owner can read the ring at `GET /api/rooms/:room/diagnostics`, gated by the same owner check as agent-connection administration. Errors outside a room context (session, account, host/proxy rejections) still return an operation ID but are not retained anywhere.
-- One bounded line per room-scoped error goes to the service log with the same fields as the ring record. Nothing above changes the event log, projections, or replay: diagnostics observe failures; they never record authority.
+Use [troubleshooting](TROUBLESHOOTING.md) and bounded operation identifiers to
+investigate failures. Keep credentials, provider callback parameters, private
+message bodies and account data out of shared logs and release evidence.
+A diagnostic response is not an authorization grant or a durable audit trail.
+
+## Historical reference
+
+The [retained service-pilot snapshot](../archive/docs/history/SERVICE-PILOT-SNAPSHOT-20261029.md)
+contains the earlier provisioning, schema-v4/v5 invitation and browser evidence.
+It is preserved for investigation, including its outdated claims; it is not a
+current operating procedure. The [handbook index](INDEX.md) is the entry point
+for maintained guidance.

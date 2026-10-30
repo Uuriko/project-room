@@ -60,6 +60,34 @@ honestly cannot survive yet.
     needs a wrangler login); the runbook below replays the real artifact
     by file with `scripts/restore-room-backup.mjs --kv`.
 
+## Bounded follow-up evidence (2026-10-29)
+
+A peer reported a synthetic SQLite/fake-KV restore of 341,091,645 bytes in
+21 parts: 45 rooms, 45,000 posts and 45,225 events. The reported check compared
+216 tables, found zero **unexpected** digest mismatches, completed full content
+verification and reopened the restored store successfully. Existing account and
+target-permit digest exceptions remained explicit. Restore time was 7,083 ms;
+fixture seeding took 160,585 ms and total runtime was 179,994 ms. An initial
+rate-limit failure was retained before correcting the fixture's simulated clock.
+The peer retained the source/configuration, manifest and result log for its local
+`f34dd18a`-derived test; this is reported evidence, not a locally repeated run.
+
+This demonstrates synthetic byte/event-scale coverage only. It does **not**
+verify an actual backup artifact, independent off-account custody, a Cloudflare
+Durable Object restore, or DO CPU/memory limits. It does not refresh the dated
+production observations above or establish a new operational RTO.
+
+A separate peer review of [#4930](https://github.com/Uuriko/project-room/pull/4930)
+at `87188ace` reported a false-healthy case: a `messages_backfill` failure could
+be classified as parked without a matching durable event block. Its focused
+fixture reported zero verified rooms, one blocked failure, zero blocked rooms
+and no errors, where the baseline reported an error. Before adopting that
+behavior, require a positive, non-null block for the same room, compare room
+identities rather than counts, and retain failure when the block map cannot be
+read. This scoped finding is not a full-PR qualification; the reproducer was
+sent to its owner. It does not establish a repair for the distinct
+`messages_parity_failed` condition. No production repair was performed here.
+
 ## Disaster-recovery defects — status (2026-10-15)
 
 The four defects that made recovery of the real production backup
@@ -98,16 +126,18 @@ remains the route that needs no Cloudflare runtime.
 
 ## What a restore recovers — and what it destroys
 
-The NDJSON export hashes every secret column (sha256). A restore recovers
-**data**, never working credentials:
+The NDJSON export sanitizes named raw secret columns. It preserves already-hashed
+credential verifiers, so **existing credentials may still authenticate after restore**.
+Restoring data does not rotate credentials or fence delayed pre-restore requests:
 
 1. Every sanitized secret cell (webhook secrets, push key material and
    tokens, join tokens, verifiers, encrypted payloads — the exact list is
    `EXPORT_SECRET_COLUMNS` in `server/room-export.mjs`) is substituted on
    restore — NULL, or an empty string where the column is NOT NULL — never
    the export's sha256 placeholder as a live value. The restore result's
-   `sanitizedCells` counts every substitution per table and column. **All
-   of them must be re-issued** after a restore before agents can act again.
+   `sanitizedCells` counts every substitution per table and column. Replace
+   these secrets to restore affected integrations. This does not invalidate
+   credentials whose stored hashes were preserved.
 2. A restore resurrects authority exactly as it was **at backup time**.
    Anything revoked between the backup and the loss (keys, share links,
    memberships, delegations) comes back looking current. The operator must
@@ -129,7 +159,8 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    before replaying; from a saved export file, use the same script with
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
-3. Re-issue every credential, and re-apply post-backup revocations (see
+3. Keep access closed while revoking and re-issuing credentials, replacing
+   sanitized secrets, and re-applying post-backup revocations (see
    above). Treat the restored room as authoritative **as of `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB

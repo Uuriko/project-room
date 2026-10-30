@@ -1,3 +1,4 @@
+import { AGENT_TALK_POLICY_SCHEMA } from "./agent-talk-policy.mjs";
 import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 // #658: mention lifecycle tracking — pure state machine, mention schema,
@@ -167,7 +168,19 @@ export const mentionStateSchema = `
     timeout_ms INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
-`;
+${AGENT_TALK_POLICY_SCHEMA}`;
+
+// A late acknowledgment (made after the mention timed out) is the member
+// saying "handled" for a mention answered outside its thread. It gets its own
+// column because acknowledged_at keeps the FIRST ack: an on-time ack followed
+// by a late one must still register the late one. Additive and idempotent;
+// existing rows read NULL ("no late ack").
+export function ensureMentionLateAckSchema(db) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mention_observations'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(mention_observations)").all().map(column => column.name));
+  if (!columns.has("late_acknowledged_at")) db.exec("ALTER TABLE mention_observations ADD COLUMN late_acknowledged_at INTEGER");
+}
 
 // Member id -> linked agent-identity display name. Mention detection and
 // mention delivery must resolve the same names: every @-resolution path

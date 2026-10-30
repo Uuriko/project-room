@@ -129,7 +129,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -806,7 +806,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -949,6 +949,15 @@
         "openWorldHint": false
       }
     },
+    "room_merge_members": {
+      "inputSchema": "d4341a4572f425c3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_needs_me": {
       "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
@@ -986,7 +995,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "7b6b1a6cdf8d0680",
+      "inputSchema": "c2d5db347f25c4a1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1005,6 +1014,15 @@
     },
     "room_read_board": {
       "inputSchema": "7dac81175f92cec4",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_read_bootstrap": {
+      "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1049,7 +1067,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1067,7 +1085,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "c0f2faaebb255d63",
+      "inputSchema": "2d3991a09f5107b5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1202,7 +1220,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "06247538b2b8ee95",
+      "inputSchema": "fef79c828fbdb3ed",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1328,7 +1346,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1564,7 +1582,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "7b6b1a6cdf8d0680",
+      "inputSchema": "c2d5db347f25c4a1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1600,7 +1618,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1618,7 +1636,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "c0f2faaebb255d63",
+      "inputSchema": "2d3991a09f5107b5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1699,7 +1717,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "06247538b2b8ee95",
+      "inputSchema": "fef79c828fbdb3ed",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2081,7 +2099,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2335,7 +2353,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2519,7 +2537,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

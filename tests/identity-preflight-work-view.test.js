@@ -4,20 +4,21 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 const config = { origin: 'https://room.example', roomId: 'commons', memberId: 'agent', token: 'pri_' + 'a'.repeat(43) };
-const packet = () => ({ snapshotView: 'work', snapshotVersion: 1, roomId: 'commons', sequence: 0,
+const packet = () => ({ snapshotView: 'identity', snapshotVersion: 1, roomId: 'commons', sequence: 0,
   viewerId: 'agent', viewerAccountId: null, viewerAuthEpoch: null, viewerSessionBinding: null, viewerSessionRevision: null,
   state: { room: { ownerId: 'owner' }, members: { agent: { id: 'agent', kind: 'agent', active: true, revision: 0, permissions: [] } }, workItems: {} } });
-test('identity and API-key checks request only the versioned work view, freshly for every operation', async () => {
+test('identity and API-key checks request only the versioned identity view, freshly for every operation', async () => {
   for (const prefix of ['pri_', 'rak_']) {
     const paths = [];
     const client = new RoomAgentClient({ ...config, token: prefix + 'a'.repeat(43), fetchImpl: async url => {
       const path = new URL(url).pathname + new URL(url).search; paths.push(path);
       assert.notEqual(path, '/api/rooms/commons', 'full history is never a preflight');
-      return Response.json(path.endsWith('?view=work') ? packet() : { id: 'selected' });
+      return Response.json(path.endsWith('?view=identity') ? packet() : { id: 'selected' });
     } });
     await client.checkConnection(); await client.workClaimGet('selected'); await client.workClaimGet('selected');
-    assert.deepEqual(paths, ['/api/rooms/commons?view=work', '/api/rooms/commons?view=work', '/api/rooms/commons/work-claims/selected', '/api/rooms/commons?view=work', '/api/rooms/commons/work-claims/selected']);
+    assert.deepEqual(paths, ['/api/rooms/commons?view=identity', '/api/rooms/commons?view=identity', '/api/rooms/commons/work-claims/selected', '/api/rooms/commons?view=identity', '/api/rooms/commons/work-claims/selected']);
   }
 });
 test('projection, principal, account scope, active membership and delegated authority fail closed without fallback', async () => {
@@ -44,19 +45,58 @@ test('projection, principal, account scope, active membership and delegated auth
     assert.equal((await new RoomAgentClient({ ...config, fetchImpl: async () => Response.json(p) }).checkConnection()).memberId, 'agent');
   }
 });
-test('actual server rechecks identity revocation and API-key scope using bounded work-view response', async t => {
+test('actual server rechecks identity revocation and API-key scope using bounded identity-view response', async t => {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons','owner'), identity = store.identities.create('Fixture agent');
-  store.identities.link(owner,'commons',{identityId:identity.identityId,memberId:'agent',displayName:'Fixture agent',permissions:[]});
+  linkWithProof(store, owner, 'commons', identity, { memberId:'agent',displayName:'Fixture agent',permissions:[]});
   const server = createRoomServer({store}); await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`, reads = [];
   const fetchImpl = async (url,options) => { const response = await fetch(url,options); const bytes = Buffer.byteLength(await response.clone().text()); reads.push({ path:new URL(url).pathname+new URL(url).search,bytes,status:response.status }); return response; };
   const client = new RoomAgentClient({...config,origin,token:identity.secret,fetchImpl});
-  assert.equal((await client.checkConnection()).memberId,'agent'); assert.ok(reads[0].bytes < 5000); assert.ok(reads[0].path.endsWith('?view=work'));
+  assert.equal((await client.checkConnection()).memberId,'agent'); assert.ok(reads[0].bytes < 5000); assert.ok(reads[0].path.endsWith('?view=identity'));
   const apiKey = 'rak_' + store.agentPlugin.issueApiKey({identityId:identity.identityId,scopes:['rooms:write']}).secret;
   await assert.rejects(new RoomAgentClient({...config,origin,token:apiKey}).checkConnection(), error => error.status === 403);
   store.identities.revoke(identity.identityId,identity.secret);
   await assert.rejects(client.checkConnection(), error => error.status === 401 || error.status === 403);
-  assert.equal(reads.length,2); assert.ok(reads.every(row => row.path.endsWith('?view=work')));
+  assert.equal(reads.length,2); assert.ok(reads.every(row => row.path.endsWith('?view=identity')));
+});
+
+test('identity view stays small with large history and never hydrates room or work projections', async t => {
+  let clock = Date.now();
+  const store = new RoomStore(':memory:', { now: () => clock }); store.initialize(initialRoom());
+  const owner = store.issueAccessKey('commons', 'owner'), identity = store.identities.create('Bounded agent');
+  linkWithProof(store, owner, 'commons', identity, { memberId: 'agent', displayName: 'Bounded agent', permissions: [] });
+  for (let index = 0; index < 80; index++) { clock += 2000; store.command(owner, 'commons', { id: `history-${index}`, type: 'message.posted',
+    data: { messageId: `message-${index}`, body: `private-history-${index} ` + 'x'.repeat(4000) } }); }
+  const projectionBytes = Buffer.byteLength(store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection);
+  assert.ok(projectionBytes > 300000);
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  t.mock.method(store, 'room', () => { throw new Error('identity preflight must not hydrate full room'); });
+  const url = `http://127.0.0.1:${server.address().port}/api/rooms/commons?view=identity`;
+  const headers = { authorization: `Bearer ${identity.secret}` };
+  const response = await fetch(url, { headers }), text = await response.text();
+  assert.equal(response.status, 200, text);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.ok(Buffer.byteLength(text) < 1200);
+  assert.equal(text.includes('private-history'), false);
+  const packet = JSON.parse(text);
+  assert.deepEqual(Object.keys(packet.state).sort(), ['members', 'room']);
+  assert.deepEqual(Object.keys(packet.state.members), ['agent']);
+  assert.deepEqual(Object.keys(packet.state.room), ['ownerId']);
+  for (const suffix of ['&view=work', '&limit=1', '&auth=invalid']) assert.equal((await fetch(url + suffix, { headers })).status, 422);
+  assert.equal((await fetch(url, { headers: { ...headers, 'x-project-room-help-context': '1' } })).status, 422);
+  t.diagnostic(`local fixture projection ${projectionBytes} bytes; identity response ${Buffer.byteLength(text)} bytes`);
+});
+
+
+test('older servers receive no fallback and explain server-first upgrade order', async () => {
+  let reads = 0;
+  const client = new RoomAgentClient({ ...config, fetchImpl: async () => {
+    reads++; return Response.json({ error: { code: 'invalid_snapshot_view' } }, { status: 422 });
+  } });
+  await assert.rejects(client.checkConnection(), error => error.status === 422 && error.code === 'invalid_snapshot_view'
+    && /Deploy the matching server/.test(error.message));
+  assert.equal(reads, 1);
 });

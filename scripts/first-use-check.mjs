@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { ensureSidebarClosed } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
@@ -102,6 +103,9 @@ for (const touch of [false, true]) {
     assert.equal(await owner.locator('#require-decision').isChecked(), true, 'owner approval remains required');
     assert.equal(await owner.locator('#reviewer-unavailable').isVisible(), false);
     await owner.getByRole('button', { name: 'Create', exact: true }).click();
+    await openSearch(owner);
+    await owner.locator('#message-search').fill(suggestion);
+    await owner.locator('#search-list [data-open-work]').filter({ hasText: suggestion }).click();
     const card = owner.locator('[data-work-record-id]').filter({ hasText: suggestion });
     await card.waitFor();
     const item = Object.values(store.snapshot(ownerKey, 'commons').state.workItems)[0];
@@ -114,6 +118,9 @@ for (const touch of [false, true]) {
       await owner.getByRole('button', { name: 'Save record', exact: true }).click();
       await owner.locator('#action-dialog').waitFor({ state: 'hidden' });
     }
+    await openSearch(guest);
+    await guest.locator('#message-search').fill(suggestion);
+    await guest.locator('#search-list [data-open-work]').filter({ hasText: suggestion }).click();
     await guest.locator('[data-work-record-id]').filter({ hasText: suggestion }).waitFor();
     assert.equal(await guest.locator('[data-work-record-id] [data-action]').count(), 0);
     assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
@@ -127,6 +134,9 @@ for (const touch of [false, true]) {
     await owner.evaluate(() => document.documentElement.style.fontSize = '200%');
     assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'large text reflows');
     await owner.evaluate(() => document.documentElement.style.fontSize = '100%');
+
+    await owner.locator('#work-navigation-return').click();
+    await owner.locator('#clear-search').click();
 
     // Suggested titles stay editable and never survive cancelling a new-work form.
     await openMessageMenu(message);

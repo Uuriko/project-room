@@ -1,3 +1,4 @@
+import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 // Work claims (B006/B007). A pure work-item state machine for agent
 // coordination: work starts unclaimed; an agent claims it (claimed), starts
 // it (in_progress), and finishes it (done) or marks it blocked. Only the
@@ -164,16 +165,9 @@ export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_DEPENDS = 16;
 const dependsOnOf = (value, selfId) => {
-  check(Array.isArray(value), "dependsOn must be an array");
-  check(value.length <= MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
-  const ids = value.map(id => {
-    check(typeof id === "string" && DEPENDS_PATTERN.test(id), "each dependsOn entry must be a claim id");
-    check(id !== selfId, "a claim cannot depend on itself");
-    return id;
-  });
-  return Object.freeze([...new Set(ids)].sort());
+  try { return normalizeWorkDependencies(value, selfId); }
+  catch (error) { check(false, error.message); }
 };
 // Provenance (orch-provenance-rollback): parentClaimId names the claim whose
 // output or premise this claim builds on — the edge the provenance walk
@@ -1012,9 +1006,16 @@ export function roomWorkClaimConfig(room) {
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
     ? raw.defaultLeaseHours : DEFAULT_LEASE_HOURS;
   const reviewPolicy = REVIEW_POLICIES.includes(raw.reviewPolicy) ? raw.reviewPolicy : DEFAULT_REVIEW_POLICY;
+  // CD-01 verdict inbox orphan interval (REV §3 req 2): a delivered claim
+  // whose attention set stays empty past this interval auto-adds the room
+  // owner. Room-configured in ms; anything invalid falls back to 24h.
+  const verdictOrphanAfterMs = typeof raw.verdictOrphanAfterMs === "number" && Number.isFinite(raw.verdictOrphanAfterMs)
+    && raw.verdictOrphanAfterMs >= 0 && raw.verdictOrphanAfterMs <= 30 * 24 * 3600 * 1000
+    ? raw.verdictOrphanAfterMs : 24 * 3600 * 1000;
   return Object.freeze({
     defaultLeaseHours,
     reviewPolicy,
+    verdictOrphanAfterMs,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
     staleSweep: raw.staleSweep === true,
@@ -1088,7 +1089,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     ? `work "${item.id}" is already ${item.state}`
     : item.owner === agent
       ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
-      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.

@@ -16,6 +16,7 @@ import { countPurge, createOperatorPurge } from "../server/operator-purge.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { collectLargestTables, revisionDrift } from "../server/operator-status.mjs";
 import { event, EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const TOKEN = "operator-test-token-0123456789abcdef";
 const HASH = createHash("sha256").update(TOKEN).digest("hex");
@@ -214,9 +215,12 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.command(ownerB, roomB, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "keep this room" } });
     const workId = "work-a";
     store.command(ownerA, roomA, { id: randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: workId, title: "Fixture work", definitionOfDone: "Done", accountableMemberId: "owner" } });
-    store.workClaims.set(roomA, { id: "claim-a", title: "Fixture claim", state: "open", owner: "owner", updatedAt: new Date().toISOString() });
+    // No workClaims.set here: a board claim writes work_claims rows, and
+    // G-1 (MGMT-PANEL Slice 2) refuses purge for any room with money/proof
+    // rows — that refusal is covered in operator-room-purge.test.js. This
+    // fixture stays a money/proof-free room so the happy path can purge.
     const identity = store.identities.create("qa2-room-agent");
-    store.identities.link(ownerA, roomA, { identityId: identity.identityId, memberId: "reporter", displayName: "Reporter", permissions: [] });
+    linkWithProof(store, ownerA, roomA, identity, { memberId: "reporter", displayName: "Reporter", permissions: [] });
     store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
     store.command(ownerA, roomA, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "wake the subscription" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE room_id=?").get(roomA).n > 0);
@@ -280,10 +284,10 @@ describe("operator purge and status", { concurrency: false }, () => {
     const settingRow = roomId => store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
     assert.equal(settingRow(roomA)?.enabled, 0);
     assert.equal(settingRow(roomB)?.enabled, 1);
-    // Public receipts state for the purged room, so its whole public face is
-    // proven gone together (public_receipts itself was already registered).
-    store.db.prepare(`INSERT INTO public_receipts (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, hashes_json, at, start_href)
-      VALUES ('pwr_0123456789abcdef', 'Fixture receipt', 'work-claim', ?, ?, 'qa2 receipts setting', '[]', '[]', '[]', '2026-10-16T00:00:00.000Z', '/?start=room')`).run(roomA, roomA);
+    // No public_receipts row for the purged room: public_receipts is a
+    // G-1 money/proof table (MGMT-PANEL Slice 2), so a room carrying one
+    // now refuses purge outright — that refusal is covered in
+    // operator-room-purge.test.js. This test's subject is the setting row.
     const { plan, executed } = await planAndExecute(call, [{ kind: "room", id: roomA }]);
     assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_entities WHERE room_id=?").get(roomA).n, 0);
     assert.equal(plan.body.counts.find(row => row.table === "room_public_receipts_setting")?.rows, 1);
@@ -291,7 +295,6 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.equal(executed.body.result, "executed");
     assert.equal(settingRow(roomA), undefined);
     assert.equal(settingRow(roomB)?.enabled, 1);
-    assert.equal(store.db.prepare("SELECT count(*) AS n FROM public_receipts WHERE origin_room_id=?").get(roomA).n, 0);
   });
 
   test("a new event between plan and execute refuses and deletes nothing", async t => {
@@ -346,7 +349,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.initialize(createdRoom("commons", "Commons"));
     const owner = store.issueAccessKey("commons", "owner");
     const identity = store.identities.create("qa2-fixture-agent");
-    store.identities.link(owner, "commons", { identityId: identity.identityId, memberId: "linked", displayName: "Linked", permissions: [] });
+    linkWithProof(store, owner, "commons", identity, { memberId: "linked", displayName: "Linked", permissions: [] });
     const subscribed = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
     store.command(owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "for the delivery" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE agent_id=?").get(identity.identityId).n > 0);
@@ -599,9 +602,13 @@ function retiredRows(db, roomId) {
   ]));
 }
 
-function seedRetiredRows(db, roomId) {
+function seedRetiredRows(db, roomId, { externalReceipts = true } = {}) {
   db.prepare("INSERT INTO external_identities(room_id, external_id, kind, display_name, created_at, last_seen_at) VALUES(?,?,'agent','Synthetic fixture',1,1)").run(roomId, `external-${roomId}`);
-  db.prepare("INSERT INTO external_receipts(room_id, receipt_id, external_id, kind, payload_json, created_at) VALUES(?,?,?,'work','{\"synthetic\":true}',1)").run(roomId, `receipt-${roomId}`, `external-${roomId}`);
+  // G-1 (MGMT-PANEL Slice 2): external_receipts is a money/proof table, so a
+  // room carrying a row refuses purge outright. The retained-room fixture
+  // therefore seeds it only for the room that is kept, never for the room
+  // being purged — the kept room proves the rows survive untouched.
+  if (externalReceipts) db.prepare("INSERT INTO external_receipts(room_id, receipt_id, external_id, kind, payload_json, created_at) VALUES(?,?,?,'work','{\"synthetic\":true}',1)").run(roomId, `receipt-${roomId}`, `external-${roomId}`);
   db.prepare("INSERT INTO emissary_drops(drop_id, room_id, issuer_member_id, venue, title, terms, artifact_text, artifact_sha256, created_at) VALUES(?,?,'owner','generic','Synthetic','Synthetic','Synthetic',?,1)").run(`drop-${roomId}`, roomId, "0".repeat(64));
   db.prepare("INSERT INTO emissary_invite_attribution(attribution_id, room_id, issuer_member_id, invite_token_hash, minted_at, expires_at) VALUES(?,?,'owner',?,1,2)").run(`attribution-${roomId}`, roomId, "0".repeat(64));
   db.prepare("INSERT INTO emissary_idempotency(room_id, idempotency_key, tool, result_json, created_at) VALUES(?,'synthetic-key','synthetic','{}',1)").run(roomId);
@@ -617,7 +624,7 @@ function retainedStore(t) {
   store.initialize(createdRoom("retained-room", "Remove this fixture"));
   store.initialize(createdRoom("keep-room", "Keep this fixture"));
   store.db.exec(RETIRED_SCHEMA);
-  seedRetiredRows(store.db, "retained-room");
+  seedRetiredRows(store.db, "retained-room", { externalReceipts: false });
   seedRetiredRows(store.db, "keep-room");
   const retainedBefore = retiredRows(store.db, "retained-room");
   const kept = retiredRows(store.db, "keep-room");
@@ -654,7 +661,8 @@ describe("retained room cleanup compatibility", () => {
     const result = executePlan(purge, plan);
     assert.equal(result.result, "executed");
     for (const table of RETIRED_TABLES) {
-      assert.equal(plan.counts.find(row => row.table === table)?.rows, 1, table);
+      // external_receipts is unseeded for this room (G-1, see seedRetiredRows).
+      assert.equal(plan.counts.find(row => row.table === table)?.rows, table === "external_receipts" ? 0 : 1, table);
       assert.equal(store.db.prepare(`SELECT count(*) AS n FROM main.${table} WHERE room_id='retained-room'`).get().n, 0, table);
     }
     assert.equal(store.db.prepare("SELECT 1 FROM rooms WHERE id='retained-room'").get(), undefined);
@@ -689,7 +697,11 @@ describe("retained room cleanup compatibility", () => {
     const plan = planRetainedRoom(purge);
     const snapshot = store.db.prepare("SELECT * FROM integrity_snapshot").all();
     const rowsBefore = nonAuditRows(store.db);
-    store.db.exec(`CREATE TRIGGER retained_cleanup_failure BEFORE DELETE ON external_receipts
+    // The failing table is emissary_journal, not external_receipts: the
+    // purged room no longer carries external_receipts rows (G-1 would
+    // refuse the plan before any delete), while emissary_journal is a
+    // seeded retired table this purge does delete.
+    store.db.exec(`CREATE TRIGGER retained_cleanup_failure BEFORE DELETE ON emissary_journal
       WHEN OLD.room_id='retained-room' BEGIN SELECT RAISE(ABORT, 'synthetic retained cleanup failure'); END`);
     assert.throws(() => executePlan(purge, plan), /synthetic retained cleanup failure/);
     assert.equal(nonAuditRows(store.db), rowsBefore);

@@ -1,7 +1,7 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
 import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { replyPostMode } from "../src/reply-requests.js";
+import { replyPostMode, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
@@ -54,7 +54,23 @@ export function buildReplyCommand(identity, name, args) {
   const { requestId: _requestId, ...data } = structuredClone(prepared), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
-  if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
+  if (name === "room_respond_to_request") {
+    data.replyToId = data.responseToRequestId;
+    // F-S6a-2: the context pair and workItemId are schema-optional, but a
+    // response without them cannot be admitted — replyPostMode's bare Error
+    // for that shape reached the hosted door as a 500 "internal". Refuse up
+    // front, before any command exists (hence before the server-side
+    // participant gate, which template-complete calls still reach), with a
+    // 422 naming the missing field(s). A present workItemId: null is the
+    // template shape for a request with no work item, not a missing field.
+    const missing = ["contextEventId", "contextSequence", "workItemId"].filter(key => !Object.hasOwn(data, key));
+    if (missing.length) throw Object.assign(new Error(
+      `room_respond_to_request is missing required context field(s): ${missing.join(", ")}. Copy contextEventId, contextSequence and workItemId exactly from the responseActions template in room_read_request (its answerBasis plus the request's workItemId); do not omit or refresh them.`),
+      { code: "invalid_reply_action", status: 422 });
+    if (!Object.hasOwn(data, "body")) throw Object.assign(new Error(
+      "room_respond_to_request requires body: supply your answer or reason for declining; keep the inspected context unchanged."),
+      { code: "invalid_reply_action", status: 422 });
+  }
   if (type === "message.posted") replyPostMode(data);
   const command = { id: requestId, type, data };
   const commandLimit = name === "room_reply" ? MAX_MESSAGE_COMMAND_BYTES : 16384;
@@ -269,7 +285,11 @@ export function validateReplyRead(result, { name, args, roomId }) {
     }
   }
   if (selected) {
-    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"])
+    // answerCredential: the server's stamp on an answered or declined request.
+    const stamped = Object.hasOwn(request ?? {}, "answerCredential");
+    assert(!stamped || ["answered", "declined"].includes(request.status) && ANSWER_CREDENTIALS.includes(request.answerCredential));
+    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason",
+      ...(stamped ? ["answerCredential"] : [])])
       && validRequest(request) && request.id === requestMessageId && validId(request.contextMessageId)
       && current?.evaluatedThrough === result.evaluatedThrough && current.contextEventId === request.contextEventId
       && integer(current.contextSequence) && current.contextSequence > 0 && current.contextSequence <= result.evaluatedThrough

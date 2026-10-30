@@ -16,7 +16,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { commitMessageRedaction } from "../server/message-redaction.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openSearch, openWorkFromSearch } from "./room-chrome.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 async function setup(t, seedRoom, { pageTimeoutMs = 30000 } = {}) {
@@ -121,9 +121,8 @@ function deleteDraft(store, key, messageId) {
 // a poisoned work card used to throw during that render and bounce the user
 // back to the sign-in panel for good. Reaching these assertions at all is
 // the room-opens proof; the rest pins exactly which drafts the card shows.
-async function assertDraftCard(page, workId, { live, deletedBody }) {
-  const card = page.locator(`#message-list .work-card[data-work-record-id="${workId}"]`);
-  await card.waitFor({ state: "visible" });
+async function assertDraftCard(page, workId, { title, live, deletedBody }) {
+  const card = await openWorkFromSearch(page, workId, title);
   // Only the live drafts count toward "Drafts (n)" and are excerpted; the
   // deleted draft is neither counted nor linked from the card.
   await card.locator(".work-drafts summary", { hasText: `Drafts (${live.length})` }).waitFor({ state: "visible" });
@@ -152,7 +151,7 @@ test("a deleted proposal draft does not poison the work card or lock the room", 
     // (agents/API can delete; the UI cannot).
     deleteDraft(store, keys.owner, "check-draft-1");
   });
-  await assertDraftCard(page, "w-draft-check", { live: drafts.slice(1), deletedBody: "alpha draft proposal text" });
+  await assertDraftCard(page, "w-draft-check", { title: "Draft deletion check", live: drafts.slice(1), deletedBody: "alpha draft proposal text" });
 });
 
 test("an owner deleting another member's draft does not poison the work card", DRAFT_TEST, async t => {
@@ -163,7 +162,7 @@ test("an owner deleting another member's draft does not poison the work card", D
     // The room owner (not the author) deletes the producer's first draft.
     deleteDraft(store, keys.owner, "own-draft-1");
   });
-  await assertDraftCard(page, "w-draft-owner", { live: drafts.slice(1), deletedBody: "delta draft proposal text" });
+  await assertDraftCard(page, "w-draft-owner", { title: "Owner draft deletion check", live: drafts.slice(1), deletedBody: "delta draft proposal text" });
 });
 
 test("a draft redacted by the account-deletion machinery does not poison the work card", DRAFT_TEST, async t => {
@@ -181,7 +180,7 @@ test("a draft redacted by the account-deletion machinery does not poison the wor
     f.store.close();
     f.store = new RoomStore(join(f.directory, "room.sqlite"));
   });
-  await assertDraftCard(page, "w-draft-redact", { live: drafts.slice(1), deletedBody: "golf draft proposal text" });
+  await assertDraftCard(page, "w-draft-redact", { title: "Redacted draft check", live: drafts.slice(1), deletedBody: "golf draft proposal text" });
 });
 
 test("deleting a work item's only draft is safe (control)", DRAFT_TEST, async t => {
@@ -193,8 +192,7 @@ test("deleting a work item's only draft is safe (control)", DRAFT_TEST, async t 
     // must keep the card (and the room) working with zero live drafts.
     deleteDraft(store, keys.producer, "solo-draft-1");
   });
-  const card = page.locator("#message-list .work-card[data-work-record-id=\"w-draft-solo\"]");
-  await card.waitFor({ state: "visible" });
+  const card = await openWorkFromSearch(page, "w-draft-solo", "Only draft deletion check");
   assert.equal(await card.locator(".work-drafts").count(), 0, "no Drafts section when no live drafts remain");
   assert.ok(!(await card.textContent()).includes("juliett draft proposal text"), "deleted draft is not excerpted");
 });

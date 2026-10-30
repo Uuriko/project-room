@@ -51,3 +51,9 @@ test("backoff doubles from 1s, caps at 30s, and honors a 429 retryAfterMs floor"
   assert.equal(wakeRetryDelayMs(0, new RoomClientError(429, "rate_limited", "x", 999999999)), 300000);
   assert.equal(wakeRetryDelayMs(3, new RoomClientError(500, "internal", "x")), 8000);
 });
+
+
+test("HTTP credential rejection takes precedence over a timeout error code", () => {
+  for (const status of [401, 403])
+    assert.equal(isTransientWakeError(new RoomClientError(status, "request_timeout", "x")), false);
+});

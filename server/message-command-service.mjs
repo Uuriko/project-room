@@ -3,10 +3,26 @@
 // reference conflicts. Keep these phases separate so existing admission order
 // and error precedence remain stable during the writer migration.
 import { EVENT_TYPES as T } from '../src/events.js';
+import { classifyCommand } from './action-classes.mjs';
+import { createAgentPause } from './agent-pause.mjs';
 import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
 import { ServiceError } from './service-error.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { hydrateMessageEntities } from './message-entity-projection.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// A paused non-human can still read, resume through POST /agent-pause (that
+// route is not a room command), and release a claim it holds. Every other
+// write stops here, whether the member paused itself or the owner did.
+// Humans stay on the opt-in HTTP pause gate.
+export function refusePausedAgentWrite(store, roomId, member, command) {
+  if (!member || member.kind === "human") return;
+  if (classifyCommand(command.type) === "observe") return;
+  if (command.type === T.CLAIM_RELEASED) return;
+  if (!createAgentPause(store.wakeQueue).isPaused(roomId, member.id)) return;
+  fail(423, "agent_paused", "This agent is paused. Writes resume when the pause is lifted.");
+}
 
 // Commands that name an existing message, and which field names it.
 const ARCHIVED_REF_FIELDS = Object.freeze({
@@ -84,11 +100,41 @@ export function assertMessageCommandReferences(store, roomId, state, command, ac
 export function prepareMessageWrite(store, { roomId, previous, state, event, sequence }) {
   const certificate = store.maintainMessageCertification
     ? captureMessageCertification(store.db, {roomId,sequence:previous.sequence,event,state:previous.state}) : null;
-  const projection = store.messageEntityProjection && certificate
+  // Cancellation changes request metadata only. Existing entity references
+  // already designate canonical records; retaining them is not a new cutover
+  // or permission to advance an unsupported transition's parity certificate.
+  let retainEntities = false;
+  let retainedMessageIds = [];
+  // Deletion scrubs history and invalidates parity. Keep only already-canonical
+  // unaffected records compact through both writes; the redacted records stay
+  // inline because redaction removes their reducer extras.
+  if (store.messageEntityProjection && event.type === T.MESSAGE_DELETED) {
+    const row = store.db.prepare("SELECT json_extract(projection,'$.messages') AS messages FROM rooms WHERE id=?").get(roomId);
+    const prior = row?.messages ? JSON.parse(row.messages) : [];
+    const deletedId = event.data.messageId;
+    retainedMessageIds = prior.filter(message => message?._entity === 1 && Object.keys(message).length === 2
+      && message.id !== deletedId && message.id !== `${deletedId}:channel`).map(message => message.id);
+  }
+  if (store.messageEntityProjection && !certificate && event.type === T.REPLY_REQUEST_CANCELLED
+    && isDeepStrictEqual(state.messages, previous.state.messages)) {
+    const row = store.db.prepare("SELECT json_extract(projection,'$.messages') AS messages FROM rooms WHERE id=?").get(roomId);
+    const prior = row?.messages ? JSON.parse(row.messages) : null;
+    retainEntities = Array.isArray(prior) && prior.length > 0 && prior.length === state.messages.length
+      && prior.every((message, index) => message?._entity === 1 && message.id === state.messages[index].id
+        && Object.keys(message).length === 2);
+    // Direct entity maintenance can leave the hydrated room cache stale. Never
+    // publish old cached content alongside references to different records.
+    if (retainEntities && !isDeepStrictEqual(hydrateMessageEntities(store.db, roomId, prior), state.messages))
+      throw new Error('projection_corrupt: message entities changed during cancellation');
+  }
+  const projection = store.messageEntityProjection && (certificate || retainEntities)
     ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
-    : store.storedProjection(roomId,state);
+    : retainedMessageIds.length
+      ? storedProjection(store.db, roomId, state, { enabled: store.bodiesAtRest, retainedMessageIds })
+      : store.storedProjection(roomId,state);
   return {
     projection,
+    retainedMessageIds,
     persistEntities() {
       syncMessageRows(store.db, {roomId,sequence,event,state});
       advanceMessageCertification(store.db,certificate,{sequence,event,state});

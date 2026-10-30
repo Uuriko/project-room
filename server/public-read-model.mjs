@@ -21,6 +21,7 @@ const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
 // The member receipt's public twin (#3636): the same deterministic id the
 // projection writes, and the absolute URL a holder can share.
 export const publicWorkClaimReceiptId = (roomId, claimId) => hashId("wcr", roomId, claimId);
+export const publicWorkItemReceiptId = (roomId, itemId) => hashId("wir", roomId, itemId);
 export const publicReceiptUrl = id => `${PUBLIC_ORIGIN}/receipts/${id}`;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -141,6 +142,41 @@ const cleanName = value => {
   if (typeof value !== "string") return null;
   const name = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
   return name ? name.slice(0, 80) : null;
+};
+
+// Receipt titles are titles, not display names. cleanName's 80-char cut
+// is a display-name shape; applied to a title it silently truncated the
+// receipt face mid-word with no ellipsis (E3-F1), and its null fell back
+// to a fabricated generic title shared by unrelated works (E3-F2).
+// The control-char strip cleanName applies stays; the length cut does not.
+const cleanTitle = value => {
+  if (typeof value !== "string") return null;
+  const title = [...value].filter(char => {
+    const code = char.codePointAt(0);
+    return code > 31 && code !== 127;
+  }).join("").trim();
+  return title ? title : null;
+};
+
+const UNTITLED_RECEIPT_TITLE = "Untitled receipt";
+
+// The title a public-work receipt carries. The task face names the task
+// by its offer's title (public-work-claims packet(): offer.title, stored
+// in the project_offers terms), so a receipt whose own record carries no
+// title reaches the same title through its task link. With no real title
+// reachable, the receipt is explicitly untitled — never a fabricated
+// generic title.
+const publicWorkReceiptTitle = (store, body) => {
+  const own = cleanTitle(body?.title);
+  if (own) return own;
+  if (typeof body?.taskId === "string" && body.taskId) {
+    try {
+      const offer = store.db.prepare("SELECT json_extract(terms, '$.title') AS title FROM project_offers WHERE offer_id=?").get(body.taskId);
+      const taskTitle = cleanTitle(offer?.title);
+      if (taskTitle) return taskTitle;
+    } catch { /* no offer table/row (legacy receipt): the untitled marker below */ }
+  }
+  return UNTITLED_RECEIPT_TITLE;
 };
 
 const parseJson = (text, fallback) => {
@@ -357,7 +393,7 @@ function optedInRows(store, state) {
     const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
       ? item.receipt.evidenceVersion : null;
     rows.push({
-      id: hashId("wir", roomId, item.id),
+      id: publicWorkItemReceiptId(roomId, item.id),
       title: cleanName(item.title) ?? "Receipt",
       source: "work-item",
       originRoomId: roomId,
@@ -531,19 +567,26 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const receiptsWere = publicReceipts(previous).enabled === true;
   // Lot receipts have no public_receipts row for an opt-out to delete, so
   // the RECORDED receipts setting is mirrored into
-  // room_public_receipts_setting for the lot read: only a recorded on
-  // serves a lot (#3594) — "never recorded" and "recorded false" both
-  // keep the lot private, and the mirror keeps the exact recorded value
-  // so the read can require the on. The setter bumps the recorded
-  // revision on every record, so an unchanged revision needs no write;
-  // a null previous (bootstrap, import, backfill) is an authoritative
-  // state and always re-mirrors.
+  // room_public_receipts_setting: only a recorded on serves a lot
+  // (#3594) — "never recorded" and "recorded false" both keep the lot
+  // private, and the mirror keeps the exact recorded value. The lot
+  // read no longer gates on this mirror (it consults the authoritative
+  // recorded setting at read time — server/public-visibility.mjs), so
+  // the mirror is now a legacy record for predating stores and purge
+  // accounting, kept honest here rather than load-bearing. The setter
+  // bumps the recorded revision on every record, so an unchanged
+  // revision needs no write; a null previous (bootstrap, import,
+  // backfill) is an authoritative state and always re-mirrors; and a
+  // state that DROPS a previously recorded setting (a restore/import of
+  // a pre-opt-in history, B2-4-F1) must re-mirror too — it deletes the
+  // row below — where the old guard left the stale row behind.
   const recorded = state.room.publicReceipts;
   const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
   const recordedWas = previous?.room?.publicReceipts ?? null;
   const mirrorSetting = previous === null
     || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
-      || recordedWas.revision !== recorded.revision));
+      || recordedWas.revision !== recorded.revision))
+    || (!hasRecorded && !!recordedWas && typeof recordedWas.enabled === "boolean");
   if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
   const write = () => {
     if (mirrorSetting) {
@@ -619,7 +662,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   ].filter(Boolean));
   const row = {
     id: body.receiptId,
-    title: cleanName(body.title) ?? "Public work",
+    title: publicWorkReceiptTitle(store, body),
     source: "public-work",
     originRoomId: roomId,
     roomId,
@@ -797,7 +840,17 @@ const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
-  if (room) { clauses.push("room_id=?"); params.push(room); }
+  if (room) {
+    // A room's own receipts match by their source room even when the
+    // room withholds its public face (room_id stays null until the
+    // room lists): the caller already holds the room id, so the filter
+    // confirms nothing the receipt page doesn't. Public-work rows
+    // carry their room in room_id — their origin is a namespace, never
+    // a room — so the origin leg names only the room sources, the same
+    // split roomProofRows applies.
+    clauses.push("(room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))");
+    params.push(room, room);
+  }
   if (needle) { clauses.push("instr(lower(agents_json), ?) > 0"); params.push(needle); }
   return { clauses, params };
 };
@@ -977,7 +1030,7 @@ export function rederivePublicReceipt(store, id) {
     return {
       artifactHashOk,
       row: {
-        id, title: cleanName(body.title) ?? "Public work", source: "public-work",
+        id, title: publicWorkReceiptTitle(store, body), source: "public-work",
         agents: typeof body.agentName === "string" && body.agentName ? [body.agentName]
           : typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
         humans: [], pullRequest: null, mergedAt: null,
@@ -1047,10 +1100,12 @@ export function publicLotReceiptById(store, id) {
   if (!settlement || typeof settlement !== "object") return null;
   // The lot gate is the visibility definition's lot rule
   // (server/public-visibility.mjs): operator unpublish, the recorded
-  // opt-in read from its write-time mirror (syncRoomPublication —
-  // #3594: no mirror row, an unreadable schema, and a recorded off all
-  // keep the lot private; only a recorded enabled = 1 serves it), and
-  // the owner's directory receipts toggle, composed in one place.
+  // opt-in consulted at read time from the authoritative room record
+  // (#3594: never-recorded, a recorded off, and an unreadable record
+  // all keep the lot private; only a recorded enabled = true serves
+  // it — the write-time mirror syncRoomPublication maintains cannot
+  // change the verdict, B7-2-F1/F2, B2-4-F1), and the owner's
+  // directory receipts toggle, composed in one place.
   if (!lotReceiptVisible(store.db, { id, roomId })) return null;
   let roomTitle = null;
   try {
@@ -1158,8 +1213,9 @@ export function loadPublicRoom(store, slug) {
   };
 }
 
-export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
+export function listPublicRoomSitemap(store, limit = 1000) {
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
+  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC LIMIT ?").all(cap)
     .filter(row => !isUnpublished(store.db, "room", row.slug))
     .map(row => ({
       slug: row.slug,

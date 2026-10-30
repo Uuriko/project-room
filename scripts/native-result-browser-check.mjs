@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome, messageAction } from "./room-chrome.mjs";
+import { clickChrome, messageAction, openWorkFromSearch } from "./room-chrome.mjs";
 
 // Hosted runners stall hard enough that the page-wide 8s default kills waits
 // whose product leg is ~1s on an unloaded box. Waits on an async round trip
@@ -34,6 +34,10 @@ async function waitForState(page, description, probe, { timeout = 30000, interva
 // conversation-first owner in room-results-browser-check.mjs.
 const previewBody = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n".repeat(35);
 
+async function selectResultWork(f) {
+  if (!await f.page.locator(`[data-work-record-id="${f.workItemId}"]`).isVisible()) await openWorkFromSearch(f.page, f.workItemId, "A quiet room");
+}
+
 async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
@@ -58,6 +62,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin); await signInFixture(page, f.keys[review ? "human-checker" : "owner"]); await page.locator("#main").waitFor({ state: "visible" });
+  await openWorkFromSearch(page, workItemId, "A quiet room");
   const open = async () => {
     if (review) await page.locator(`[data-work-record-id='${workItemId}'] [data-action='verify']`).click();
     else {
@@ -84,7 +89,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.capture(mobile ? "mobile" : "desktop"); await f.save.click(); await f.page.locator("#action-dialog").waitFor({ state: "hidden" });
   assert.equal(f.item().receipt.nativeText.messageId, "native-draft"); assert.equal(f.item().receipt.evidenceVersion, textVersion(f.body));
   assert.equal(f.item().verification, null); assert.equal(f.item().decision, null);
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#result-options > summary").focus(); await f.page.keyboard.press("Enter");
@@ -110,7 +115,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
 
 test("exact result copy preserves text, reports failure and ignores a late completion after closing", { timeout: 30000 }, async t => {
   const f = await setup(t, { body: previewBody }); f.complete();
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-options > summary").click();
   await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
   await f.page.evaluate(() => {
@@ -129,7 +134,7 @@ test("exact result copy preserves text, reports failure and ignores a late compl
   await f.page.locator("#close-result").click();
   await f.page.evaluate(() => window.finishCopy());
   assert.equal(await f.page.locator("#result-use-status").textContent(), "");
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-options > summary").click();
   await f.page.locator("#result-copy-text").waitFor({ state: "visible" });
   await f.page.evaluate(() => { navigator.clipboard.writeText = async text => { window.copiedResult = text; }; });
@@ -325,7 +330,7 @@ test("native result large text and keyboard remain usable; revocation clears vis
   assert.equal(await f.page.locator("#action-text-body").evaluate(el => getComputedStyle(el).fontSize), "32px");
   assert.equal(await f.page.locator("#action-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#cancel-action").focus(); await f.page.keyboard.press("Escape"); await f.page.locator("#action-dialog").waitFor({ state: "hidden" });
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body); await f.capture("large-text");
   assert.equal(await f.page.locator("#result-body").evaluate(el => getComputedStyle(el).fontSize), "32px");
   f.send(T.MEMBER_ACCESS_CHANGED, { memberId: "human-checker", expectedMemberRevision: 0, permissions: ["verify"], active: false });
@@ -344,7 +349,7 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "phone" : "de
     return route.fulfill({ response }).catch(() => {});
   });
   await f.page.locator("#message-input").fill("Keep my steering draft.");
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(() => document.querySelector("#result-status").textContent.includes("unavailable"));
   assert.equal(await retry.isVisible(), true, "a failed exact result can be retried inside its selected reader");
   await retry.focus(); await f.page.keyboard.press("Enter"); await started;
@@ -468,7 +473,7 @@ for (const responseKind of ["wrong-completion", "missing-result"]) test(`native 
     await route.fulfill({ response, json: responseKind === "missing-result" ? { ...value, result: null } : value });
   });
   await f.page.locator("#message-input").fill("Keep this draft while reviewing.");
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-retry").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#result-body").textContent(), "");
   assert.equal(await f.page.locator("#result-discuss").isVisible(), false);
@@ -484,7 +489,7 @@ for (const mobile of [false, true]) test(`selected result feedback ${mobile ? "m
   await f.page.locator("#message-input").fill("Please clarify this.");
   await f.page.locator("#thread-back").click();
   await f.page.locator("#message-input").fill("Keep the room draft");
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-discuss").waitFor({ state: "visible" });
   await f.page.locator("#result-body").evaluate(body => {
     const range = document.createRange(); range.setStart(body.firstChild, 2); range.setEnd(body.firstChild, 14);
@@ -510,7 +515,7 @@ test("result reply refusal keeps the reader and private destination draft intact
   await f.page.locator("#message-to-select").evaluate(el => { el.value = "human-checker"; el.dispatchEvent(new Event("change", { bubbles: true })); });
   await f.page.locator("#thread-back").click();
   await f.page.locator("#message-input").fill("Room draft");
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-discuss").waitFor({ state: "visible" });
   await f.page.locator("#result-discuss").click();
   assert.equal(await f.page.locator("#result-dialog").isVisible(), true, "refused handoff leaves exact result visible");
@@ -521,7 +526,7 @@ test("result reply refusal keeps the reader and private destination draft intact
   assert.equal(await f.page.locator("#message-to-select").inputValue(), "human-checker");
   await f.page.locator("#message-to-select").evaluate(el => { el.value = ""; el.dispatchEvent(new Event("change", { bubbles: true })); });
   await f.page.locator("#thread-back").click();
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.locator("#result-discuss").waitFor({ state: "visible" });
   await f.page.locator("#result-discuss").click();
   assert.equal(await f.page.locator("#main > #result-dialog.result-docked").isVisible(), true, "accepted desktop handoff retains the pinned result beside feedback");
@@ -624,7 +629,7 @@ for (const mobile of [false, true]) test(`result feedback preserves another repl
   await f.page.locator("#message-input").fill("My answer to the separate question");
   const originalReply = await f.page.locator("#reply-context").textContent();
   await f.page.locator("#thread-back").click();
-  await f.page.locator(`[data-read-result='${f.workItemId}']`).first().click();
+  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).first().click();
   await f.page.locator("#result-discuss").waitFor({ state: "visible" });
   await f.page.locator("#result-discuss").click();
   assert.equal(await f.page.locator("#result-dialog").isVisible(), true);

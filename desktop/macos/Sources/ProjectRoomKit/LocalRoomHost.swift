@@ -8,10 +8,38 @@ public struct RoomHostManifest: Codable {
     public let script: String
     public let runtimeConfig: String
     public let roomConnection: String
+    public let allowedRequesterIds: [String]?
+    public let allowedRequestIds: [String]?
+    public init(version: Int, node: String, script: String, runtimeConfig: String, roomConnection: String, allowedRequesterIds: [String]? = nil, allowedRequestIds: [String]? = nil) {
+        self.version = version; self.node = node; self.script = script
+        self.runtimeConfig = runtimeConfig; self.roomConnection = roomConnection; self.allowedRequesterIds = allowedRequesterIds; self.allowedRequestIds = allowedRequestIds
+    }
+    public static func validateRequesterIds(_ ids: [String]?) throws {
+        guard let ids else { return }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        guard !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
+            ids.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 128 && $0.unicodeScalars.allSatisfy(allowed.contains) })
+        else { throw LocalToolFailure("invalid_allowed_requesters") }
+    }
+    public static func validateRequestIds(_ ids: [String]?, requesters: [String]?) throws {
+        guard let ids else { return }
+        let reserved = Set(["constructor", "prototype", "__proto__"])
+        let first = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-")
+        guard requesters != nil, !ids.isEmpty, ids.count <= 20, Set(ids).count == ids.count,
+            ids.allSatisfy({ id in
+                guard let initial = id.unicodeScalars.first else { return false }
+                return id.utf8.count <= 128 && first.contains(initial)
+                    && id.unicodeScalars.allSatisfy(allowed.contains) && !reserved.contains(id)
+            })
+        else { throw LocalToolFailure("invalid_allowed_requests") }
+    }
     public static func read(_ url: URL) throws -> RoomHostManifest {
         let data = try Data(contentsOf: url)
         guard data.count <= 65536 else { throw LocalToolFailure("invalid_host_manifest") }
         let value = try JSONDecoder().decode(RoomHostManifest.self, from: data)
+        try validateRequesterIds(value.allowedRequesterIds)
+        try validateRequestIds(value.allowedRequestIds, requesters: value.allowedRequesterIds)
         guard value.version == 1 else { throw LocalToolFailure("invalid_host_manifest") }
         for path in [value.node, value.script, value.runtimeConfig, value.roomConnection] {
             guard path.hasPrefix("/"), !path.contains("\0"), path.utf8.count < 4096 else { throw LocalToolFailure("invalid_host_manifest") }
@@ -51,7 +79,7 @@ public final class LocalRoomHost {
         if FileManager.default.fileExists(atPath: saved.path) { try? configure(saved, restoring: true) }
         let preference = self.directory.appendingPathComponent("receiving.json")
         if manifest != nil, let data = try? Data(contentsOf: preference),
-            let saved = try? JSONDecoder().decode(ReceivingPreference.self, from: data), saved.scope == scope {
+            let saved = try? JSONDecoder().decode(ReceivingPreference.self, from: data), saved.scope == receivingScope {
             receivingEnabled = saved.enabled
         }
     }
@@ -67,13 +95,21 @@ public final class LocalRoomHost {
         let enabled: Bool
         let scope: [String: String]
     }
+    // Legacy shared-ask preferences retain their identity scope. Directed receiving
+    // also pins the explicit allowlist so a replaced manifest cannot broaden consent.
+    private var receivingScope: [String: String] {
+        guard let ids = manifest?.allowedRequesterIds else { return scope }
+        var consent = ["mode": "directed_requests", "allowedRequesterIds": ids.sorted().joined(separator: ",")]
+        if let requests = manifest?.allowedRequestIds { consent["allowedRequestIds"] = requests.sorted().joined(separator: ",") }
+        return scope.merging(consent) { _, new in new }
+    }
     // Caller holds lock. Desired receiving survives app shutdown, never a user disconnect.
     private func saveReceiving(_ enabled: Bool) throws {
         let url = directory.appendingPathComponent("receiving.json")
         // A failed disk write must not undo a user's disconnect in this process.
         if !enabled { receivingEnabled = false }
         do {
-            try JSONEncoder().encode(ReceivingPreference(enabled: enabled, scope: scope)).write(to: url, options: .atomic)
+            try JSONEncoder().encode(ReceivingPreference(enabled: enabled, scope: receivingScope)).write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             receivingEnabled = enabled
         } catch {
@@ -125,7 +161,7 @@ public final class LocalRoomHost {
             try JSONSerialization.data(withJSONObject: runtime, options: [.sortedKeys]).write(to: managed, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: managed.path)
             let updated = RoomHostManifest(version: 1, node: selected.node, script: selected.script,
-                runtimeConfig: managed.path, roomConnection: selected.roomConnection)
+                runtimeConfig: managed.path, roomConnection: selected.roomConnection, allowedRequesterIds: selected.allowedRequesterIds, allowedRequestIds: selected.allowedRequestIds)
             try JSONEncoder().encode(updated).write(to: temporary, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
             try configure(temporary)
@@ -168,7 +204,10 @@ public final class LocalRoomHost {
         guard fd >= 0 else { throw LocalToolFailure("host_lock_unavailable") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw LocalToolFailure("another_desktop_host_running") }
         let previouslyEnabled = receivingEnabled
-        do { try saveReceiving(true); pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
+        var arguments = manifest.allowedRequesterIds.map { ["--watch-requests", journalURL.path, manifest.runtimeConfig, $0.joined(separator: ",")] }
+            ?? ["--watch", journalURL.path, manifest.runtimeConfig]
+        if let requests = manifest.allowedRequestIds { arguments.append(requests.joined(separator: ",")) }
+        do { try saveReceiving(true); pid = try spawn(manifest, arguments: arguments, selectedScope: scope) }
         catch {
             // A failed first start cannot arm a future automatic launch. An existing
             // receiving preference remains available for an interrupted host's retry.
@@ -257,7 +296,7 @@ public final class LocalRoomHost {
         return value
     }
     public func snapshot() -> [String: Any] {
-        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit, receiving = receivingEnabled; lock.unlock()
+        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit, receiving = receivingEnabled, directed = manifest?.allowedRequesterIds != nil; lock.unlock()
         var text = message
         var evidence: [String: Any] = ["statusFresh": false, "phase": "unknown", "protocol": "unverified", "credentials": "unknown"]
         if child != 0 && !isStopping {
@@ -267,7 +306,7 @@ public final class LocalRoomHost {
                 if value["credentials"] as? String == "login_required" { text = "Sign in to the dedicated Codex account" }
                 else {
                     switch value["phase"] as? String {
-                    case "running": text = "Working on a shared ask"
+                    case "running": text = directed ? "Working on a directed request" : "Working on a shared ask"
                     case "assistant_not_selected": text = "Not selected as this room’s assistant"
                     case "watching_room", "protocol_qualified", "settled":
                         text = value["protocol"] as? String == "qualified" && ["present", "not_required"].contains(value["credentials"] as? String ?? "") ? "Listening · model execution not verified" : "Connecting · checking agent setup"
@@ -279,7 +318,8 @@ public final class LocalRoomHost {
                 }
             } else { text = "Connecting · current status unavailable" }
         }
-        return evidence.merging(["receivingEnabled": receiving, "configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
+        if directed { text += " · Directed requests" }
+        return evidence.merging(["hostMode": directed ? "directed_requests" : "shared_asks", "receivingEnabled": receiving, "configured": configured, "running": child != 0, "stopping": isStopping, "message": text,
             "macTools": selectedTools, "lastExit": exitState, "modelExecution": "not_tested", "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]) { _, new in new }
     }
 }

@@ -14,6 +14,12 @@ const access = Object.freeze({
   // Autonomy-biased default for agent-to-agent invites: work + steer + verify.
   // Still attenuated — no manage_members / decide / write_external / invite_member.
   collaborate: ["steer", "accept_work", "complete_work", "verify"],
+  // #5384 simple levels. Guest = read and chat. Member = the work set most
+  // members hold today; owner-only stays manage_members/decide/invite_member.
+  // The older names above stay as API aliases with their original sets, so
+  // nobody's existing or future access under those names changes.
+  guest: [],
+  member: ["steer", "accept_work", "complete_work", "verify", "manage_claims", "write_external"],
 });
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
@@ -239,7 +245,8 @@ export class AgentConnections {
       // so a disconnected identity can't keep acting through the bond
       // surface; the removed identity is echoed on the receipt for audit.
       if (action === "create" && request.identityId) {
-        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode);
+        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode,
+          { roomId, sponsorAccountId: auth.account.id });
         const identity = this.store.identities.get(request.identityId);
         if (!identity) fail(404, "identity_not_found", "No such agent identity");
         const plugin = this.store.agentPlugin;

@@ -1,0 +1,43 @@
+  /api/rooms/{roomId}/read-horizon:
+    get:
+      summary: Read the caller's read horizon
+      description: >-
+        Returns the caller's last-read message id for the room (threadId
+        "") or a thread, or a private conversation selected by `peerMemberId`.
+        A nonempty threadId and peerMemberId are mutually exclusive.
+        Hidden or pre-membership message positions return null.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: threadId
+          in: query
+          schema: { type: string, maxLength: 384 }
+        - name: peerMemberId
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, threadId, peerMemberId?, lastReadMessageId }" }
+    post:
+      summary: Advance the caller's read horizon
+      description: >-
+        Sets last_read_message_id for the room, thread, or private conversation. "Mark unread"
+        on message M is this endpoint with the id of the message before M.
+        Body: `{ threadId?, peerMemberId?, lastReadMessageId }`.
+        A private marker must belong to the caller and the selected peer.
+        Null clears the position; rewinding is supported.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lastReadMessageId]
+              properties:
+                threadId: { type: string, maxLength: 384 }
+                peerMemberId: { type: string, minLength: 1, maxLength: 100 }
+                lastReadMessageId: { type: [string, 'null'], maxLength: 384 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, threadId, peerMemberId?, lastReadMessageId }" }

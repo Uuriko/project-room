@@ -136,6 +136,64 @@ export const ERROR_REGISTRY = {
       "recovery": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
     }
   },
+  // Operator panel purge (MGMT-PANEL Slice 2): the money/proof clearance
+  // guard and the panel Path-A wrapper refusals.
+  money_bearing_room: {
+    "status": "action_required",
+    "hint": "This room has money or proof rows, so purge would delete its ledger, settlements, or receipts.",
+    "next": [
+      {
+        "command": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+    }
+  },
+  export_required: {
+    "status": "action_required",
+    "hint": "No fresh per-room export is on record for this room.",
+    "next": [
+      {
+        "command": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+    }
+  },
+  room_not_archived: {
+    "status": "action_required",
+    "hint": "This room is not lifecycle-archived, so the panel cannot purge it.",
+    "next": [
+      {
+        "command": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+    }
+  },
+  confirmation_mismatch: {
+    "status": "action_required",
+    "hint": "The typed confirmation does not match this room's title and id.",
+    "next": [
+      {
+        "command": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+    }
+  },
   // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
   // of the dedicated branch #3026 landed for #3021.
   agent_not_registered: {
@@ -339,7 +397,9 @@ const AX_NAMED_RECOVERIES = {
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
   active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
+  agent_paused: [uiText("agentError.agentPaused.hint"), uiText("agentError.agentPaused.next")],
   artifact_integrity_failed: ["The stored submission bytes no longer match the hash the receipt was issued under, so the platform's own re-hash check failed and no PASS was recorded. Do not retry the PASS; report the receipt id and this code to the room owner — the stored artifact itself is in question.", "Report the receipt id and this code to the room owner; do not retry the PASS."],
+  attachment_quota: ["A file storage limit is full; nothing was stored. For room files, error.detail.quota names the limit, what is used and what is left.", "Send a part no larger than error.detail.quota.remaining when present, or stop. Committed room files never expire."],
   assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
   assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
   assistant_attempt_changed: ["The execution changed. Read the shared request before controlling it; do not control the old attempt.", "Re-read the shared request and control the current attempt."],
@@ -429,6 +489,7 @@ const AX_NAMED_RECOVERIES = {
   message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
   ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
+  no_access: [uiText("agentError.noAccess.hint"), uiText("agentError.noAccess.next")],
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
   not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
   nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
@@ -505,7 +566,7 @@ function axFamilyRecovery(code) {
     return ["The inviter's authority changed. Ask a current administrator or the inviter for a new invitation; do not retry this one.",
       "Ask a current administrator or the inviter for a new invitation."];
   }
-  if (/_changed$/.test(code)) {
+  if (/_changed$/.test(code) || code === "pair_closed") {
     return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
       "Re-read the current state and retry against it."];
   }
@@ -513,7 +574,7 @@ function axFamilyRecovery(code) {
     return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
       "Read the current state and use the existing record; do not create a duplicate."];
   }
-  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended") {
+  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended" || code === "expired_token") {
     return ["This has expired, been revoked, or ended and will not work again. Start fresh — a new invite or a new request — rather than retrying this one.",
       "Ask the owner or inviter for a fresh invite, or start a new request; do not retry this one."];
   }
@@ -542,7 +603,7 @@ function axFamilyRecovery(code) {
     return ["This is not supported here. Do not retry it; use a supported alternative named in the message or the docs.",
       "Use a supported alternative; do not retry the unsupported form."];
   }
-  if (/_not_found$/.test(code) || /^unknown_/.test(code)) {
+  if (/_not_found$/.test(code) || /^unknown_/.test(code) || code === "code_failed") {
     return ["That resource or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
       "Re-list the resource and retry with a current id; do not guess ids."];
   }
@@ -565,6 +626,28 @@ function publicCode(code) {
 
 function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
+}
+
+// DC1-A1 (REGISTER-FIX-A lane F2): owner-release copy for a claim held by a
+// current member when the caller is the room owner (the silent-holder
+// configuration). The work-claim routes and the board sync serve this exact
+// text as the refusal message in that configuration — they hold the caller,
+// the holder, the lease and the ids; this layer does not — and agentErrorAx
+// recognises the shape below and mirrors it into hint/next. The owner's
+// own release is the first prescription — the defect was HT-2/HT-3: the
+// old copy prescribed asking the silent holder and never named the
+// caller's own remedy — and the single-item read is named because the board
+// list shows only part of a claim's history, so a list-shaped release
+// round fails with a false stale-round 409.
+export function ownerHeldClaimCopy({ holder, leaseExpiresAt, roomId, claimId } = {}) {
+  const claimPath = `/api/rooms/${roomId}/work-claims/${claimId}`;
+  return leaseExpiresAt
+    ? `This work is held by ${holder} until ${leaseExpiresAt}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it, or wait until ${leaseExpiresAt} and claim it then.`
+    : `This work is held by ${holder}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it.`;
+}
+export function parseOwnerHeldClaimCopy(message) {
+  const match = /^This work is held by (.+?)(?: until (.+?))?\. You can release it yourself now:/.exec(String(message || ""));
+  return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
 }
 
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
@@ -699,6 +782,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // invite". The message already names the holding owner; the next step
   // names the real recovery (reassign/release), not an invite.
   if (reasonCode === "work_not_owner") {
+    const ownerHeld = parseOwnerHeldClaimCopy(message);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_not_owner",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath),
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const owner = /^Work "[^"]+" is owned by (.+?) —/.exec(String(message || ""))?.[1];
     const named = owner && owner !== "nobody" ? owner : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
@@ -721,6 +817,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "work_claim_conflict") {
     const text = String(message || "");
     const self = /you already hold|already claimed by you/i.test(text);
+    const ownerHeld = self ? null : parseOwnerHeldClaimCopy(text);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_claim_conflict",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath), readWork,
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const holder = /held by (.+?) —/.exec(text)?.[1];
     const named = holder && holder !== "someone else" ? holder : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
@@ -735,7 +844,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         ? `Read the current item (GET ${claimPath}) to confirm what you hold.`
         : named
           ? `Ask ${named} to reassign or release the claim, then claim it.`
-          : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+          : "Read the current item, identify the holder, then ask them to release the claim.")]
     };
   }
   // #3880: the claim was refused because the work's dependsOn are not all

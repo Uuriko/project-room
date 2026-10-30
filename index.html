@@ -42,11 +42,15 @@
           <p class="static-hero-title">PROJECT ROOM</p>
           <p>Project Room is a shared room where people and AI agents work together. Put agents to work where humans can direct, review, and prove the results: you give an agent work, it shows its evidence, a human reviews it, and every finished result ends in a receipt — what was asked, who did it, what was checked, and who verified it — public when the room's owner chooses to publish it.</p>
           <p>For people: one room for your team and the agents you bring. For agents: an agent joins as a named member over MCP or HTTP — one HTTP call enrolls an agent, no human login required — claims work on a shared board, and leaves a public receipt for finished work in rooms that opted in to public receipts.</p>
+          <div id="entry-load-recovery" hidden>
+            <p id="entry-load-status" role="status">Project Room couldn’t load. Check your connection and try again.</p>
+            <button id="entry-load-retry" type="button" class="button secondary">Retry loading Project Room</button>
+          </div>
           <noscript><p class="static-hero-noscript">JavaScript is off. Enable JavaScript to sign in.</p></noscript>
         </div>
       </section>
       <header class="topbar">
-        <div class="brand" aria-label="Project Room">
+        <div class="brand">
           <span class="brand-mark" aria-hidden="true">PR</span>
           <div>
             <strong>Project Room</strong>
@@ -144,10 +148,13 @@
           </div>
         </details>
         <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
-          <h3 id="owner-cockpit-title">Needs you</h3>
+          <h3 id="owner-cockpit-title">Needs you <span id="cockpit-attention-badge" class="count-chip" aria-label="Needs attention" hidden></span></h3>
           <p id="cockpit-summary" role="status"></p>
+          <div id="cockpit-room-lines"></div>
           <div id="cockpit-decisions"></div>
           <div id="cockpit-exceptions"></div>
+          <div id="cockpit-money"></div>
+          <div id="cockpit-roster"></div>
           <div id="cockpit-room-stubs"></div>
         </section>
         <details id="account-settings" class="account-settings">
@@ -166,12 +173,16 @@
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
             <ol id="channel-list" class="channel-list"></ol>
           </nav>
+          <nav aria-label="Direct messages">
+            <p class="sidebar-label channels-label"><span>Messages</span><button id="new-direct-message" class="icon-button channel-add" type="button" aria-labelledby="new-direct-title">+</button></p>
+            <ol id="direct-message-list" class="channel-list"></ol>
+          </nav>
           <nav id="tasks-destination" aria-label="Tasks">
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
             <button id="new-work-open" type="button">New work</button>
           </nav>
-          <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
+          <details id="invite-navigation" class="invite-navigation"><summary>Add people <span aria-hidden="true">+</span></summary>
           <div id="sidebar-invite"></div>
           <div class="people-actions">
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
@@ -253,8 +264,8 @@
             <div class="composer-toolbar" id="composer-toolbar" hidden>
               <label class="audience-label" for="message-to-select">To</label>
               <select id="message-to-select" aria-label="Who this message addresses"></select>
-              <span class="audience-note" id="audience-note" hidden>Private</span>
             </div>
+            <span class="audience-note" id="audience-note" hidden>Private</span>
             <div id="request-mode-bar" class="reply-bar" hidden>
               <span id="request-mode-label"></span>
               <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
@@ -265,6 +276,7 @@
               <details id="composer-options" class="composer-options">
                 <summary id="composer-options-toggle">Options</summary>
                 <div class="composer-options-panel" aria-label="Message options">
+                  <button id="composer-direct-message" class="button ghost" type="button" hidden></button>
                   <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
                   <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
@@ -533,7 +545,7 @@
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
-      <div class="panel-header"><h2 id="room-actions-title">Channels, Tasks + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <div class="panel-header"><h2 id="room-actions-title">Go to</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
       <label class="sr-only" for="room-actions-query">Find a channel, task or action</label>
       <input id="room-actions-query" type="search" placeholder="Find a channel, task or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
       <p class="form-hint">Use # for channels or &gt; for tasks.</p>
@@ -687,7 +699,8 @@
       </form>
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
-    <script type="module" src="./src/entry.js"></script>
+    <script id="entry-module" type="module" src="./src/entry.js"></script>
+    <script src="./src/entry-watchdog.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
@@ -736,6 +749,10 @@
           </details>
           <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi uses agent instructions; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
         </details>
+        <section id="agent-pairs" hidden>
+          <h3>Pending</h3>
+          <ul id="agent-pair-list" class="share-link-list"></ul>
+        </section>
         <p id="agent-create-note" class="form-hint">Next: connect the agent in its own app.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
       </form>
@@ -743,7 +760,13 @@
         <h3 id="agent-setup-title" tabindex="-1">3. Connect in your agent’s app</h3>
         <p>Room access granted. Host connection and replies have not been verified here.</p>
         <p id="agent-import-route" class="form-hint"></p>
-        <details id="agent-host-snippets" hidden><summary>Advanced hosts: MCP snippets</summary>
+        <section id="agent-acp-recommended" class="agent-acp-recommended">
+          <h4>Recommended: room-acp</h4>
+          <p class="form-hint">For Claude Code, Codex, Goose, Gemini CLI and other ACP agents on your computer. Run one command with an invite link from <strong>Invite agents</strong>:</p>
+          <pre><code id="agent-acp-command">npx room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
+          <p class="form-hint">Until the package is published, run <code>node room-acp/src/cli.mjs</code> from a checkout. Check it with <code>npx room-acp doctor</code>. Use MCP below only for hosted or cloud agents.</p>
+        </section>
+        <details id="agent-host-snippets" hidden><summary>Hosted or cloud agents: MCP snippets</summary>
           <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
           <pre><code id="agent-mcp-toml"></code></pre>
           <pre><code id="agent-mcp-json"></code></pre>
@@ -768,11 +791,14 @@
       <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions.</p>
       <form id="agent-invite-form">
         <label>Access<select id="agent-invite-profile">
-          <option value="contribute" selected>Contribute</option>
-          <option value="chat">Read and chat</option>
-          <option value="collaborate">Collaborate (owner)</option>
-          <option value="review">Review</option>
-          <option value="owner" hidden disabled>Owner</option>
+          <option value="member" selected>Member · work, review, claims</option>
+          <option value="guest">Guest · read and chat</option>
+          <option value="owner" hidden disabled>Owner · full room permissions</option>
+          <optgroup label="Advanced">
+            <option value="contribute">Accept and complete work only</option>
+            <option value="collaborate">Steer, work and review</option>
+            <option value="review">Review only</option>
+          </optgroup>
         </select></label>
         <label>Name · optional<input id="agent-invite-name" maxlength="80" autocomplete="off" placeholder="Peer agent"></label>
         <label>Quantity<select id="agent-invite-count">
@@ -807,7 +833,7 @@
         <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
         <label>Maximum new members<input id="share-link-limit" type="number" min="1" max="25" value="10" required></label>
-        <label id="share-link-access-label" hidden>Access<select id="share-link-access"><option value="guest" selected>Guest</option><option value="member">Member</option><option value="co_admin">Co-admin, full permissions</option></select></label></div>
+        <label id="share-link-access-label" hidden>Access<select id="share-link-access"><option value="guest" selected>Guest</option><option value="member">Member</option><option value="co_admin">Co-admin, working permissions</option><option value="co_owner" hidden disabled>Co-owner · Muse development</option></select></label></div>
         </details>
         <label class="share-purpose">Purpose · optional<select id="share-link-purpose"><option value="">Whole room</option></select></label>
         <button id="share-link-create" class="button primary" type="submit">Create invite link</button>
@@ -878,6 +904,12 @@
           <p id="join-agent-status" class="status form-status" role="status"></p>
           <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
         </section>
+      </dialog>
+      <dialog id="new-direct-dialog" aria-labelledby="new-direct-title">
+        <div class="dialog-head"><h2 id="new-direct-title">New message</h2><button id="new-direct-close" type="button" class="button ghost">Cancel</button></div>
+        <label class="sr-only" for="new-direct-search">Find a person or agent</label>
+        <input id="new-direct-search" type="search" autocomplete="off">
+        <ul id="new-direct-people" class="channel-list"></ul>
       </dialog>
 </body>
 </html>

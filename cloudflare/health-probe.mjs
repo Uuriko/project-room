@@ -1,9 +1,10 @@
 // Shared probe for /api/ready. /api/health is Worker liveness and does not
 // enter the Durable Object. Readiness asks invite-only-pilot to run SELECT 1.
 // One in-flight probe is shared so a 1 Hz checker does not queue a call per
-// tick while the constructor holds the input gate. Each caller still gets its
-// own answer once the object is awake, because Origin checks and HEAD/GET are
-// per request.
+// tick while the constructor holds the input gate. Concurrent callers share
+// only the storage snapshot: Origin is checked before this helper, and each
+// caller shapes its own response (including HEAD) through onSnapshot.
+// One helper instance must address one authority with request-independent start().
 
 // Warm production storage answers in tens of milliseconds. A cold
 // invite-only-pilot used to block the same check for 6–20 s. After one second
@@ -27,20 +28,7 @@ export function createHealthProbe() {
       const joined = await race(inflight, timeoutMs);
       if (joined.timeout) track(inflight);
       if (joined.timeout || joined.error) return onUnready(joined.timeout ? "timeout" : "error", timing());
-      // The joiner's own start() is per-request, but it is not exempt from
-      // the budget: bound it by the time left after waiting for the gate,
-      // not a fresh timeoutMs, so the caller still answers within its
-      // overall timeout. On timeout keep its I/O alive via waitUntil,
-      // exactly as the leader branch does for its task.
-      const remainingMs = Math.max(0, timeoutMs - (performance.now() - started));
-      const own = (async () => snapshotResponse(await start()))();
-      const racedOwn = await race(own, remainingMs);
-      if (racedOwn.timeout) {
-        track(own);
-        return onUnready("timeout", timing());
-      }
-      if (racedOwn.error) return onUnready("error", timing());
-      return onSnapshot(racedOwn, timing());
+      return onSnapshot(joined.snapshot, timing());
     }
     let settle;
     const gate = new Promise(resolve => { settle = resolve; });
@@ -48,7 +36,7 @@ export function createHealthProbe() {
     const task = (async () => {
       try {
         const snapshot = await snapshotResponse(await start());
-        settle({ error: false });
+        settle({ error: false, snapshot });
         return { snapshot, timing: timing() };
       } catch (error) {
         settle({ error: true });

@@ -19,7 +19,7 @@
 //    canonical claim.
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -171,4 +171,16 @@ test("Routes compact core set names the same tools as the 18-tool paragraph", ()
     assert.deepEqual(missing, [],
       `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
   }
+});
+
+// PR5163 discovery slice: name the verified registry entry without promising
+// a new release version or changing the canonical connection destination.
+test('both agent packets name the official registry listing and canonical remote', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../server.json', import.meta.url), 'utf8'));
+  for (const packet of [llmsTxt(), llmsFullTxt()]) {
+    assert.ok(packet.includes('https://registry.modelcontextprotocol.io'));
+    assert.ok(packet.includes(manifest.name));
+    assert.ok(packet.includes(manifest.remotes[0].url));
+  }
+  assert.ok(Buffer.byteLength(llmsTxt()) < 5120, 'registry guidance must fit the short packet budget');
 });

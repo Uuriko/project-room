@@ -2,7 +2,8 @@
 // and cloning; this module owns work transitions and their local invariants.
 // Shared authority guards are injected once for identical replay/live behavior.
 import { nativeTextEvidence, reportedProducer, validateResultSegments } from './work-packet.js';
-import { applySessionFields } from './work-item-session.js';
+import { normalizeWorkDependencies } from './work-dependencies.js';
+import { applySessionFields, completionAttemptSnapshot } from './work-item-session.js';
 
 export function createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource }) {
 function proposeWork(state, incoming) {
@@ -64,6 +65,7 @@ function proposeWork(state, incoming) {
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
     ...(labels !== undefined ? { labels } : {}),
+    ...(incoming.data.dependsOn !== undefined ? { dependsOn: normalizeWorkDependencies(incoming.data.dependsOn) } : {}),
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
     // wherever the envelope exists; it is never read from data and never inferred from the
     // source message's author. Pre-field legacy rows simply lack the key and render unknown.
@@ -208,6 +210,7 @@ function completeWork(state, incoming) {
   }
   const attribution = reportedProducer(incoming.data), { producerId } = attribution;
   if (producerId !== null) knownMember(state, producerId);
+  const attemptSnapshot = completionAttemptSnapshot(item, incoming.data.attempt, incoming.actorId, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
   if (item.decision) item.decisionHistory.push(item.decision);
@@ -217,6 +220,7 @@ function completeWork(state, incoming) {
     // the reporter. This also lets verification enforce independence when a producer is
     // actually known.
     reportedById: incoming.actorId,
+    ...(attemptSnapshot ? { attemptSnapshot } : {}),
     ...attribution,
     summary: incoming.data.summary,
     evidenceUrl: nativeText ? null : (incoming.data.evidenceUrl ?? null),
