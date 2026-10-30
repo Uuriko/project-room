@@ -5233,6 +5233,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
       return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
     };
+    // #5382: mentions and DMs waiting for an agent whose bridge is away.
+    // The signal stays queued until its host polls and acks, so this count
+    // is what the agent will receive when it reconnects.
+    const queuedOf = this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals
+      WHERE agent_id=? AND room_id=? AND delivered_at IS NULL AND kind IN ('mention','dm')`);
+    const queuedWakesOf = identityId => {
+      if (!identityId) return 0;
+      try { return queuedOf.get(identityId, roomId).n; } catch { return 0; }
+    };
     const agentPresence = memberId => {
       const host = hostStatusOf(memberId);
       if (host.status === null) return null;
@@ -5266,6 +5275,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           isOwner: m.id === ownerId,
           scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
           ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+          // #5382: additive. Mentions/DMs queued for this agent in this room.
+          queuedWakes: m.kind === "agent" ? queuedWakesOf(host.identityId) : 0,
           // plan-dir-card: the member's linked directory card id (the
           // member chip lazy-loads the card from
           // /api/rooms/{roomId}/members/{memberId}/card). Null when the

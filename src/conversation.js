@@ -119,6 +119,15 @@ export function presenceLabel(presence) {
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
 
+// #5382: when an agent is not listening, say its mentions are queued (not
+// lost): the server holds them until the agent's bridge reconnects.
+export function queuedNote(member, presence) {
+  const n = Number(member?.queuedWakes);
+  if (member?.kind !== "agent" || !Number.isSafeInteger(n) || n <= 0) return "";
+  if (presence === "listening" || presence === "working") return "";
+  return `${n} queued until it reconnects`;
+}
+
 // Presence is derived from room work + recent chat. No extra people-data store.
 // #660: when the member carries a server-provided `state` (from the presence
 // API), it wins — the server is authoritative. Otherwise fall back to the
