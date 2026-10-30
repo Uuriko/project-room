@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A2: an account that administers membership creates a room from Rooms,
@@ -57,6 +58,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#account-room-purpose").fill("Plan the synthetic pilot together.");
     await page.locator("#account-room-kind").selectOption("organization");
     await page.locator("#account-room-name").fill("Test admin");
+    await captureDesignEvidence(page, { id: "create-room", title: "Create room form", fixture: "acceptance admin account; existing room membership", testName: t.name, component: "form controls" });
     const before = f.roomCount();
     await page.locator("#account-room-submit").click();
     await page.locator("#main").waitFor({ state: "visible" });
@@ -68,6 +70,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(f.store.room(created).state.room.kind, "organization");
     assert.equal(await page.locator("#room-archived-note").isHidden(), true);
     assert.equal(await page.locator("#message-input").isDisabled(), false);
+    await captureDesignEvidence(page, { id: "created-room", title: "Created room and empty composer", fixture: "actual room creation from Rooms", testName: t.name, component: "empty state and composer" });
     await page.locator("#message-input").fill("First note before archiving.");
     await page.locator('#message-form button[type="submit"]').click();
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();

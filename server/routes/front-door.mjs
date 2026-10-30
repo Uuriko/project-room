@@ -23,6 +23,19 @@ export function frontDoorFacts(ctx) {
   const latest = featuredReceipt(receipts);
   return ctx.json(ctx.res, 200, {
     schema: "project-room-front-door/1",
+    computedAt: new Date(ctx.store.now()).toISOString(),
+    provenance: {
+      kind: "request-snapshot",
+      population: "Currently public records; not all room activity or an immutable historical total.",
+      counters: {
+        resultsVerified: { unit: "merge-linked receipt", source: "/receipts",
+          definition: "Public receipt rows with both mergedAt and pullRequest recorded; not distinct pull requests or independently accepted outcomes." },
+        receiptsIssued: { unit: "public receipt", source: "/receipts",
+          definition: "Receipt rows visible under the current publication settings, including published QA records." },
+        workAvailableNow: { unit: "claimable task", source: "/offers",
+          definition: "Claimable count returned by the current public work board, not its page length." },
+      },
+    },
     counters: {
       resultsVerified: receipts.filter(r => r.mergedAt && r.pullRequest).length,
       receiptsIssued: receipts.length,

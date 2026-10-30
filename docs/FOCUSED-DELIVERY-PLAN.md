@@ -22,6 +22,34 @@ without reconstructing the project or losing control. Physical sleep/wake,
 installed-host adoption and human productivity evidence remain separate from
 protocol fixtures and synthetic measurements.
 
+## Agent workflow improvements — 2026-10-29
+
+Grok Bot's competitive review is being reconciled against the existing contracts,
+not treated as eleven missing subsystems. Codex owns follow-through and integration;
+Room work records carry current claims. [Linear's activity/session model](https://linear.app/developers/agent-interaction)
+is a useful interaction reference, not evidence that Room needs the same state machine.
+The acceptance journey is: find executable work, understand its dependencies, act,
+show an inspectable result, obtain the applicable human decision, and resume after
+interruption without reconstructing history.
+
+| Proposal | Existing contract and disposition | Owner / next evidence |
+| --- | --- | --- |
+| Human acceptance as value | `recordOwnerDecision` already binds the designated human and decision permission to the exact completion and evidence version. Board verification is a different contract. Reuse these boundaries; no parallel approval events. | Codex: test discoverability in selected agent reads and PR mirrors before adding presentation. |
+| Provider/model/client provenance | Merged bounded declared provider/client metadata into the existing attempt model and bind completion receipts to an explicit immutable attempt. These declarations are not independently verified provenance and stay out of public summaries. | Merged [#5351](https://github.com/Uuriko/project-room/pull/5351): 88 focused checks, 1 Chromium journey and 10 independent checks passed. A new public accepted-work list remains separate until opt-in visibility is qualified; no deployment claim. |
+| Task dependencies | Board `dependsOn`, available-work filtering and claim-time refusal already exist. Extend canonical proposal/read/acquire integration using that relation, with mutation-time checks. | Merged [#5350](https://github.com/Uuriko/project-room/pull/5350): canonical proposals, selected reads and mutation checks reuse Board dependencies. 2,651 affected checks passed on Node24; no new blocked/unblocked state or deployment. |
+| Typed activity | Work-linked messages, formal reply requests, blockers and results already exist. A bounded activity annotation may improve scanning; it must not become another authority or task state. | Codex follow-up: demonstrate a useful read/UI consumer first. Elicitation links a real request; reported action/response/error does not prove execution or completion. “Thought” means a concise progress summary. |
+| Derived session status | Existing `workContinuity`, cancellation and resume projections reach `room_read_work`. No additional session model. | Codex: test UI/MCP presentation parity for revoked access and budget stops; silence stays unknown. |
+| Fingerprinted skill discovery | Salvaged unfinished #4811 into [#5342](https://github.com/Uuriko/project-room/pull/5342). Exact served bytes are hashed; downloads stay on the requested origin. | Merged; 58 focused tests and 2 Workerd checks. Fingerprints are not authenticity or permission. Deployment remains separate. |
+| Cross-vendor retries | Commands already deduplicate by room, actor and command ID with fingerprint conflict rejection. A header adapter is compatibility work, not missing replay protection. | Codex: add only for a demonstrated client need; one retry identity/store, reject header/body conflicts. Latest-read scan fixed separately in [#5344](https://github.com/Uuriko/project-room/pull/5344). |
+| Reviewer credit | Current verdicts reject self-review, require visible summaries and bind the reviewed revision. | Codex follow-up: expose distinct current qualified verdicts if useful; no reward for empty notes, stale reviews or review volume. |
+| Decision tamper evidence | Shared invitation journal hashing already exists. Extending coverage to decisions needs a defined threat model and atomic verification boundary. | Retained design decision; do not claim an unkeyed chain prevents an administrator rewriting data. |
+| Repository room file | Private connection settings, `.github/project-room.yml` and explicit Graphify repository bindings already have consumers. | Deferred: require a named missing CLI journey before another schema. Any future checked-in hint is secret-free and cannot grant authority or execute commands. |
+| Evidence-linked public metrics | Current counters use public records; merge-linked receipt rows are not necessarily unique merges. | Merged [#5348](https://github.com/Uuriko/project-room/pull/5348): request timestamp, counting definitions and source links; 19 focused checks preserve public visibility and count semantics. No deployment claim. |
+
+Qualification records distinguish a reported implementation, a merged change and
+a capability verified on the serving revision. Follow-through counts accepted
+journeys and corrected failures, not proposal count or coordination volume.
+
 ## Sustained two-laptop execution — 2026-10-29
 
 This sequence expands investigation across F1–F6 while keeping implementation
@@ -382,7 +410,8 @@ all allowlisted runtime imports and candidate-manifest drift. It warns about Nod
 does not install or switch runtimes, and leaves cold-package and full-suite
 qualification intact. The Node engine range remains unchanged.
 
-This section owns the next concrete tasks; the six outcomes below remain the scope.
+At the October 18 checkpoint, this section listed the next concrete tasks.
+For current selection, use the six outcomes and execution pointers above.
 The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
 repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
 work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).

@@ -151,11 +151,11 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
     note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
-  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. Only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Co-owners, owner-equivalent members, and everyone else receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. In the opted-in Muse development room, co-owners can also pass it. In other rooms only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Outside the opted-in Muse room, other members receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
     profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
-    ownerEquivalent: { type: "boolean", description: "Room owner only. Grants every delegable permission. Does not transfer the owner seat." },
+    ownerEquivalent: { type: "boolean", description: "Room owner, or a co-owner in opted-in Muse Room. Grants every delegable permission without transferring ownership." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["roomId"]), false),

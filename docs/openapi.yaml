@@ -2938,11 +2938,12 @@ paths:
         Live facts for the /about front door, no login. The counters
         are computed per request from the same public sources the hero
         links to: the public receipts (issued, and verified = carrying
-        a merged pull request) and the public work board (claimable
-        count). latestReceipt is the newest public receipt, or null
+        both mergedAt and pullRequest, counted per receipt, not per distinct PR) and the public work board (claimable
+        count). computedAt is the request computation time, not publication time
+        or an immutable acceptance event. provenance defines each count unit
+        and its public source. latestReceipt is the newest eligible non-QA public receipt, or null
         when none is published. Never cached (Cache-Control no-store),
-        so the numbers always match the records a visitor can open
-        from the page itself.
+        and later reads may differ after publication or work changes.
       security: []
       responses:
         '200':
@@ -2951,9 +2952,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [schema, counters, latestReceipt]
+                required: [schema, computedAt, provenance, counters, latestReceipt]
                 properties:
                   schema: { type: string, enum: ['project-room-front-door/1'] }
+                  computedAt: { type: string, format: date-time }
+                  provenance:
+                    type: object
+                    required: [kind, population, counters]
+                    properties:
+                      kind: { type: string, enum: [request-snapshot] }
+                      population: { type: string }
+                      counters:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          required: [unit, source, definition]
+                          properties:
+                            unit: { type: string }
+                            source: { type: string }
+                            definition: { type: string }
                   counters:
                     type: object
                     required: [resultsVerified, receiptsIssued, workAvailableNow]
@@ -4804,7 +4821,10 @@ paths:
         session_claimed. The error message is `Claim held by <memberId>`
         and the hint names that holder, the 10-minute heartbeat, and
         supersede. The holder may send the same claim again to renew.
-        Release is set_status done or failed.
+        Release is set_status done or failed. Optional provider/client/model values
+        are bounded declarations at session start, not verified provider identity.
+        Completion can explicitly bind its own finished attempt; omitting that
+        reference leaves completion attribution unknown.
         Budgets (RC-2026-09-19-063): a start may declare maxRounds and
         maxToolCalls alongside the existing bounds. Status changes may report
         cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding
@@ -4833,6 +4853,9 @@ paths:
                 budget:
                   type: object
                   description: "Declared on the start transition only. Optional keys: maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents, maxRounds, maxToolCalls; undeclared quotas read \"unknown\"."
+                provider: { type: string, minLength: 1, maxLength: 100, description: Declared unverified provider at session start only }
+                client: { type: string, minLength: 1, maxLength: 100, description: Declared unverified client at session start only }
+                model: { type: string, minLength: 1, maxLength: 100, description: Declared unverified model at session start only }
                 spendCents: { type: integer, description: Cumulative spend report }
                 rounds: { type: integer, description: Cumulative work-loop rounds report (monotonic) }
                 toolCalls: { type: integer, description: Cumulative tool-call report (monotonic) }
@@ -4857,6 +4880,10 @@ paths:
         - name: includeSource
           in: query
           schema: { type: boolean, default: false }
+        - name: sourceObservation
+          in: query
+          description: JSON observation from an earlier includeSource read of this work and viewer. Requires includeSource=true. Fields roomId, workItemId, viewerId, messageId, revision (nonnegative safe integer), sha256 (lowercase hex). Maximum 1024 characters.
+          schema: { type: string, maxLength: 1024 }
       responses:
         '401': { description: unauthenticated }
         '200':
@@ -4868,7 +4895,17 @@ paths:
             (not retrieved), the declared session budget with undeclared bounds
             as "unknown", participant ids, and the same `omitted` list as
             `context.omitted`. It lists nothing the caller cannot already read
-            through this view and grants nothing. See docs/WORK-CONTEXT.md.
+            through this view and grants nothing. Replaced work includes
+            `next.replacement`: a one-hop status (available or unavailable),
+            workItemId, and a room_read_work nextRead pointer when available.
+            Target content is not included; following it rechecks access.
+            No approval or assignment transfers, and chains are not traversed.
+            Opt-in source reads include a scoped content observation and freshness
+            observed, changed, unchanged or unavailable. A matching observation
+            returns source.status not_modified with message null; changed reads
+            include the current body. Unavailable sources reveal no observation.
+            Observations are content comparisons, not access grants. Briefs omit bodies.
+            See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:
     get:
@@ -14266,11 +14303,10 @@ paths:
         invite_member stay refused on this array), a `profile` (chat, contribute,
         review, collaborate), or `ownerEquivalent: true`, plus optional
         `expiresInMinutes` and `displayName`. `ownerEquivalent: true` is the room's
-        owner member only: a human session, a human room key, or that owner's own
+        owner member, or a co-owner in opted-in Muse Room: a human session, a human room key, or that owner's own
         identity secret or room connection, including when the owner is an agent.
         It grants every permission the owner can delegate. The invitee is a
-        co-owner-level member, not the owner. Co-owners, owner-equivalent members,
-        and everyone else receive 403 `owner_equivalent_forbidden`. Each such mint
+        co-owner-level member, not the owner. Outside opted-in Muse Room, other members receive 403 `owner_equivalent_forbidden`. Each such mint
         is logged in the room as `agent_invite.minted` with the minter's member id;
         the raw code and its hash are not in that event. Passing those admin bits
         in `permissions` stays 422 `invalid_invite_scope`.
@@ -14289,13 +14325,13 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
-                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room's owner member only, including an agent owner on their own connection. Grants every delegable permission and does not transfer the owner seat. Co-owners cannot." }
+                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room owner, or a co-owner in opted-in Muse Room, including agents on their own connections. Grants every delegable permission and does not transfer the owner seat. Other rooms keep owner-only issuance." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, ownerEquivalent, displayName, createdAt, expiresAt }. profile is owner when ownerEquivalent is true. The raw code is returned once." }
-        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (only the room's owner member can mint an owner-level invite)" }
+        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (room owner or opted-in Muse co-owner required)" }
         '409': { description: pilot_limit }
         '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
@@ -17682,6 +17718,74 @@ paths:
         '200':
           description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
         '401': { description: unauthenticated or room_token_not_identity }
+  /api/account/access-requests:
+    post:
+      summary: Ask to join a room as the signed-in human account
+      description: >-
+        Requires the account_session cookie, current X-Session-Binding,
+        X-CSRF-Token and same-origin Origin. The account is derived from that
+        session; supplied accountId or identityId is rejected. Does not mint
+        an agent or bind membership before an authorized approval. Requests
+        always await review, separately from agent auto-admission rules.
+        Reuse requestId with identical contents for safe retries.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, displayName, requestedPermissions]
+              properties:
+                roomId: { type: string }
+                displayName: { type: string, minLength: 1, maxLength: 80 }
+                requestedPermissions: { type: array, uniqueItems: true, items: { type: string } }
+                requestId: { type: string, maxLength: 64 }
+                note: { type: string, nullable: true, maxLength: 500 }
+                referredBy: { type: string, nullable: true, maxLength: 80 }
+      responses:
+        '201': { description: '{ request } with principalKind account, identityId null and normalized status; no account ID or credential.' }
+        '401': { description: Account session required }
+        '403': { description: Origin or CSRF refused }
+        '409': { description: Request conflict, stale session binding, or room archived }
+        '422': { description: Invalid input }
+        '429': { description: Request limit reached }
+  /api/account/access-requests/{requestId}:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
+    get:
+      summary: Read the signed-in account's admission request
+      description: >-
+        Requires account_session and current X-Session-Binding. Other accounts
+        and unknown requests receive the same 404. Returns { request }; approved
+        requests include memberId only while a matching active human binding exists.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: '{ request }' }
+        '401': { description: Account session required }
+        '404': { description: Request unavailable }
+    post:
+      summary: Withdraw the signed-in account's pending admission request
+      description: Requires account_session, current X-Session-Binding, X-CSRF-Token and same-origin Origin. An empty object withdraws the request. Repeated cancellation is idempotent.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200': { description: '{ request } with cancelled status' }
+        '401': { description: Account session required }
+        '403': { description: Origin or CSRF refused }
+        '404': { description: Request unavailable }
+        '409': { description: Request already decided }
 components:
   securitySchemes:
     accountBrowserSession:
