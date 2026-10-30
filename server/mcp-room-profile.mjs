@@ -222,7 +222,8 @@ function validRoomArgs(name, args) {
     const idOk = args.id === undefined || validId(args.id);
     const messageOk = args.messageId === undefined || validId(args.messageId);
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
-    return idOk && messageOk && replyOk
+    const workOk = args.workItemId === undefined || validId(args.workItemId);
+    return idOk && messageOk && replyOk && workOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
   if (name === "room_list_work") {
@@ -642,7 +643,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();
     const messageId = args.messageId ?? id;
-    const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
+    const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
+      ...(args.workItemId === undefined ? {} : { workItemId: args.workItemId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);

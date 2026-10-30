@@ -111,3 +111,46 @@ for (const mutation of ['identity-revoked', 'identity-rotated', 'grant-expired',
   assert.equal((await f.rpc(tokens.access_token)).status, 401);
   assert.equal((await f.exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).status, 400);
 });
+
+test('a fresh accountless Member invite can deliver its first read task without manual promotion', async t => {
+  const f = await setup(t);
+  const allowed = await f.submit('allow');
+  const code = new URL(allowed.headers.get('location')).searchParams.get('code');
+  const tokens = await (await f.exchange({ grant_type: 'authorization_code', code })).json();
+  const call = async (name, args = {}) => {
+    const reply = await f.rpc(tokens.access_token, name, args);
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.equal(reply.body.error, undefined, JSON.stringify(reply.body));
+    assert.notEqual(reply.body.result?.isError, true, JSON.stringify(reply.body));
+    return reply.body.result.structuredContent;
+  };
+  const { memberId } = await call('room_check_access');
+  f.store.command(f.owner, 'commons', { id: 'first-native-task', type: 'work.proposed', data: {
+    workItemId: 'native-first-task', title: 'Suggest a useful first step',
+    definitionOfDone: 'One concrete step and why it helps', accountableMemberId: memberId,
+    mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false,
+  } });
+  await call('room_read_work', { workItemId: 'native-first-task' });
+  await call('room_accept_work', { workItemId: 'native-first-task' });
+  await call('room_start_work', { workItemId: 'native-first-task' });
+  const body = 'Start by checking the shared brief and propose a bounded task with a named reviewer.';
+  const receipt = await call('room_post_message', { id: 'native-first-result', body, workItemId: 'native-first-task' });
+  const preview = await call('room_read_result', { workItemId: 'native-first-task', draftMessageId: 'native-first-result' });
+  const evidence = preview.result.text;
+  assert.equal(evidence.postedById, memberId);
+  assert.equal(evidence.body, body);
+  assert.equal(evidence.messageEventId, receipt.event.id);
+  assert.match(evidence.evidenceVersion, /^sha256:[0-9a-f]{64}$/);
+  await call('room_submit_text_result', { workItemId: 'native-first-task', summary: 'Suggested first step',
+    nextAction: 'Review the proposed step', evidenceMessageId: evidence.messageId, evidenceMessageEventId: evidence.messageEventId,
+    evidenceVersion: evidence.evidenceVersion,
+    previousCompletionEventId: preview.current.completionEventId, producerId: memberId,
+  });
+  assert.equal(f.store.room('commons').state.workItems['native-first-task'].state, 'completed');
+  const unknown = await f.rpc(tokens.access_token, 'room_post_message', { id: 'native-unknown-task', body: 'Do not save', workItemId: 'missing-task' });
+  assert.ok(unknown.body.error || unknown.body.result?.isError, 'existing store validation rejects an unknown task');
+  assert.equal(f.store.room('commons').state.messages.some(message => message.id === 'native-unknown-task'), false);
+  const malformed = await f.rpc(tokens.access_token, 'room_post_message', { body: 'Do not save', workItemId: '../other-room' });
+  assert.equal(malformed.body.error?.code, -32602);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n, f.accountsBefore);
+});
