@@ -655,6 +655,27 @@ function reviewLabel(review, item) {
 // list read; the omitted count is disclosed rather than silently dropped.
 // Composed like claimReviewForm — array pieces, each literal a complete tag
 // or a lone catalog string — so the i18n harness sees no new hardcoded copy.
+// #5378: one Thread link per claim card. The thread is read on open from
+// GET …/work-claims/{id}/thread (same visibility as the claim read).
+export function claimThreadHtml(thread, statusKey = "board.thread.empty") {
+  const entries = Array.isArray(thread?.entries) ? thread.entries : [];
+  if (!entries.length) return `<li>${escapeHtml(uiText(statusKey))}</li>`;
+  return entries.map(entry => {
+    const detail = [entry.kind, entry.action, entry.ciState, entry.verdict, entry.pullRequest?.url, entry.note]
+      .filter(value => typeof value === "string" && value).join(" · ");
+    const kind = escapeHtml(entry.kind ?? "");
+    const at = escapeHtml(entry.at ?? "");
+    return `<li data-thread-kind="${kind}"><time>${at}</time> ${escapeHtml(detail)}</li>`;
+  }).join("");
+}
+
+function claimThreadDisclosure(item) {
+  const id = escapeHtml(item.id);
+  const label = escapeHtml(uiText("board.thread.summary"));
+  const summary = `<summary data-claim-action="thread" data-claim-id="${id}">${label}</summary>`;
+  return `<details class="claim-thread">${summary}<ol class="claim-thread-entries" aria-live="polite"></ol></details>`;
+}
+
 function claimRecordHtml(item, members) {
   const parts = [];
   const section = (labelKey, body) => ["<p class=\"claim-record-label\">", uiText(labelKey), "</p>", body].join("");
@@ -833,7 +854,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${overlapChip(item)}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${overlapChip(item)}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}${claimThreadDisclosure(item)}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -1208,6 +1229,16 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;
     const action = button.dataset.claimAction;
+    if (action === "thread") {
+      const details = button.parentElement;
+      const list = details?.querySelector(".claim-thread-entries");
+      if (!details || details.open || !list) return; // closing, or nothing to fill
+      list.innerHTML = claimThreadHtml(null, "board.thread.loading");
+      client.request(`${client.path("/work-claims")}/${encodeURIComponent(id)}/thread`)
+        .then(thread => { list.innerHTML = claimThreadHtml(thread); })
+        .catch(() => { list.innerHTML = claimThreadHtml(null, "board.thread.failed"); });
+      return;
+    }
     const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id), pending: pendingOutcome(action, titleOf(id)) };
     if (action === "sweep") {
       flyButton(button, () => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);

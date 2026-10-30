@@ -99,3 +99,16 @@ test('MCP room_work_claim_thread returns the same thread as the route', async t 
   const missing = await call('nope');
   assert.ok(missing.error || missing.result?.isError, 'unknown claim is an error');
 });
+
+test('claim card renders one Thread disclosure and the thread renderer escapes entries', async () => {
+  const { claimThreadHtml } = await import('../src/board-ui.js');
+  const html = claimThreadHtml({ entries: [
+    { kind: 'pr', action: 'pr_autolinked', at: '2026-10-30T00:00:00Z', note: '<b>x</b>' },
+    { kind: 'merge', action: 'pr_merged', at: '2026-10-30T00:01:00Z', pullRequest: { url: 'https://github.com/a/b/pull/1' } },
+  ] });
+  assert.match(html, /data-thread-kind="pr"/);
+  assert.match(html, /pr_merged · https:\/\/github.com\/a\/b\/pull\/1/);
+  assert.ok(!html.includes('<b>'), 'entry text is escaped');
+  assert.ok(html.indexOf('pr_autolinked') < html.indexOf('pr_merged'), 'order kept');
+  assert.match(claimThreadHtml({ entries: [] }), /No steps recorded yet/);
+});
