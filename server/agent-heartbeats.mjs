@@ -38,6 +38,14 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
+// The one wake-ack batch rule, shared by every door (MCP heartbeat_ack and
+// REST POST /api/agent-heartbeats/ack): 1..50 signal ids, each a 1..128
+// char string. It lives here so the doors cannot drift apart — the REST
+// door once accepted 55 ids the MCP door refused (issue #3264).
+export function validSignalIds(signalIds) {
+  return Array.isArray(signalIds) && signalIds.length > 0 && signalIds.length <= MAX_PENDING_WAKES
+    && signalIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128);
+}
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // Push wake path (RC-2026-09-24-203): token bounds, delivery timeout, and

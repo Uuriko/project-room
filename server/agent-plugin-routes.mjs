@@ -26,7 +26,7 @@ import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscriptions.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
-import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
+import { HOST_ID_PATTERN, validSignalIds } from "./agent-heartbeats.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
@@ -908,8 +908,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // Without a token the legacy behavior stands for lease-free queues.
     if (!data || !Object.hasOwn(data, "signalIds")
         || !Object.keys(data).every(field => field === "signalIds" || field === "fencingToken")
-        || !Array.isArray(data.signalIds))
-      reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field; fencingToken is optional");
+        || !validSignalIds(data.signalIds))
+      reject(422, "invalid_heartbeat_ack", "signalIds (1 to 50 ids, each a string of 1 to 128 characters) is the accepted field; fencingToken is optional");
     if (data.fencingToken !== undefined && (typeof data.fencingToken !== "string" || data.fencingToken.length === 0))
       reject(422, "invalid_heartbeat_ack", "fencingToken must be a non-empty string when present");
     return json(res, 200, store.transaction(() => {
