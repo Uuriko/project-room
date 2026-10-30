@@ -216,6 +216,13 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // text is clipped, and the serialized UTF-8 body is held to BRIEF_BYTES by
 // dropping lower-priority detail in a fixed order. `full` always points at
 // the unbounded pack.
+//
+// REGISTER row 59 (F-B10-2): the brief consumes the store's shared
+// presence derivation (presenceMembers rows passed in) — workingOn on
+// around[] rows is that derivation's, claim-derived entries included.
+// The "recent" label keeps its word only with its window stated in the
+// payload (`recentWindowMs`); a member holding live work is never
+// counted quiet.
 const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
 const BRIEF_ITEMS = 3;
 const BRIEF_AROUND = 8;
@@ -238,7 +245,11 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // Enrollment contributes to legacy lastSeenAt; it cannot prove availability.
     // Use the shared presence derivation for liveness, never a fresh timestamp.
     const live = member.watching || member.state === "working" || member.state === "listening";
-    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : null;
+    // Holding live work (a fresh session or a live claim, both carried in
+    // the shared derivation's workingOn) is evidence of presence: such a
+    // member is listed under their derived state, never counted quiet.
+    const holding = Array.isArray(member.workingOn) && member.workingOn.length > 0;
+    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : holding ? (member.state ?? "idle") : null;
     if (!state) { quiet += 1; continue; }
     listed.push({ handle: clip(member.displayName, 40), kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
       workingOn: Array.isArray(member.workingOn) ? member.workingOn.slice(0, 1).map(item => clip(item.title ?? item.workItemId, 60)) : [] });
@@ -264,6 +275,9 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     around,
     aroundMore: listed.length - around.length,
     quietMembers: quiet,
+    // The window the around[] "recent" label stands for, stated in the
+    // payload itself (REGISTER row 59).
+    recentWindowMs: BRIEF_ACTIVE_MS,
     pickUp: [...claims, ...unclaimed],
     openWorkTotal: pack.openWork.length,
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)

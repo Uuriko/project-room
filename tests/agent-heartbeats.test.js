@@ -382,9 +382,11 @@ test("room presence lists agent members with additive host presence", async t =>
     return (await res.json()).members.find(m => m.memberId === "wakeagent3");
   };
 
-  // No heartbeat yet: the agent is not in the presence list, or unregistered.
-  assert.equal((await presenceOf())?.presence ?? null, null,
-    "agents without hosts have no presence field or are absent");
+  // No heartbeat yet: REGISTER row 59 states the unregistered case —
+  // the linked agent is listed with status "unregistered" (join basis:
+  // it has issued no command), never null and never online.
+  assert.deepEqual((await presenceOf())?.presence,
+    { status: "unregistered", lastSeenAt: null, basis: "member-added" });
 
   await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret);
   let listed = await presenceOf();

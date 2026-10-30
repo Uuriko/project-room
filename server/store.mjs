@@ -103,7 +103,7 @@ import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
-import { backfillAllRoomsWorkItemBoard, boardClaimId, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
+import { backfillAllRoomsWorkItemBoard, boardClaimId, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES, liveClaim, boardStateForWorkItem } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -190,7 +190,7 @@ import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
-import { presenceState } from "../src/presence-state.js"; // #660: agent presence/working states.
+import { presenceState, PRESENCE_LIVE_WINDOW_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
@@ -1014,7 +1014,23 @@ const compactEventForPoll = event => {
 
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
-const presenceNext = (roomId, memberIds) => {
+// REGISTER row 59 (F-B10-2): the watch-presence text counts evidence
+// instead of asserting who is "online" — every clause is a count of a
+// named evidence class computed from the same rows, with its window
+// stated. "Online" is used only for the host-derived status in the
+// member rows themselves, never as a summary claim about the room.
+const presenceEvidenceSummary = (evidence) => {
+  const liveHosts = evidence?.liveHosts ?? 0;
+  const recentWriters = evidence?.recentWriters ?? 0;
+  const claimHolders = evidence?.claimHolders ?? 0;
+  return [
+    `${liveHosts} live ${liveHosts === 1 ? "host" : "hosts"}`,
+    `${recentWriters} ${recentWriters === 1 ? "member" : "members"} with a command in the last 5 minutes`,
+    `${claimHolders} ${claimHolders === 1 ? "member" : "members"} holding claimed work`,
+  ].join(" · ");
+};
+
+const presenceNext = (roomId, memberIds, evidence = null) => {
   if (memberIds.length > 0) {
     return [Object.freeze({
       action: "dm-member",
@@ -1025,7 +1041,7 @@ const presenceNext = (roomId, memberIds) => {
   }
   return [Object.freeze({
     action: "watch-presence",
-    description: "Nobody is online right now. Presence lists online members and who is holding work sessions.",
+    description: `${presenceEvidenceSummary(evidence)}. Watch presence for recent activity.`,
   })];
 };
 
@@ -5244,13 +5260,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const listed = this.presenceMembers(roomId, watcherMemberIds);
+      const evidence = {};
+      const listed = this.presenceMembers(roomId, watcherMemberIds, evidence);
       // Suggested DM targets require current connection/execution observations.
+      // Holding a live claim is NOT such an observation: it never keys
+      // dm-member (REGISTER row 59).
       const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
       return {
         members: listed,
-        next: Object.freeze(presenceNext(roomId, onlineIds)),
+        next: Object.freeze(presenceNext(roomId, onlineIds, evidence)),
       };
     });
   }
@@ -5259,15 +5278,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // exactly this code — one derivation, two surfaces. The caller supplies
   // the room's live SSE watcher member ids ([] for a read with no stream,
   // so watching reads false there).
-  presenceMembers(roomId, watcherMemberIds) {
+  presenceMembers(roomId, watcherMemberIds, evidenceOut = null) {
     const { members, ownerId } = this.roomAuthority(roomId);
     const room = this.room(roomId);
     const now = this.now();
     const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
     const working = new Map();
     const heartbeats = new Map();
+    // REGISTER row 59 (F-B10-2): claim-derived workingOn. The board reads
+    // the same projection state and was truthful while presence showed
+    // [] — so presence now groups live claims by holder in the same pass.
+    // Liveness is the board's own liveClaim(): claim.status "active" and
+    // claim.expiresAt unexpired; suspended (status != "active"),
+    // released, completed and lease-expired claims never appear.
+    const held = new Map();
     for (const item of Object.values(room.state.workItems ?? {})) {
       const session = sessionRecord(item);
+      const claim = liveClaim(item, now);
+      // Suspended reservations stay excluded (fragment 0032): an item
+      // whose session is suspended is not listed as held work either.
+      if (claim?.holderId && session.status !== "suspended") {
+        const claimState = boardStateForWorkItem(item, now);
+        if (["claimed", "in_progress", "blocked"].includes(claimState)) {
+          if (!held.has(claim.holderId)) held.set(claim.holderId, []);
+          held.get(claim.holderId).push({ workItemId: item.id, title: item.title, status: claimState });
+        }
+      }
       if (session.worker_member_id && session.heartbeat_at) {
         const prev = heartbeats.get(session.worker_member_id);
         if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
@@ -5317,8 +5353,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const link = identityLinkOf.get(roomId, memberId);
       if (!link) return { identityId: null, status: null, lastSeenAt: null };
       const status = this.agentHeartbeats.statusOf(link.identityId);
-      // Unregistered (no host) stays null so RC-051 clients keep the
-      // "no presence field or absent" contract. Roster still lists the member.
+      // Unregistered (no host) reads as status null HERE, for the
+      // presenceState derivation (no host observation exists). The
+      // emitted presence object states the unregistered case explicitly
+      // — see agentPresence below (REGISTER row 59).
       if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
       return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
     };
@@ -5333,15 +5371,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     };
     const agentPresence = memberId => {
       const host = hostStatusOf(memberId);
-      if (host.status === null) return null;
-      return { status: host.status, lastSeenAt: host.lastSeenAt };
+      if (host.status !== null) return { status: host.status, lastSeenAt: host.lastSeenAt, basis: "host" };
+      if (host.identityId === null) return null;
+      // REGISTER row 59 (F-B10-2): an identity-linked agent with no
+      // registered host used to fall out of the response as null — the
+      // unregistered case is now stated, with the stamp labelled by its
+      // basis. "unregistered" is literally true (no host has ever
+      // registered); nothing here asserts the member is online. When the
+      // only stamp is the join (member.added), lastSeenAt stays null so
+      // it cannot be misread as a last-seen time.
+      const commandAt = timestamp(lastCommandAt.get(memberId));
+      if (Number.isFinite(commandAt)) {
+        return { status: "unregistered", lastSeenAt: commandAt, basis: "last-command" };
+      }
+      return { status: "unregistered", lastSeenAt: null, basis: "member-added" };
     };
     const listed = Object.values(members)
       .filter(m => m && m.active !== false)
       .map(m => {
         const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
         const host = hostStatusOf(m.id);
-        const workingOn = working.get(m.id) ?? [];
+        const sessionWork = working.get(m.id) ?? [];
+        // Claim entries follow session entries; an item with a fresh
+        // executing session is listed once, by its session entry.
+        const workingOn = [...sessionWork,
+          ...(held.get(m.id) ?? []).filter(entry => !sessionWork.some(s => s.workItemId === entry.workItemId))];
         const isWatching = watching.has(m.id);
         return {
           memberId: m.id, displayName: m.displayName, kind: m.kind,
@@ -5349,9 +5403,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           lastSeenAt, statusMessage: m.statusMessage ?? null,
           presence: agentPresence(m.id),
           // #660: derived working state + owner/scope projection (additive).
+          // hasActiveSession stays session-only: holding a claim is not
+          // executing, so a claim never derives state "working".
           state: presenceState({
             kind: m.kind,
-            hasActiveSession: workingOn.length > 0,
+            hasActiveSession: sessionWork.length > 0,
             watching: isWatching,
             hostStatus: host.status,
             hostLastSeenAt: host.lastSeenAt,
@@ -5376,6 +5432,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         };
       })
       .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+    if (evidenceOut) {
+      // Evidence counts for the summary/next wording (REGISTER row 59):
+      // each count is computed from the rows just derived, so every
+      // clause of the summary is checkable against this same response.
+      evidenceOut.liveHosts = listed.filter(m => m.presence?.basis === "host" && m.presence.status === "online").length;
+      evidenceOut.recentWriters = listed.filter(m => {
+        const at = timestamp(lastCommandAt.get(m.memberId));
+        return Number.isFinite(at) && at <= now && now - at <= PRESENCE_LIVE_WINDOW_MS;
+      }).length;
+      evidenceOut.claimHolders = listed.filter(m => m.workingOn.some(entry => typeof entry.status === "string")).length;
+    }
     return listed;
   }
   // Presence Gap 4: the cross-room presence read behind
