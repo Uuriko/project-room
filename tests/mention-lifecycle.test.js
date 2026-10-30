@@ -450,3 +450,11 @@ test("message.posted warns not_member for an unknown handle", t => {
   assert.equal(result.mentionWarnings?.length, 1);
   assert.equal(result.mentionWarnings[0].reason, "not_member");
 });
+
+test("a spaced display name is reachable as one joined handle", () => {
+  const members = { a: { displayName: "QA Friend 7" }, o: { displayName: "Potter" } };
+  for (const text of ["@QA Friend 7 hi", "@QA-Friend-7 hi", "@qa_friend_7 hi", "@QAFriend7, hi"]) {
+    assert.deepEqual(resolveMentionTargetsInText(members, {}, text, "o"), ["a"], text);
+  }
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "@QA-Friend-77 hi", "o"), [], "no partial joined match");
+});
