@@ -63,7 +63,7 @@ import {
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
 import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
-import { agentErrorBody } from "../src/agent-error.mjs";
+import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -884,6 +884,20 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // DC1-A1: in the silent-holder configuration (caller is the room owner,
+  // holder is a current member) the refusal copy on the claim and update
+  // routes names the owner's own force-release — single-item read first
+  // — instead of the fictitious "reassign". Other configurations keep
+  // their existing copy (the creator and removed-holder configurations are
+  // the separate Fix A2/A3 slices). Returns null outside that configuration.
+  const ownerHeldCopy = item => {
+    if (!item?.owner || item.owner === caller) return null;
+    if (!access.ownerId || caller !== access.ownerId) return null;
+    let holder = null;
+    try { holder = store.roomAuthority(roomId)?.members?.[item.owner] ?? null; } catch { holder = null; }
+    if (!holder || holder.active === false) return null;
+    return ownerHeldClaimCopy({ holder: item.owner, leaseExpiresAt: item.leaseExpiresAt ?? null, roomId, claimId: item.id });
+  };
   // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
   // the claim route. create-with-assignee and reassign are acquire paths
   // too — they must refuse overlapping leases with the same 409 body, or a
@@ -1018,7 +1032,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
-    assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
+    assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other), get: other => registry.get(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     const open = openClaimCount(registry.list(roomId), nowMs);
     if (open >= config.maxOpenClaims) {
@@ -1092,19 +1106,28 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // re-claim and was unactionable for a foreign holder (non-owners cannot
     // release it) — it also never named the holder.
     if (item.state !== "unclaimed") {
-      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      if (item.state !== "claimed") {
+        // DC1-A1, A2 sub-case: an active item (in_progress/blocked) held by
+        // a current member gets the same owner-release copy when the
+        // caller is the room owner — the bare "already <state>" message
+        // would leave the agent-error fallback prescribing an ask to the
+        // (silent) holder, with no caller remedy named.
+        const ownerCopy = ACTIVE_CLAIM_STATES.includes(item.state) ? ownerHeldCopy(item) : null;
+        if (ownerCopy) reject(409, "work_claim_conflict", ownerCopy);
+        reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      }
       if (item.owner === caller) {
         reject(409, "work_claim_conflict",
           `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
       }
       reject(409, "work_claim_conflict",
-        `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+        ownerHeldCopy(item) ?? `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
-    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other), get: other => registry.get(roomId, other) });
     // #3880: dependsOn gates the AvailableWork projection (a claim is
     // claimable only when every dependency is done); the claim write path
     // must enforce the same definition, or the projection's "claimable"
@@ -1198,7 +1221,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const sendBackCall = item.state === "delivered" && data.state === "in_progress";
     const reviewerOutcome = item.owner !== caller && data.requestId !== undefined
       ? reviewerRequestOutcome(item, data.requestId, caller) : null;
-    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) {
+      reject(403, "work_not_owner", ownerHeldCopy(item)
+        ?? `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    }
     if (sendBackCall && item.owner !== caller
       && !mayManageAnyClaim(access)
       && !(item.reviews ?? []).some(entry => entry.memberId === caller && entry.verdict === "changes_requested")) {

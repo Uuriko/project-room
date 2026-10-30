@@ -14,6 +14,19 @@ export function confirmationPhrase(targets, titles = new Map()) {
   return `purge ${targets.length} target${targets.length === 1 ? "" : "s"}`;
 }
 
+// MGMT-PANEL Slice 1: the export URL for one room. A room that is not
+// lifecycle-archived needs the typed room id and a reason in the query
+// (MF-6); an archived room exports with neither. The server verifies both
+// cases and writes the audit row; this helper only builds the path.
+export function operatorExportPath(room, { format = "jsonl", confirmRoomId = "", reason = "" } = {}) {
+  const params = new URLSearchParams({ format });
+  if (!room.archived) {
+    params.set("confirmRoomId", confirmRoomId);
+    params.set("reason", reason);
+  }
+  return `/api/operator/rooms/${encodeURIComponent(room.id)}/export?${params.toString()}`;
+}
+
 export function describeFailure(status, body) {
   if (status === 404) return "The token was not accepted, or the operator surface is not configured on this deployment.";
   if (status === 429) return "Too many operator calls from this address. Wait a minute and try again.";
@@ -96,6 +109,78 @@ function init() {
     body.replaceChildren(...actions.map(a => row([when(a.at), a.action, a.targetKind ? `${a.targetKind} ${a.targetId ?? "(batch)"}` : "", a.result, a.reason ?? ""])));
   }
 
+  let exportRoom = null;
+
+  async function downloadExport(room, options) {
+    const response = await fetch(operatorExportPath(room, options), {
+      credentials: "omit",
+      headers: { Authorization: `Operator ${token()}` }
+    });
+    if (!response.ok) {
+      let body = null;
+      try { body = await response.json(); } catch { body = null; }
+      const error = new Error(describeFailure(response.status, body));
+      error.status = response.status;
+      throw error;
+    }
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const named = /filename="([^"]+)"/.exec(disposition)?.[1];
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = named ?? `room-${room.id}-export.${options.format === "html" ? "html" : "jsonl"}`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    say(`Exported room ${room.id}. The export is as sensitive as the room itself; keep it private and delete it when its purpose is done.`);
+    await loadActions();
+  }
+
+  function openExport(room) {
+    exportRoom = room;
+    $("op-export-room").textContent = room.archived
+      ? `Export room ${room.id}. It is archived, so no typed confirmation is needed.`
+      : `Export room ${room.id}. It is not archived: type its id and a reason. Both are checked by the server and the reason is kept in the audit log.`;
+    $("op-export-confirm-id").disabled = room.archived;
+    $("op-export-reason").disabled = room.archived;
+    $("op-export-confirm-id").value = "";
+    $("op-export-reason").value = "";
+    $("op-export-panel").hidden = false;
+  }
+
+  async function loadRooms() {
+    const data = await call("/api/operator/rooms?limit=100");
+    $("op-rooms-read-at").textContent = `Read at ${when(data.readAt)}${data.truncated ? " — list truncated at 100 rooms" : ""}.`;
+    const body = $("op-rooms").tBodies[0];
+    const rows = [];
+    for (const room of data.rooms ?? []) {
+      if (room.title) titles.set(room.id, room.title);
+      const tr = document.createElement("tr");
+      const name = el("td");
+      name.append(el("span", room.title ?? room.id), el("br"), el("code", room.id));
+      const size = el("td", `${room.projectionBytes} bytes`);
+      const cap = document.createElement("td");
+      const bar = el("div", null, { class: "op-bar", role: "img", "aria-label": `${Math.round((room.percentOfCap ?? 0) * 100)} percent of cap` });
+      const fill = el("div", null, { class: "op-bar-fill" });
+      fill.style.width = `${Math.min(100, Math.max(0, (room.percentOfCap ?? 0) * 100))}%`;
+      bar.append(fill);
+      cap.append(bar, el("span", `${((room.percentOfCap ?? 0) * 100).toFixed(1)}%`));
+      const members = Object.entries(room.activeMembersByKind ?? {}).map(([kind, count]) => `${kind} ${count}`).join(", ") || "none";
+      const state = [room.archived ? "archived" : "open", room.protected ? "protected" : null, room.messagesArchived ? "messages archived" : null].filter(Boolean).join(", ");
+      const action = document.createElement("td");
+      const button = el("button", "Export", { type: "button", "aria-label": `Export room ${room.id}` });
+      button.addEventListener("click", () => {
+        if (room.archived) guarded(() => downloadExport(room, { format: "jsonl" }));
+        else openExport(room);
+      });
+      action.append(button);
+      tr.append(name, size, cap, el("td", room.headSeq), el("td", members), el("td", state), action);
+      rows.push(tr);
+    }
+    body.replaceChildren(...rows);
+  }
+
   function renderTargets() {
     const list = $("op-targets");
     list.replaceChildren();
@@ -147,7 +232,7 @@ function init() {
   async function start() {
     showSignedIn(true);
     renderTargets();
-    await guarded(async () => { await loadStatus(); await loadActions(); say("Connected."); });
+    await guarded(async () => { await loadStatus(); await loadRooms(); await loadActions(); say("Connected."); });
   }
 
   $("op-token-form").addEventListener("submit", event => {
@@ -166,6 +251,22 @@ function init() {
     say("Token forgotten.");
   });
   $("op-status-refresh").addEventListener("click", () => guarded(loadStatus));
+  $("op-rooms-refresh").addEventListener("click", () => guarded(loadRooms));
+  $("op-export-cancel").addEventListener("click", () => { exportRoom = null; $("op-export-panel").hidden = true; });
+  $("op-export-form").addEventListener("submit", event => {
+    event.preventDefault();
+    if (!exportRoom) return;
+    const room = exportRoom;
+    guarded(async () => {
+      await downloadExport(room, {
+        format: $("op-export-format").value,
+        confirmRoomId: $("op-export-confirm-id").value.trim(),
+        reason: $("op-export-reason").value.trim()
+      });
+      exportRoom = null;
+      $("op-export-panel").hidden = true;
+    });
+  });
   $("op-actions-refresh").addEventListener("click", () => guarded(loadActions));
   $("op-drift-form").addEventListener("submit", event => {
     event.preventDefault();
@@ -230,6 +331,101 @@ function init() {
       targets = [];
       clearPlan();
       renderTargets();
+      await loadActions();
+    });
+  });
+
+  // --- Message archive (Slice 2, §2.3): dry run first, real run only on
+  // the dry run's expect. This rides the existing /api/operator/archive
+  // door; it is not lifecycle archive and does not close the room.
+  let archivePlan = null;
+  $("op-archive-form").addEventListener("submit", event => {
+    event.preventDefault();
+    guarded(async () => {
+      const data = {
+        roomId: $("op-archive-room").value.trim(),
+        keepNewest: Number($("op-archive-keep").value),
+        reason: $("op-archive-reason").value.trim(),
+        dryRun: true
+      };
+      const done = await call("/api/operator/archive", { method: "POST", data });
+      archivePlan = { ...data, expect: done.expect };
+      $("op-archive-result").textContent = `Dry run: ${done.archived} messages would move, ${done.retained} retained, ${done.freedBytes} bytes freed, through sequence ${done.throughSeq}. Projection ${done.projectionBytes.before} → ${done.projectionBytes.after} bytes.`;
+      $("op-archive-run").disabled = false;
+      say("Archive dry run ready. Review it, then run the archive.");
+    });
+  });
+  $("op-archive-run").addEventListener("click", () => {
+    if (!archivePlan) return;
+    guarded(async () => {
+      const { roomId, keepNewest, reason, expect } = archivePlan;
+      const done = await call("/api/operator/archive", { method: "POST", data: { roomId, keepNewest, reason, dryRun: false, expect } });
+      $("op-archive-result").textContent = `Archived ${done.archived} messages, ${done.retained} retained, ${done.freedBytes} bytes freed, through sequence ${done.throughSeq}. Projection ${done.projectionBytes.before} → ${done.projectionBytes.after} bytes. The room stays open.`;
+      archivePlan = null;
+      $("op-archive-run").disabled = true;
+      say("Archive done. Nothing was deleted.");
+      await loadActions();
+    });
+  });
+
+  // --- Panel delete, Path A only (Slice 2, §2.4): purge of one
+  // lifecycle-archived room through the panel wrapper. The server verifies
+  // the typed title + id, the archived state, and the fresh export on
+  // record; the money/proof guard lives in the purge core itself.
+  let panelPlan = null;
+  let panelRoomId = null;
+  const panelExpectedTitle = () => (panelPlan?.title || panelRoomId);
+  function panelSyncExecute() {
+    $("op-panel-execute").disabled = !panelPlan
+      || $("op-panel-confirm-title").value !== panelExpectedTitle()
+      || $("op-panel-confirm-id").value !== panelRoomId
+      || !$("op-panel-export-held").checked;
+  }
+  $("op-panel-plan-form").addEventListener("submit", event => {
+    event.preventDefault();
+    guarded(async () => {
+      panelRoomId = $("op-panel-room").value.trim();
+      panelPlan = await call(`/api/operator/rooms/${encodeURIComponent(panelRoomId)}/purge/plan`, {
+        method: "POST",
+        data: { reason: $("op-panel-reason").value.trim() }
+      });
+      $("op-panel-plan").hidden = false;
+      $("op-panel-summary").textContent = `Plan ${panelPlan.planId} deletes ${panelPlan.totalRows} rows for archived room ${panelRoomId}. It expires at ${when(panelPlan.expiresAt)}. After this purge the room id becomes available again; old links to this room and its receipts will stop working, and a future room could reuse the id.`;
+      $("op-panel-money").textContent = "Money/proof tables: all zero — checked at plan time, re-checked at execute time in the purge core.";
+      $("op-panel-export").textContent = panelPlan.exportOnRecordAt
+        ? `Export on record: ${when(panelPlan.exportOnRecordAt)}. Confirm below that you hold the file.`
+        : "Export on record: none in the last 24 hours. Export this room first; execute will be refused without one.";
+      const counts = (panelPlan.counts ?? []).filter(c => c.rows > 0);
+      $("op-panel-counts").tBodies[0].replaceChildren(...counts.map(c => row([c.table, c.action === "retain" ? `keep (${c.reason ?? "retained"})` : "delete", c.rows])));
+      $("op-panel-confirm-title").value = "";
+      $("op-panel-confirm-id").value = "";
+      $("op-panel-export-held").checked = false;
+      panelSyncExecute();
+      say("Panel plan ready. Review the counts, then type the confirmation.");
+    });
+  });
+  for (const id of ["op-panel-confirm-title", "op-panel-confirm-id", "op-panel-export-held"]) {
+    $(id).addEventListener("input", panelSyncExecute);
+    $(id).addEventListener("change", panelSyncExecute);
+  }
+  $("op-panel-execute-form").addEventListener("submit", event => {
+    event.preventDefault();
+    if (!panelPlan) return;
+    guarded(async () => {
+      const done = await call(`/api/operator/rooms/${encodeURIComponent(panelRoomId)}/purge/execute`, {
+        method: "POST",
+        data: {
+          planId: panelPlan.planId,
+          confirmToken: panelPlan.confirmToken,
+          confirmTitle: $("op-panel-confirm-title").value,
+          confirmId: $("op-panel-confirm-id").value,
+          exportHeld: $("op-panel-export-held").checked
+        }
+      });
+      say(`Purged ${done.totalRows} rows for room ${panelRoomId}.`);
+      panelPlan = null;
+      panelRoomId = null;
+      $("op-panel-plan").hidden = true;
       await loadActions();
     });
   });

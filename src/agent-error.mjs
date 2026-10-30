@@ -136,6 +136,64 @@ export const ERROR_REGISTRY = {
       "recovery": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
     }
   },
+  // Operator panel purge (MGMT-PANEL Slice 2): the money/proof clearance
+  // guard and the panel Path-A wrapper refusals.
+  money_bearing_room: {
+    "status": "action_required",
+    "hint": "This room has money or proof rows, so purge would delete its ledger, settlements, or receipts.",
+    "next": [
+      {
+        "command": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Do not purge this room. Money-bearing rooms are excluded from purge by the G-1 guard in the purge core; they route to the DB-1 decision, not to a purge plan."
+    }
+  },
+  export_required: {
+    "status": "action_required",
+    "hint": "No fresh per-room export is on record for this room.",
+    "next": [
+      {
+        "command": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "no",
+      "recovery": "Export this room from the operator panel first, confirm you hold the file, then plan and execute the purge within 24 hours of that export."
+    }
+  },
+  room_not_archived: {
+    "status": "action_required",
+    "hint": "This room is not lifecycle-archived, so the panel cannot purge it.",
+    "next": [
+      {
+        "command": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "no",
+      "recovery": "Ask the room owner to lifecycle-archive the room first (that closes its writes). The panel purge path only accepts rooms whose archived_at is set."
+    }
+  },
+  confirmation_mismatch: {
+    "status": "action_required",
+    "hint": "The typed confirmation does not match this room's title and id.",
+    "next": [
+      {
+        "command": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": "Type the room title exactly as shown (the room id when the room has no title) and the room id, then execute again."
+    }
+  },
   // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
   // of the dedicated branch #3026 landed for #3021.
   agent_not_registered: {
@@ -570,6 +628,28 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
+// DC1-A1 (REGISTER-FIX-A lane F2): owner-release copy for a claim held by a
+// current member when the caller is the room owner (the silent-holder
+// configuration). The work-claim routes and the board sync serve this exact
+// text as the refusal message in that configuration — they hold the caller,
+// the holder, the lease and the ids; this layer does not — and agentErrorAx
+// recognises the shape below and mirrors it into hint/next. The owner's
+// own release is the first prescription — the defect was HT-2/HT-3: the
+// old copy prescribed asking the silent holder and never named the
+// caller's own remedy — and the single-item read is named because the board
+// list shows only part of a claim's history, so a list-shaped release
+// round fails with a false stale-round 409.
+export function ownerHeldClaimCopy({ holder, leaseExpiresAt, roomId, claimId } = {}) {
+  const claimPath = `/api/rooms/${roomId}/work-claims/${claimId}`;
+  return leaseExpiresAt
+    ? `This work is held by ${holder} until ${leaseExpiresAt}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it, or wait until ${leaseExpiresAt} and claim it then.`
+    : `This work is held by ${holder}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it.`;
+}
+export function parseOwnerHeldClaimCopy(message) {
+  const match = /^This work is held by (.+?)(?: until (.+?))?\. You can release it yourself now:/.exec(String(message || ""));
+  return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -702,6 +782,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // invite". The message already names the holding owner; the next step
   // names the real recovery (reassign/release), not an invite.
   if (reasonCode === "work_not_owner") {
+    const ownerHeld = parseOwnerHeldClaimCopy(message);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_not_owner",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath),
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const owner = /^Work "[^"]+" is owned by (.+?) —/.exec(String(message || ""))?.[1];
     const named = owner && owner !== "nobody" ? owner : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
@@ -724,6 +817,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "work_claim_conflict") {
     const text = String(message || "");
     const self = /you already hold|already claimed by you/i.test(text);
+    const ownerHeld = self ? null : parseOwnerHeldClaimCopy(text);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_claim_conflict",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath), readWork,
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const holder = /held by (.+?) —/.exec(text)?.[1];
     const named = holder && holder !== "someone else" ? holder : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
@@ -738,7 +844,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         ? `Read the current item (GET ${claimPath}) to confirm what you hold.`
         : named
           ? `Ask ${named} to reassign or release the claim, then claim it.`
-          : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+          : "Read the current item, identify the holder, then ask them to release the claim.")]
     };
   }
   // #3880: the claim was refused because the work's dependsOn are not all

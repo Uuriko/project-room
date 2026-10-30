@@ -72,6 +72,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
+  paths.add('server/agent-talk-policy.mjs'); // #5384
+  paths.add('server/routes/talk-policy.mjs'); // #5384
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
@@ -92,6 +94,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
+  paths.add("server/approval-tokens.mjs");
+
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
   paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
   paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
@@ -147,7 +151,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
   paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
   // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
-  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs', 'server/operator-archive.mjs']) paths.add(path);
+  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-room-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs', 'server/operator-archive.mjs', 'server/operator-rooms.mjs']) paths.add(path);
   paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
   paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
   paths.add('src/password-auth.mjs'); // Email+password crypto (imported by server/http.mjs, slice 2)
@@ -170,7 +174,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs', 'server/claim-coordination.mjs', 'server/claim-pr-sync.mjs', 'server/mention-receipts.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)
   paths.add('server/retention-response.mjs'); // room-retention: first-contribution SLA bot + zero-reply watchdog (pure, imported by server/work-claim-routes.mjs)
   paths.add('server/claim-validate.mjs'); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
-  for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
+  for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-disputability.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
   paths.add('server/persisted-row.mjs'); // RC-2026-09-27-2730: replay-safe persisted-row envelope (imported by server/bounty-escrow.mjs, server/work-claim-sqlite.mjs, server/dispatch-journal.mjs; pure, no imports)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)

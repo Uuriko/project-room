@@ -76,7 +76,7 @@ test("agent-connect quickstart cites only real invite UI", () => {
     assert.ok(doc.includes(ui), `doc cites "${ui}" but never names it`);
     assert.ok(page.includes(ui), `"${ui}" is cited in the doc but not found in index.html`);
   }
-  for (const option of ["Contribute", "Read and chat", "Collaborate", "Review"]) {
+  for (const option of ["Member", "Guest", "Owner", "Accept and complete work only", "Steer, work and review", "Review only"]) {
     assert.ok(page.includes(option), `invite access option "${option}" is not in index.html`);
     assert.ok(doc.includes(option), `doc never names the "${option}" access option`);
   }
