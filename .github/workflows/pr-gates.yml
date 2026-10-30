@@ -31,8 +31,10 @@ permissions:
 
 # Pushes to main and merge-group runs are not cancelled mid-flight. Pull
 # requests cancel their own older runs.
+# Ineligible PR payloads must not cancel running or replace pending ready checks.
+# Keep eligible events grouped by PR so newer commits still cancel obsolete work.
 concurrency:
-  group: ${{ github.event_name == 'schedule' && 'pr-gates-nightly' || github.event_name == 'workflow_dispatch' && format('pr-gates-dispatch-{0}', github.run_id) || format('pr-gates-{0}', github.ref) }}
+  group: ${{ github.event_name == 'pull_request' && !(github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')) && format('{0}-ineligible-{1}', github.workflow, github.run_id) || (github.event_name == 'schedule' && 'pr-gates-nightly' || github.event_name == 'workflow_dispatch' && format('pr-gates-dispatch-{0}', github.run_id) || format('pr-gates-{0}', github.ref)) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

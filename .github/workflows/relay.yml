@@ -16,8 +16,10 @@ on:
 permissions:
   contents: read
 
+# Ineligible PR payloads must not cancel running or replace pending ready checks.
+# Keep eligible events grouped by PR so newer commits still cancel obsolete work.
 concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  group: ${{ github.event_name == 'pull_request' && !(github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')) && format('{0}-ineligible-{1}', github.workflow, github.run_id) || (format('{0}-pr-{1}', github.workflow, github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id)) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
