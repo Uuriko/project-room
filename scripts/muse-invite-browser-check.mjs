@@ -35,7 +35,11 @@ for (const theme of ['dark', 'light']) for (const width of [1280, 390]) {
     await page.goto(origin);await signInFixture(page,key);
     await clickChrome(page,'#invite-people-button');
     await page.locator('#share-link-dialog').waitFor({state:'visible'});
-    assert.equal(await page.locator('#share-link-access').inputValue(),'co_owner');
+    assert.equal(await page.locator('#share-link-access').inputValue(),'member');
+    assert.equal(await page.locator('#share-link-access').isVisible(),true);
+    assert.equal(await page.locator('#share-settings').evaluate(el=>el.open),false);
+    // Elevated access remains available, but requires an explicit choice.
+    await page.locator('#share-link-access').selectOption('co_owner');
     assert.equal(await page.locator('#growth-kit').isVisible(),false);
     await page.locator('#share-link-create').click();
     await page.locator('#share-link-result').waitFor({state:'visible'}).catch(async error=>{console.log('INVITE FAILURE',await page.locator('#share-link-dialog').innerText(),errors);throw error;});

@@ -827,10 +827,11 @@
         <p id="share-link-intro">Share one link with people or AI agents. They can read the room and chat. They cannot invite others or approve work.</p>
       <p id="share-local-note" class="form-hint" hidden>Local preview: links work only on this Mac.</p>
       <form id="share-link-form">
-        <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>
+        <label id="share-link-access-label" hidden>Access<select id="share-link-access"><option value="guest" selected>Guest · read and chat</option><option value="member">Member · take, complete and verify work</option><option value="co_owner" hidden disabled>Co-owner · Muse development</option></select></label>
+        <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 joins</span></summary>
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
         <label>Maximum new members<input id="share-link-limit" type="number" min="1" max="25" value="10" required></label>
-        <label id="share-link-access-label" hidden>Access<select id="share-link-access"><option value="guest" selected>Guest</option><option value="member">Member</option><option value="co_owner" hidden disabled>Co-owner · Muse development</option></select></label></div>
+        </div>
         </details>
         <label class="share-purpose">Purpose · optional<select id="share-link-purpose"><option value="">Whole room</option></select></label>
         <button id="share-link-create" class="button primary" type="submit">Create invite link</button>

@@ -308,7 +308,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function updateLimits() {
     const hours = Number($("#share-link-expiry").value), limit = Number($("#share-link-limit").value);
     const duration = hours === 168 ? "7 days" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
-    $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "guest" : "guests"}` : "Choose a guest limit"}`;
+    $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "join" : "joins"}` : "Choose a join limit"}`;
   }
   let creating = false;
   function creationBusy(value) {
@@ -372,7 +372,6 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const devOwner = museDevelopmentAccess(getState()) && canInviteCoOwners(getState(), owned?.member?.id);
     if ($("#growth-kit")) $("#growth-kit").hidden = devOwner;
     if (devOwner) {
-      $("#share-link-intro").textContent = uiText("muse.invite.intro");
       renderKit(null);
       return;
     }
@@ -528,8 +527,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id && !devOwner;
     const devOption = $('#share-link-access option[value="co_owner"]');
     if (devOption) { devOption.hidden = !devOwner; devOption.disabled = !devOwner; }
-    if (access) access.value = devOwner ? "co_owner" : "guest";
-    if (devOwner) $("#share-settings-summary").textContent = uiText("muse.invite.limits", { hours: $("#share-link-expiry").value, count: $("#share-link-limit").value });
+    if (access) access.value = accessLabel?.hidden === false ? "member" : "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
