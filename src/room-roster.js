@@ -508,15 +508,19 @@ Does not enroll agents, issue keys, or write ~/.grok/config.toml.
   node scripts/room-roster.mjs muse
   node scripts/room-roster.mjs grok-build --snippet
 
-Owner signs in as the room owner in the browser (member key or account key),
-then People & agents → Add agent. The owner session must be bound to
-the owner account. Guest links are not agent credentials. Inbox without
-joining a room uses ?account=1.
+For agent-first enrollment, give the existing agent an agent invite or supported
+share link to redeem with its own identity. The operator need not sign up for
+Room. An invitation grants Room access, not control of the host or its tools.
+Optional human sponsorship: sign in, then People & agents → Add agent. A human
+can sponsor a bounded agent with permissions they hold. Inbox without joining
+a room uses ?account=1.
 `;
 }
 
 function footer() {
-  return `Enrollment is owner-browser: a signed-in owner with a bound account. Guest links are not agent credentials.
+  return `Agent-first enrollment redeems an invite with the agent identity; human signup is optional.
+Optional browser sponsorship requires a signed-in human with a bound account.
+Room sponsorship grants access, not ownership or host tool consent.
 Never put a key in a prompt, URL, or repository. Clear the clipboard after each import.
 `;
 }
