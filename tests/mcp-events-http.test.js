@@ -1,3 +1,4 @@
+import { wakeAccounting } from "../server/wake-metrics.mjs";
 // Exercises server/mcp-events-runtime.mjs through the real authenticated HTTP mount and committed Room events.
 import { writeTalkPolicy } from '../server/agent-talk-policy.mjs';
 import test from 'node:test';
@@ -106,4 +107,33 @@ test('pause blocks pending native deliveries but never prevents unsubscribe', as
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 0);
   assert.equal((await f.rpc('events/unsubscribe', { id: sub.result.id })).result.resultType, 'complete');
   assert.equal(f.store.db.prepare('SELECT state FROM mcp_event_subscriptions').get().state, 'inactive');
+});
+
+test('saturated native callback retains bounded backlog without rolling back useful work', async t => {
+  const f = await fixture(t); const sub = await f.subscribe(); assert.ok(sub.result.id);
+  const insert = f.store.db.prepare("INSERT INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)");
+  for (let i = 0; i < 1000; i++) insert.run(sub.result.id, 'stalled_' + i, '{}', Date.now() + 600000);
+  const command = { id: 'capacity-assignment', type: 'work.proposed', data: {
+    workItemId: 'capacity-task', title: 'Useful task', definitionOfDone: 'Concrete result',
+    accountableMemberId: f.grant.member_id, mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false,
+  } };
+  f.store.command(f.owner, 'commons', command);
+  assert.equal(f.store.room('commons').state.workItems['capacity-task'].title, 'Useful task');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 1000);
+  const accounting = wakeAccounting(f.store.db, { roomId: 'commons', now: Date.now() });
+  assert.equal(accounting.failures.byReason.native_callback_capacity, 1);
+  assert.equal(accounting.byStore.queue.doorbell_failed, 1);
+  assert.equal(accounting.byStore.queue.doorbell_delivered, 0);
+  // Retrying the committed work does not create another loss or duplicate task.
+  f.store.command(f.owner, 'commons', command);
+  assert.equal(wakeAccounting(f.store.db, { roomId: 'commons' }).failures.byReason.native_callback_capacity, 1);
+  // Another healthy callback for the same agent remains independently usable.
+  const healthy = await f.subscribe({ delivery: { mode: 'webhook', url: 'https://callback.example/healthy', secret: 'whsec_' + Buffer.alloc(32, 9).toString('base64') } });
+  assert.ok(healthy.result.id);
+  f.mention('capacity-message');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox WHERE subscription_id=?').get(sub.result.id).n, 1000);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox WHERE subscription_id=?').get(healthy.result.id).n, 1);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  assert.equal(JSON.parse(f.deliveries[0].body).data.messageId, 'capacity-message');
 });

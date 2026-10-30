@@ -1,4 +1,5 @@
 // Durable MCP Events receipts. A webhook receipt is not proof an agent ran.
+import { recordWakeEvent } from "./wake-metrics.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { eventSigningKey, verifyMcpEventCallback, deliverMcpEvent } from "./mcp-events-wire.mjs";
 
@@ -134,7 +135,14 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       const sub = JSON.parse(row.document);
       if (sub.arguments.roomId !== roomId || sub.arguments.memberId !== memberId) continue;
       if (db.prepare("SELECT 1 FROM mcp_event_outbox WHERE subscription_id=? AND event_id=?").get(row.id, eventId)) continue;
-      if (db.prepare("SELECT count(*) AS n FROM mcp_event_outbox WHERE subscription_id=? AND state IN ('pending','leased')").get(row.id).n >= 1000) throw new Error("Event outbox capacity exceeded");
+      if (db.prepare("SELECT count(*) AS n FROM mcp_event_outbox WHERE subscription_id=? AND state IN ('pending','leased')").get(row.id).n >= 1000) {
+        // Callback availability must not roll back the task/message transaction.
+        // This pointer is lost, not delivered: retain the bound and journal it
+        // for the existing operator wake-failure view. Current work remains readable.
+        recordWakeEvent(db, { at: now(), roomId, store: "queue", event: "doorbell_failed",
+          door: "native-mcp", kind: "native-mcp", subjectId: memberId, reason: "native_callback_capacity" });
+        continue;
+      }
       queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(event), now()).changes);
     }
     return queued;
