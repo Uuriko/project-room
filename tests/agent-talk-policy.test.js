@@ -8,6 +8,13 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { TALK_POLICY_ROUTES } from "../server/routes/talk-policy.mjs";
 import { talkAllowed } from "../server/agent-talk-policy.mjs";
+import { TALK_POLICY_ROUTES } from "../server/routes/talk-policy.mjs";
+import { assertRouteRow } from "../server/routes/table.mjs";
+
+test("talk-policy route rows are well-formed", () => {
+  assert.equal(TALK_POLICY_ROUTES.length, 2);
+  for (const row of TALK_POLICY_ROUTES) assert.deepEqual(assertRouteRow(row), []);
+});
 
 const state = {
   room: { ownerId: "owner" },
