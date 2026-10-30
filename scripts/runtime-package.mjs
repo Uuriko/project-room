@@ -202,6 +202,7 @@ optional.push("src/service-origin.js"); // shared client/server URL routing with
 optional.push("server/governance.mjs"); // /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
 optional.push("server/discoverability.mjs"); // Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
 optional.push("server/matchmaking-routes.mjs", "server/work-matchmaking.mjs", "server/work-declarations.mjs", "server/agent-lanes.mjs"); // work matchmaking routes (imported by server/http.mjs)
+optional.push("server/experimental-routes.mjs"); // freeze gate for jev-shadow, matchmaking, and spend routes (imported by server/http.mjs)
 optional.push("server/attention.mjs");
 optional.push("server/owner-attention.mjs"); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
 optional.push("server/owner-overview.mjs"); // #3342: cross-room owner overview read model (imported by server/http.mjs)
