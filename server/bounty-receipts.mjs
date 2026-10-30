@@ -69,7 +69,10 @@ const compareKeys = (a, b) => {
   return a.length - b.length;
 };
 
+const ESCAPE_NEEDED = /["\\\u0000-\u001f]/;
 const escapeString = value => {
+  // Fast path: nothing to escape (the common case) — quote and go.
+  if (!ESCAPE_NEEDED.test(value)) return `"${value}"`;
   let out = '"';
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i);
@@ -86,21 +89,33 @@ const escapeString = value => {
   return `${out}"`;
 };
 
-export function canonicalJson(value) {
-  if (value === null) return Buffer.from("null", "utf8");
-  if (value === true) return Buffer.from("true", "utf8");
-  if (value === false) return Buffer.from("false", "utf8");
-  if (typeof value === "string") return Buffer.from(escapeString(value), "utf8");
+// String form of the same canonical encoding (PERF-50 B3-b): building one
+// string and encoding it once replaces the old Buffer-per-node recursion
+// (a Buffer allocation plus a UTF-8 decode/re-encode round trip at every
+// node) — ~5x faster on the receipt issuance/verify path, byte-identical
+// output. The round trips were lossless for every string this encoder
+// produces: valid UTF-8 scalars re-encode to themselves, and an unpaired
+// surrogate becomes U+FFFD under both the old per-node decode and the
+// single final Buffer.from here.
+function canonicalString(value) {
+  if (value === null) return "null";
+  if (value === true) return "true";
+  if (value === false) return "false";
+  if (typeof value === "string") return escapeString(value);
   if (typeof value === "number" || typeof value === "bigint")
     fail("number_ban", "JSON numbers are forbidden in signed bodies — use decimal strings");
   if (Array.isArray(value))
-    return Buffer.from(`[${value.map(v => canonicalJson(v).toString("utf8")).join(",")}]`, "utf8");
+    return `[${value.map(v => canonicalString(v)).join(",")}]`;
   if (typeof value === "object") {
     const parts = Object.keys(value).sort(compareKeys)
-      .map(k => `${escapeString(k)}:${canonicalJson(value[k]).toString("utf8")}`);
-    return Buffer.from(`{${parts.join(",")}}`, "utf8");
+      .map(k => `${escapeString(k)}:${canonicalString(value[k])}`);
+    return `{${parts.join(",")}}`;
   }
   fail("invalid_json_value", `cannot canonicalize ${typeof value}`);
+}
+
+export function canonicalJson(value) {
+  return Buffer.from(canonicalString(value), "utf8");
 }
 
 // --- strict JSON parse (duplicate-key rejection) -----------------------------
