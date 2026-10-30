@@ -80,6 +80,8 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   chat: "Read-only: the agent can observe the room but holds no work permissions.",
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
+  guest: "Guest: read and chat.",
+  member: "Member (default): steer, accept, complete, verify, manage claims, record external writes. Not manage_members, decide, or invite_member.",
   collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
@@ -339,6 +341,9 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
+    // #5384: "owner" is the Owner level by name; no scope at all means Member.
+    if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
+    if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) profile = "member";
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
     if (ownerLevel) {
