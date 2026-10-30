@@ -24,8 +24,27 @@ const lockError = (code, message) => {
 };
 
 // process.kill(pid, 0) is the portable "does this pid exist" probe: it throws
-// ESRCH for a dead pid and EPERM for a live pid owned by another user.
-const pidAlive = pid => {
+// ESRCH for a dead pid and EPERM for a live pid owned by another user. But a
+// ZOMBIE also answers signal 0: an exited process that was never reaped keeps
+// its pid until its parent waits on it. A SIGKILLed server whose parent did
+// not reap it therefore reads as alive forever, and every later boot on the
+// same database directory is refused instead of reclaiming the stale lock.
+// On Linux, /proc/<pid>/stat answers liveness honestly: state Z (and X, the
+// dead state) means gone for our purposes. Where /proc is unavailable or
+// unreadable (non-Linux, hidepid), fall back to the signal-0 probe.
+export const procState = pid => {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // Field 2 (comm) is parenthesised and may itself contain spaces or a
+    // closing paren, so state is the first character after the LAST ")".
+    const close = stat.lastIndexOf(")");
+    return close >= 0 ? stat.slice(close + 1).trimStart()[0] ?? null : null;
+  } catch { return null; }
+};
+
+export const pidAlive = pid => {
+  const state = procState(pid);
+  if (state !== null) return state !== "Z" && state !== "X";
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === "EPERM"; }
 };
