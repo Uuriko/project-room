@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 // C2: the read-only "what this agent can access" preview on a work card.
 import test from "node:test";
@@ -21,7 +22,8 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: "reduce" }), errors = [];
+  const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
+  const page = await context.newPage(), errors = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   const access = new AccessRequests(f.store);
   const addRequest = index => {
@@ -51,6 +53,7 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
   await page.locator("#join-request-name").fill("Confirmation applicant");
   const form = page.locator("#join-request-form"), status = page.locator("#join-request-status");
   const submit = page.locator("#join-request-submit"), submissions = [];
+  await captureDesignEvidence(page, { id: "request-access", title: "Request access to a room", fixture: "Real identity-based admission form; local RoomStore", testName: t.name, component: "form controls" });
   let release, reached;
   const held = new Promise(resolve => { release = resolve; });
   const received = new Promise(resolve => { reached = resolve; });
@@ -69,6 +72,7 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
   assert.equal(await status.isVisible(), true);
   assert.equal(await form.isVisible(), true);
   assert.equal(await submit.isEnabled(), true);
+  await captureDesignEvidence(page, { id: "request-access-error", title: "Request access retry", fixture: "Injected first response 503; next request reaches real server", testName: t.name, component: "error and retry" });
   await submit.click(); await received;
   assert.equal(await submit.isDisabled(), true);
   assert.equal(await status.isVisible(), true);
@@ -81,6 +85,7 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
   assert.ok((await status.textContent()).includes(submissions[1].requestId));
   assert.equal(submissions[0].identityId, submissions[1].identityId, "retry reuses the same identity");
   assert.equal(f.access.list(f.keys.owner, "commons").length, 1, "one request reached the owner");
+  await captureDesignEvidence(page, { id: "request-access-sent", title: "Access request sent", fixture: "Real server accepted one identity-based admission request", testName: t.name, component: "confirmation status" });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
 });
