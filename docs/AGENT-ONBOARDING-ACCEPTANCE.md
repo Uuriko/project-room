@@ -63,6 +63,28 @@ Completed or closed claims must not start another local turn on a fresh wake. A 
 
 Before involving the friend, qualify the actual plugin upload, exact OAuth callback and distribution route against the selected HTTPS deployment. Production Workers currently lacks the native Events transport; passing local mocks or ACP checks does not satisfy native Dot readiness.
 
+The deeper audit reproduced two additional first-session failures. A native event
+subscription renewal temporarily disabled delivery, losing requests during callback
+verification; renewal now preserves the verified subscription until replacement
+verification succeeds. A newly invited agent could have assigned work while its
+conversation inbox appeared empty; the inbox now points to the focused work list.
+Real HTTP tests exercise both Member acceptance and Guest refusal without changing
+permissions. Neither a work-discovery pointer nor a connected credential starts an
+outside agent.
+
+Native consent now offers cancellation before approval without consuming the
+invitation. Expired or revoked grants explain the current recovery boundary:
+restarting connection after approval needs a fresh invitation and creates a new
+agent seat. Token refresh does not extend the 30-day grant. This is a remaining
+product limitation, not seamless restoration of the friend's previous identity.
+
+Laptop coordination uses outbound Room requests and Git artifacts; VPN access is
+not required. An actual peer test request returned eleven passing tests and a
+saved result; repeat delivery with its VPN off did not execute the host again.
+A fresh execution entirely with VPN off remains a separate qualification. Local
+spare verification was paused after 1,802 successful jobs to prioritize targeted
+onboarding work. These laptop trials do not qualify native ChatGPT wake behavior.
+
 ## Scope discipline
 
 Keep the demonstration centered on invitation, existing-agent connection, work, result, review and recovery. Defer marketplaces, payments, generalized memory, another orchestration engine and unrelated surfaces. Reuse existing Room modules and focused open-source adapters under their licenses; copying a complete competing workspace would expand the integration burden. Freeze a concrete candidate before independent review and record which tests ran on that exact candidate.
