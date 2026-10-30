@@ -18,10 +18,10 @@ Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Ev
 | Status | Ledger rows |
 | --- | --- |
 | fixed | 16 |
-| open | 117 |
-| open (fix in PR) | 27 |
-| open (part in PR) | 1 |
-| stale | 8 |
+| open | 112 |
+| open (fix in PR) | 30 |
+| open (part in PR) | 2 |
+| stale | 9 |
 | superseded | 3 |
 
 | Category | Ledger rows |
@@ -84,7 +84,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-029 | Two concurrent permission asks accepted by one allow | Codex 23701 | open (fix in PR) | Codex local reviewer | bug | P1 | S | Codex (#5428 path) | Codex |
 | KI-030 | qa-friend-agent-e2e passes crash receipts as success | Codex 23701 | open (fix in PR) | Codex owns the script | bug | P2 | S | Codex (#5428 path) | Codex |
 | KI-031 | Friend journey proven only with a scripted agent, not a real model | Codex 23686, Grok | open | no real-model run recorded | redesign | P1 | M | Jill-Dot | Jill-Dot runs packaged install + real model on second laptop |
-| KI-032 | Generated npx command implies plain codex/claude speak ACP; no adapter prerequisites | Codex 23686 | open | no PR | low-hanging fruit | P2 | S | Grok | Doctor + connect copy name the adapter and remediation |
+| KI-032 | Generated npx command implies plain codex/claude speak ACP; no adapter prerequisites | Codex 23686 | open (part in PR) | #5455: room-acp doctor names adapters and flags plain claude/codex; connect copy in #5426 | low-hanging fruit | P2 | S | Grok | Doctor + connect copy name the adapter and remediation |
 | KI-033 | Mentions miss agents whose names contain spaces | Grok 10-30 | open (fix in PR) | #5421 open | bug | P2 | S | Grok | Land #5421 |
 | KI-034 | Claim permission asks auto-denied | Grok 10-30 | open (fix in PR) | #5422 open | bug | P2 | S | Grok | Land #5422 |
 | KI-035 | Agents load 122 tools (~41k tokens) to claim a task | Streamline audit #1 | open (fix in PR) | #5434 open | simplify | P1 | S | Grok | Land #5434 |
@@ -122,7 +122,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-067 | Invariants workflow deletes prior FAIL evidence; drops error text | #4263 #4262 #4261 | open | issues open | bug | P3 | S | Jill fleet | Jill fleet owns invariants harness |
 | KI-068 | Browser test list hand-maintained | SIMPLIFY #3 | open | no PR | simplify | P3 | S | Fo | Glob runner |
 | KI-069 | Docs: 438 md files, 19 plan/backlog docs | MVP cut #1, #12 | open (fix in PR) | #5407 open; this ledger replaces lists | cut | P2 | S | Grok | Land #5407; KNOWN-ISSUES is the one issue list |
-| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open (fix in PR) | Potter decision Oct 30: cut. #5447 pauses new bounty work in production (REST + MCP); full removal of routes, tools, OpenAPI and docs is the follow-up | cut | P2 | L | Potter ruling | Potter keep or delete; until then fix only P1s (KI-012) |
+| KI-070 | Bounties, escrow, spend (~20k lines) carry money risk | MVP cut #2, SIMPLIFY #35 | open (fix in PR) | Potter decision Oct 30: cut. #5447 pauses new bounty work in production (REST + MCP); full removal of routes, tools, OpenAPI and docs is the follow-up; docs and llms copy live in server/agent-discovery.mjs, a #5428 path, so that part waits for Codex | cut | P2 | L | Potter ruling | Potter keep or delete; until then fix only P1s (KI-012) |
 | KI-071 | Public volunteer work (~7.5k lines) | MVP cut #6 | open | frozen; prod claims exist | cut | P3 | M | Grok | Freeze; delete after 30-day zero writes |
 | KI-072 | Growth, referrals, SEO probes | MVP cut #5 | open (fix in PR) | #5408 open | cut | P3 | S | Grok | Land #5408 |
 | KI-073 | Machines, relay, herdr in repo (~19k lines) | MVP cut #3 | open | relay live | cut | P3 | M | Grok | Move out after room-acp on npm |
@@ -178,10 +178,10 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-123 | /receipts has no skip link | Jill MI-015 (23888) | open (fix in PR) | #5449: skip link, focusable main, focus-visible; no skip link in public/ receipts pages on main 2249dbb5 | low-hanging fruit | P3 | S | Grok | Add a skip link |
 | KI-124 | One-time agent key field #join-secret has no accessible name | Jill MI-018 (23888) | open | Jill master-issues draft: S3 FIXED-ALIVE; not re-verified | low-hanging fruit | P3 | S | NONE | Closed: fixed on main, M2-RETEST FIXED; no act |
 | KI-125 | No main landmark in signed-out door state | Jill MI-019 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Add main landmark / heading structure |
-| KI-126 | /join loading state is not a live region | Jill MI-020 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Mark loading state as a live region |
+| KI-126 | /join loading state is not a live region | Jill MI-020 (23888) | open (fix in PR) | #5453: role=status on #join-loading; re-verified on main | low-hanging fruit | P3 | S | Grok | Mark loading state as a live region |
 | KI-127 | Receipt detail prints raw ISO timestamps | Jill MI-021 (23888) | open (fix in PR) | #5450: readable UTC times; re-verified on main 2249dbb5 (raw ISO in Recorded/Merged) | low-hanging fruit | P3 | S | Grok | Format timestamps for display |
-| KI-128 | Receipt-detail SR noise: em-dash value, 197-char badge alt duplicating text | Jill MI-022 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Trim badge alt / placeholder value |
-| KI-129 | Receipts list duplicate link names out of context | Jill MI-023 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Include state/date context in links' accessible names |
+| KI-128 | Receipt-detail SR noise: em-dash value, 197-char badge alt duplicating text | Jill MI-022 (23888) | open (fix in PR) | #5454: 'none' and short badge alt; re-verified on main | low-hanging fruit | P3 | S | Grok | Trim badge alt / placeholder value |
+| KI-129 | Receipts list duplicate link names out of context | Jill MI-023 (23888) | stale | not reproduced on main 2249dbb5: list links are the receipt titles | low-hanging fruit | P3 | S | Grok | Include state/date context in links' accessible names |
 | KI-130 | Message-list focus outline is dead CSS (.message-list vs class=timeline) | Jill MI-025 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Fix the selector to the served element (one line) |
 | KI-131 | Board j/k navigation starts dead, undiscoverable | Jill MI-026 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Land initial focus inside #work-board; surface the shortcut |
 | KI-132 | needs-me snippet truncation splits a grapheme cluster, drops U+064E | Jill MI-027 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Grapheme-aware truncation |
@@ -190,7 +190,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 | KI-135 | Invite-expiry relative text hand-built English, no Intl APIs | Jill MI-030 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Use Intl.RelativeTimeFormat / PluralRules |
 | KI-136 | Counters hard-code en-US formatters, binary English plurals | Jill MI-031 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Route counters through locale formatters |
 | KI-137 | Credits render as raw milli-credit integer | Jill MI-032 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Format from the structured amount (display leg only) |
-| KI-138 | #join-enter-home tap target 40x19 px at 360x640 | Jill MI-033 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Enlarge the tap target |
+| KI-138 | #join-enter-home tap target 40x19 px at 360x640 | Jill MI-033 (23888) | open (fix in PR) | #5453: 44px minimum; re-verified on main (inline link, no size rule) | low-hanging fruit | P3 | S | Grok | Enlarge the tap target |
 | KI-139 | Wordmark font 140,632 B = 65% of door wire, for one heading | Jill MI-034 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Subset or drop the font for the wordmark |
 | KI-140 | Public HTML uncacheable, no ETag, on all public surfaces | Jill MI-035 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Codex (proposed) | Extend the /src/* validator pattern to public HTML |
 | KI-141 | Two conflicting claim recipes in official docs | Jill MI-036 (23888) | open | Jill master-issues draft: S3 OPEN; not re-verified | low-hanging fruit | P3 | S | Jill-fleet (proposed) | Reconcile to one claim recipe, cross-referenced; H-D #4448 merged here (same front-door conflict) |
