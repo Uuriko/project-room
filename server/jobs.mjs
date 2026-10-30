@@ -346,7 +346,15 @@ export const JOBS = Object.freeze([
     enabled(_env, store) { return store?.nativeMcpEventsEnabled === true && nativeMcpEventDueAt(store) != null; },
     disabledReason: () => "No native event delivery is waiting",
     nextDueAt: store => nativeMcpEventDueAt(store),
-    async run(_store, ctx) { return ctx.room.drainMcpEvents(); }
+    async run(_store, ctx) {
+      const deliveries = await ctx.room.drainMcpEvents() ?? [];
+      // Numeric counts survive compactSummary and make terminal callback losses
+      // visible to scheduler health without exposing callback URLs or secrets.
+      const count = classification => deliveries.filter(row => row.classification === classification).length;
+      return { checked: deliveries.length, delivered: count("delivered"), retrying: count("retry"),
+        exhausted: count("exhausted"), dead: count("dead"), expired: count("expired"),
+        revoked: count("revoked"), superseded: count("superseded"), errors: count("exhausted") + count("dead") };
+    }
   }),
   defineJob({
     name: "gmail-sync",

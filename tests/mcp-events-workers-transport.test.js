@@ -95,7 +95,7 @@ test('durable worker scheduler derives pending and expired lease due times', asy
     store.nativeMcpEventsEnabled = false;
     assert.equal(job.enabled({}, store), false);
     store.nativeMcpEventsEnabled = true;
-    let drains = 0; await job.run(store, { room: { drainMcpEvents: async () => drains++ } });
+    let drains = 0; await job.run(store, { room: { drainMcpEvents: async () => { drains++; return []; } } });
     assert.equal(drains, 1);
     store.db.exec("UPDATE mcp_event_outbox SET state='delivered'");
     assert.equal(job.enabled({}, store), false);

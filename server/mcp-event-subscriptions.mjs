@@ -179,8 +179,17 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       } catch { result = { classification: "retry" }; }
       const retry = result.classification === "retry" && job.attempts < 8 && row?.expires_at > now();
       const state = result.classification === "delivered" ? "delivered" : retry ? "pending" : "dead";
-      db.prepare("UPDATE mcp_event_outbox SET state=?,next_at=?,lease=NULL,lease_until=NULL WHERE subscription_id=? AND event_id=? AND lease=?").run(state, now() + Math.min(60000, 1000 * 2 ** job.attempts), job.subscription_id, job.event_id, job.lease);
-      results.push({ eventId: job.event_id, subscriptionId: job.subscription_id, classification: result.classification });
+      const updated = db.prepare("UPDATE mcp_event_outbox SET state=?,next_at=?,lease=NULL,lease_until=NULL WHERE subscription_id=? AND event_id=? AND lease=?").run(state, now() + Math.min(60000, 1000 * 2 ** job.attempts), job.subscription_id, job.event_id, job.lease).changes;
+      // Report the committed outcome, not the HTTP retry suggestion after its
+      // budget has run out. A superseded lease cannot claim a final outcome.
+      const classification = !updated ? "superseded" : result.classification === "retry" && !retry
+        ? (row?.expires_at > now() ? "exhausted" : "expired") : result.classification;
+      if (classification === "exhausted" || classification === "dead") {
+        recordWakeEvent(db, { at: now(), roomId: event.data.roomId, store: "queue", event: "doorbell_failed",
+          door: "native-mcp", kind: "native-mcp", subjectId: event.data.memberId,
+          reason: classification === "exhausted" ? "native_callback_exhausted" : "native_callback_delivery_failed" });
+      }
+      results.push({ eventId: job.event_id, subscriptionId: job.subscription_id, classification });
     }
     return results;
   }

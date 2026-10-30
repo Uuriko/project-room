@@ -52,6 +52,7 @@ export const WAKE_EVENTS = Object.freeze([
 ]);
 export const WAKE_FAILURE_REASONS = Object.freeze([
   "no_identity_link", "enqueue_error", "push_delivery_failed", "native_callback_capacity",
+  "native_callback_exhausted", "native_callback_delivery_failed",
 ]);
 // A pending signal older than the 24h wakeability window whose agent has
 // never polled is reported as aged stock, not silently young forever.

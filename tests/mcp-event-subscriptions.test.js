@@ -1,3 +1,6 @@
+import { JOBS } from "../server/jobs.mjs";
+import { summaryFailure, compactSummary } from "../cloudflare/job-heartbeat.mjs";
+import { wakeAccounting } from "../server/wake-metrics.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,7 +55,9 @@ test("expired subscription and permanent callback failures stop retries", async 
   const x = setup(t); await x.manager.subscribe(input);
   x.manager.enqueueRequested(event); x.advance(3600001); await x.manager.drain(); assert.equal(x.seen.length, 0);
   const y = setup(t); await y.manager.subscribe(input); y.manager.enqueueRequested(event); y.status(410);
-  await y.manager.drain(); y.advance(60000); await y.manager.drain(); assert.equal(y.seen.length, 1);
+  assert.equal((await y.manager.drain())[0].classification, "dead");
+  assert.equal(wakeAccounting(y.db).failures.byReason.native_callback_delivery_failed, 1);
+  y.advance(60000); await y.manager.drain(); assert.equal(y.seen.length, 1);
 });
 test("concurrent workers lease once; unsubscribe cannot be undone by delayed receipt", async t => {
   const x = setup(t); const sub = await x.manager.subscribe(input); x.manager.enqueueRequested(event);
@@ -60,7 +65,9 @@ test("concurrent workers lease once; unsubscribe cannot be undone by delayed rec
   const draining = x.manager.drain();
   await new Promise(resolve => setImmediate(resolve));
   await createMcpEventSubscriptions(x.options).drain(); assert.equal(x.seen.length, 1);
-  x.manager.unsubscribe({ principal, id: sub.id }); release(); await draining;
+  x.manager.unsubscribe({ principal, id: sub.id }); release();
+  assert.equal((await draining)[0].classification, "superseded");
+  assert.equal(wakeAccounting(x.db).failures.total, 0);
   assert.equal(x.db.prepare("SELECT state FROM mcp_event_outbox").get().state, "dead");
 });
 test("crashed leases are reclaimable with same event identity and attempts are bounded", async t => {
@@ -178,4 +185,26 @@ test('a slower renewal cannot replace the latest successfully verified key', asy
   await x.manager.subscribe({ ...input, delivery: { ...input.delivery, secret: latest } });
   release(); assert.match((await outcome).message, /superseded/);
   assert.equal(JSON.parse(x.db.prepare('SELECT document FROM mcp_event_subscriptions').get().document).secret, latest);
+});
+
+test("retry budget exhaustion is terminal in delivery receipts, accounting and Workers health", async t => {
+  const x = setup(t); await x.manager.subscribe(input); x.manager.enqueueRequested(event); x.status(503);
+  const job = JOBS.find(row => row.name === "native-mcp-events");
+  const run = () => job.run(x.options.store, { room: { drainMcpEvents: () => x.manager.drain() } });
+  for (let attempt = 1; attempt <= 7; attempt++) {
+    const summary = await run();
+    assert.equal(summary.retrying, 1); assert.equal(summary.exhausted, 0);
+    assert.equal(summaryFailure(summary), null);
+    assert.equal(x.db.prepare("SELECT state FROM mcp_event_outbox").get().state, "pending");
+    x.advance(60001);
+  }
+  const terminal = await run();
+  assert.equal(terminal.retrying, 0); assert.equal(terminal.exhausted, 1);
+  assert.equal(summaryFailure(terminal), "1 error(s) in tick");
+  assert.equal(compactSummary(terminal).exhausted, 1);
+  assert.equal(x.db.prepare("SELECT state,attempts FROM mcp_event_outbox").get().state, "dead");
+  assert.equal(x.seen.length, 8);
+  assert.equal(wakeAccounting(x.db).failures.byReason.native_callback_exhausted, 1);
+  x.advance(60001); assert.equal((await run()).checked, 0); assert.equal(x.seen.length, 8);
+  assert.equal(wakeAccounting(x.db).failures.byReason.native_callback_exhausted, 1);
 });
