@@ -561,7 +561,16 @@ export function refreshDirectoryForReceipt(store, receiptId) {
 // Same transaction as the event write when the caller is already inside one.
 export function syncRoomPublication(store, { roomId, state, previous = null, auth = null } = {}) {
   if (!roomId || !state?.room) return;
-  const pageOn = publicPage(state).enabled === true;
+  // An archived room's public face is retired (UT2 05-08 F3): the archive
+  // write must remove the public_rooms row — page, "Join this room" flow,
+  // live join token and sitemap entry — in this same transaction, the way
+  // an owner opt-out removes it. Before this predicate the sync re-upserted
+  // the row from the archived state, so the face stayed live indefinitely
+  // (~10.4h observed) while writes to the room refused 409 room_archived.
+  // Mirrors the other public doors: public-face.mjs and public-agent-page
+  // answer 404 for archived rooms.
+  const archived = typeof state.room.archivedAt === "string" && Boolean(state.room.archivedAt);
+  const pageOn = publicPage(state).enabled === true && !archived;
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
   const receiptsWere = publicReceipts(previous).enabled === true;
@@ -600,7 +609,10 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
     if (pageOn) upsertPublicRoom(store, state, auth);
-    else if (pageWas) store.db.prepare("DELETE FROM public_rooms WHERE slug=?").run(roomId);
+    // `archived` also deletes when pageWas is false: a stale row left by a
+    // pre-cure archive (previous === null on the backfill path) converges
+    // to retired on re-sync instead of surviving on its join token.
+    else if (pageWas || archived) store.db.prepare("DELETE FROM public_rooms WHERE slug=?").run(roomId);
     refreshLinkedDirectory(store, roomId);
   };
   if (store.db.isTransaction) write();
