@@ -2,7 +2,7 @@
 //
 // Reads a room store READ-ONLY (PRAGMA query_only) and reports per-signal
 // review coverage over the durable quarantine journal
-// (server/spam-quarantine-journal.mjs): for each spam signal that fired on a
+// (server/journal.mjs): for each spam signal that fired on a
 // held row, the held count, the reviewed count, the Confirm (released into
 // the inbox) / Dismiss (confirmed spam) / Split (detached off its thread)
 // breakdown, and the coverage ratio — the reviewCoverage metric from the

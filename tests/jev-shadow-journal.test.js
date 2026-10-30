@@ -93,12 +93,13 @@ test("schema verify passes on a fresh store", () => {
   store.close();
 });
 
-test("jev-shadow-journal does not import store.mjs (no import cycle)", () => {
+test("the shared journal does not import store.mjs (no import cycle)", () => {
   // Regression: the journal used to import ServiceError from store.mjs while
   // store.mjs imports the journal — a fragile ESM cycle. ServiceError now
   // lives in server/service-error.mjs; the journal must not reach back into
-  // the store module.
-  const src = fs.readFileSync(new URL("../server/jev-shadow-journal.mjs", import.meta.url), "utf8");
+  // the store module. (Retargeted from the deleted per-kind
+  // jev-shadow-journal.mjs to its successor, server/journal.mjs.)
+  const src = fs.readFileSync(new URL("../server/journal.mjs", import.meta.url), "utf8");
   assert.ok(!/from\s+["']\.\/store\.mjs["']/.test(src), "journal must not import ./store.mjs");
   assert.ok(/from\s+["']\.\/service-error\.mjs["']/.test(src), "journal imports ServiceError from ./service-error.mjs");
 });

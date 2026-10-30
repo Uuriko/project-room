@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { replayInvitationJournal } from "../server/invitation-journal.mjs";
+import { replayInvitationJournal } from "../server/journal.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-journal-"));

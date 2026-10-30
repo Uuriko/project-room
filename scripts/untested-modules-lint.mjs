@@ -10,8 +10,7 @@ const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
   // NEW modules here. agent-key-registry.mjs left with IR-1
-  // (tests/restore-reconcile-coverage.test.js). sla-breach-journal.mjs left
-  // when tests/journal-roundtrip.test.js imported it.
+  // (tests/restore-reconcile-coverage.test.js).
   "inbox-collab-routes.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
