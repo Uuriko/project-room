@@ -67,7 +67,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
-import { issueBountyReceipt } from "./bounty-receipts.mjs";
+import { issueBountyReceipt, canonicalJson as receiptCanonicalJson, parseStrict as parseReceiptStrict, RECEIPT_TYPES } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { disputabilityFor } from "./bounty-disputability.mjs";
 
@@ -122,6 +122,50 @@ const SIGNABLE_KINDS = new Map([
   ["payout", "payout-released"],
   ["refund", "refund-issued"],
 ]);
+
+// The validator's own receiptId shape (bounty-receipts.mjs validateShape),
+// reused by the signed-receipt lookup's shape gate so the gate can never
+// drift from the validator.
+const SIGNED_RECEIPT_ID_PATTERN = new RegExp(
+  `^room-bounty-receipt:(${Object.values(RECEIPT_TYPES).join("|")}):[0-9a-f]{32}$`);
+
+// Tolerant JSON read for persisted receipt-bearing text (event data,
+// idempotency responses, review outcomes): strict parse first (duplicate
+// keys rejected, the receipt codec's own discipline), plain parse as a
+// fallback for legacy rows; null on failure.
+function parsePersistedJson(text) {
+  if (typeof text !== "string") return null;
+  try { return parseReceiptStrict(text); } catch { /* fall through to plain parse */ }
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+// Leg-D extraction walk (proof-layer B7 M-7). Signed bodies persist inside
+// whole route/tool response bodies, never top-level. The persisted shapes
+// in this tree, discovered over the escrow's transition returns and the
+// route/tool wrappers that store them, are:
+//   - transition returns (fund/claim/accept/reject/dispute/decide):
+//       { receipt: { kind, ..., signed: [body] } }
+//   - finalizeBounty / dispute-settle returns:
+//       { receipt: { kind: "finalize" | "dispute-settle", signed: [body] } }
+//   - closeEpoch returns:
+//       { summary: { signedReceipts: { [bountyId]: [body] } } }
+//   - wrappers that nest any of the above (e.g. under `epoch` or `result`).
+// The walk covers those named paths by construction — it descends the
+// whole parsed value and collects every object whose receiptId matches
+// and which carries a signature string — so a response shape the
+// enumeration missed still yields its bodies instead of silently losing
+// them (a lost body later reads as a false unretrievable-body alarm).
+// Depth and visit caps bound adversarial rows.
+function collectSignedBodies(value, receiptId, out, depth = 0, budget = { visits: 0 }) {
+  if (depth > 10 || budget.visits > 5000 || value === null || typeof value !== "object") return;
+  budget.visits += 1;
+  if (Array.isArray(value)) {
+    for (const item of value) collectSignedBodies(item, receiptId, out, depth + 1, budget);
+    return;
+  }
+  if (value.receiptId === receiptId && typeof value.signature === "string") { out.push(value); return; }
+  for (const item of Object.values(value)) collectSignedBodies(item, receiptId, out, depth + 1, budget);
+}
 
 export const BOUNTY_STATES = Object.freeze([
   "proposed", "funded", "claimed", "submitted", "accepted", "disputed",
@@ -3288,6 +3332,102 @@ export class BountyEscrow {
       }
       return receipts;
     });
+  }
+
+  _hasTable(name) {
+    try { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
+    catch { return false; }
+  }
+
+  // Unified signed-receipt lookup (proof layer S2a; design B2 §2). Read-only;
+  // absent returns null, the escrow's convention. Verification is the
+  // serving layer's job — this is a dumb, total retriever that returns the
+  // body plus its provenance:
+  //   { receipt, roomId, bountyId, source } (+ mismatch: true on disagreement)
+  // Precedence: leg A bounty_receipts (the post-S1 store; its probe is
+  // existence-guarded, so pre-S1 databases are tolerated — S2b is S1's
+  // acceptance state, when the same code's leg A goes live unchanged) →
+  // leg C epoch.closed events (SQL-prefiltered) → leg D
+  // bounty_idempotency.response → leg E public-work verdict journal
+  // (existence-guarded). The journal-stamp resolver runs between legs A
+  // and C: every receipt _issueReceipt ever issued was stamped on two
+  // journal rows, so a missing stamp means the receipt was never issued
+  // in this room — a receipt ID must never become a cross-room oracle.
+  // Duplicates across legs must be byte-identical after canonicalJson
+  // re-encoding; a disagreement returns the highest-precedence copy with
+  // mismatch: true (a store-tamper signal, surfaced, not hidden).
+  // Deliberately no _ensure() and no index: the lookup writes nothing
+  // and adds no schema.
+  getSignedReceipt(roomId, receiptId) {
+    // 0. Shape gate — malformed input returns before any DB touch.
+    if (typeof roomId !== "string" || !roomId) return null;
+    if (typeof receiptId !== "string" || !SIGNED_RECEIPT_ID_PATTERN.test(receiptId)) return null;
+    const db = this.db;
+    const candidates = [];
+    const seenCanonical = new Set();
+    const consider = (body, source) => {
+      if (!body || typeof body !== "object" || Array.isArray(body)) return;
+      if (body.receiptId !== receiptId || typeof body.signature !== "string") return;
+      let canonical = null;
+      try { canonical = receiptCanonicalJson(body).toString("utf8"); } catch { return; }
+      if (seenCanonical.has(canonical)) return; // byte-identical duplicate
+      seenCanonical.add(canonical);
+      candidates.push({ receipt: body, source });
+    };
+    // Leg A — bounty_receipts PK probe, existence-guarded, room post-check.
+    let legAFound = false;
+    if (this._hasTable("bounty_receipts")) {
+      let row = null;
+      try { row = db.prepare("SELECT body FROM bounty_receipts WHERE receipt_id=?").get(receiptId); } catch { row = null; }
+      if (row) {
+        const body = parsePersistedJson(row.body);
+        if (body && body.roomId === roomId) { consider(body, "bounty_receipts"); legAFound = candidates.length > 0; }
+      }
+    }
+    // Journal-stamp resolver.
+    let stamp = null;
+    try { stamp = db.prepare("SELECT bounty_id FROM bounty_journal WHERE room_id=? AND receipt_id=? LIMIT 1").get(roomId, receiptId) ?? null; }
+    catch { stamp = null; }
+    if (!stamp && !legAFound) return null; // never issued in this room
+    // Leg C — epoch.closed events for the resolver's bounty.
+    if (stamp) {
+      let events = [];
+      try { events = db.prepare("SELECT data FROM bounty_events WHERE room_id=? AND type='epoch.closed' ORDER BY seq").all(roomId); }
+      catch { events = []; }
+      for (const row of events) {
+        const data = parsePersistedJson(row.data);
+        const list = data?.summary?.signedReceipts?.[stamp.bounty_id];
+        if (Array.isArray(list)) for (const body of list) consider(body, "epoch.closed");
+      }
+    }
+    // Leg D — bounty_idempotency.response (whole response bodies).
+    {
+      let rows = [];
+      try { rows = db.prepare("SELECT response FROM bounty_idempotency WHERE room_id=?").all(roomId); } catch { rows = []; }
+      for (const row of rows) {
+        const parsed = parsePersistedJson(row.response);
+        if (!parsed) continue;
+        const found = [];
+        collectSignedBodies(parsed, receiptId, found);
+        for (const body of found) consider(body, "bounty_idempotency");
+      }
+    }
+    // Leg E — public-work verdict journal, existence-guarded.
+    if (this._hasTable("public_work_review_requests")) {
+      let rows = [];
+      try { rows = db.prepare("SELECT outcome_json FROM public_work_review_requests WHERE room_id=?").all(roomId); } catch { rows = []; }
+      for (const row of rows) {
+        const outcome = parsePersistedJson(row.outcome_json);
+        const signed = outcome?.settlement?.escrowReceipt?.signed;
+        if (Array.isArray(signed)) for (const body of signed) consider(body, "public_work_review");
+      }
+    }
+    if (!candidates.length) return null;
+    const [first, ...rest] = candidates;
+    const result = { receipt: first.receipt, roomId,
+      bountyId: first.receipt.bountyId ?? stamp?.bounty_id ?? null, source: first.source };
+    if (rest.length) result.mismatch = true;
+    return Object.freeze(result);
   }
 
   // Conservation invariant: payable + locked + attributed + approved =
