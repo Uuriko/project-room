@@ -698,7 +698,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} places left.`;
       const sharedUrl = publicJoinInviteHref(joinSecret);
       $("#shared-agent-details").hidden = !sharedUrl;
-      $("#shared-agent-instructions").value = sharedUrl ? `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.` : "";
+      $("#shared-agent-instructions").value = sharedUrl ? uiText("entry.invite.agentInstructions", { url: sharedUrl }) : "";
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
