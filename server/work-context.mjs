@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -86,7 +87,7 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null, replacementAvailable = null, sourceObservation = undefined }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
@@ -99,6 +100,19 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const message = includeSource && linked && !linked.deletedAt ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
+  if (includeSource) {
+    // Canonical selected message was already audience/history filtered. Never
+    // distinguish why a source is unavailable or hash a hidden body.
+    const revision = message && !Object.hasOwn(message, "revision") ? 0 : message?.revision;
+    const observable = message && typeof message.body === "string" && Number.isSafeInteger(revision) && revision >= 0;
+    source.observation = observable ? { roomId: state.room.id, workItemId, viewerId, messageId: message.id,
+      revision, sha256: createHash("sha256").update(message.body, "utf8").digest("hex") } : null;
+    source.freshness = !observable ? "unavailable" : !sourceObservation ? "observed"
+      : sourceObservation.messageId === message.id && sourceObservation.revision === revision && sourceObservation.sha256 === source.observation.sha256 ? "unchanged" : "changed";
+    source.editedAt = observable && typeof message.editedAt === "string" ? message.editedAt : null;
+    if (source.freshness === "unchanged") { source.status = "not_modified"; source.message = null; }
+    source.nextRead = observable ? { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: { ...source.observation } } } : null;
+  }
   const next = nextWorkStep(item, now, state.room.ownerId);
   // One link, not recursive traversal or target-content delivery. Work is
   // room-visible; the subsequent selected read rechecks membership and source privacy.

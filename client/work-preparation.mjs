@@ -7,10 +7,10 @@ const changedReview = () => new WorkReviewRefused("review_changed", "Work, resul
 
 // Compose existing authenticated reads; no writes, acknowledgements or dispatch.
 // A bounded window keeps a busy task from consuming an entire agent context.
-export async function prepareWork(client, workItemId, { includeSource = false, includeOffers = false, discussionSince, signal, fenceSession = false } = {}) {
+export async function prepareWork(client, workItemId, { includeSource = false, includeOffers = false, sourceObservation, discussionSince, signal, fenceSession = false } = {}) {
   if (discussionSince !== undefined && (!Number.isSafeInteger(discussionSince) || discussionSince < 0)) throw new Error("Use a nonnegative discussion checkpoint from a completed read of this task");
   signal?.throwIfAborted();
-  const options = { includeSource, includeOffers, signal };
+  const options = { includeSource, includeOffers, sourceObservation, signal };
   const initial = await client.workContext(workItemId, options);
   const items = [], cursors = new Set();
   let cursor, page;
@@ -84,7 +84,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
   const batch = args.workItemIds !== undefined;
   const ids = batch ? args.workItemIds : [args.workItemId];
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 || !ids.every(validId)
-    || new Set(ids).size !== ids.length || batch && (args.workItemId !== undefined || args.discussionSince !== undefined || args.includeResult === true)) {
+    || new Set(ids).size !== ids.length || batch && (args.workItemId !== undefined || args.discussionSince !== undefined || args.includeResult === true || args.sourceObservation !== undefined)) {
     throw new Error("Choose one workItemId or 1–4 unique workItemIds; discussionSince and includeResult require one task");
   }
   const stop = new AbortController();
@@ -93,12 +93,13 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
   let next = 0, bytes = 64;
   const read = async id => {
     readSignal.throwIfAborted();
-    const options = { includeSource: args.includeSource ?? false, includeOffers: args.includeOffers ?? false, signal: readSignal };
+    const options = { includeSource: args.includeSource ?? false, includeOffers: args.includeOffers ?? false, sourceObservation: args.sourceObservation, signal: readSignal };
     let context = args.includeDiscussion ? await prepareWork(client, id, { ...options, discussionSince: args.discussionSince, fenceSession: args.includeResult === true })
       : await client.workContext(id, options);
     readSignal.throwIfAborted();
     if (args.includeResult) context = await prepareReview(client, id, context, options);
     if (hosted) {
+      if (context.context?.source?.nextRead) context.context.source.nextRead.arguments.roomId = context.roomId;
       if (context.next?.replacement?.nextRead) context.next.replacement.nextRead.arguments.roomId = context.roomId;
       if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = context.roomId;
       for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
@@ -106,7 +107,7 @@ export async function readWorkSelection(client, args, { signal, hosted = false }
     }
     return (args.brief ?? batch) ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
-      brief: workContextMarkdown(context), briefVersion: (await createWorkBrief(context)).version, ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
+      brief: workContextMarkdown({ ...context, context: { ...context.context, source: { ...context.context.source, message: null } } }), briefVersion: (await createWorkBrief(context)).version, ...(context.review ? { review: context.review } : {}), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;
   };
   const worker = async () => {
     try {

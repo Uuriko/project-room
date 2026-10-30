@@ -12,6 +12,7 @@ import { nextWorkStep, workActions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { workContinuity, SESSION_HEARTBEAT_STALE_MS } from "../src/work-item-session.js";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { createWorkBrief } from "../client/work-brief.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function fixture(t) {
@@ -89,6 +90,11 @@ test("HTTP selected source preserves targeted-message privacy for body, access p
       assert.equal(view.accessSummary.conversation.sourceAvailability, allowed ? "available" : "unavailable");
       assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, allowed ? ["private-source"] : []);
       assert.equal(JSON.stringify(view).includes("PRIVATE-SOURCE-SENTINEL"), allowed && includeSource);
+      if (!allowed && includeSource) {
+        assert.equal(view.context.source.observation, null);
+        assert.equal(view.context.source.freshness, "unavailable");
+        assert.equal(view.context.source.editedAt, null);
+      }
       if (!allowed) {
         assert.equal(view.context.participants.some(member => member.id === "guest"), false, "private source author is not added to participants");
         assert.equal(view.accessSummary.participantIds.includes("guest"), false);
@@ -486,6 +492,9 @@ test("selected source lookup respects a late member history floor without full h
   t.mock.method(f.store, "room", () => { throw new Error("unexpected full hydration"); });
   const view = f.store.workContext(key, "commons", "test-handoff", { includeSource: true });
   assert.equal(view.context.source.status, "unavailable");
+  assert.equal(view.context.source.observation, null);
+  assert.equal(view.context.source.freshness, "unavailable");
+  assert.equal(view.context.source.editedAt, null);
   assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, []);
   assert.equal(view.accessSummary.conversation.sourceAvailability, "unavailable");
 });
@@ -521,3 +530,63 @@ test("replacement reads are one-hop navigation, preserve history, and omit targe
   f.store.revoke(f.keys.producer);
   await assert.rejects(f.client("producer").workContext("replacement-one"), error => error.status === 401);
 });
+
+test("opt-in source comparison tracks exact revision and bytes, omits unchanged bodies, and fails private", async t => {
+  const f = await fixture(t);
+  const client = f.client("producer");
+  const first = await client.workContext("test-handoff", { includeSource: true });
+  const source = first.context.source;
+  assert.equal(source.freshness, "observed");
+  assert.equal(source.observation.revision, 0);
+  assert.equal(source.observation.viewerId, "producer");
+  const body = source.message.body, sourceObservation = source.observation;
+  const repeated = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(repeated.context.source.status, "not_modified");
+  assert.equal(repeated.context.source.freshness, "unchanged");
+  assert.equal(repeated.context.source.message, null);
+  assert.ok(!JSON.stringify(repeated).includes(body));
+  assert.equal((await createWorkBrief(first)).version, (await createWorkBrief(repeated)).version);
+  f.send("guest", T.MESSAGE_EDITED, { messageId: "test-request", expectedMessageRevision: 0, body: "UPDATED SOURCE SENTINEL" });
+  const changed = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(changed.context.source.freshness, "changed");
+  assert.equal(changed.context.source.message.body, "UPDATED SOURCE SENTINEL");
+  assert.equal(changed.context.source.observation.revision, 1);
+  assert.ok(Number.isFinite(Date.parse(changed.context.source.editedAt)));
+
+  f.send("guest", T.MESSAGE_EDITED, { messageId: "test-request", expectedMessageRevision: 1, body });
+  const reverted = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(reverted.context.source.observation.sha256, sourceObservation.sha256);
+  assert.equal(reverted.context.source.freshness, "changed", "edit and revert is not unchanged");
+  assert.equal(reverted.context.source.observation.revision, 2);
+  const omitted = await client.workContext("test-handoff");
+  assert.equal(omitted.context.source.status, "not_requested");
+  assert.equal(omitted.context.source.observation, undefined);
+  for (const patch of [{ roomId: "other" }, { workItemId: "other" }, { viewerId: "reviewer" }, { revision: -1 }, { sha256: "bad" }])
+    await assert.rejects(client.workContext("test-handoff", { includeSource: true, sourceObservation: { ...sourceObservation, ...patch } }));
+  await assert.rejects(client.workContext("test-handoff", { sourceObservation }));
+  f.send("guest", T.MESSAGE_DELETED, { messageId: "test-request", expectedMessageRevision: 2, reason: "Remove" });
+  const deleted = await client.workContext("test-handoff", { includeSource: true, sourceObservation });
+  assert.equal(deleted.context.source.status, "unavailable");
+  assert.equal(deleted.context.source.freshness, "unavailable");
+  assert.equal(deleted.context.source.observation, null);
+  assert.equal(deleted.context.source.nextRead, null);
+  assert.equal(deleted.context.source.message, null);
+  f.store.revoke(f.keys.producer);
+  await assert.rejects(client.workContext("test-handoff", { includeSource: true, sourceObservation }), e => e.status === 401);
+});
+
+ test("SDK refuses malformed and unsolicited source comparisons without exposing private observations", async t => {
+  const f = await fixture(t);
+  const first = await f.client("producer").workContext("test-handoff", { includeSource: true });
+  const observation = first.context.source.observation;
+  const fake = source => new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: async () => new Response(JSON.stringify({ ...first, context: { ...first.context, source } }), { status: 200 }) });
+  for (const patch of [{ observation: undefined }, { observation: { ...observation, sha256: "0".repeat(64) } },
+    { status: "not_modified", message: null, freshness: "unchanged" }]) {
+    await assert.rejects(fake({ ...first.context.source, ...patch }).workContext("test-handoff", { includeSource: true }), e => e.code === "invalid_response");
+  }
+  const unchanged = { ...first.context.source, status: "not_modified", message: null, freshness: "unchanged" };
+  await assert.rejects(fake(unchanged).workContext("test-handoff", { includeSource: true, sourceObservation: { ...observation, viewerId: "other" } }), e => e.code === "invalid_response");
+  const legacy = { status: "included", message: first.context.source.message };
+  await assert.rejects(fake(legacy).workContext("test-handoff", { includeSource: true, sourceObservation: observation }), e => e.code === "source_freshness_unavailable");
+ });

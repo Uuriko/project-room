@@ -1067,7 +1067,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1618,7 +1618,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2099,7 +2099,7 @@
       }
     },
     "room_read_work": {
-      "inputSchema": "ad0ec36250888c94",
+      "inputSchema": "1698c672b1be94ee",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
