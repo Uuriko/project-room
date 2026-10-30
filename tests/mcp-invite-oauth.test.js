@@ -121,7 +121,7 @@ for (const mutation of ['identity-revoked', 'identity-rotated', 'grant-expired',
   assert.match((await rejected.json()).recovery, /fresh agent invitation/);
 });
 
-test('a fresh accountless Member invite can deliver its first read task without manual promotion', async t => {
+test('accountless native agent discovers work, submits, revises and reads exact independent approval', async t => {
   const f = await setup(t);
   const allowed = await f.submit('allow');
   const code = new URL(allowed.headers.get('location')).searchParams.get('code');
@@ -137,11 +137,21 @@ test('a fresh accountless Member invite can deliver its first read task without 
   f.store.command(f.owner, 'commons', { id: 'first-native-task', type: 'work.proposed', data: {
     workItemId: 'native-first-task', title: 'Suggest a useful first step',
     definitionOfDone: 'One concrete step and why it helps', accountableMemberId: memberId,
-    mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false,
+    mode: 'read', verifierMemberId: 'owner', independentVerificationRequired: true,
+    ownerDecisionRequired: true, humanDecisionMakerId: 'owner',
   } });
-  await call('room_read_work', { workItemId: 'native-first-task' });
-  await call('room_accept_work', { workItemId: 'native-first-task' });
-  await call('room_start_work', { workItemId: 'native-first-task' });
+  const discovered = await call('room_list_work', { focus: 'needs_me' });
+  assert.ok(discovered.work.some(work => work.id === 'native-first-task'));
+  const selected = await call('room_read_work', { workItemId: 'native-first-task' });
+  assert.equal(selected.next.action, 'accept');
+  assert.equal(selected.next.addressedToViewer, true);
+  const accepted = await call('room_accept_work', { workItemId: 'native-first-task' });
+  const started = await call('room_start_work', { workItemId: 'native-first-task' });
+  const blockInput = { workItemId: 'native-first-task', reason: 'Need a clearer test scope', nextAction: 'Keep it to one read task' };
+  const blocked = await call('room_block_work', blockInput);
+  const resolveInput = { workItemId: 'native-first-task', resolution: 'One bounded read task is sufficient' };
+  const resolved = await call('room_resolve_blocker', resolveInput);
+  await call('room_start_work', { workItemId: 'native-first-task', requestId: 'native-after-scope-start' });
   const body = 'Start by checking the shared brief and propose a bounded task with a named reviewer.';
   const receipt = await call('room_post_message', { id: 'native-first-result', body, workItemId: 'native-first-task' });
   const preview = await call('room_read_result', { workItemId: 'native-first-task', draftMessageId: 'native-first-result' });
@@ -156,12 +166,96 @@ test('a fresh accountless Member invite can deliver its first read task without 
     previousCompletionEventId: preview.current.completionEventId, producerId: memberId,
   });
   assert.equal(f.store.room('commons').state.workItems['native-first-task'].state, 'completed');
+  const workItemId = 'native-first-task';
+  const read = () => call('room_read_work', { workItemId });
+  const ownerCommand = async (type, data) => {
+    const response = await fetch(f.base + '/api/rooms/commons/commands', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + f.owner, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: crypto.randomUUID(), type, data }) });
+    assert.equal(response.status, 201, await response.clone().text());
+    return response.json();
+  };
+  const review = async (result, exact, summary) => {
+    const response = await fetch(f.base + '/api/rooms/commons/work-result?' + new URLSearchParams({
+      workItemId, completionEventId: exact.result.receipt.eventId,
+    }), { headers: { Authorization: 'Bearer ' + f.owner } });
+    assert.equal(response.status, 200);
+    const inspected = await response.json();
+    assert.equal(inspected.result.text.body, exact.result.text.body);
+    return ownerCommand('verification.recorded', {
+      workItemId, expectedRevision: (await read()).work.revision, result,
+      completionEventId: inspected.result.receipt.eventId, evidenceVersion: inspected.result.text.evidenceVersion,
+      summary, nextAction: 'Add a reconnect check',
+    });
+  };
+  const first = await call('room_read_result', { workItemId });
+  assert.equal((await read()).next.action, 'verify');
+  assert.equal((await read()).next.memberId, 'owner');
+  const selfReview = await f.rpc(tokens.access_token, 'room_record_verification', {
+    workItemId, result: 'pass', completionEventId: first.result.receipt.eventId,
+    evidenceVersion: first.result.text.evidenceVersion, summary: 'Self approval must be refused',
+  });
+  assert.ok(selfReview.body.error || selfReview.body.result?.isError);
+  await review('fail', first, 'Missing a concrete reconnect check');
+  assert.ok((await call('room_list_work', { focus: 'needs_me' })).work.some(work => work.id === workItemId));
+  assert.equal((await read()).work.state, 'blocked');
+  await call('room_resolve_blocker', { workItemId, resolution: 'Will add reconnect and duplicate-result checks' });
+  await call('room_start_work', { workItemId, requestId: 'native-rework-start', expectedRevision: (await read()).work.revision });
+  const revisedBody = 'Reconnect the existing agent, ask it for one task result, and verify exactly one result appears.';
+  await call('room_post_message', { id: 'native-revised-result', workItemId, body: revisedBody });
+  const revised = await call('room_read_result', { workItemId, draftMessageId: 'native-revised-result' });
+  const text = revised.result.text;
+  const revisedSubmission = { requestId: 'native-revised-submit', workItemId,
+    summary: 'Added reconnect check', nextAction: 'Review revised text', producerId: memberId,
+    evidenceMessageId: text.messageId, evidenceMessageEventId: text.messageEventId,
+    evidenceVersion: text.evidenceVersion, previousCompletionEventId: revised.current.completionEventId };
+  await call('room_submit_text_result', revisedSubmission);
+  const second = await call('room_read_result', { workItemId });
+  assert.notEqual(second.result.receipt.eventId, first.result.receipt.eventId);
+  assert.equal(second.result.text.body, revisedBody);
+  await review('pass', first, 'Historical first-version check cannot approve revised evidence');
+  assert.equal((await read()).work.verification, null);
+  await review('pass', second, 'Revised result contains a bounded reconnect check');
+  assert.equal((await read()).next.action, 'decide');
+  assert.equal((await read()).work.decision, null);
+  const rationale = await ownerCommand('message.posted', { messageId: 'native-owner-rationale', body: 'Exact revised result accepted.' });
+  await ownerCommand('owner.decision_recorded', { workItemId, expectedRevision: (await read()).work.revision,
+    decision: 'approved', completionEventId: second.result.receipt.eventId,
+    evidenceVersion: second.result.text.evidenceVersion, reason: 'Exact revised result accepted.',
+    sourceMessageId: rationale.event.data.messageId });
+  const duplicate = await call('room_submit_text_result', revisedSubmission);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.eventId, second.result.receipt.eventId);
+  assert.equal(duplicate.currentStateVerified, false);
+  for (const [name, original] of [['room_accept_work', accepted], ['room_start_work', started]]) {
+    const replay = await call(name, { workItemId });
+    assert.equal(replay.duplicate, true);
+    assert.equal(replay.eventId, original.eventId);
+  }
+  for (const [name, args, original] of [['room_block_work', blockInput, blocked], ['room_resolve_blocker', resolveInput, resolved]]) {
+    const replay = await call(name, args);
+    assert.equal(replay.duplicate, true);
+    assert.equal(replay.eventId, original.eventId);
+  }
+  const changed = await f.rpc(tokens.access_token, 'room_submit_text_result', { ...revisedSubmission, summary: 'Changed retry content' });
+  assert.equal(changed.body.result.structuredContent.code, 'idempotency_conflict');
+  const explicitRevision = await f.rpc(tokens.access_token, 'room_submit_text_result', { ...revisedSubmission, expectedRevision: (await read()).work.revision });
+  assert.equal(explicitRevision.body.result.structuredContent.code, 'idempotency_conflict');
+  const approved = await read();
+  assert.equal(approved.work.verification.independenceConfirmed, true);
+  assert.equal(approved.work.decision.decision, 'approved');
+  assert.equal(approved.work.decision.completionEventId, second.result.receipt.eventId);
+  assert.equal((await call('room_read_result', { workItemId, completionEventId: first.result.receipt.eventId })).result.text.body, body);
+
   const unknown = await f.rpc(tokens.access_token, 'room_post_message', { id: 'native-unknown-task', body: 'Do not save', workItemId: 'missing-task' });
   assert.ok(unknown.body.error || unknown.body.result?.isError, 'existing store validation rejects an unknown task');
   assert.equal(f.store.room('commons').state.messages.some(message => message.id === 'native-unknown-task'), false);
   const malformed = await f.rpc(tokens.access_token, 'room_post_message', { body: 'Do not save', workItemId: '../other-room' });
   assert.equal(malformed.body.error?.code, -32602);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n, f.accountsBefore);
+  f.store.db.prepare('UPDATE agent_invite_codes SET revoked_at=?').run(Date.now());
+  assert.equal((await f.rpc(tokens.access_token, 'room_submit_text_result', revisedSubmission)).status, 401,
+    'a saved receipt does not bypass current OAuth revocation');
 });
 
 test('native consent cancellation is CSRF-bound, preserves the invitation and returns no credentials', async t => {

@@ -233,8 +233,15 @@ export async function callHostedStdioTool(store, secret, name, args) {
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
-async function currentWorkRevision(store, secret, roomId, name, args, usesRevision) {
+async function currentWorkRevision(store, secret, roomId, name, args, usesRevision, identity, command) {
   if (!usesRevision(name) || args?.expectedRevision !== undefined || !validId(args?.workItemId)) return undefined;
+  // A retry must reconstruct the original command, not fill a newer revision.
+  // This lookup only supplies the omitted field: normal command authentication,
+  // scope checks and the complete input fingerprint still govern the replay.
+  const prior = store.db.prepare(`SELECT e.body FROM commands c JOIN events e
+    ON e.room_id=c.room_id AND e.sequence=c.sequence
+    WHERE c.room_id=? AND c.actor_id=? AND c.id=?`).get(roomId, identity.memberId, command.id);
+  if (prior) return JSON.parse(prior.body).data.expectedRevision;
   const context = await store.workContext(secret, roomId, args.workItemId, {});
   if (!Number.isSafeInteger(context?.work?.revision)) throw new ServiceError(422, "invalid_work_action", "Current work revision unavailable");
   return context.work.revision;
@@ -253,7 +260,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
   if (isHelpTool(name)) {
-    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, helpUsesExpectedRevision);
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, helpUsesExpectedRevision, identity, buildHelpCommand(name, rest, identity));
     const command = buildHelpCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command, receipt => recordedHelpAction(name, command, receipt));
   }
@@ -347,7 +354,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
   }
   if (isWorkTool(name)) {
-    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision);
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision, identity, buildWorkCommand(name, rest, identity));
     const command = buildWorkCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command,
       receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
