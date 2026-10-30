@@ -91,6 +91,7 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
 test("the shared window fitter and bootstrap builder are the modules the read uses", () => {
   assert.equal(typeof buildRoomBootstrap, "function");
   assert.deepEqual(ROOM_WINDOW_ROUTES.map(row => `${row.method} ${row.path}`), [
+    "GET /api/rooms/{roomId}/conversations",
     "GET /api/rooms/{roomId}/bootstrap",
     "GET /api/rooms/{roomId}/messages"
   ]);
