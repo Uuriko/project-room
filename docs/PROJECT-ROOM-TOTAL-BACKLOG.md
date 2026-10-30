@@ -1086,7 +1086,7 @@ Each row is a required reconciliation task, not an instruction to implement dupl
 - [Canonical task inventory](backlog/project-room-total-backlog.json)
 - [Captured issue metadata](backlog/github-open-issues-2026-10-18.json)
 - [Captured PR metadata](backlog/github-open-prs-2026-10-18.json)
-- [Execution packages](BUILD-TO-COMPLETION-PLAN.md)
+- [Execution packages](../archive/docs/history/BUILD-TO-COMPLETION-PLAN.md)
 - [Original delivery ledger](DELIVERY-LEDGER.md)
 
 No generated checkbox is checked by default. Unknown implementation state remains unknown until reconciled.

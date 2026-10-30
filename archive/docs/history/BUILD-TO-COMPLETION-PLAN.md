@@ -1,19 +1,21 @@
+> Moved from `docs/BUILD-TO-COMPLETION-PLAN.md` to history on 2026-10-29 by the roadmap consolidation. Content is unchanged apart from relative links. Active scope lives in [FOCUSED-DELIVERY-PLAN](../../../docs/FOCUSED-DELIVERY-PLAN.md); unfinished requirements stay traceable through the total backlog.
+
 # Project Room: build-to-completion plan
 
-Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+Active scope: [six-outcome delivery plan](../../../docs/FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
 
 Plan date: 2026-10-18. Starting local checkpoint: `973260d6`.
 Owner: Codex implementation, coordinating shared lanes before changes.
 Status: historical package sequence; the overhaul is not finished. Use the active
 plan above for current execution, preserving retained acceptance requirements.
 
-This records the October 18 package mapping for the [delivery ledger](DELIVERY-LEDGER.md),
+This records the October 18 package mapping for the [delivery ledger](../../../docs/DELIVERY-LEDGER.md),
 not a current instruction to execute B00–B09 in order.
-The [master vision](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) explains the product;
+The [master vision](../../../docs/ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) explains the product;
 this document defines build packages, dependencies, outputs and finish gates.
-Detailed invariants in the [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md),
-[automation design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md) and
-[quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md) remain requirements.
+Detailed invariants in the [architecture plan](../../../docs/ARCHITECTURE-EXECUTION-PLAN.md),
+[automation design](../../../docs/AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md) and
+[quality scorecard](../../../docs/QUALITY-AND-PRODUCTIVITY-SCORECARD.md) remain requirements.
 
 ## 1. Starting state: what has and has not been accomplished
 
@@ -246,7 +248,7 @@ capability requirements.
 - Verify export/import, recovery drills, operational runbooks and observability.
 - Publish internal comparative results with uncertainty, limitations and failed
   scenarios. Product ambitions remain hypotheses until evidence supports them.
-- Prepare rollout/rollback artifacts. Use existing authorization and the [serialized lane](DEPLOY-LANE.md);
+- Prepare rollout/rollback artifacts. Use existing authorization and the [serialized lane](../../../docs/DEPLOY-LANE.md);
   standing authorization does not expire per session. Verify the deployed version
   before declaring shipped, following current [repository instructions](../AGENTS.md).
 

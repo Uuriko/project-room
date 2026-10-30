@@ -1,7 +1,7 @@
 # Canonical work and acceptance cutover
 
 Baseline `ee32e58f`, 2026-10-18. Implements the remaining boundaries in
-[the lifecycle plan](WORK-LIFECYCLE-BUILD-PLAN.md).
+[the lifecycle plan](../archive/docs/history/WORK-LIFECYCLE-BUILD-PLAN.md).
 
 ## Contract
 

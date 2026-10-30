@@ -1,8 +1,10 @@
+> Moved from `docs/WORK-LIFECYCLE-BUILD-PLAN.md` to history on 2026-10-29 by the roadmap consolidation. Content is unchanged apart from relative links. Active scope lives in [FOCUSED-DELIVERY-PLAN](../../../docs/FOCUSED-DELIVERY-PLAN.md); unfinished requirements stay traceable through the total backlog.
+
 # Work lifecycle and authority build plan
 
 2026-10-18. Baseline: `3f240e53`. This implements the next chunk of the
-[focused delivery plan](FOCUSED-DELIVERY-PLAN.md), with ownership defined in
-[the authority decision](WORK-AUTHORITY-DECISION.md). Status is recorded below;
+[focused delivery plan](../../../docs/FOCUSED-DELIVERY-PLAN.md), with ownership defined in
+[the authority decision](../../../docs/WORK-AUTHORITY-DECISION.md). Status is recorded below;
 this is not a claim that the whole architectural overhaul is complete.
 
 ## Execution prompt
@@ -181,7 +183,7 @@ with `3f240e53` and are unchanged.
 Final `npm run lint`: exit 0; zero errors, 290 existing warnings; design, reachability, i18n and generated UI-string checks pass.
 
 
-The subsequent [canonical work cutover](WORK-CUTOVER-PLAN.md) supersedes the
+The subsequent [canonical work cutover](../../../docs/WORK-CUTOVER-PLAN.md) supersedes the
 unimplemented-storage and cross-door-acceptance bullets above. It records exact
 qualification and remaining aggregate/legacy divergence limitations; the larger
 overhaul and v1.0 release gates remain open.
