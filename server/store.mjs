@@ -6414,7 +6414,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command, expectedSessionBinding = null) {
+  command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false } = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
     // command transaction cannot roll back, so remember the spend and refund
@@ -6612,6 +6612,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      if (agentConnectionSponsor && (!memberAuthorityEvent || auth.member.kind !== "human" || !auth.account || auth.kind !== "session"))
+        fail(403, "account_session_required", "Agent sponsorship requires your signed-in human account");
       // F-1 follow-up: stamp new pins with the DM-party policy version at
       // live admission (both the pins route and direct /commands flow through
       // here). The reducer enforces the party check only on stamped events,
@@ -6624,6 +6626,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : memberAuthorityEvent ? {
             ...command.data,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+            ...(agentConnectionSponsor ? { selfSponsorshipVersion: 1 } : {}),
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION,

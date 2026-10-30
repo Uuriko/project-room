@@ -1376,6 +1376,7 @@ export class AgentIdentities {
     if (!link) return null;
     const member = memberOf(this.store.roomAuthority(roomId).members, link.member_id);
     if (!member || member.active === false) return null;
+    if (!this.store.agentConnections.identityAuthority(roomId, member.id)) return null;
     this.noteActivated(identityId);
     return { identityId, member };
   }

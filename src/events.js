@@ -1104,7 +1104,12 @@ function addMember(state, incoming) {
     const agentSafeInvite = incoming.data.kind === "agent"
       && Array.isArray(incoming.data.permissions)
       && !incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p));
-    if (agentSafeInvite) {
+    if (incoming.data.selfSponsorshipVersion === 1) {
+      const sponsor = requireMember(state, incoming.actorId);
+      if (sponsor.kind !== "human" || incoming.data.kind !== "agent" || incoming.data.accountableHumanId !== sponsor.id
+        || !Array.isArray(incoming.data.permissions) || incoming.data.permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !sponsor.permissions.includes(p)))
+        throw new Error("Self-sponsored agent authority must be a safe subset of its human sponsor");
+    } else if (agentSafeInvite) {
       if (!canInviteMembers(state, incoming.actorId)) throw new Error(`${incoming.actorId} lacks invite_member`);
     } else {
       requirePermission(state, incoming.actorId, "manage_members");
@@ -1238,7 +1243,12 @@ function validatePermissions(permissions, kind, isOwner = false, isOwnerGrant = 
 }
 
 function changeMemberAccess(state, incoming) {
-  if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
+  const sponsoredDisconnect = incoming.data.selfSponsorshipVersion === 1;
+  if (sponsoredDisconnect) {
+    const sponsor = requireMember(state, incoming.actorId), target = state.members[incoming.data.memberId];
+    if (sponsor.kind !== "human" || target?.kind !== "agent" || target.accountableHumanId !== sponsor.id || incoming.data.active !== false
+      || JSON.stringify(incoming.data.permissions) !== JSON.stringify(target.permissions)) throw new Error("A sponsor may only disconnect their own agent");
+  } else if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
   requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");
@@ -1251,7 +1261,7 @@ function changeMemberAccess(state, incoming) {
   // so the scoped-administration rule does not apply to it. Without this,
   // an invite_member-only human could not leave (account deletion: 422).
   if (incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
-    if (!isLeaveRequest(state, incoming)) requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
+    if (!sponsoredDisconnect && !isLeaveRequest(state, incoming)) requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
     throw new Error("Unsupported membership authority policy");
   }
