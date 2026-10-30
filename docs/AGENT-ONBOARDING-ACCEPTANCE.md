@@ -18,7 +18,7 @@ Use the actual intended host, both without a Room account and with a separate hu
 
 | Stage | Required observable result | Negative / recovery test |
 | --- | --- | --- |
-| Invitation | One human-readable link, visible Member scope, clear expiry | Expired/revoked link; duplicate redemption; already joined |
+| Invitation | One short agent-directed prompt containing the correct bounded invitation link, visible scope and clear expiry | Reusable human share link must not masquerade as a native OAuth invitation; browser joining must not consume the code intended for the existing agent |
 | Identity | Access sponsor and agent controller are distinguished; optional account linking proves control | Inviter differs from operator; forged sponsorship; another human cannot take over the grant |
 | Connection | Host authentication and a real tool call succeed | Missing login, wrong account, wrong audience, stale grants, unsupported host |
 | Discovery | A short useful entry point explains how to read and act | Hidden/unsupported tools are not advertised as usable; malformed input gives actionable recovery |
@@ -52,6 +52,16 @@ Room's old webhook format is not this wire protocol. Reuse its public-address va
 - Native OAuth, friend-sponsored lifecycle and server-side listener fencing are composed in the draft candidate. Signed event transport, durable subscriptions and their authenticated MCP2 mount pass local tests, including the official SDK 2.4.0 client. Actual Dot installation and wake remain unqualified.
 - A real HTTPS browser completes invitation preview, consent and a lost-response retry without creating an account or duplicate agent. Strict Origin checks remain enabled. Back from the completed callback to the uncached POST review can still show a browser cache error; seamless callback Back is not claimed.
 - Full hosted checks are still a release gate. No external-friend completion, production rollout or YC readiness is asserted by this document.
+
+## Audit findings and first-session behavior
+
+The ordinary Invite entry must create an authorized agent invitation before copying its prompt. A reusable shared-room link and an RM native-consent invitation are different capabilities. Existing-agent guidance must preserve the invitation until native consent; browser joining is a separate explicit path. Never fabricate a plugin installation URL or claim a copied prompt established a connection.
+
+After connection, the supported first session reads access, inbox and relevant work, introduces useful capabilities once, and suggests one bounded next task. Work begins only with the appropriate assignment/claim and current permissions. Native OAuth discovery must expose its authorized work tools by default because the host controls tool listing. The initial native demo supports producing results and responding to review in conversation; formal verification is performed by a human or another supported agent.
+
+Completed or closed claims must not start another local turn on a fresh wake. A replacement task must not depend on completing the superseded task merely because that task appears in its history. Explicit prerequisites remain enforced. Public verification facts must not contain an unqualified contradictory shadow-scoring verdict; the full advisory decision remains in the owner-only journal. These three defects were reproduced and repaired during the audit.
+
+Before involving the friend, qualify the actual plugin upload, exact OAuth callback and distribution route against the selected HTTPS deployment. Production Workers currently lacks the native Events transport; passing local mocks or ACP checks does not satisfy native Dot readiness.
 
 ## Scope discipline
 
