@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { RoomStore } from '../server/store.mjs';
+import { messageProjectionArmingFromEnv } from '../server/message-entity-projection.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { perRoomObjectsEnabled } from '../server/room-shard-flag.mjs';
 
@@ -20,6 +21,8 @@ export class RoomShard extends DurableObject {
       storagePlatform: durableStorage,
       integrity: 'deferred',
       bodiesAtRest: env.ROOM_BODIES_AT_REST === '1',
+      // Message entity projection arming (default OFF; empty when unset).
+      ...messageProjectionArmingFromEnv(env),
     });
   }
 
