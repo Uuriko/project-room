@@ -12,7 +12,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -68,7 +68,7 @@ describe("operator rooms list", { concurrency: false }, () => {
     assert.equal(rooms.length, 2);
     assert.equal(rooms[0].id, "commons", "the room with posts is the largest");
     assert.ok(rooms[0].projectionBytes > rooms[1].projectionBytes);
-    assert.equal(rooms[0].capBytes, 4 * 1024 * 1024);
+    assert.equal(rooms[0].capBytes, PILOT_LIMITS.projectionBytes);
     assert.ok(Math.abs(rooms[0].percentOfCap - rooms[0].projectionBytes / rooms[0].capBytes) < 1e-9);
     assert.equal(rooms[0].archived, false);
     assert.equal(rooms[0].protected, false);
