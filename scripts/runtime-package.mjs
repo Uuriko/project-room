@@ -212,8 +212,8 @@ optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "ser
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/channel-live-status.mjs"); // Task 10: durable Telegram live-delivery/send facts (imported by server/store.mjs)
 optional.push("server/delivery-tracing.mjs"); // R1: opt-in OTel delivery-path tracing (pure, no store.mjs imports)
-optional.push("server/channel-send-budgets.mjs"); // Task 41: per-connection send budgets (imported by server/http.mjs; imports token-bucket.mjs and store.mjs)
-optional.push("server/token-bucket.mjs"); // token-bucket limiter (imported by server/channel-send-budgets.mjs; pure, no imports)
+optional.push("server/channel-send-budgets.mjs"); // Task 41: per-connection send budgets (imported by server/http.mjs; imports identity-ratelimit.mjs and store.mjs)
+optional.push("server/token-bucket.mjs"); // S-05: merged into identity-ratelimit.mjs (createRateLimiter) and cut from the current tree — registration stays so genuine historical packages, whose channel-send-budgets.mjs imports it, remain packagable and verifiable
 optional.push("server/spam-quarantine-journal.mjs"); // Durable spam-guard quarantine journal (imported by server/store.mjs)
 optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending_channel_updates (imported by server.mjs)
 optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (imported by server/inbox.mjs)
