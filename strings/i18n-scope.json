@@ -121,6 +121,7 @@
   "src/strings.js",
   "src/updates-ui.js",
   "src/work-announcements.js",
+  "src/work-dependencies.js",
   "src/work-help.js",
   "src/work-item-session.js",
   "src/work-loops.js",
