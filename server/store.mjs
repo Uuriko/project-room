@@ -1465,6 +1465,12 @@ export class RoomStore {
     // mask a later commit that reuses its sequence.
     this._appendStamps = new Map();
     this._pendingAppends = new Set();
+    // Highest event sequence appended per pending room in the open
+    // transaction. B3-1-F1: when a platform reports a commit as failed
+    // after it applied (indeterminate commit), transaction()'s error
+    // path probes the durable head against this to tell a committed
+    // append (flush its notification) from a rolled-back one (drop it).
+    this._pendingAppendSeqs = new Map();
     this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
@@ -3578,7 +3584,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
-        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0], args[1]);
         return result;
       };
       return stmt;
@@ -3601,8 +3607,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // transaction commits (_flushEventAppends, called from transaction()), and
   // is dropped if that transaction rolls back. Outside a transaction the
   // append has already committed by the time the statement returns.
-  _noteEventAppend(roomId) {
-    if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
+  _noteEventAppend(roomId, sequence = null) {
+    if (this.db.isTransaction) {
+      this._pendingAppends.add(roomId);
+      if (Number.isSafeInteger(sequence)) {
+        const prior = this._pendingAppendSeqs.get(roomId);
+        if (prior === undefined || sequence > prior) this._pendingAppendSeqs.set(roomId, sequence);
+      }
+      return;
+    }
     this._bumpAppendStamp(roomId);
   }
   _bumpAppendStamp(roomId) {
@@ -3615,7 +3628,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!this._pendingAppends.size) return;
     const rooms = [...this._pendingAppends];
     this._pendingAppends.clear();
+    this._pendingAppendSeqs.clear();
     for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // B3-1-F1: the platform threw at the outermost boundary, but the
+  // database is no longer in a transaction — the commit may have applied
+  // before the failure was reported (SQLITE_FULL / I/O errors reported
+  // by COMMIT itself are the classic indeterminate case). For each
+  // pending room, probe the durable head: if it reached the sequence
+  // this transaction appended, the append committed and its notification
+  // must be flushed even though the caller sees an error; if not, the
+  // append rolled back and is dropped like any other rollback. A probe
+  // that cannot answer falls back to dropping (the pre-cure behaviour).
+  _settlePendingAppendsAfterError() {
+    const rooms = [...this._pendingAppends];
+    this._pendingAppends.clear();
+    const seqs = this._pendingAppendSeqs;
+    this._pendingAppendSeqs = new Map();
+    for (const roomId of rooms) {
+      const appended = seqs.get(roomId);
+      if (appended === undefined) continue;
+      let head = null;
+      try { head = this.headSequence(roomId); } catch { head = null; }
+      if (head !== null && head >= appended) this._bumpAppendStamp(roomId);
+    }
   }
   // The room's append stamp: a counter that changes whenever an event has
   // committed to the room since the caller's last look. Purely in-memory.
@@ -3650,7 +3686,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
       this._dropProjectionCache();
-      if (boundary) { frames.pop(); this._pendingAppends.clear(); }
+      if (boundary) {
+        frames.pop();
+        // B3-1-F1: at the outermost boundary with no transaction left
+        // open, the throw may report a commit that actually applied;
+        // settle pending appends by their durable head instead of
+        // clearing them all. Inside a still-open transaction (nested /
+        // isolated boundary, or a live rollback) the clear stands.
+        if (outermost && !this.db.isTransaction) this._settlePendingAppendsAfterError();
+        else { this._pendingAppends.clear(); this._pendingAppendSeqs.clear(); }
+      }
       throw this.storageFailure(error, outermost);
     }
     if (boundary) {

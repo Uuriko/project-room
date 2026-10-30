@@ -171,10 +171,21 @@ function withCurrentPull(item, pullRequest) {
 export function rememberPoll(item, nowMs, delayMs, { etag, rateLimitedUntil = null } = {}) {
   if (!item?.pullRequest) return item;
   const previous = usableEtag(item.pullRequest.etag);
+  // B3-5-F3: backoff is anchored to the item's own recorded time base,
+  // never solely to the seam clock at write time. A backward wall step
+  // between the poll and this stamp would otherwise move nextPollAt
+  // before the previous schedule (or before the last sync), erasing the
+  // pacing in real terms; the next poll is never moved earlier than the
+  // schedule it replaces or the last recorded sync plus the delay.
+  const prevNextPollAt = Number(item.pullRequest.nextPollAt);
+  const prevSyncedAt = Date.parse(item.pullRequest.syncedAt ?? "");
+  const nextPollAt = Math.max(nowMs + delayMs,
+    Number.isFinite(prevNextPollAt) ? prevNextPollAt : -Infinity,
+    Number.isFinite(prevSyncedAt) ? prevSyncedAt + delayMs : -Infinity);
   return withCurrentPull(item, Object.freeze({
     ...item.pullRequest,
     syncedAt: new Date(nowMs).toISOString(),
-    nextPollAt: nowMs + delayMs,
+    nextPollAt,
     pollBackoffMs: delayMs,
     etag: etag === undefined ? previous : usableEtag(etag),
     rateLimitedUntil
