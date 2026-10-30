@@ -64,9 +64,9 @@ export class RoomClient {
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/work-claims/${encodeURIComponent(claimId)}/update`, { body: { note, requestId: randomUUID() } });
   }
   thread(messageId) { return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/messages/${encodeURIComponent(messageId)}/thread`); }
-  async post({ body, replyToId = null, messageId = `acp-${randomUUID()}` }) {
+  async post({ body, replyToId = null, toMemberId: directTo = null, messageId = `acp-${randomUUID()}` }) {
     const parent = replyToId ? (await this.thread(replyToId)).thread : null;
-    const toMemberId = parent?.toMemberId ? (parent.authorId === this.memberId ? parent.toMemberId : parent.authorId) : null;
+    const toMemberId = !parent && directTo ? directTo : parent?.toMemberId ? (parent.authorId === this.memberId ? parent.toMemberId : parent.authorId) : null;
     return this.request(`/api/rooms/${encodeURIComponent(this.roomId)}/commands`, { body: { id: randomUUID(), type: "message.posted", data: { messageId, body, ...(replyToId ? { replyToId } : {}), ...(toMemberId ? { toMemberId } : {}) } } })
       .then(() => ({ messageId }));
   }
