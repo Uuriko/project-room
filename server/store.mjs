@@ -1086,8 +1086,8 @@ const workSessionsNext = (roomId, sessions) => {
   return [Object.freeze({
     action: "register-work-item",
     method: "POST",
-    path: `/api/rooms/${roomId}/work-claims`,
-    description: "No work sessions are open. Register a work item first: POST { id: \"<slug>\", title: \"<task>\", note: \"<context>\" } to this path, then claim it with the claim-session action above.",
+    path: `/api/rooms/${roomId}/commands`,
+    description: "No work sessions are open. Create a session work item first: POST { type: \"work.proposed\", data: { workItemId: \"<slug>\", title: \"<task>\", accountableMemberId: \"<member-id>\" } } to this path, then claim it with the claim-session action above. Board claims are a different noun: POST /work-claims creates a board claim, not a session work item.",
   })];
 };
 
