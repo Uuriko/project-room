@@ -31,6 +31,13 @@ import { messageRepository } from "./message-repository.mjs";
 //
 // Error contract: the pure module throws ClaimError (code
 // invalid_claim_input, no HTTP status); claimHttpError maps it to 422.
+// Degradation contract (Fo panel, muse-room seq 19947): a storage
+// busy/degraded error at this door is a clean retryable refusal —
+// 503 service_degraded with Retry-After — never a 500. handleWorkClaims
+// maps it at the seam (see isWorkClaimStorageDegraded below), and a bare
+// ClaimError escaping the core outside runPure takes its documented 422
+// there too, instead of reaching the generic HTTP catch status-less and
+// rendering as 500 invalid_claim_input.
 // Ownership and policy refusals are raised directly as 403 via reject();
 // conflicts (double create, claim on claimed work, update of done work) as
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
@@ -527,6 +534,33 @@ const runPure = (reject, fn) => {
   }
 };
 
+// Storage busy/degraded at the work-claims door (Fo panel, muse-room seq
+// 19947): during Durable Object degradation, claim attempts surfaced as
+// 500-class refusals for ~25 minutes while the caller's leases lapsed.
+// SQLite BUSY (primary code 5 — a writer holding the lock past
+// busy_timeout, or the DO storage layer reporting contention) is a clean
+// retryable refusal, not a server fault: the failing transaction has
+// already rolled back, so zero partial writes exist and the exact request
+// is safe to retry once the contention clears. BUSY is deliberately NOT
+// added to store.mjs's storageFailureSqlite set: contention is not
+// storage failure — classifying it there would count transient lock waits
+// toward the storage-unavailable readiness threshold and misreport a busy
+// store as a broken one. Typed storage_unavailable refusals (a
+// StorageUnavailableError from store.transaction) are NOT matched here:
+// they already carry their established 503 shape (Retry-After 30) and
+// pass through unchanged. The escrow door has the same BUSY shape mapped
+// as 503 storage_busy (PR #4908, server/bounty-escrow-routes.mjs); this
+// door's code is service_degraded, the name the panel report proposed for
+// the claims surface. Other sqlite errors (constraint, I/O, schema) are
+// NOT degraded and keep their existing paths.
+export const isWorkClaimStorageDegraded = error => {
+  if (!error || typeof error !== "object") return false;
+  if (Number.isInteger(error.errcode) && (error.errcode & 0xff) === 5) return true;
+  if (error.code === "SQLITE_BUSY" || error.code === "ERR_SQLITE_BUSY") return true;
+  return error.code === "ERR_SQLITE_ERROR"
+    && /database is locked|database table is locked/i.test(String(error.message ?? ""));
+};
+
 // Receipts (RC-2026-09-24-205): the "what has this room already solved"
 // surface. Done work items projected as receipts — `receiptId` is the
 // stable projection `"rc_" + workItemId` — searchable by exact tag (AND)
@@ -747,6 +781,10 @@ export async function handleWorkClaims(options) {
         auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize, listenerToken: req.headers?.[LISTENER_TOKEN_HEADER] });
       return helpers.json(res, 200, withProjectMapOverlap(options.store, options.roomId, item));
     } catch (error) {
+      if (isWorkClaimStorageDegraded(error)) {
+        helpers.reject(503, "service_degraded", "Work claims are temporarily degraded; nothing was applied — retry the exact request", { "Retry-After": "1" });
+      }
+      if (error instanceof ClaimError) helpers.reject(422, error.code, error.message);
       if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
       throw error;
     }
@@ -801,6 +839,14 @@ export async function handleWorkClaims(options) {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
+    // Degradation map (see isWorkClaimStorageDegraded): a busy/degraded
+    // store is a retryable 503 service_degraded, and a bare ClaimError
+    // takes its documented 422 — neither may reach the generic HTTP catch
+    // status-less, where both rendered as a 500 (seq 19947).
+    if (isWorkClaimStorageDegraded(error)) {
+      helpers.reject(503, "service_degraded", "Work claims are temporarily degraded; nothing was applied — retry the exact request", { "Retry-After": "1" });
+    }
+    if (error instanceof ClaimError) helpers.reject(422, error.code, error.message);
     if (error?.code === "file_lease_conflict" && error.body) {
       try {
         alertLeaseRefusal(options.store, options.roomId, {
