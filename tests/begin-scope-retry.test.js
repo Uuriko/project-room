@@ -14,7 +14,9 @@ import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
-const expiresAt = "2027-01-01T00:00:00.000Z";
+// Relative to the wall clock: a fixed date here expired the scope and
+// broke this test on 2027-01-01 (issue #3318).
+const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
 const scopeA = { repository: "test/repo", ref: "main", paths: ["src/a.js"], expiresAt };
 const scopeB = { repository: "test/repo", ref: "main", paths: ["src/b.js"], expiresAt };
 
