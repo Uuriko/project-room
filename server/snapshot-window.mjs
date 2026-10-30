@@ -125,7 +125,11 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
     if (helpContext || offerContext || auditView !== "full" || windowed) fail(422, "invalid_snapshot_view", "Orientation does not accept snapshot context options");
     return readAgentOrientation(store, token, roomId, fence);
   }
-  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null);
+  // #4265: the non-windowed form is the explicit full-history contract (the
+  // compat ?full=1 read; the work view returns before the messages branch),
+  // so it opts in to full history at the store. The windowed default passes
+  // no opt-in and stays bounded.
+  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null, !windowed);
   if (view === "work") {
     delete snapshot.state.agentHalts;
     return snapshot;

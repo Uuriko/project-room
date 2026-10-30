@@ -4908,7 +4908,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return privatePartiesByWork;
   }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null, fullHistory = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -4943,8 +4943,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       }
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
+      if (typeof fullHistory !== "boolean" || fullHistory && messageLimit !== null) fail(422, "invalid_snapshot_view", "Choose a bounded message window or full history, not both");
       let messages = room.state.messages, pins = room.state.pins, messagesWindow;
-      if (messageLimit !== null || room.state.messagesArchive) {
+      if (messageLimit !== null || fullHistory || room.state.messagesArchive) {
         const repository = messageRepository(this, roomId, room.state);
         if (messageLimit !== null) {
           const floor = this.historyFloor(roomId, auth.member.id);
@@ -4954,10 +4955,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countViewerVisible(auth.member.id, floor)-messages.length,older:"conversation"};
           const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
           pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
-        } else {
-          // Explicit legacy full-snapshot contract. Recent and conversation reads
-          // stay bounded; full export-compatible reads explicitly request history.
+        } else if (fullHistory) {
+          // Explicit full-history contract (the HTTP snapshot door's
+          // compat full read; the client's background fill). Recent and
+          // conversation reads stay bounded; only an explicit request pays
+          // the archive-depth decode.
           messages = [...repository.records()];
+        } else {
+          // Default on an archived room: the live window only — a snapshot
+          // no longer materializes archived history unless asked. The
+          // window marker counts the visible archived remainder so the
+          // reader can page it through /conversation.
+          const floor = this.historyFloor(roomId, auth.member.id);
+          messagesWindow = {mode:"recent",limit:messages.length,omitted:repository.countArchivedForViewer(auth.member.id, floor),older:"conversation"};
         }
       }
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
