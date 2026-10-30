@@ -29,7 +29,10 @@ export class PermissionBroker {
     const deny = pick(options, ["reject_once", "reject_always"]);
     const allow = pick(options, ["allow_once", "allow_always"]);
     const outcome = option => (option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } });
-    if (!threadKey || !allow) return outcome(deny);
+    if (!threadKey || !allow || signal?.aborted || this.pending.has(threadKey)) return outcome(deny);
+    // Reserve synchronously: two ACP requests may arrive before posting either
+    // ask completes. The second request must never consume the first answer.
+    this.pending.set(threadKey, null);
     const title = String(toolCall?.title ?? toolCall?.kind ?? "an action").replace(/\s+/g, " ").slice(0, 200);
     const minutes = Math.max(1, Math.round(this.timeoutMs / 60000));
     const claimId = threadKey.startsWith("work-claim:") ? threadKey.slice("work-claim:".length) : null;
@@ -38,26 +41,29 @@ export class PermissionBroker {
       let messageId;
       if (claimId) {
         if (!this.approverId) return outcome(deny);
-        ({ messageId } = await this.room.post({ toMemberId: this.approverId, body: `Permission needed on claim ${claimId}: ${title}\nReply "allow" or "deny" in this thread. No answer in ${minutes} min means deny.` }));
-        askThread = messageId;
-        this.askThreads.add(askThread);
-        await this.room.claimNote?.(claimId, `Waiting for owner permission: ${title}`).catch(() => {});
+        ({ messageId } = await this.room.post({ toMemberId: this.approverId, body: `Permission needed on claim ${claimId}: ${title}\nReply to this permission request with "allow" or "deny". No answer in ${minutes} min means deny.` }));
       } else {
-        ({ messageId } = await this.room.post({ replyToId: threadKey, body: `Permission needed: ${title}\nReply "allow" or "deny" in this thread. No answer in ${minutes} min means deny.` }));
+        ({ messageId } = await this.room.post({ replyToId: threadKey, body: `Permission needed: ${title}\nReply to this permission request with "allow" or "deny". No answer in ${minutes} min means deny.` }));
       }
+      askThread = messageId;
+      this.askThreads.add(askThread);
       this.pending.set(threadKey, messageId);
+      if (claimId) await this.room.claimNote?.(claimId, `Waiting for owner permission: ${title}`).catch(() => {});
       const askedAt = Date.now();
       while (Date.now() - askedAt < this.timeoutMs && !signal?.aborted) {
         await new Promise(resolve => setTimeout(resolve, this.pollMs));
+        if (signal?.aborted || Date.now() - askedAt >= this.timeoutMs) break;
         const thread = (await this.room.thread(askThread)).thread;
+        if (signal?.aborted || Date.now() - askedAt >= this.timeoutMs) break;
         const replies = thread.replies ?? [];
-        const index = askThread === messageId ? -1 : replies.findIndex(reply => reply.id === messageId);
-        for (const reply of askThread === messageId ? replies : index >= 0 ? replies.slice(index + 1) : []) {
-          if (reply.authorId !== this.approverId) continue;
+        for (const reply of replies) {
+          // A generic "allow" elsewhere in the work conversation, or a late
+          // answer to a previous ask, is never authority for this action.
+          if (reply.authorId !== this.approverId || reply.replyToId !== messageId) continue;
           const decision = decisionOf(reply.body);
           if (decision) {
             await this.room.post({ replyToId: askThread, body: decision === "allow" ? `Allowed: ${title}` : `Denied: ${title}` }).catch(() => {});
-            return outcome(decision === "allow" ? allow : deny);
+            return outcome(decision === "allow" && !signal?.aborted && Date.now() - askedAt < this.timeoutMs ? allow : deny);
           }
         }
       }

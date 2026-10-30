@@ -35,16 +35,19 @@ test("owner allow in the thread selects the allow option", async t => {
   const room = await startRoom(t);
   const { connection } = await startBridge(t, room, 20000);
   const rootId = room.say("@Coder clean the build");
-  await waitFor(() => mine(room, rootId, connection.memberId).some(message => /^Permission needed: Run rm -rf build/.test(message.body)));
+  const ask = await waitFor(() => mine(room, rootId, connection.memberId).find(message => /^Permission needed: Run rm -rf build/.test(message.body)));
   // A guest saying allow does not count.
   const guestKey = room.f.store.issueAccessKey("commons", "guest");
-  room.f.store.command(guestKey, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: "g-allow", body: "allow", replyToId: rootId } });
+  room.f.store.command(guestKey, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: "g-allow", body: "allow", replyToId: ask.id } });
   await new Promise(resolve => setTimeout(resolve, 200));
   assert.ok(!mine(room, rootId, connection.memberId).some(message => message.body.startsWith("Allowed")));
   room.say("@Coder allow", { replyToId: rootId });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.ok(!mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Allowed")), "generic root reply cannot approve");
+  room.say("@Coder allow", { replyToId: ask.id });
   const final = await waitFor(() => mine(room, rootId, connection.memberId).find(message => /^permission: /.test(message.body)));
   assert.match(final.body, /permission: allow_once/);
-  assert.ok(mine(room, rootId, connection.memberId).some(message => message.body.startsWith("Allowed:")));
+  assert.ok(mine(room, ask.id, connection.memberId).some(message => message.body.startsWith("Allowed:")));
 });
 
 test("no answer before the timeout denies", async t => {
@@ -53,7 +56,7 @@ test("no answer before the timeout denies", async t => {
   const rootId = room.say("@Coder clean the build");
   const final = await waitFor(() => mine(room, rootId, connection.memberId).find(message => /^permission: /.test(message.body)));
   assert.match(final.body, /permission: reject_once/);
-  assert.ok(mine(room, rootId, connection.memberId).some(message => message.body.startsWith("No answer; denied")));
+  assert.ok(room.messages().some(message => message.authorId === connection.memberId && message.body.startsWith("No answer; denied")));
 });
 
 test("a permission ask in a Board claim turn goes to the owner as a DM; allow there selects allow", async t => {
