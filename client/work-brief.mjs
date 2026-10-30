@@ -31,13 +31,14 @@ export async function createWorkBrief(context) {
       verification: pick(work.verification, 'eventId verifierId result completionEventId evidenceVersion summary independenceConfirmed'),
       decision: pick(work.decision, 'eventId actorId decision completionEventId evidenceVersion reason'),
       references: structuredClone(context.accessSummary.evidence.records), retrieved: false },
-    source: { ...structuredClone(context.accessSummary.conversation), contentObserved: false },
+    source: { ...structuredClone(context.accessSummary.conversation), contentObserved: ["included", "not_modified"].includes(context.context.source?.status),
+      ...(context.context.source?.freshness ? { observation: structuredClone(context.context.source.observation) } : {}) },
     conversations: structuredClone(context.replyRequestContext ?? null)
   };
   const sectionVersions = Object.fromEntries(await Promise.all(Object.entries(sections)
     .map(async ([key, value]) => [key, await fingerprint(value)])));
   const brief = { contractVersion: 1, scope, version: await fingerprint({ scope, sectionVersions }), sectionVersions,
-    observed: { workRevision: work.revision, evaluatedThrough: context.evaluatedThrough, evaluatedAt: context.evaluatedAt },
+    observed: { sourceFreshness: context.context.source?.freshness ?? "unknown", sourceBodyDelivered: context.context.source?.status === "included", workRevision: work.revision, evaluatedThrough: context.evaluatedThrough, evaluatedAt: context.evaluatedAt },
     sections, omitted: [...context.context.omitted, 'discussion_text', 'source_text', 'result_body'],
     nextReads: [{ tool: 'room_read_work', arguments: { roomId: context.roomId, workItemId: work.id } },
       { tool: 'room_read_work_discussion', arguments: { roomId: context.roomId, workItemId: work.id } },
