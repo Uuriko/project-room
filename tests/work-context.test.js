@@ -141,7 +141,15 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   await producer.command({ id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: stale.work.id, expectedRevision: stale.work.revision } });
   await assert.rejects(producer.command({ id: crypto.randomUUID(), type: T.WORK_STARTED, data: { workItemId: stale.work.id, expectedRevision: stale.work.revision } }), error => error.status === 409);
   await mutate(producer, T.WORK_STARTED);
-  assert.equal((await producer.workContext("test-handoff")).next.needsAttention, false);
+  const working = await producer.workContext("test-handoff");
+  assert.equal(working.next.needsAttention, false);
+  assert.equal(working.work.state, "working");
+  assert.equal(working.work.status, "queued");
+  assert.equal(working.work.displayStatus, "queued");
+  assert.match(workContextMarkdown(working), /Worker session: no start reported/);
+  assert.doesNotMatch(workContextMarkdown(working), /Session display status: queued/);
+  assert.match(workContextMarkdown(working), /Recorded session controls[^\n]+"status":"queued"/);
+  assert.match(workContextMarkdown({ ...working, work: { ...working.work, started_at: "2026-10-30T00:00:00.000Z", attempt_count: 1 } }), /Session display status: queued/, "a reported attempt must not be called never started");
   const complete = version => mutate(producer, T.WORK_COMPLETED, { summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: version, producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   await complete("v1");
   let context = await reviewer.workContext("test-handoff");
