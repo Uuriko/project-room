@@ -1,0 +1,55 @@
+  /api/rooms/{roomId}/work-claims/{claimId}/thread:
+    get:
+      summary: Read the claim thread
+      description: |
+        One ordered record per Board claim (#5378): every committed claim
+        change (claim, review, CI, merge or close, release) from the room's
+        `work_claim.updated` events in sequence order, plus the system steps
+        stamped only on the claim's history (`pr_autolinked`, `deploy_linked`).
+        Each entry carries a `kind` (claim, pr, ci, review, merge, deploy).
+        Same visibility as the claim read; no chat messages are included.
+        The newest 500 events are returned; `truncated` is true when older
+        ones exist.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The claim thread
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  claimId: { type: string }
+                  title: { type: string }
+                  state: { type: string }
+                  owner: { type: [string, 'null'] }
+                  truncated: { type: boolean }
+                  pullRequests:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        url: { type: [string, 'null'] }
+                        outcome: { type: [string, 'null'] }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source: { type: string, enum: [event, history] }
+                        sequence: { type: [integer, 'null'] }
+                        at: { type: [string, 'null'] }
+                        actorId: { type: [string, 'null'] }
+                        kind: { type: string, enum: [claim, pr, ci, review, merge, deploy] }
+                        action: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: not_member or insufficient_scope (API key without rooms:read) }
+        '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
