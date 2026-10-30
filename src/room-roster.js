@@ -511,7 +511,8 @@ Does not enroll agents, issue keys, or write ~/.grok/config.toml.
 For agent-first enrollment, give the existing agent an agent invite or supported
 share link to redeem with its own identity. The operator need not sign up for
 Room. An invitation grants Room access, not control of the host or its tools.
-Optional human sponsorship: sign in, then People & agents → Add agent. A human
+Optional human sponsorship: sign in (member key or account key), then
+People & agents → Add agent. A human
 can sponsor a bounded agent with permissions they hold. Inbox without joining
 a room uses ?account=1.
 `;
