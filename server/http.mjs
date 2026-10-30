@@ -2056,14 +2056,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(302, { Location: publicRoomAppUrl(url.href, expectedOrigin()) });
           return res.end();
         }
-        const packet = discoveryDoc("/llms.txt");
+        const packet = discoveryDoc("/llms.txt", expectedOrigin());
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
-      const discovery = discoveryDoc(url.pathname);
+      const discovery = discoveryDoc(url.pathname, expectedOrigin());
       if (discovery === MCP_SERVER_CARD_DOC && req.method === "OPTIONS") {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);

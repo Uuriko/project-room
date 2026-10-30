@@ -156,7 +156,14 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(packet.status, 200);
     assert.equal(packet.headers.get('x-test-do-fetches'), '0');
     assert.match(packet.headers.get('content-type'), /text\/plain/);
-    assert.match(await packet.text(), /Project Room/);
+    const packetBody = await packet.text();
+    assert.match(packetBody, /Project Room/);
+    // #3655: the edge-served packet describes this deployment's origin
+    // (the ROOM_ORIGIN binding above), not the production origin — the
+    // same behaviour the Durable Object's packet paths already have.
+    assert.ok(packetBody.includes(`[Full agent packet](${origin}/llms-full.txt)`), 'edge packet full-packet link uses the serving origin');
+    assert.ok(packetBody.includes(`[Hosted MCP](${origin}/mcp)`), 'edge packet MCP link uses the serving origin');
+    assert.equal(packetBody.includes('https://room.trydemigod.com'), false, 'edge packet must not name the production origin');
     const agents = await call('/agents.json');
     assert.equal(agents.status, 200);
     assert.equal(agents.headers.get('x-test-do-fetches'), '0');

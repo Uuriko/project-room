@@ -195,7 +195,7 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
     // static doc plus `"members": []`.
     const expectedBody = discoveryDoc(path) === discoveryDoc("/skills")
       ? JSON.stringify({ ...JSON.parse(expected.body), members: [] }, null, 2) + "\n"
-      : expected.body;
+      : discoveryDoc(path, origin).body;
     assert.equal(await get.text(), expectedBody, path);
     const head = await fetch(origin + path, { method: "HEAD" });
     assert.equal(head.status, 200, path);
@@ -280,7 +280,8 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
       assert.equal(discoveryDoc(path).type, short.type, path);
       const get = await fetch(origin + path);
       assert.equal(get.status, 200, path);
-      assert.equal(await get.text(), short.body);
+      // #3655: served bytes are the packet rebased onto the serving origin.
+      assert.equal(await get.text(), discoveryDoc(path, origin).body);
     }
   }
 });
@@ -396,7 +397,8 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), short.type, path);
-    assert.equal(await get.text(), short.body, path);
+    // #3655: served bytes are the packet rebased onto the serving origin.
+    assert.equal(await get.text(), discoveryDoc(path, origin).body, path);
   }
   for (const path of ["/room/agent.json", "/room/agent.json/"]) {
     assert.equal(discoveryDoc(path).body, card.body, path);
@@ -556,7 +558,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
     const plain = await fetch(`${base}${path}`, { headers: { Accept: "text/plain" } });
     assert.equal(plain.status, 200, path);
     assert.match(plain.headers.get("content-type"), /text\/plain/);
-    assert.equal(await plain.text(), llmsTxt());
+    assert.equal(await plain.text(), llmsTxt(base));
   }
   const workspace = await fetch(`${base}/`);
   assert.equal(workspace.status, 200);
@@ -565,7 +567,44 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
   const packet = await fetch(`${base}/room/llms.txt`);
   assert.equal(packet.status, 200);
   assert.match(packet.headers.get("content-type"), /text\/plain/);
-  assert.equal(await packet.text(), llmsTxt());
+  assert.equal(await packet.text(), llmsTxt(base));
+});
+
+test("#3655: a packet served from a non-production origin carries that origin's front-door links", async (t) => {
+  const staging = "https://staging.example.test";
+  const shortPacket = llmsTxt(staging);
+  assert.ok(shortPacket.includes(`[Full agent packet](${staging}/llms-full.txt)`), "llms.txt full-packet link");
+  assert.ok(shortPacket.includes(`[Hosted MCP](${staging}/mcp)`), "llms.txt MCP link");
+  assert.ok(shortPacket.includes(`[Machine-readable card](${staging}/.well-known/agent.json)`), "llms.txt card link");
+  assert.ok(!shortPacket.includes(ROOM_ORIGIN), "llms.txt must not link the production origin");
+  const fullPacket = llmsFullTxt(staging);
+  assert.ok(fullPacket.includes(`[Short agent packet](${staging}/llms.txt)`), "llms-full.txt short-packet link");
+  assert.ok(fullPacket.includes(`[Hosted MCP](${staging}/mcp)`), "llms-full.txt MCP link");
+  assert.ok(fullPacket.includes(`[Machine-readable card](${staging}/.well-known/agent.json)`), "llms-full.txt card link");
+  assert.ok(!fullPacket.includes(ROOM_ORIGIN), "llms-full.txt must not link the production origin");
+  // Default and canonical-origin packets are byte-identical to before.
+  assert.ok(llmsTxt().includes(`[Full agent packet](${ROOM_ORIGIN}/llms-full.txt)`));
+  assert.equal(llmsTxt(ROOM_ORIGIN), llmsTxt());
+  assert.equal(llmsFullTxt(ROOM_ORIGIN), llmsFullTxt());
+  // Invalid origins fall back to the canonical packet instead of
+  // producing links to a non-origin string.
+  assert.equal(llmsTxt("not a url"), llmsTxt());
+  assert.equal(llmsTxt("https://example.test/some/path"), llmsTxt());
+  // discoveryDoc threads the serving origin for the packets and their
+  // aliases only; other docs keep their frozen identity.
+  assert.equal(discoveryDoc("/llms.txt", staging).body, llmsTxt(staging));
+  assert.equal(discoveryDoc("/room/llms.txt", staging).body, llmsTxt(staging));
+  assert.equal(discoveryDoc("/llms-full.txt", staging).body, llmsFullTxt(staging));
+  assert.equal(discoveryDoc("/llms.txt").body, llmsTxt());
+  assert.equal(discoveryDoc("/.well-known/agent.json", staging), discoveryDoc("/.well-known/agent.json"));
+  // Serve path: this server was created with no configured origin, so its
+  // packets describe its own loopback origin, not production.
+  const base = await serve(t);
+  const served = await (await fetch(`${base}/llms.txt`)).text();
+  assert.equal(served, llmsTxt(base));
+  assert.ok(served.includes(`[Hosted MCP](${base}/mcp)`));
+  const servedFull = await (await fetch(`${base}/llms-full.txt`)).text();
+  assert.equal(servedFull, llmsFullTxt(base));
 });
 
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
