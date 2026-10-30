@@ -183,3 +183,42 @@ test('mixed native reads require every category while full grants read the real 
   assert.equal(pack.body.result.structuredContent.room.slug, 'commons');
   assert.equal(pack.body.result.structuredContent.orientation.purpose, f.store.room('commons').state.room.charter?.purpose ?? f.store.room('commons').state.room.purpose ?? '');
 });
+
+test('native text schemas accept complete prose under substring and whole-string validators', async t => {
+  const f = await setup(t);
+  const listed = await f.rpc('tools/list');
+  const tools = listed.body.result.tools;
+  assert.equal(tools.length, 22, 'audit every advertised native tool');
+  const fields = [];
+  const inspect = (schema, path) => {
+    if (typeof schema?.pattern === 'string') {
+      assert.ok(schema.pattern.startsWith('^') && schema.pattern.endsWith('$'), `${path}: portable anchored pattern`);
+      if (schema.pattern.includes('\\S')) fields.push({ path, schema });
+    }
+    for (const [key, value] of Object.entries(schema?.properties ?? {})) inspect(value, `${path}.${key}`);
+    if (schema?.items) inspect(schema.items, `${path}[]`);
+  };
+  for (const tool of tools) inspect(tool.inputSchema, tool.name);
+  for (const path of ['room_submit_text_result.summary', 'room_submit_text_result.nextAction',
+    'room_submit_text_result.checksClaimed[]', 'room_reply.body']) {
+    assert.ok(fields.some(field => field.path === path), `missing audited field ${path}`);
+  }
+  // Model the reported connector whole-string behavior, without claiming access
+  // to its private validator. JSON Schema's ordinary substring behavior must
+  // agree for multiline prose, Unicode, and leading/trailing whitespace.
+  const submission = { workItemId: 'schema-validation-only', summary: 'Concrete review', nextAction: 'Review the evidence',
+    evidenceMessageId: 'schema-message', evidenceMessageEventId: 'schema-event', evidenceVersion: 'sha256:' + 'a'.repeat(64),
+    previousCompletionEventId: null, producerId: 'friend-dot' };
+  for (const invalid of [{ summary: ' \n' }, { nextAction: '\t' }, { checksClaimed: [' '] }, { summary: 'x'.repeat(4097) }]) {
+    const denied = await f.rpc('tools/call', { name: 'room_submit_text_result', arguments: { ...submission, ...invalid } });
+    assert.equal(denied.body.error?.code, -32602, 'server still rejects blank/oversized input before mutation');
+  }
+  for (const { path, schema } of fields) {
+    const pattern = new RegExp(schema.pattern, 'u');
+    for (const value of ['A useful next step', '  Read the brief.\nThen review the result.  ', 'Café 🪷', 'x', '\n x\n']) {
+      assert.equal(pattern.test(value), true, `${path}: ordinary validation`);
+      assert.equal(pattern.exec(value)?.[0], value, `${path}: complete-string validation`);
+    }
+    for (const value of ['', ' ', '\t\r\n', '\u00a0']) assert.equal(pattern.test(value), false, `${path}: refuse blank input`);
+  }
+});

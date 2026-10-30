@@ -7,7 +7,8 @@ import { agentErrorAx } from "../src/agent-error.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
-const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
+// Match the complete string for hosts that full-match JSON Schema patterns.
+const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const bool = { type: "boolean" }, revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const object = (properties, required = Object.keys(properties)) => ({ type: "object", properties, required, additionalProperties: false });
 const common = { requestId: { ...id, description: "Optional stable business operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; keep the returned ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
