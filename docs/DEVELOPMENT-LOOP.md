@@ -196,3 +196,35 @@ retries still require operation-specific idempotency. These are design reference
 not added dependencies. Existing Project Room contracts remain the implementation
 starting point; the wider resource-network direction remains conditional in
 `FOCUSED-DELIVERY-PLAN.md`.
+
+### Connectivity: no required VPN
+
+Tailscale, SSH access and shared Wi-Fi are not prerequisites for the Room request
+path. The local runtime makes outbound authenticated connections to Room and
+returns results through the existing journal. A direct machine link is optional.
+The next connectivity increment should be authorized, resumable artifact transfer
+with digest verification, explicit size/retention limits and reconnect recovery;
+keep binary content outside room event snapshots and link bounded evidence.
+Do not assume retained historical transfer code is deployed or maintained.
+
+Prefer the existing Room HTTPS path for small commands/results. Evaluate an
+HTTP resumable-transfer standard such as [tus](https://tus.io/faq) for large
+artifacts before adding a custom protocol. Direct WebRTC data channels can be a
+later throughput optimization, but [WebRTC's own documentation](https://webrtc.org/getting-started/turn-server)
+explains why relay service is still needed when direct sockets are unavailable.
+Our own hosted or self-hosted relay removes a VPN-provider dependency; it does
+not remove bandwidth cost, authentication, availability or abuse controls.
+
+Qualify with VPN disabled, machines on different networks, interrupted transfer,
+reconnection and revoked membership. Neither successful same-LAN ping nor one
+HTTP result proves all those cases. Screen control, arbitrary port forwarding
+and filesystem access remain separate explicitly enabled capabilities, not
+implicit consequences of joining a room.
+
+Observed30October: an actual Muse request from the peer laptop ran two pinned
+local suites and returned through the existing request journal. The subsequent
+same-request delivery with Tailscale disabled returned `hostExecuted:false` and
+used one saved attempt. Initial execution preceded VPN disable; this qualifies
+VPN-independent result recovery, not a new VPN-off execution or artifact relay.
+See the private maintainer evidence record for exact receipts; no credentials or
+machine-local paths belong in shared documentation.
