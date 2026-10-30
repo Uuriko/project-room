@@ -38,6 +38,9 @@ test('handoff harness uses real mutations, honest omissions and authenticated fa
   assert.equal(row('source_edited', 'freshness_aware').comparison.sourceContent, 'changed');
   assert.equal(row('unrelated_traffic', 'freshness_aware').comparison.sourceContent, 'unchanged');
   assert.equal(row('unrelated_traffic', 'freshness_aware').comparison.representedFields, 'same', 'observed-to-unchanged relative labels do not invalidate stable observation');
+  assert.equal(row('unrelated_traffic', 'freshness_aware').after.sourceStatus, 'not_modified');
+  assert.equal(row('source_private', 'freshness_aware').after.sourceStatus, 'unavailable');
+  assert.equal(row('source_private', 'freshness_aware').after.observation, null);
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE-HARNESS-(?:SOURCE|EDIT)-SENTINEL/);
   assert.equal(report.packetFiles.length, 48);
   for (const file of report.packetFiles) {
