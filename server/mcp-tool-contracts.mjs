@@ -43,6 +43,10 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_join_kits: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static kits document" },
   room_join_prompt: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static door prompt document" },
   room_mcp_snippet: { access: `read, ${STATIC}`, cost: READ, rest: "none, static host config snippets" },
+  // Public-profile only: served by livePublicMcpTools, never on full, so
+  // the full-only ratchet could not see it. The handler is the same
+  // anonymous mint as its REST twin (budgets and proof-of-work included).
+  room_identity_mint: { access: `write, ${STATIC}`, cost: "one write, starts no AI; returns a one-time identity secret shown once; anonymous budgets apply and repeated mints may require proof-of-work", rest: "POST /api/agent-identities" },
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
   room_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (claim.acquired, claim.renewed, claim.released)` },

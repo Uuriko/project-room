@@ -3,11 +3,15 @@
 // description. The REST twin must agree with the parity table in
 // tests/mcp-core-rest-parity.test.js. Core and lean keep short blurbs; their
 // byte budget is pinned in tests/mcp-core-profile.test.js.
-// KNOWN_UNCOVERED is a ratchet: a new full-profile tool must ship with a
-// contract, and a tool that gains one must leave this list (AUX-08b).
+// KNOWN_UNCOVERED is a ratchet: a new tool on ANY served profile must
+// ship with a contract, and a tool that gains one must leave this list
+// (AUX-08b). The ratchet used to enumerate only the full profile, which
+// made public-profile-only tools structurally invisible to it —
+// room_identity_mint (anonymous identity minting, served only by
+// livePublicMcpTools) escaped both this table and the ratchet that way.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { listedMcpTools } from "../server/mcp-discovery.mjs";
+import { listedMcpTools, liveEnrolledMcpTools, livePublicMcpTools } from "../server/mcp-discovery.mjs";
 import { MCP_TOOL_CONTRACTS, mcpToolContractLine, withMcpToolContract } from "../server/mcp-tool-contracts.mjs";
 import { CORE_REST_TWINS, CORE_REST_EXEMPT } from "./mcp-core-rest-parity.test.js";
 import { GUEST_WRITABLE_TOOLS, T1_WRITABLE_TOOLS } from "../server/capability-visibility.mjs";
@@ -49,12 +53,34 @@ test("full: every front-door tool on core and lean has a contract", () => {
   assert.deepEqual([...front].filter(name => !MCP_TOOL_CONTRACTS[name]), []);
 });
 
-test("ratchet: no new full-profile tool without a contract, no stale exemption", () => {
-  const names = listedMcpTools("full").map(tool => tool.name);
+// Every verb the server serves, on any profile. The public profile is
+// the one the full-only ratchet could not see: it carries the join
+// tools, the anonymous public-work tools and room_identity_mint.
+const allServedNames = () => [...new Set([
+  ...listedMcpTools("full"),
+  ...listedMcpTools("core"),
+  ...listedMcpTools("lean"),
+  ...livePublicMcpTools(),
+  ...liveEnrolledMcpTools()
+].map(tool => tool.name))];
+
+test("ratchet: no new tool on any served profile without a contract, no stale exemption", () => {
+  const names = allServedNames();
   const missing = names.filter(name => !MCP_TOOL_CONTRACTS[name] && !KNOWN_UNCOVERED.has(name));
   assert.deepEqual(missing, [], "new tools need an entry in server/mcp-tool-contracts.mjs");
   const stale = [...KNOWN_UNCOVERED].filter(name => MCP_TOOL_CONTRACTS[name] || !names.includes(name));
   assert.deepEqual(stale, [], "drop these from KNOWN_UNCOVERED");
+});
+
+test("public: room_identity_mint carries a contract naming its HTTP mint twin", () => {
+  const pub = livePublicMcpTools().map(tool => tool.name);
+  assert.ok(pub.includes("room_identity_mint"), "mint is served on the public profile");
+  assert.ok(!listedMcpTools("full").map(tool => tool.name).includes("room_identity_mint"),
+    "mint is not on the full profile — the reason the full-only ratchet missed it");
+  const contract = MCP_TOOL_CONTRACTS.room_identity_mint;
+  assert.ok(contract, "room_identity_mint needs an entry in server/mcp-tool-contracts.mjs");
+  assert.ok(contract.access.startsWith("write"), "mint is a write (readOnlyHint=false)");
+  assert.equal(contract.rest, "POST /api/agent-identities");
 });
 
 test("core and lean stay short: no contract line", () => {
@@ -86,7 +112,7 @@ test("REST twin agrees with the parity table", () => {
 });
 
 test("no stale contracts and the line is added once", () => {
-  const served = new Set([...listedMcpTools("full"), ...listedMcpTools("lean")].map(tool => tool.name));
+  const served = new Set(allServedNames());
   for (const name of Object.keys(MCP_TOOL_CONTRACTS)) assert.ok(served.has(name), `${name} is not served; drop its contract`);
   const once = withMcpToolContract("room_post_message", withMcpToolContract("room_post_message", "Post."));
   assert.equal(once.split("Access:").length, 2);
