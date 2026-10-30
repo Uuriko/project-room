@@ -96,7 +96,8 @@ test('normalized-tail mode removes settled history from the rewritten blob and k
 test('DM and channel-copy records agree after live writes; access revocation is fresh',t=>{
  const f=setup(t);f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
  const reader=f.store.issueAccessKey('commons','reader');f.certify();f.post('root','Public root.');
- f.post('direct','Private note.',{toMemberId:'owner'});f.post('copy','Reply with public copy.',{replyToId:'root',alsoSendToChannel:true});
+ f.command('member.added',{memberId:'ada',displayName:'Ada',kind:'human',permissions:[]});
+ f.post('direct','Private note.',{toMemberId:'ada'});f.post('copy','Reply with public copy.',{replyToId:'root',alsoSendToChannel:true});
  const page=f.compare({},reader);assert.equal(page.messages.some(m=>m.id==='direct'),false);assert.ok(page.messages.some(m=>m.id==='copy:channel'));
  assert.equal(f.store.checkMessagesParity().ok,true);
  const member=f.store.room('commons').state.members.reader;
@@ -235,7 +236,8 @@ test('public feed, squad channels and receipt deduplication survive archival and
  const { createSquad, getSquad } = await import('../server/squads.mjs');
  const { postReceiptCard } = await import('../server/receipt-cards.mjs');
  const f=setup(t);f.store.roomFlood={consume(){}};
- f.post('channel','Public channel.');f.post('private','Hidden private wording.',{toMemberId:'owner'});
+ f.command('member.added',{memberId:'ada',displayName:'Ada',kind:'human',permissions:[]});
+ f.post('channel','Public channel.');f.post('private','Hidden private wording.',{toMemberId:'ada'});
  const item={id:'closed-item',title:'Finished task',state:'done',deliveryMode:'result',owner:'owner'};
  f.store.transaction(()=>postReceiptCard(f.store,'commons',item,Date.now()));
  for(let i=0;i<5;i++)f.post(`tail-${i}`,`Tail ${i}.`);
@@ -263,7 +265,8 @@ test('public feed, squad channels and receipt deduplication survive archival and
 test('work and decision commands resolve archived source entities without room replay',t=>{
  const f=setup(t);f.store.roomFlood={consume(){}};
  f.post('work-source','Use this as the work brief.');f.post('decision-source','Use the pilot design.');
- f.post('private-source','Private rationale.',{toMemberId:'owner'});f.post('tail','Settled tail.');
+ f.command('member.added',{memberId:'ada',displayName:'Ada',kind:'human',permissions:[]});
+ f.post('private-source','Private rationale.',{toMemberId:'ada'});f.post('tail','Settled tail.');
  f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});f.store.messageProjectionWindow=2;
  const replay=f.store._replayRoom;f.store._replayRoom=()=>{throw new Error('Unrelated history replayed');};
  assert.throws(()=>f.command('decision.recorded',{sourceMessageId:'private-source',statement:'Do not publish.'}),/public room message/);
@@ -470,8 +473,9 @@ test('failed replay publication rolls back serving rows and staging progress tog
 test('archive fallback pages preserve ordering and private-message filtering during replay',t=>{
  const f=setup(t,true,2,true);f.store.roomFlood={consume(){}};
  f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ f.command('member.added',{memberId:'ada',displayName:'Ada',kind:'human',permissions:[]});
  const reader=f.store.issueAccessKey('commons','reader');f.certify();
- for(let i=0;i<12;i++)f.post(`page-${i}`,`Page ${i}.`,i%3===0?{toMemberId:'owner'}:{});
+ for(let i=0;i<12;i++)f.post(`page-${i}`,`Page ${i}.`,i%3===0?{toMemberId:'ada'}:{});
  f.command('message.edited',{messageId:'page-1',body:'Old retained edit.',expectedMessageRevision:0});
  const walk=()=>{
   const pages=[];let cursor=null;
@@ -507,8 +511,9 @@ test('deletion scrubs a staged replay snapshot and cannot resurrect on publicati
 test('archive conversation filters private bodies before decoding them',t=>{
  const f=setup(t,true,2,true);f.store.roomFlood={consume(){}};
  f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ f.command('member.added',{memberId:'ada',displayName:'Ada',kind:'human',permissions:[]});
  const reader=f.store.issueAccessKey('commons','reader');f.certify();
- f.post('hidden-archive','Private.',{toMemberId:'owner'});
+ f.post('hidden-archive','Private.',{toMemberId:'ada'});
  for(let i=0;i<8;i++)f.post(`visible-${i}`,`Public ${i}.`);
  f.store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
  f.store.db.prepare("UPDATE messages SET record_json='{invalid' WHERE message_id='hidden-archive'").run();

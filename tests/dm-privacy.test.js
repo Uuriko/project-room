@@ -86,7 +86,9 @@ test("search: participants find the DM, non-participants and the owner do not", 
   for (const [label, key] of [["producer", f.keys.producer], ["reviewer", f.keys.reviewer]]) {
     const result = await search(key, DM_BODY);
     assert.equal(result.messages.length, 1, `${label} should find the DM`);
-    assert.equal(result.messages[0].body, DM_BODY);
+    assert.equal(result.messages[0].id, "dm-1");
+    assert.equal(result.messages[0].snippet, DM_BODY);
+    assert.equal(Object.hasOwn(result.messages[0], "body"), false);
   }
   for (const [label, key] of [["guest", f.keys.guest], ["owner", f.keys.owner]]) {
     const result = await search(key, DM_BODY);

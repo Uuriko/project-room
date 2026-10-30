@@ -194,6 +194,7 @@ optional.push("server/attachment-schema.mjs");
 optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
 optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)
 optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
+optional.push("server/text-policy.mjs"); // invisible-character and search-fold checks (imported by server/attachments.mjs and server/store.mjs)
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/wake-queue-limits.mjs"); // wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf, no store import)
 optional.push("src/service-origin.js"); // shared client/server URL routing without discovery dependencies

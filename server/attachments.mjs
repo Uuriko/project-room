@@ -2,9 +2,9 @@
 // metadata (filename, size, MIME type), blocks dangerous extensions,
 // tracks download state per attachment (pending → downloading → done or
 // failed), and enforces a per-message size cap. All state is
-// caller-owned (a Map); the module is pure and dependency-free. Frozen
-// outputs; malformed inputs throw AttachmentError. Actual byte fetching
-// and storage wiring is a later slice.
+// caller-owned (a Map). Frozen outputs; malformed inputs throw
+// AttachmentError. Actual byte fetching and storage wiring is a later slice.
+import { invisibleCharIssue } from "./text-policy.mjs";
 const BLOCKED_EXTENSIONS = Object.freeze(["exe", "bat", "cmd", "com", "scr", "ps1", "vbs", "jar", "msi"]);
 const DEFAULTS = Object.freeze({ maxFileBytes: 25 * 1024 * 1024, maxMessageBytes: 100 * 1024 * 1024 });
 class AttachmentError extends Error { constructor(code, message) { super(message); this.name = "AttachmentError"; this.code = code; } }
@@ -25,8 +25,12 @@ const extensionOf = filename => {
 export function validateAttachment({ filename, sizeBytes, mimeType }, { maxFileBytes } = {}) {
   check(typeof filename === "string" && filename.length > 0 && filename.length <= 255,
     "filename must be 1-255 chars");
-  check(!filename.includes("/") && !filename.includes("\\") && !filename.includes("\0"),
+  check(!filename.includes("/") && !filename.includes("\\"),
     "filename must not contain path separators");
+  check(!/[\u0000-\u001F]/.test(filename),
+    "filename must not contain control characters");
+  const invisible = invisibleCharIssue(filename);
+  check(!invisible, `filename must not contain ${invisible}`);
   check(Number.isInteger(sizeBytes) && sizeBytes >= 0, "sizeBytes must be a non-negative integer");
   check(typeof mimeType === "string" && mimeType.length > 0, "mimeType must be a non-empty string");
   const max = maxFileBytes ?? DEFAULTS.maxFileBytes;

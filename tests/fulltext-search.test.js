@@ -254,3 +254,39 @@ test("a capped search page keeps the newest matches, oldest first", async t => {
  assert.equal(page.total, 12);
  assert.deepEqual(page.messages.map(m => m.id), ids.slice(-5));
 });
+
+test("search folds café and İstanbul, and returns a snippet instead of the body", async t => {
+  const { ownerKey, get, post } = await serve(t);
+  const decomposed = post("Order a cafe\u0301 please");
+  const istanbul = post("Meet in İstanbul tomorrow");
+  const plain = post("istanbul is the city");
+  const long = `START-${"x".repeat(200)}NEEDLE${"y".repeat(200)}-END`;
+  const longId = post(long);
+  const search = async (q) => {
+    const res = await get(`/api/rooms/commons/search?q=${encodeURIComponent(q)}&kind=messages`, ownerKey);
+    assert.equal(res.status, 200, q);
+    return res.json();
+  };
+  for (const q of ["café", "cafe\u0301", "CAFÉ"]) {
+    assert.deepEqual((await search(q)).messages.map(hit => hit.id), [decomposed], q);
+  }
+  for (const q of ["istanbul", "İstanbul", "Istanbul"]) {
+    const ids = (await search(q)).messages.map(hit => hit.id).sort();
+    assert.deepEqual(ids, [istanbul, plain].sort(), q);
+  }
+  const folded = await search("İstanbul");
+  const city = folded.messages.find(hit => hit.id === istanbul);
+  assert.equal(city.snippet.includes("İstanbul"), true);
+  assert.equal(Object.hasOwn(city, "body"), false);
+  const hit = (await search("NEEDLE")).messages.find(row => row.id === longId);
+  assert.equal(hit.snippet.includes("NEEDLE"), true);
+  assert.equal(hit.snippet.length <= 160, true);
+  assert.equal(hit.snippet.includes("START-"), false);
+  assert.equal(hit.snippet.includes("-END"), false);
+  assert.equal(Object.hasOwn(hit, "body"), false);
+  const thread = await (await get(`/api/rooms/commons/messages/${longId}/thread`, ownerKey)).json();
+  assert.equal(thread.thread.body, long);
+  const dotted = await get(`/api/rooms/commons/search?q=${encodeURIComponent("\u0307")}&kind=messages`, ownerKey);
+  assert.equal(dotted.status, 422);
+  assert.equal((await dotted.json()).error.code, "invalid_search");
+});

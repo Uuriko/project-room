@@ -139,13 +139,15 @@ test("room_read_messages marks other members' text and leaves the caller's own u
   const found = await searchResponse.json();
   assert.equal(found.contentTrust, CONTENT_TRUST);
   assert.equal(found.messages.length, 1);
-  assert.equal(found.messages[0].body, peerBody);
+  assert.equal(found.messages[0].snippet, peerBody);
+  assert.equal(Object.hasOwn(found.messages[0], "body"), false);
   assert.equal(found.messages[0].untrusted, true);
   const ownSearch = await fetch(`${origin}/api/rooms/${roomId}/search?q=${encodeURIComponent("owner-authored")}`, {
     headers: { Authorization: `Bearer ${owner.secret}` }
   });
   const own = await ownSearch.json();
-  assert.equal(own.messages[0].body, ownerBody);
+  assert.equal(own.messages[0].snippet, ownerBody);
+  assert.equal(Object.hasOwn(own.messages[0], "body"), false);
   assert.equal(Object.hasOwn(own.messages[0], "untrusted"), false);
 });
 
