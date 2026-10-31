@@ -2173,6 +2173,13 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
+      // EA-005: the deadline is the verdict deadline. Past it, acceptance
+      // is refused and the keeper's free-miss (unverified) settlement is
+      // the only outcome — whether the late accept or a keeper pass runs
+      // first can no longer decide between payment and refund. Same
+      // half-open gate as claimBounty/submitWork (keeper settles at
+      // now >= deadlineMs).
+      check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the bounty deadline passed");
       check(this._mayApprove(bounty, lane), "not_authorized", this._acceptDenialMessage(bounty));
       check(lane !== bounty.claimant, "not_authorized", "acceptance must come from an identity distinct from the claimant");
       check(verifierAttestation !== null && typeof verifierAttestation === "object" && !Array.isArray(verifierAttestation)
@@ -2283,6 +2290,14 @@ export class BountyEscrow {
             : "only the poster may reject a human-approved bounty");
       check(lane !== bounty.claimant, "not_authorized",
         "rejection must come from an identity distinct from the claimant");
+      // EA2-003: the same deadline gate as acceptWork (EA-005), placed
+      // BEFORE the idempotent replay below. Past the deadline a reject is
+      // refused outright: it can neither convert the keeper's unverified
+      // settlement into a "failed" one (bond forfeited + flake strike for
+      // the reviewer's own lateness) nor silently replay that unverified
+      // settlement as if it were the verdict asked for. The keeper's
+      // settlement stands undisputed.
+      check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the bounty deadline passed");
       const settled = this._settledVerdict(bounty);
       if (settled) {
         return { bounty: this._getBounty(roomId, bountyId), settlement: settled, alreadySettled: true,
