@@ -540,7 +540,10 @@ export class AgentInvites {
         }
         throw error;
       }
-      const identity = existingIdentity ?? this.store.identities.create(name);
+      // EA-011: a redemption that creates a new identity spends the global
+      // daily mint budget and records mint provenance (inviteRedemption);
+      // an existing identity re-joining creates nothing and spends nothing.
+      const identity = existingIdentity ?? this.store.identities.create(name, { inviteRedemption: true });
       const relinked = existingLinkOutcome(this, row, identity.identityId, { requestId, requestedName: name });
       if (relinked) return relinked;
       const memberId = identity.identityId;
