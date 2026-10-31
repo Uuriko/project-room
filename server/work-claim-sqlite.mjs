@@ -235,7 +235,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     *inboxCandidates(roomId, ownerId, { review = false } = {}) {
       let after = 0;
       const query = `SELECT rowid AS ordinal, ${inboxProjection} AS metadata,
-        json_extract(item_json, '$.v') AS version,
+        CASE WHEN json_type(item_json, '$.v') IN ('integer','real') THEN json_extract(item_json, '$.v') END AS version,
         json_extract(item_json, '$.kind') AS kind
         FROM work_claims WHERE room_id=? AND rowid>?
         AND ${inboxOwner} ${review ? "!=?" : "=?"}
