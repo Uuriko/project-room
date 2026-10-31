@@ -182,7 +182,8 @@ export class RoomAttachmentBytes {
   // the uploader authored the bound message, so they were a party to it
   // whether it was a DM or a public post.
   visibleTo(row, messages, memberId) {
-    if (row.state === "staged") return row.uploader_id === memberId;
+    // Unbound uploads stay private even after expiry or discard.
+    if (!row.message_id || row.state === "staged") return row.uploader_id === memberId;
     if (row.message_id) {
       const message = messages.get(row.message_id);
       if (!message) return row.uploader_id === memberId;
@@ -206,7 +207,8 @@ export class RoomAttachmentBytes {
       this.expire(roomId, this.store.now());
       const messages = this.messageIndex(roomId);
       const memberId = auth.member.id;
-      const files = this.db.prepare(`SELECT * FROM room_attachments
+      const files = this.db.prepare(`SELECT id, filename, media_type, byte_length, sha256,
+        state, uploader_id, created_at, expires_at, message_id FROM room_attachments
         WHERE room_id=? AND state IN ('staged','committed')
         ORDER BY created_at DESC, id`).all(roomId)
         .filter(row => this.visibleTo(row, messages, memberId))
@@ -222,12 +224,12 @@ export class RoomAttachmentBytes {
       this.expire(roomId, this.store.now());
       const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
       if (!row) fail(404, "attachment_not_found", "Attachment not found");
-      if ((row.state !== "staged" && row.state !== "committed") || row.bytes == null) {
-        fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
-      }
       // Invisible files 404 (not 403) so the id does not leak existence.
       if (!this.visibleTo(row, this.messageIndex(roomId), auth.member.id)) {
         fail(404, "attachment_not_found", "Attachment not found");
+      }
+      if ((row.state !== "staged" && row.state !== "committed") || row.bytes == null) {
+        fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
       }
       return {
         roomId,
