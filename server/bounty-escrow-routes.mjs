@@ -28,6 +28,7 @@
 // Idempotency: every mutating route accepts an idempotency key via the
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
+import { bountyNewWorkEnabled, BOUNTY_NEW_WORK_ROUTES, BOUNTIES_PAUSED_CODE, BOUNTIES_PAUSED_MESSAGE } from "./bounty-flag.mjs";
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor, ACCEPT_ATTESTATION_CONTRACT } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
@@ -185,6 +186,8 @@ export function publishBountyEvent(store, roomId, event) {
 
 export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null }) {
   const { json, reject, body } = helpers;
+  if (req.method === "POST" && BOUNTY_NEW_WORK_ROUTES.has(escrowRoute) && !bountyNewWorkEnabled())
+    reject(403, BOUNTIES_PAUSED_CODE, BOUNTIES_PAUSED_MESSAGE);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} bounty ${escrowRoute}`, fail: reject });

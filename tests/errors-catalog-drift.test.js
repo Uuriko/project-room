@@ -62,6 +62,7 @@ function liveCodes() {
 // against the live definitions. If one of these definitions changes, this
 // test's list must change too, which is the point.
 const VARIABLE_CODES = new Map([
+  ["bounties_paused", /BOUNTIES_PAUSED_CODE = "bounties_paused"/],
   ["trust_off", /TRUST_OFF_CODE = "trust_off"/],                    // src/events.js
   ["rate_limited", /limitCode = "rate_limited"/],                    // server/agent-identities.mjs default
   ["invalid_signing_input", /"invalid_signing_input"/],              // agent-plugin-routes signingCode
@@ -134,7 +135,7 @@ test("variable-passed codes resolve to live definitions and are catalogued", () 
   const pluginRoutes = readFileSync(join(SERVER, "agent-plugin-routes.mjs"), "utf8");
   const passwordAuth = readFileSync(join(ROOT, "src/password-auth.mjs"), "utf8");
   const outsideAgents = readFileSync(join(ROOT, "src/outside-agents.mjs"), "utf8");
-  const sources = { "src/events.js": events, "server/agent-identities.mjs": identities, "server/agent-plugin-routes.mjs": pluginRoutes, "src/password-auth.mjs": passwordAuth, "src/outside-agents.mjs": outsideAgents };
+  const sources = { "server/bounty-flag.mjs": readFileSync(join(SERVER, "bounty-flag.mjs"), "utf8"), "src/events.js": events, "server/agent-identities.mjs": identities, "server/agent-plugin-routes.mjs": pluginRoutes, "src/password-auth.mjs": passwordAuth, "src/outside-agents.mjs": outsideAgents };
   for (const [code, pattern] of VARIABLE_CODES) {
     const found = Object.values(sources).some(t => pattern.test(t));
     assert.ok(found, `variable-passed code '${code}' no longer resolves to a live definition`);

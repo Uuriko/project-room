@@ -1,3 +1,4 @@
+import { initialRoom } from "../server/bootstrap.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -105,9 +106,9 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const coreBody = await listed.json();
   const names = coreBody.result.tools.map(tool => tool.name);
   assert.equal(coreBody.result.profile, "core");
-  assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
-  assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
-  assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
+  // A joined member's core list omits the join helpers (still callable).
+  assert.deepEqual(names, [...CORE_MCP_TOOLS]);
+  assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
   assert.equal(names.includes("room_react"), false);
   assert.equal(names.includes("bond.list"), false);
   for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
@@ -128,8 +129,12 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(access.value.memberId, created.ownerMemberId);
   assert.equal(JSON.stringify(access.body).includes(owner.secret), false);
 
+  const emptyJoin = await rpc(origin, "tools/call", { name: "room_join", arguments: {} }, owner.secret);
+  const emptyJoinBody = await emptyJoin.json();
+  assert.deepEqual(emptyJoinBody.error.data.missing, ["linkToken or inviteCode"], "empty room_join names what to pass");
   const roomsOnly = await call(origin, "room_check_access", {}, owner.secret);
   assert.equal(roomsOnly.value.rooms[0].roomId, created.roomId);
+  assert.equal(roomsOnly.value.archivedRooms, 0, "live rooms are listed, archived ones only counted");
 
   const pack = await call(origin, "room_activation_pack", { roomId: created.roomId }, owner.secret);
   assert.equal(pack.value.room.slug, created.roomId);
@@ -437,4 +442,31 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /webhook_subscribe, webhook_list, and webhook_unsubscribe/);
   assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
+});
+
+test("identity access lists more than 100 rooms within the Worker bind limit and excludes archived seats", async t => {
+  const { origin, store } = await serve(t);
+  const identity = store.identities.create("Many rooms");
+  const live = [];
+  for (let index = 0; index < 102; index++) {
+    const roomId = `many-access-${index}`;
+    store.initialize(initialRoom(roomId));
+    const key = store.issueAccessKey(roomId, "owner");
+    linkWithProof(store, key, roomId, identity, { displayName: "Many rooms", permissions: [] });
+    if (index % 2) store.command(key, roomId, { id: `archive-${index}`, type: "room.archived", data: { reason: "Synthetic test" } });
+    else live.push(roomId);
+  }
+  const prepare = store.db.prepare.bind(store.db);
+  let queries = 0;
+  store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.includes("SELECT id FROM rooms WHERE archived_at IS NOT NULL AND id IN")) return statement;
+    return { all(...args) { queries++; assert.ok(args.length <= 100, "actual Worker SQL binding ceiling"); return statement.all(...args); } };
+  };
+  t.after(() => { store.db.prepare = prepare; });
+  const response = await call(origin, "room_check_access", {}, identity.secret);
+  assert.equal(response.body.error, undefined);
+  assert.equal(response.value.archivedRooms, 51);
+  assert.deepEqual(response.value.rooms.map(r => r.roomId).sort(), live.sort());
+  assert.ok(queries >= 2);
 });
