@@ -105,9 +105,9 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const coreBody = await listed.json();
   const names = coreBody.result.tools.map(tool => tool.name);
   assert.equal(coreBody.result.profile, "core");
-  assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
-  assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
-  assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
+  // A joined member's core list omits the join helpers (still callable).
+  assert.deepEqual(names, [...CORE_MCP_TOOLS]);
+  assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
   assert.equal(names.includes("room_react"), false);
   assert.equal(names.includes("bond.list"), false);
   for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
