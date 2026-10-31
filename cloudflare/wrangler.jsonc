@@ -41,7 +41,7 @@
     "staging": {
       "name": "project-room-stage",
       "workers_dev": true,
-      "preview_urls": false,
+      "preview_urls": true,
       "routes": [],
       "limits": { "cpu_ms": 30000 },
       "durable_objects": { "bindings": [

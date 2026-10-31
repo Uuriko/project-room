@@ -25,6 +25,10 @@ Staging uses the same 30 second CPU budget as the production Durable Object. The
 
 Staging has no cron. Production's minute schedule is unchanged.
 
+## Preview URLs
+
+Preview URLs are enabled for the staging environment only (`env.staging.preview_urls` in `cloudflare/wrangler.jsonc`). Deploying a branch over the staging script with the command above makes that version reachable at its per-version preview URL on the `project-room-stage` script, which is the named one-command path to a reachable branch preview. Production and the public entry door keep `preview_urls` off: a preview of either would serve production Durable Objects from an unreviewed URL. `cloudflare/staging-preview.check.mjs` pins this split and runs in the cloudflare test list.
+
 ## Secrets
 
 Set these on the staging script only, with `pnpm exec wrangler secret put NAME --env staging` from `cloudflare/`. Do not copy production values into the repo, and do not put values in `wrangler.jsonc`. None of them are required for the public smoke checks. Set the ones the rehearsal needs.
