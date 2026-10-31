@@ -109,6 +109,20 @@ test("credential-producing MCP tools and action wrappers keep credentials struct
     await call("room_join", { inviteCode: invite.code }, guest.secret, ["mcpToken.credential"], wrapped);
   }
   await call("room_create", { title: "Wrapped credential audit", purpose: "Test wrapper redaction" }, founder.secret, ["mcpToken.credential"], true);
+  let previousFence;
+  for (const [name, args] of [
+    ["heartbeat_set", { mode: "pull-only" }],
+    ["wake_register", { wakeUrl: "https://example.com/fixture-wake" }],
+    ["wake_clear", {}]
+  ]) {
+    for (const wrapped of [false, true]) {
+      const value = await call(name, { ...args, hostId: "credential-audit-host", listenerLease: true }, founder.secret, ["listener.fencingToken"], wrapped);
+      assert.equal(value.listener.acquired, true, `${name}: lease acquired`);
+      if (previousFence) assert.ok(value.listener.fencingToken === previousFence, `${name}: renewal preserves structured token`);
+      previousFence = value.listener.fencingToken;
+      assert.equal(value.host.mode, name === "wake_register" ? "wakeable" : "pull-only", `${name}: wake behavior preserved`);
+    }
+  }
   for (const { name, content } of outputs) {
     assert.ok(content?.some(part => part.type === "text"), `${name}: text output exists`);
     const text = JSON.stringify(content);
