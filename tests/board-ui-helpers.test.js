@@ -12,7 +12,9 @@ import {
   collapseClaimUpdates,
   boardToolNames,
   canWriteClaims,
+  boardHtml,
 } from "../src/board-ui.js";
+import { createWork, claimWork, updateWork, closeWork } from "../server/work-claims.mjs";
 
 // --- columnOf: board placement is a pure function of claim state ---
 
@@ -66,7 +68,7 @@ test("columnOf never shows an owned-but-unclaimed row in a column", () => {
   assert.equal(columnOf(item, byId([item]), NOW), null);
 });
 
-test("columnOf sends open pull requests to review ahead of their state", () => {
+test("columnOf sends active open pull requests to review", () => {
   const open = claim("open", {
     state: "claimed", owner: "w",
     pullRequest: { url: "https://github.com/o/r/pull/12" },
@@ -77,6 +79,25 @@ test("columnOf sends open pull requests to review ahead of their state", () => {
   });
   assert.equal(columnOf(open, byId([open]), NOW), "review");
   assert.equal(columnOf(decided, byId([decided]), NOW), "claimed");
+});
+
+test("an open PR cannot hide a blocker or revive retired work", () => {
+  const created = createWork({ id: "fix", title: "Fix recovery", pullRequest: { url: "https://github.com/o/r/pull/12" } }, { now: NOW, agentId: "w" });
+  const owned = claimWork(created, "w", { now: NOW });
+  const blocked = updateWork(owned, "w", { state: "blocked", note: "Waiting for callback configuration", now: NOW });
+  assert.equal(columnOf(blocked, byId([blocked]), NOW), "blocked");
+  const html = boardHtml([blocked], null, { id: "reader" }, {}, NOW);
+  const section = html.slice(html.indexOf('<section aria-labelledby="board-col-blocked"'), html.indexOf('<section aria-labelledby="board-col-review"'));
+  assert.match(section, /Fix recovery/);
+  assert.match(section, /https:\/\/github.com\/o\/r\/pull\/12/);
+  const resumed = updateWork(blocked, "w", { state: "in_progress", now: NOW });
+  assert.equal(columnOf(resumed, byId([resumed]), NOW), "review", "resuming restores the existing open-PR review path");
+  for (const verb of ["close", "cancel"]) {
+    const retired = closeWork(blocked, "w", { verb, reason: "No longer needed", now: NOW });
+    assert.equal(retired.state, "closed");
+    assert.equal(columnOf(retired, byId([retired]), NOW), null, verb);
+    assert.ok(!boardHtml([retired], null, { id: "reader" }, {}, NOW).includes('data-claim-id="fix"'), "retired work is absent from active columns");
+  }
 });
 
 test("columnOf maps blocked/claimed/in_progress to their columns", () => {
