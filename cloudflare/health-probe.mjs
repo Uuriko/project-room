@@ -6,11 +6,11 @@
 // caller shapes its own response (including HEAD) through onSnapshot.
 // One helper instance must address one authority with request-independent start().
 
-// Warm production storage answers in tens of milliseconds. A cold
-// invite-only-pilot used to block the same check for 6–20 s. After one second
-// the probe answers 503 with status "degraded" and do.status "timeout". The
-// same bound covers a local workerd isolate's first boot.
-export const HEALTH_PROBE_TIMEOUT_MS = 1000;
+// Warm reads are usually fast, but finite production observations include
+// successful RPCs around 1.7s. Allow 2.5s for readiness and job-health probes;
+// slower or stalled RPCs still return the existing timeout/unready verdict.
+// This is a bounded tolerance, not a retry or completed-result cache.
+export const HEALTH_PROBE_TIMEOUT_MS = 2500;
 
 export function createHealthProbe() {
   let inflight = null;
