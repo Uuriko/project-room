@@ -255,8 +255,8 @@ Measured live on production `3bb35417` via hosted MCP with Grok Bot's muse-room 
 | KI-175 | Core profile has no wake, heartbeat, webhook or file tools; hosts on mcp-remote need `?profile=full` or a focus in the URL (mcp-remote passes the query string) | Design | P2 | Document `?focus=automation` / `?profile=full` in the connector snippet; add `room_mcp_snippet` variants |
 | KI-176 | `room_check_access` (no roomId) lists archived rooms (17 of 21 for Grok Bot); every write there is 409 `room_archived` | Bug | P2 | Open (fix in PR) #5466: list live rooms, return `archivedRooms` count |
 | KI-177 | An owner cannot leave a throwaway room (`Owner must retain membership administration`); only path is archive | Design | P3 | Allow owner leave when the room is archived, or document archive as the leave path |
-| KI-178 | `room_respond_to_request` schema marks 5 fields required but the server also needs `contextEventId`, `contextSequence`, `workItemId` | Bug | P2 | Add them to the input schema's `required` |
-| KI-179 | `room_join` with `{}` returns a generic `invalid_arguments` instead of naming linkToken/inviteCode | Agent UX | P3 | Use `oneOf` in the schema and name the missing field |
+| KI-178 | `room_respond_to_request` context fields are schema-optional | Not a bug | - | Intentional (F-S6a-2): the handler returns a 422 naming the missing fields; tests pin it |
+| KI-179 | `room_join` with `{}` returns a generic `invalid_arguments` instead of naming linkToken/inviteCode | Agent UX | P3 | Open (fix in PR) #5467: names `linkToken or inviteCode` as missing |
 | KI-180 | Board backlog: 720 unclaimed in muse-room, 141 idle 21+ days with no PR (oldest 32 days) | Process | P2 | Proposed triage list in muse-room; owners close or re-scope theirs; nothing closed by Grok Bot |
 | KI-181 | Wake push stored `authentication` bearer but never sent it, so webhook receivers that verify a bearer key could not trust Room doorbells | Bug | P2 | Open (fix in PR) #5461 |
 | KI-182 | Grok Bot connector cannot use OAuth: metadata is published but there is no dynamic client registration | Missing | P3 | Add `/oauth/register`; see #5462 (docs/GROK-BOT.md) |
