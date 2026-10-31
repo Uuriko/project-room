@@ -177,7 +177,7 @@
     "src/work-loops.js": "sha256:93c681edd6cdd34702088505d4f0fdebab289fefa937cfc972b0a546fe0d92eb",
     "src/work-packet.js": "sha256:482a10fa7a6814e63cb04fe3e31bc73d0c2d044c1203be8ef49da32414e85221",
     "src/work-reducers.js": "sha256:98b640f34c8ee4d03123843c7912f16bf1d5efe6e71b64836d55521bcc58456b",
-    "src/work-selectors.js": "sha256:8ae961ad81209a7c12d302cc73028c2111a8055a5a935ea4247b392f96b3bb15",
+    "src/work-selectors.js": "sha256:4f8dce1bdf6558c270c24af64c6b93a3c0e71287c14fc2b27de64e0002d9b13b",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:7a7b57700bea2aa06ee4135d7c1d58d48daca1a5f95fe44910242bd0d7284b52",
     "src/workspace-navigation.js": "sha256:9b36dd33d00c0015b61fdb2aeafdf22583658d9f04c758fca72e56233589aa4a",
