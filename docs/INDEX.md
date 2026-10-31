@@ -9,6 +9,7 @@ for each answer rather than copying its contents.
 | Use Project Room | [User guide](USER-GUIDE.md), [onboarding](HUMAN-ONBOARDING.md) | Supported human journeys and help. |
 | Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md) | Setup, discovery and scoped task context. |
 | Follow a current procedure | [Room procedures](ROOM-PROCEDURES.md), [coordination](ROOM-COORDINATION.md), [deployment lane](DEPLOY-LANE.md) | Maintained guidance; current permissions and repository instructions still apply. |
+| Diagnose and repair approved legacy message shapes | [Operator repair runbook](OPERATOR-LEGACY-MESSAGE-REPAIR.md) | Bounded diagnosis, fresh plans, exact-shape verification and refusal conditions. |
 | Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
 | Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
 | Verify a release | [Latest recorded release evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |

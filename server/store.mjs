@@ -2462,14 +2462,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // drifted from its projection is recorded and the parity sweep moves on
   // to the next room in the same visit; a room that certifies clears any
   // earlier record.
+  reportMessagesParity({ roomId, error }) {
+    if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
+    else this.clearIntegrityFailure("messages_parity", roomId);
+  }
+
   runIntegrityParityStep() {
     // Legacy record shapes would fail parity forever; upgrade them first.
     this.upgradeLegacyMessageShapes();
     const result = runMessagesParityCheck(this, {
-      report: ({ roomId, error }) => {
-        if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
-        else this.clearIntegrityFailure("messages_parity", roomId);
-      }
+      report: result => this.reportMessagesParity(result)
     });
     // A room deleted since its failure was recorded is never picked by the
     // sweep again; its record is moot. The step-scoped record (record id

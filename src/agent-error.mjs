@@ -662,6 +662,14 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   const registeredAx = errorRegistryAx(reasonCode, { httpStatus, message, roomId, workItemId });
   if (registeredAx) return registeredAx;
 
+  if (["invalid_legacy_repair", "repair_plan_required", "repair_bound_exceeded", "repair_not_exact_legacy",
+    "repair_head_changed", "repair_projection_unavailable", "repair_plan_changed", "repair_verification_failed"].includes(reasonCode)) {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This Operator repair was refused. Inspect fresh Operator message parity diagnostics; do not broaden the repair or treat an incomplete check as success.",
+      next: [command("Use GET /api/operator/status with Operator authentication. Review the exact target rooms and limits before requesting a new /api/operator/messages/legacy-repair/plan. Preserve the request ID only when retrying identical execution input.")]
+    };
+  }
   if (reasonCode === "member_required") {
     return {
       status: "action_required", reason: "member_required",
