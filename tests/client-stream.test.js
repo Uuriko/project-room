@@ -167,7 +167,7 @@ function postEvent(stream, sequence) {
   }));
 }
 
-test('a later successful read clears an interrupted open stream without replacing it', async t => {
+test('a later successful read after cooldown clears an interrupted open stream without replacing it', async t => {
   const { client, streams, statuses, emit } = fixture(t);
   client.connect();
   await emit('open', 1);
@@ -178,6 +178,8 @@ test('a later successful read clears an interrupted open stream without replacin
   assert.equal(client.sequence, 7);
   client.fetcher = async () => followUpSnapshot(client, 9);
   postEvent(streams[0], 9);
+  assert.equal(client.flight, null, 'another event cannot bypass the recovery backoff');
+  t.mock.timers.tick(1000);
   await client.flight.promise;
   assert.equal(streams.length, 1, 'the live stream stays open');
   assert.equal(client.sequence, 9);
