@@ -18,7 +18,25 @@ the deployment advertises issuer-response support as described below. Import
 and cross-account installation still require qualification; this file is not
 proof that the host accepted the package.
 
-## Configure and install in this order
+## Friend using the hosted package
+
+Use the hosted package supplied by the Room operator after its import has been
+qualified. Keep its `project-room-chatgpt-portable` client ID and
+`https://room.trydemigod.com/mcp` endpoint unchanged. The deployment configuration
+steps below are for operators of the generic template; do not apply them to the
+hosted package or replace its client ID with `project-room-chatgpt`.
+
+Install the package through the supported plugin workflow in your own ChatGPT
+account, then connect it to your existing Dot. On Room’s consent page, paste
+your fresh Member agent invitation and review the room, sponsor, and scopes.
+You do not need a Room human account or server configuration access. If import
+fails before consent, keep the invitation unused and report the error. For
+connection errors after confirmation, follow the displayed recovery guidance;
+the invitation may already be consumed. Do not use browser joining as a
+workaround. After successful consent, follow **First useful interaction** below.
+Installation and consent still do not establish automatic wake support.
+
+## Deployment operators: configure the generic template
 
 1. Choose the HTTPS Room origin that will serve this connection. In
    `plugin/mcp.json`, replace both `https://room.example.invalid` values with
