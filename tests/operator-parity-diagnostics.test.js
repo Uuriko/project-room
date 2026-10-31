@@ -90,7 +90,7 @@ test('archived rows still require canonical aggregate posting sequence', t => {
 test('row and event limits explicitly refuse partial certification', t => {
   const store = fixture(t); const row = store.db.prepare('SELECT * FROM messages').get();
   const insert = store.db.prepare(`INSERT INTO messages(${Object.keys(row).join(',')}) VALUES(${Object.keys(row).map(() => '?').join(',')})`);
-  for (let n = 0; n < 500; n++) insert.run(...Object.values({ ...row, message_id: `extra-${n}` }));
+  for (let n = 0; n < 2000; n++) insert.run(...Object.values({ ...row, message_id: `extra-${n}` }));
   assert.equal(diagnose(store).reason, 'row_limit');
   store.db.exec("DELETE FROM messages WHERE message_id != 'card'");
   const eventRow = store.db.prepare('SELECT * FROM events LIMIT 1').get();
@@ -135,4 +135,17 @@ for (const marker of [null, {throughSeq: '100', count: 1, retainedIds: ['card']}
   store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.messagesArchive',json(?)) WHERE id='commons'").run(JSON.stringify(marker));
   assert.equal(store.checkMessagesParity({roomId: 'commons'}).ok, true);
   assert.equal(diagnose(store).status, 'clean');
+});
+
+test('2000 rows are fully compared while 2001 rows remain unknown', t => {
+  const store = fixture(t); const row = store.db.prepare('SELECT * FROM messages').get();
+  const insert = store.db.prepare(`INSERT INTO messages(${Object.keys(row).join(',')}) VALUES(${Object.keys(row).map(() => '?').join(',')})`);
+  for (let n = 1; n < 2000; n++) insert.run(...Object.values({ ...row, message_id: `bounded-${n}`, body: '', record_json: '{}', reducer_extras_json: null }));
+  const full = diagnose(store, { now: () => 0 });
+  assert.equal(full.complete, true); assert.equal(full.status, 'mismatch'); assert.equal(full.extraRows, 1999);
+  assert.equal(full.exactLegacyShapeOnly, false);
+  insert.run(...Object.values({ ...row, message_id: 'over-limit', body: '', record_json: '{}', reducer_extras_json: null }));
+  const incomplete = diagnose(store);
+  assert.equal(incomplete.reason, 'row_limit'); assert.equal(incomplete.status, 'unknown');
+  assert.equal(incomplete.complete, false); assert.equal(incomplete.exactLegacyShapeOnly, false);
 });

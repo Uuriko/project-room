@@ -3,7 +3,7 @@
 import { hydrateProjection } from './projection-at-rest.mjs';
 import { affectedMessageIds, archiveMarker, messagesBackfillCaughtUp, messageRowParityFields, messageRecordParityDetail } from './messages-store.mjs';
 
-const LIMITS = Object.freeze({ rooms: 5, rows: 500, events: 2000, bytes: 4 * 1024 * 1024, budgetMs: 150 });
+const LIMITS = Object.freeze({ rooms: 5, rows: 2000, events: 2000, bytes: 4 * 1024 * 1024, budgetMs: 150 });
 const exists = (db, table) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
 
 export function operatorParityDiagnostics(store, { now = () => performance.now(), budgetMs = LIMITS.budgetMs } = {}) {
