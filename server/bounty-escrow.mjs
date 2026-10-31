@@ -2525,6 +2525,19 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
+      // EA2-001: the decider's window ends at the same instant the keeper's
+      // timeout-default begins. The keeper fires strictly after
+      // disputeOpenedMs + DISPUTE_TIMEOUT_MS (_keeperPass, same strict >
+      // condition), so a ruling at or before that instant is still timely
+      // and a ruling after it is refused — never converted — matching how
+      // claimBounty/submitWork/disputeBounty refuse late actions with
+      // invalid_state and leave the mechanical settlement to the keeper.
+      // Without this gate, whichever of decideDispute/finalizeBounty ran
+      // first past the timeout silently decided opposite settlements.
+      check(!(bounty.disputeOpenedMs !== null
+          && this.nowMs() - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS),
+        "invalid_state",
+        "the dispute decision window has closed: the 14-day timeout-default now governs this dispute");
       const dispute = this._disputes.get(bounty.disputeId);
       check(dispute.decider === lane, "not_authorized",
         `only the seated decider may rule (seated decider: ${dispute.decider})`);
