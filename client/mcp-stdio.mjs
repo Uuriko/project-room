@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { connectionDiagnostic } from "./agent-connection.mjs";
 import { validWorkSearchQuery, validProjectMapArguments } from "./room-agent.mjs";
-import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal, normalizeHandoffArguments } from "./work-actions.mjs";
+import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal, normalizeHandoffArguments, textResultInputSchema, validTextResultInput, argumentProblem } from "./work-actions.mjs";
 import { currentAttention } from "./attention-inbox.mjs";
 import { WatchError } from "./watch-journal.mjs";
 import { replyTools, isReplyTool, replyRoute, validReplyArguments, submitReplyAction, replyRefusal } from "./reply-actions.mjs";
@@ -82,7 +82,7 @@ export const roomTools = [
       expiresAt: { type: "string", minLength: 1, maxLength: 64 }
     }, ["workItemId"]),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
-  ...workTools,
+  ...workTools.map(entry => entry.name === "room_submit_text_result" ? { ...entry, inputSchema: textResultInputSchema } : entry),
   ...helpTools,
   ...replyTools
 ];
@@ -105,10 +105,15 @@ export const attentionTools = [
   tool("room_acknowledge_attention", "Acknowledge one exact local notice ID after recording it. Rechecks access and current conditions first; an obsolete ID cannot dismiss its replacement. Retry the same ID if the outcome is unknown. Not proof of understanding, accepted work, completion, human approval or a human read marker. Updates only private local observer state.", schema({ noticeId: id }, ["noticeId"]), false)
 ];
 const wakeAckTool = tool("room_acknowledge_wake", "Acknowledge exact wake signal IDs emitted by this channel only after handling them and confirming any required Room reply. A notification is not a processing receipt. Retain exact IDs on an uncertain response. Does not complete work or grant authority.", schema({ signalIds: { type: "array", items: id, minItems: 1, maxItems: 50, uniqueItems: true } }, ["signalIds"]), false);
+function namedArgumentError(tool, args) {
+  const problem = argumentProblem(tool.inputSchema, args);
+  return problem ? `Invalid arguments for ${tool.name}: ${problem}` : "Unknown tool or invalid arguments";
+}
 function validArguments(tool, args) {
   if (isAssistantTool(tool.name)) return validAssistantArguments(tool.name, args);
   if (isHelpTool(tool.name)) return validHelpArguments(tool.name, args);
   if (isReplyTool(tool.name)) return validReplyArguments(tool.name, args);
+  if (tool.name === "room_submit_text_result") return validTextResultInput(args);
   if (isWorkTool(tool.name)) return validWorkArguments(tool.name, args);
   if (!object(args) || Object.keys(args).some(key => !Object.hasOwn(tool.inputSchema.properties, key))
     || tool.inputSchema.required.some(key => !Object.hasOwn(args, key))) return false;
@@ -292,7 +297,7 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
           const handoff = selected && isWorkTool(selected.name) ? normalizeHandoffArguments(selected.name, args) : null;
           const message = handoff?.error ? `Invalid work action input: ${handoff.error}`
             : selected?.name === "room_post_draft" && object(args) && !validDraftBody(args.body)
-            ? draftBodyHint : "Unknown tool or invalid arguments";
+            ? draftBodyHint : selected ? namedArgumentError(selected, args) : "Unknown tool or invalid arguments";
           await error(requestId, -32602, message); return;
         }
         let value, isError = false;
