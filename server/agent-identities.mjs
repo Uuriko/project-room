@@ -159,9 +159,16 @@ const base64url = bytes => Buffer.from(bytes).toString("base64url");
 // are also budgeted per address, per network, and per rolling day, and a
 // short proof-of-work is required once an address passes its free quota.
 // Anonymous rows that never authenticate, post, or get linked expire, so
-// unused signups do not hold the cap. Invite and in-process mints are not
-// anonymous and do not spend these budgets.
+// unused signups do not hold the cap. In-process mints are not anonymous
+// and do not spend these budgets. Invite-redemption mints are not
+// anonymous either — no per-address/per-network metering and no proof —
+// but since EA-011 they spend the GLOBAL daily budget and record a mint
+// provenance, so the global cap bounds total identity creation.
 export const IDENTITY_LIMIT = 5000;
+// Mint provenance recorded on invite-redemption rows: the prefix plus the
+// identity's own id, so each redemption's provenance is distinct and no
+// redemption shares (or trips) an address/network bucket.
+export const INVITE_REDEMPTION_MINT_PREFIX = "invite-redemption:";
 export const IDENTITY_MINT_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const IDENTITY_ACTIVATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const ANONYMOUS_MINT_DAILY_LIMIT = 200;
@@ -396,8 +403,12 @@ export class AgentIdentities {
   //
   // `anonymous` marks an unauthenticated HTTP mint. Those rows spend the
   // address, network, and daily budgets and stay inactive until the holder
-  // authenticates, posts, or is linked. Invite and in-process mints omit it.
-  create(displayName, { secret: suppliedSecret, anonymous, publicKey: suppliedPublicKey } = {}) {
+  // authenticates, posts, or is linked. In-process mints omit it.
+  // `inviteRedemption` marks an identity created by redeeming an agent
+  // invite code (EA-011): it spends only the global daily budget, records
+  // an invite-redemption mint provenance, and stays active like any other
+  // invite mint (no per-address/per-network metering, no proof).
+  create(displayName, { secret: suppliedSecret, anonymous, inviteRedemption = false, publicKey: suppliedPublicKey } = {}) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
@@ -463,10 +474,15 @@ export class AgentIdentities {
         activatedAt = null;
         mintAddress = buckets.address;
         mintNetwork = buckets.network;
+      } else if (inviteRedemption) {
+        // EA-011: refuse before any row is written when the global daily
+        // mint budget is spent; the provenance is set once the id exists.
+        this.admitInviteRedemption(now);
       }
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
+      if (inviteRedemption && !anonymous) mintAddress = `${INVITE_REDEMPTION_MINT_PREFIX}${identityId}`;
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       ensureIdentitySecretSchema(this.db);
       const verifier = this.verifierColumns(secret);
@@ -528,11 +544,37 @@ export class AgentIdentities {
     if (typeof this.capacityAlert !== "function" || globalDay < CAPACITY_ALERT_USAGE * this.anonymousDailyLimit) return;
     if (this.lastCapacityAlertAt && now - this.lastCapacityAlertAt < CAPACITY_ALERT_EVERY_MS) return;
     this.lastCapacityAlertAt = now;
-    this.capacityAlert(`[capacity] anonymous identity mints ${globalDay}/${this.anonymousDailyLimit} in the rolling 24h (${Math.round(100 * globalDay / this.anonymousDailyLimit)}%); new anonymous mints get 429 at the limit. Invite-code redeems are not counted.`);
+    this.capacityAlert(`[capacity] anonymous identity mints ${globalDay}/${this.anonymousDailyLimit} in the rolling 24h (${Math.round(100 * globalDay / this.anonymousDailyLimit)}%); new anonymous mints get 429 at the limit. Invite-code redeems count toward this same global budget (EA-011).`);
   }
 
   admitAnonymous(name, buckets, proof, requireProof, now, limitCode = "rate_limited") {
     enforceAnonymousMintLimits(this, { name, buckets, proof, requireProof, now, limitCode });
+  }
+
+  // EA-011: the global tier alone, for invite-redemption mints. The
+  // counted rows are exactly the rows the anonymous path counts globally
+  // (mint_address IS NOT NULL — anonymous mints and earlier redemptions),
+  // and the refusal is the counted path's global refusal verbatim: 429
+  // rate_limited, "Identity mint daily budget reached", a Retry-After
+  // header, and retryAfterSeconds/mintBudget detail with scope "global".
+  // No address/network/minute tier and no proof apply here.
+  admitInviteRedemption(now) {
+    const dayStart = now - IDENTITY_MINT_WINDOW_MS;
+    const globalDay = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+    ).get(dayStart).n;
+    this.noteCapacity?.(globalDay, now);
+    if (globalDay < this.anonymousDailyLimit) return;
+    const oldestAt = this.db.prepare(
+      "SELECT min(created_at) AS t FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+    ).get(dayStart).t;
+    const resetAt = oldestAt + IDENTITY_MINT_WINDOW_MS;
+    const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
+    fail(429, "rate_limited", "Identity mint daily budget reached",
+      { "Retry-After": String(retryAfterSeconds) }, {
+        retryAfterSeconds,
+        mintBudget: { scope: "global", limit: this.anonymousDailyLimit, windowMs: IDENTITY_MINT_WINDOW_MS, retryAfterSeconds, resetAt },
+      });
   }
 
   // Keep an anonymous row that still holds a room membership, an invite, or
