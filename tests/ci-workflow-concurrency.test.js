@@ -211,7 +211,7 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
 // Execute the actual workflow shell command with a stand-in npm binary.
 // This catches manual suite lists drifting behind package.json and ensures
 // a failed runtime suite cannot be hidden by later browser success.
-test("required merge-gate jobs stay present and the unit suite is one job", () => {
+test("required merge-gate jobs stay present and the unit suite shards off pull requests", () => {
   const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
   for (const id of ["test", "contract", "lint", "browser", "cloudflare", "friend-agent-e2e"]) {
     assert.ok(workflow.jobs[id], `required check job ${id} is missing`);
@@ -219,11 +219,25 @@ test("required merge-gate jobs stay present and the unit suite is one job", () =
   // The friend's-agent journey is part of the landing gate.
   assert.ok(workflow.jobs.test.needs.includes("friend-agent-e2e"));
   assert.match(workflow.jobs["friend-agent-e2e"].steps.map(step => step.run).filter(Boolean).join("\n"), /qa-friend-agent-e2e\.mjs --local/);
-  assert.equal(workflow.jobs["unit-shards"], undefined);
-  assert.equal(workflow.jobs.unit.strategy, undefined);
-  const runs = workflow.jobs.unit.steps.map(step => step.run).filter(Boolean).join("\n");
-  assert.match(runs, /unit-ci\.mjs --all/);
+  // Pull requests run one affected job; push, merge_group, schedule and
+  // dispatch run three shards. `unit` stays the required aggregator.
+  const unitRun = workflow.jobs["unit-run"];
+  assert.ok(unitRun, "unit-run job is missing");
+  const matrix = String(unitRun.strategy.matrix.shard);
+  assert.match(matrix, /github\.event_name == 'pull_request' && '\["affected"\]'/);
+  assert.match(matrix, /"1\/3","2\/3","3\/3"/);
+  assert.equal(unitRun.strategy["fail-fast"], false);
+  const runs = unitRun.steps.map(step => step.run).filter(Boolean).join("\n");
+  assert.match(runs, /unit-ci\.mjs --shard="\$UNIT_SHARD"/);
   assert.match(runs, /unit-ci\.mjs --affected/);
+  assert.doesNotMatch(runs, /unit-ci\.mjs --all/);
+  const unit = workflow.jobs.unit;
+  assert.deepEqual(unit.needs, ["changes", "unit-run"]);
+  assert.equal(unit.strategy, undefined);
+  assert.equal(unit.if, unitRun.if);
+  const gate = unit.steps.map(step => step.run).filter(Boolean).join("\n");
+  assert.match(gate, /unit-shards-check\.mjs unit-receipts/);
+  assert.match(gate, /UNIT_RUN_RESULT" = "success"/);
   assert.equal(String(workflow.jobs["browser-shards"].if).includes("github.event_name != 'push'"), false);
   const safety = workflow.jobs["safety-net"];
   assert.ok(safety, "safety-net job is missing");
