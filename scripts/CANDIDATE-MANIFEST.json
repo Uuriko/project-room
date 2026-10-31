@@ -154,7 +154,7 @@
     "src/result-reader.js": "sha256:dfadca74501fcfb8bc03cebb93834673523eb73cdca96534d16293cf21e28d8f",
     "src/return-brief.js": "sha256:bf1c2775a5347645110b87a1d8ef22810950089c3616e7b4467e79788bdd4114",
     "src/room-administration.js": "sha256:27e9d03dfaef3247fc02bec3a98db79db18c8fe53bef026fd94f7b38ee1c0fd1",
-    "src/room-charter.js": "sha256:594e8a1486774d56cd197349996e6225ce9a435918641717c8794c0c2ee21d64",
+    "src/room-charter.js": "sha256:509fc75ef4db8b22993e1cc79bf5a542fed135bd0ae2c1467d185bbc6a456922",
     "src/room-deep-link.js": "sha256:fc111ee798a43ee05991c147fa1b4cf0b743c5cc5530a8357ff8770146ea98c3",
     "src/room-instructions.js": "sha256:f44a40e9edcf346e1804bdbd87dd7529d51b16e212a74f1d74d7aa79ea91901c",
     "src/room-layout.js": "sha256:dfa9a49f34650ced88c9df63633d9ebf82ff7d25a1c535f983b675bba544ced3",
