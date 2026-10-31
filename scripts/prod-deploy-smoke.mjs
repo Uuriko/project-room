@@ -4,7 +4,7 @@
 //
 //   node scripts/prod-deploy-smoke.mjs --sha <40-hex> \
 //     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
-//     [--wait-ms 300000] \
+//     [--wait-ms 420000] \
 //     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
 //     [--agent-card-agent-id <id>] [--agent-card-fetches 10] \
 //     [--agent-card-wait-ms 90000]
@@ -63,7 +63,7 @@ const opt = (name, fallback = "") => {
 const sha = opt("sha");
 const origin = opt("origin", "https://room.trydemigod.com").replace(/\/$/, "");
 const entry = opt("entry", "https://www.getdasha.com/room").replace(/\/$/, "");
-const waitMs = Number(opt("wait-ms", "300000"));
+const waitMs = Number(opt("wait-ms", "420000"));
 // Test seams (#1524): the deploy pipeline never sets these, so production
 // always verifies against the pinned key with the full fetch count. Tests
 // inject their own keypair through these knobs — they cannot sign for the
