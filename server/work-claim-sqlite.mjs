@@ -10,6 +10,7 @@
 
 import { roomWorkClaimConfig, MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { refuseArchivedWriteDb } from "./archived-guard.mjs";
 
 // Replay-safe row kind for claim items (RC-2026-09-27-2730). The fields mirror
 // the workOf() output shape in work-claims.mjs; unknown fields are dropped on
@@ -197,6 +198,11 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       return item;
     },
     set(roomId, item) {
+      // EA-001: the registry is the choke point every claim door (REST,
+      // MCP, land queue, board sync) writes through; an archived room is
+      // frozen here, so no door can record a phantom claim the room
+      // projection never sees. Reads (get/list/has) stay open.
+      refuseArchivedWriteDb(db, roomId);
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());
       if (typeof onChange === "function") onChange(roomId);
@@ -205,6 +211,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
+      refuseArchivedWriteDb(db, roomId);
       // #1527: readyClaims treats a missing dependency as "not done", so a
       // claim depending on a deleted claim could never return to
       // queue=ready -- stranded, ownerless, invisible. Waive the deleted id
@@ -229,6 +236,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
+        refuseArchivedWriteDb(db, roomId);
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
         upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
       }

@@ -505,7 +505,14 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
     try { [item] = releaseExpired([before], nowMs); }
     catch (error) { skipInvalidMaintenanceClaim(error, before, skipped); continue; }
     if (item.state === "unclaimed" && before.state !== "unclaimed") {
-      registry.set(roomId, item); released.push(item.id); onRelease(item, before);
+      // EA-001: in an archived room the registry refuses the sweep's
+      // write (409 room_archived). The sweep runs on board reads, and a
+      // frozen room's board must still read — the expired claim simply
+      // stays as stored, which is what "frozen" means. Any other error
+      // is a real persistence failure and still fails the request.
+      try { registry.set(roomId, item); }
+      catch (error) { if (error?.code === "room_archived") continue; throw error; }
+      released.push(item.id); onRelease(item, before);
     }
   }
   warnInvalidMaintenanceClaims(roomId, "lease_expiry", skipped);

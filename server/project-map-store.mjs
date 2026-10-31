@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { ownMember } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { appendRoomEvent, stableEventId } from "./receipt-cards.mjs";
+import { refuseArchivedWriteDb, isArchivedRoomDb } from "./archived-guard.mjs";
 import {
   applyFiles, assessOverlap, createOverlapContext, emptyGraph, graphFromGraphify, graphifyPreferred,
   mapExplain, mapHotspots, mapPath, mapQuery, normalizePath, normalizeRepo, projectMapEnabled
@@ -172,6 +173,10 @@ export async function drainProjectMapQueue(store, env = featureEnv(store), { lim
 
 export async function pushProjectMap(store, roomId, body) {
   if (!projectMapEnabled(featureEnv(store))) return { enabled: false, reason: "ROOM_PROJECT_MAP is off" };
+  // G8 (T2-L05d-C1): the map store is a side-table writer that never
+  // passes through store.command; the freeze is checked here, at the
+  // store layer, before anything is prepared or persisted.
+  refuseArchivedWriteDb(store.db, roomId);
   ensure(store);
   // No await between observing the previous map and committing its replacement.
   // Invalid input cannot poison a durable queue or overwrite the valid graph.
@@ -268,6 +273,11 @@ function postNotice(store, roomId, subject, overlap) {
 
 export function publishProjectMapOverlap(store, roomId, subject) {
   if (!subject || !projectMapEnabled(featureEnv(store))) return null;
+  // Overlap notices are posted from read/decoration paths too, where a
+  // thrown refusal would break the read. In an archived room the notice
+  // simply does not post — the same null appendRoomEvent returns there —
+  // and no project_map_notices row is recorded.
+  if (isArchivedRoomDb(store.db, roomId)) return null;
   try {
     const overlap = overlapAgainst(loadContext(store, roomId), subject);
     if (!overlap) return null;
@@ -307,6 +317,7 @@ export function withProjectMapOverlap(store, roomId, value) {
 
 export function recordProjectMapPull(store, roomId, body) {
   if (!projectMapEnabled(featureEnv(store))) return { enabled: false, reason: "ROOM_PROJECT_MAP is off" };
+  refuseArchivedWriteDb(store.db, roomId); // G8 (T2-L05d-C1), as in pushProjectMap.
   const repo = normalizeRepo(body?.repo);
   const number = body?.number;
   if (!repo || !Number.isInteger(number) || number < 1 || number > 100_000_000) {
