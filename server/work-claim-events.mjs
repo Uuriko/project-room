@@ -10,7 +10,7 @@
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
 import { createHash, randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, ownMember, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
@@ -113,7 +113,7 @@ export function nativeClaimWakeAllowed(store, roomId, memberId, actorId, claimId
   if (!item || nativeClaimWakeBasis(item) !== basis || ["done", "closed", "cancelled", "unclaimed"].includes(item.state)
     || item.supersededBy || claimWakeSkip(store, roomId, memberId, actorId)) return false;
   const members = store.room(roomId).state.members;
-  const member = members[memberId];
+  const member = ownMember(members, memberId);
   if (member?.kind !== "agent" || member.active === false) return false;
   if (item.owner === memberId) return member.permissions?.includes("accept_work") === true;
   return member.permissions?.includes("verify") === true
