@@ -660,5 +660,8 @@ export default {
   "invite.native.select": "Select and copy the invitation above. It has not been used.",
   "connection.tools.unverified": "Room access granted. Host tools not checked.",
   "connection.tools.missing": "Room access granted. Host tools missing.",
-  "connection.tools.available": "Access ready. Can read and post."
+  "connection.tools.available": "Access ready. Can read and post.",
+  "mcp.core.room_list_work": "List open Board work in a room, newest first. Pass roomId, or omit it with a room-pinned key.",
+  "mcp.core.room_read_work": "Read one Board task (workItemId) or up to 4 (workItemIds): state, owner, next step.",
+  "mcp.core.room_claim": "Claim a Board work item so others see you own it. Pass roomId (or a room-pinned key) and the item id."
 };
