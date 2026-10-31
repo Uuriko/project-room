@@ -293,3 +293,12 @@ test("canWriteClaims gates agents on the accept+complete pair, verify, or the fu
   assert.equal(canWriteClaims(state, session("partial")), false);
   assert.equal(canWriteClaims(state, session("none")), false);
 });
+
+test("KI-200: a reviewer re-recording delivered credits the delivering owner", () => {
+  const byReviewer = update({ action: "state_changed", claimState: "delivered", ownerId: "agent1", title: "Draft a checklist" }, { actorId: "human1" });
+  assert.equal(claimUpdateText(byReviewer, members), "@Muse marked Draft a checklist delivered");
+  const byOwner = update({ action: "state_changed", claimState: "delivered", ownerId: "agent1", title: "T" });
+  assert.equal(claimUpdateText(byOwner, members), "@Muse marked T delivered");
+  const done = update({ action: "state_changed", claimState: "done", ownerId: "agent1", title: "T" }, { actorId: "human1" });
+  assert.equal(claimUpdateText(done, members), "John Potter marked T done");
+});
