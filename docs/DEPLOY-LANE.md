@@ -26,10 +26,23 @@ safe to deploy; it does not create a blanket merge freeze. Actual repository pro
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
-   - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
+   - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` HTTP 200 with valid liveness and a summary consistent with a fresh `/api/health/jobs` view, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
+
+The health smoke requires the required `room-backup` job to be present and healthy,
+and rejects active failed or stale jobs, malformed or old snapshots, and unknown,
+timeout or error summaries. An optional GitHub rate-limit wait may report
+`degraded` and still qualify only when its job evidence confirms that exact wait;
+the receipt retains the degradation. At most three complete health/job pairs are
+read when internally valid snapshots straddle an `ok`/rate-limit transition;
+persistent mismatches and failed or malformed states remain failures. Other
+degradation remains a failure. New
+Worker responses require explicit `liveness: ok` and matching summary fields.
+Older rollback targets with neither new field may use their legacy `status: ok`
+response, but must pass the same independent job checks. Readiness, email policy,
+source versions, pages, and signed-card checks remain required.
 
 Product-health observations are optional follow-up checks, not deployment-receipt
 gates. The public work board may legitimately be empty, and a gallery may have no
