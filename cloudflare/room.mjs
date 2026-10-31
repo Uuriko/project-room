@@ -603,6 +603,9 @@ export class ProjectRoom extends DurableObject {
     });
     const outcomes = [];
     for (const job of selected) {
+      // Each runCronJobs call below contains one job, so its own between-job
+      // yield never runs. Open the input gate before the next synchronous job.
+      if (outcomes.length) await yieldToQueuedRequests();
       const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
