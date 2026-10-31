@@ -63,9 +63,11 @@ test("MCP agents submit native text, read exact history, retry after restart and
   await action(writer, "room_accept_work"); await action(writer, "room_start_work");
   const a = await draft("  First answer: café 🪷\n"), original = { requestId: "native-first", workItemId, expectedRevision: 2, ...a,
     previousCompletionEventId: null, producerId: "native-writer", summary: "First version", nextAction: "Review exact text" };
-  for (const key of ["previousCompletionEventId", "producerId"]) {
-    const missing = { ...original }; delete missing[key]; assert.equal((await writer.mcp.call("room_submit_text_result", missing)).error.code, -32602);
-  }
+  // KI-198: previousCompletionEventId stays an explicit assertion, and the
+  // refusal names it.
+  const noPrevious = { ...original }; delete noPrevious.previousCompletionEventId;
+  const refusedPrevious = (await writer.mcp.call("room_submit_text_result", noPrevious)).error;
+  assert.equal(refusedPrevious.code, -32602); assert.match(refusedPrevious.message, /missing required field previousCompletionEventId/);
   assert.equal((await writer.mcp.call("room_read_result", { workItemId, completionEventId: "x", draftMessageId: "y" })).error.code, -32602);
   const first = await recorded(writer.mcp, "room_submit_text_result", original);
   assert.equal(first.result.read.arguments.completionEventId, first.eventId); assert.equal(first.currentStateVerified, false);
@@ -250,4 +252,23 @@ test("managed contributor acquires a write claim without write_external", { time
   const acquired = await recorded(contributor.mcp, "room_acquire_claim", { requestId: "board-writer-claim", workItemId, expectedRevision: 1, ...f.manifest.scope });
   assert.equal(acquired.duplicate, false);
   assert.equal((await read(contributor.mcp, workItemId)).work.claim.holderId, "managed-contributor");
+});
+
+test("KI-198: submit_text_result fills the exact draft pins, treats an omitted producer as unknown and names a bad field", { timeout: 30000 }, async t => {
+  const f = await fixture(t), writer = await f.enroll("pin-writer", "contribute"), workItemId = "pin-work";
+  f.send(T.WORK_PROPOSED, { workItemId, title: "Pins", definitionOfDone: "One answer", accountableMemberId: "pin-writer",
+    mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false });
+  for (const name of ["room_accept_work", "room_start_work"]) await recorded(writer.mcp, name, { requestId: randomUUID(), workItemId, expectedRevision: (await read(writer.mcp, workItemId)).work.revision });
+  const body = "Answer with café 🪷", current = await read(writer.mcp, workItemId);
+  const posted = (await writer.mcp.call("room_post_draft", { requestId: randomUUID(), workItemId, packetId: "pin-packet", basisRevision: current.work.revision, body })).result.structuredContent;
+  const minimal = { workItemId, evidenceMessageId: posted.messageId, previousCompletionEventId: null, summary: "Done", nextAction: "Review" };
+  const bad = (await writer.mcp.call("room_submit_text_result", { ...minimal, evidenceVersion: "sha256:nothex" })).error;
+  assert.equal(bad.code, -32602); assert.match(bad.message, /field evidenceVersion does not match/);
+  const unknown = (await writer.mcp.call("room_submit_text_result", { ...minimal, evidenceHash: "x" })).error;
+  assert.match(unknown.message, /unknown field evidenceHash/);
+  const done = await recorded(writer.mcp, "room_submit_text_result", minimal);
+  assert.equal(done.result.evidenceVersion, digest(body));
+  const stored = (await writer.mcp.call("room_read_result", { workItemId })).result.structuredContent.result;
+  assert.equal(stored.receipt.eventId, done.eventId); assert.equal(stored.receipt.producerId, null);
+  assert.equal(stored.text.messageEventId, posted.eventId);
 });

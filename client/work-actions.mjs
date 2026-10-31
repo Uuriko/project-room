@@ -147,6 +147,49 @@ const DEPRECATED_WORK_TOOLS = Object.freeze({
   room_record_handoff: { successor: "room_handoff", action: null }
 });
 export const workTools = [...actions.values()].map(action => action.tool).concat(claimTool, handoffTool);
+// KI-198: the stdio adapter can read the named draft, so the two exact pins
+// it carries (post event and UTF-8 SHA-256) are filled from that read when
+// omitted, and an omitted producerId means unknown (null), as on
+// record_completion. previousCompletionEventId stays an explicit assertion.
+export const TEXT_RESULT_DERIVED = Object.freeze(["evidenceMessageEventId", "evidenceVersion", "producerId"]);
+const submitSchema = actions.get("room_submit_text_result").tool.inputSchema;
+export const textResultInputSchema = Object.freeze({ ...submitSchema, required: submitSchema.required.filter(key => !TEXT_RESULT_DERIVED.includes(key)) });
+export function validTextResultInput(args) {
+  if (!conforms(args, textResultInputSchema)) return false;
+  if (!Object.hasOwn(args, "producerId")) return true;
+  try { reportedProducer(args); return true; } catch { return false; }
+}
+// Names the first argument problem against a tool schema so a -32602 says
+// which field to fix instead of one fixed sentence.
+export function argumentProblem(schema, args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "arguments must be an object";
+  const properties = schema?.properties ?? {};
+  const unknown = Object.keys(args).find(key => !Object.hasOwn(properties, key));
+  if (unknown) return `unknown field ${unknown}`;
+  const missing = (schema?.required ?? []).find(key => !Object.hasOwn(args, key));
+  if (missing) return `missing required field ${missing}`;
+  const bad = Object.keys(args).find(key => !conforms(args[key], properties[key]));
+  if (bad) return `field ${bad} does not match its schema${properties[bad]?.pattern ? ` (pattern ${properties[bad].pattern})` : ""}`;
+  return null;
+}
+async function completeTextResultArguments(client, identity, args, signal) {
+  if (TEXT_RESULT_DERIVED.every(key => Object.hasOwn(args, key))) return args;
+  // Derive the request ID from the caller's own input, so a retry with the
+  // same omissions keeps the same operation.
+  const pinned = withDerivedRequestId("room_submit_text_result", args, identity);
+  const filled = { ...pinned };
+  if (!Object.hasOwn(filled, "producerId")) filled.producerId = null;
+  if (!Object.hasOwn(filled, "evidenceMessageEventId") || !Object.hasOwn(filled, "evidenceVersion")) {
+    const draft = await client.workResult(args.workItemId, { draftMessageId: args.evidenceMessageId, signal });
+    const text = draft?.result?.text;
+    if (!validId(text?.messageEventId) || !/^sha256:[0-9a-f]{64}$/.test(text?.evidenceVersion ?? "")) {
+      throw Object.assign(new Error("Invalid work action input: evidenceMessageId does not name a readable work-linked draft"), { code: "invalid_work_action" });
+    }
+    if (!Object.hasOwn(filled, "evidenceMessageEventId")) filled.evidenceMessageEventId = text.messageEventId;
+    if (!Object.hasOwn(filled, "evidenceVersion")) filled.evidenceVersion = text.evidenceVersion;
+  }
+  return filled;
+}
 export const isWorkTool = name => actions.has(name) || canonicalActions.has(name);
 
 function validCanonicalWorkArguments(name, args) {
@@ -264,6 +307,9 @@ export function withWorkDeprecation(name, recorded) {
 }
 export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
+  if (name === "room_submit_text_result" && args && typeof args === "object" && !Array.isArray(args) && validTextResultInput(args)) {
+    args = await completeTextResultArguments(client, identity, args, signal);
+  }
   let expectedRevision;
   if (workUsesExpectedRevision(name) && args && typeof args === "object" && !Array.isArray(args)
       && args.expectedRevision === undefined && validId(args.workItemId)) {
