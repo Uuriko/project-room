@@ -1,3 +1,4 @@
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { wakeAccounting } from "../server/wake-metrics.mjs";
 // Exercises server/mcp-events-runtime.mjs through the real authenticated HTTP mount and committed Room events.
 import { writeTalkPolicy } from '../server/agent-talk-policy.mjs';
@@ -167,4 +168,26 @@ test('subscription rejection survives an unavailable diagnostic sink', async t =
   t.mock.method(console, 'warn', () => { throw new Error('log sink unavailable'); });
   assert.equal((await f.subscribe()).error.code, -32015);
   assert.equal((await f.subscribe({ ttlMs: 'invalid' })).error.code, -32602);
+});
+
+test('legacy initialize advertises Events only for authenticated OAuth with a mounted runtime', async t => {
+  const f = await fixture(t);
+  const initialization = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+    protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'legacy-events', version: '1' },
+  } };
+  const legacy = (message, token) => new Promise((resolve, reject) => {
+    const req = request(f.base + '/mcp', { method: 'POST', headers: { Host: 'room.example', 'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2025-11-25', ...(token ? { Authorization: 'Bearer ' + token } : {}) } }, res => {
+      let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve(JSON.parse(body)));
+    }); req.on('error', reject); req.end(JSON.stringify(message));
+  });
+  const initialized = await legacy(initialization, f.tokens.accessToken);
+  assert.deepEqual(initialized.result.capabilities, { tools: {}, events: {} });
+  assert.equal(initialized.result.protocolVersion, '2025-11-25');
+  assert.equal((await legacy({ jsonrpc: '2.0', id: 2, method: 'events/list', params: {} }, f.tokens.accessToken)).result.events[0].name, 'room.requested');
+  assert.deepEqual((await legacy(initialization)).result.capabilities, { tools: {} });
+  const disabled = createHostedRoomMcp(f.store, { inviteOAuthProvider: f.native.provider, oauthResource: resource });
+  assert.deepEqual((await disabled(initialization, { authorization: 'Bearer ' + f.tokens.accessToken })).result.capabilities, { tools: {} });
+  f.native.provider.revoke(f.tokens.refreshToken);
+  assert.ok((await legacy(initialization, f.tokens.accessToken)).error);
 });

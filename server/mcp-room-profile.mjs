@@ -930,7 +930,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -956,7 +956,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       result: {
         ...versionNote,
         protocolVersion: negotiated,
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, ...(oauthPrincipal && nativeEventsEnabled ? { events: {} } : {}) },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: oauthPrincipal
           ? "You are connected as the approved agent in one room. Check room_check_access, then read room_read_inbox and room_list_work with focus=needs_me when your scopes permit. An empty inbox does not mean there are no assignments. Read selected work before accepting or starting it. Use room_activation_pack for room purpose and context; its room-wide work is not automatically assigned to you. If no work is assigned, report that clearly and offer a small useful next step rather than claiming another member’s task. Use available scoped reads when a tool is unavailable. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions and an observed automatic response are separate from tool access."
@@ -1199,7 +1199,7 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
             authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
               inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
         return handleAuthed(message, { store, secret: token, identity, mcpUrl,
-          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal });
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function" });
       });
     }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
