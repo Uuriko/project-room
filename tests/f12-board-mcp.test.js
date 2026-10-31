@@ -70,6 +70,7 @@ test("hosted Board includes the canonical REST-created claim without changing le
 });
 
 import { createWork, claimWork, updateWork, recordReview } from "../server/work-claims.mjs";
+import { recordPullOutcome } from "../server/claim-coordination.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { setTier, demoteToReadonly } from "../server/autonomy-tiers.mjs";
@@ -260,14 +261,23 @@ test("read-only HTTP, hosted MCP and SDK leave expired/live claims and lifecycle
   let expired = createWork({ id: "expired", files: ["src/held.js"] }, { agentId: f.ownerId, now: now - 7200000 });
   expired = claimWork(expired, f.ownerId, { now: now - 7200000, leaseHours: 1 });
   f.store.workClaims.set(f.roomId, expired);
-  for (const kind of ["land", "deploy"]) seed(f, `live-${kind}`, { kind, revision: SOURCE_REVISION }, now);
+  // L04-C4: live claims are seeded in the legitimately closable shape —
+  // held by the owner with their pull recorded merged — so the ordinary
+  // REST housekeeping below, and only it, closes them.
+  for (const kind of ["land", "deploy"]) {
+    const url = `https://github.com/Uuriko/project-room/pull/${kind === "land" ? 41 : 42}`;
+    let live = seed(f, `live-${kind}`, { kind, revision: SOURCE_REVISION, pullRequest: url }, now);
+    live = claimWork(live, f.ownerId, { now, leaseHours: 6 });
+    live = recordPullOutcome(live, url, "merged", now);
+    f.store.workClaims.set(f.roomId, live);
+  }
   const before = durableEffects(f);
   for (const read of [() => readPage(f), async () => pageValue(await f.mcp()),
     () => new RoomAgentClient({ origin: f.origin, roomId: f.roomId, token: f.identity.secret }).board()]) {
     const result = await read();
     assert.equal(result.claims.find(claim => claim.id === "expired").state, "claimed");
     assert.equal(result.claims.find(claim => claim.id === "expired").owner, f.ownerId);
-    assert.equal(result.claims.find(claim => claim.id === "live-deploy").state, "unclaimed");
+    assert.equal(result.claims.find(claim => claim.id === "live-deploy").state, "claimed");
     assert.equal(durableEffects(f), before);
   }
   const ordinary = await f.rest();
