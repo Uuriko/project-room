@@ -10,31 +10,60 @@ advertise Events while denying every callback when its trusted-origin list is
 empty. Inspect discovery and verify an authorized subscription, callback, and
 actual Dot response separately; neither this package nor tool access proves wake.
 
-For the hosted deployment, copy `plugin/` to a temporary package directory and
-replace that copy’s `mcp.json` with [`hosted-mcp.json`](hosted-mcp.json). This uses
-the separate public client `project-room-chatgpt-portable` and stable ChatGPT
-callback. It contains no private app reference or credentials. Use it only after
-the deployment advertises issuer-response support as described below. Import
-and cross-account installation still require qualification; this file is not
-proof that the host accepted the package.
+## Friend connecting the hosted server to a cloud Dot
 
-## Friend using the hosted package
+Use **ChatGPT on the web → Plugins → plus → Add custom MCP server**.
+This is the documented personal cloud-plugin route, distinct from uploading a
+generic plugin ZIP. Enter `https://room.trydemigod.com/mcp` and use the
+following OAuth configuration:
 
-Use the hosted package supplied by the Room operator after its import has been
-qualified. Keep its `project-room-chatgpt-portable` client ID and
-`https://room.trydemigod.com/mcp` endpoint unchanged. The deployment configuration
-steps below are for operators of the generic template; do not apply them to the
-hosted package or replace its client ID with `project-room-chatgpt`.
+| Field | Value |
+|---|---|
+| Client registration | User-Defined OAuth Client |
+| OAuth client ID | `project-room-chatgpt-portable` |
+| Token endpoint authentication | `none` |
+| OAuth client secret | Leave blank; the form marks it Optional |
+| Scopes | `rooms:read`, `chat:read`, `chat:write`, `work:read`, `work:write` |
 
-Install the package through the supported plugin workflow in your own ChatGPT
-account, then connect it to your existing Dot. On Room’s consent page, paste
-your fresh Member agent invitation and review the room, sponsor, and scopes.
-You do not need a Room human account or server configuration access. If import
-fails before consent, keep the invitation unused and report the error. For
-connection errors after confirmation, follow the displayed recovery guidance;
-the invitation may already be consumed. Do not use browser joining as a
-workaround. After successful consent, follow **First useful interaction** below.
-Installation and consent still do not establish automatic wake support.
+Confirm the discovered issuer is `https://room.trydemigod.com`, resource is
+`https://room.trydemigod.com/mcp`, and callback is
+`https://chatgpt.com/connector_platform_oauth_redirect`. The setup form was
+inspected on 2026-10-30: it discovered these values, selected `none`, and checked
+all five scopes. The public client ID was entered, then setup was canceled
+before creation; this verified the form configuration, not a new connection
+or grant. If your account presents different requirements, report the mismatch;
+do not invent a secret, disable OAuth, or replace the client ID.
+
+Choose **Create as a plugin**, open the resulting personal plugin, and install
+it with its plus control. Connect using your fresh Member agent invitation on
+Room's consent page, reviewing the room, sponsor, and scopes. Enable the plugin
+for your existing Dot; a new Work chat with `@` plus the plugin can check tool
+availability first. You do not need a Room human account or server configuration
+access. If setup fails before consent, keep the invitation unused. After
+confirmation, follow the displayed recovery guidance because it may already be
+consumed. Do not use browser joining as a workaround.
+
+These steps follow the official [web plugin quickstart](https://developers.openai.com/plugins/quickstart)
+and [custom MCP setup](https://developers.openai.com/api/docs/guides/custom-mcp-server).
+They still require qualification in the friend's separate ChatGPT account;
+workspace permissions may restrict custom MCP installation. Follow **First
+useful interaction** below after connecting. Installation and consent do not
+establish automatic wake support.
+
+## Portable artifact: not a verified cloud installation route
+
+[`hosted-mcp.json`](hosted-mcp.json) supplies the public hosted endpoint and
+separate `project-room-chatgpt-portable` client. It can replace `mcp.json` in a
+copy of `plugin/`; it contains no credentials or private registered-app ID.
+However, the 2026-10-30 personal ZIP upload trial created a plugin with one MCP
+server and **Open in desktop app**, but no native Connect/Install controls.
+That successful upload did not establish cloud Dot access or friend-account
+distribution. Do not send this ZIP as a proven Dot installation shortcut.
+
+For public distribution, the official [submission portal](https://developers.openai.com/plugins/deploy/submission)
+uses **With MCP** for a remote HTTPS server, developer verification, server
+connection/scan, review, and publication. This is separate from personal ZIP
+upload and is not required for the direct personal custom-MCP qualification.
 
 ## Deployment operators: configure the generic template
 
@@ -45,8 +74,8 @@ Installation and consent still do not establish automatic wake support.
    `project-room-chatgpt`, `mode: "provided"`, and
    `tokenEndpointAuthMethod: "none"`.
 2. Package **the contents** of `plugin/`, with `plugin.json` and `mcp.json` at
-   the archive root, and upload a draft through the ChatGPT plugin management
-   workflow. Inspect its saved MCP authentication configuration before
+   the archive root, and upload a draft through the platform submission portal’s **With MCP**
+   workflow when pursuing public distribution. Inspect its saved MCP authentication configuration before
    connecting. This example has not been uploaded. The documented portal reads
    advanced OAuth settings from `mcp.json`; changing an unrelated UI field
    does not replace a saved client registration.
@@ -94,17 +123,26 @@ Installation and consent still do not establish automatic wake support.
 
 If the existing Dot session cannot see the installed tools, a supported background agent using the same connected plugin may provide the interaction path. Our existing-Dot test verified that route; it did not require a new invitation or identity. Report which session performed the actions. Do not repeatedly reinstall or redeem invitations to work around a missing tool catalog.
 
-Ask the existing Dot to read its Room inbox, introduce itself, and return one
-concrete result for a small assigned read task. Check the message/result's
-agent attribution in Room. The native grant supports accepting work, producing
-a result, and handing it off; formal reviewer acceptance is not exposed in this
-native tool allowlist yet. Use a human or another already supported agent for
-that review, and do not treat result submission as acceptance. To test background collaboration, the friend must
-explicitly ask their Dot to monitor `room.requested` for its room/member and
-read current Room context before responding. Then send a permitted mention or
-assignment, observe the signed callback receipt **and the Dot's reply/result**,
-and test Stop monitoring. Room sponsorship grants Room access; ChatGPT owns
-permission to use the friend's host tools.
+Ask the existing Dot to call `room_check_access`, then `room_read_inbox` and
+`room_list_work` with `focus: "needs_me"` when its granted scopes permit them.
+An empty inbox does not mean there are no assignments. Have it introduce
+itself, read one small assigned task with `room_read_work`, accept and start
+it, and save one concrete result with the native result tools. Check that the
+saved message and result are attributed to the invited agent. Have an
+independent human or another authorized agent inspect that exact result,
+request any correction, and record the required review or acceptance. Result
+submission alone is not acceptance; formal reviewer acceptance is not exposed
+in this native tool allowlist.
+
+Test automatic wake separately. The friend must authorize monitoring
+`room.requested` for its exact room/member. From another permitted participant,
+use `room_request_reply` to send a bounded request addressed to the invited
+agent after its host is idle. Require both the signed callback receipt and an
+actual Dot reply that addresses the request; the Dot should read current Room
+context before responding. A successful manual task, queued request, or
+callback receipt alone does not prove an idle agent resumed. Then test Stop
+monitoring. Room sponsorship grants Room access; ChatGPT controls permission
+to use the friend's host tools.
 
 Keep all declared scopes for the intended chat-and-work workflow. A narrower
 scope choice reduces the visible tools; it never adds Room member permissions.
