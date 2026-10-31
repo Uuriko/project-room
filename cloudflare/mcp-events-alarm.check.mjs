@@ -11,6 +11,9 @@ import { ProjectRoom } from './cloudflare/room.mjs';
 import { createMcpEventSubscriptions } from './server/mcp-event-subscriptions.mjs';
 export class Probe extends ProjectRoom {
  constructor(ctx,env) { super(ctx,env); this.store.nativeMcpEventsEnabled=true; this.allowed=true;this.posts=[];this.failures=0;
+ const getAlarm=ctx.storage.getAlarm.bind(ctx.storage),setAlarm=ctx.storage.setAlarm.bind(ctx.storage);
+ ctx.storage.getAlarm=async()=>this.staleAlarm?Date.now()-86400000:getAlarm();
+ ctx.storage.setAlarm=async when=>{this.staleAlarm=false;return setAlarm(when);};
  this.principal={principalType:'invited-agent',familyId:'family',resource:'https://room.example/mcp',roomId:'commons',identityId:'ai_probe',memberId:'agent',scopes:['chat:read']};
  this.manager=createMcpEventSubscriptions({store:this.store,authorize:()=>this.allowed,
  dnsResolvers:{lookup:async()=>[{address:'93.184.216.34',family:4}]},transport:async(_url,_addresses,{body})=>{
@@ -19,7 +22,7 @@ export class Probe extends ProjectRoom {
  async drainMcpEvents(){return this.manager.drain({limit:1});}
  async fetch(request){const path=new URL(request.url).pathname;
  if(path==='/seed'){
- const mode=new URL(request.url).searchParams.get('mode'); this.failures=mode==='retry'?1:0;
+ const mode=new URL(request.url).searchParams.get('mode'); this.failures=mode==='retry'?1:0;this.staleAlarm=mode==='stale-alarm';
  await this.manager.subscribe({principal:this.principal,name:'room.requested',arguments:{roomId:'commons',memberId:'agent'},delivery:{mode:'webhook',url:'https://8.8.8.8/wake',secret:'whsec_'+Buffer.alloc(32,7).toString('base64')}});
  for(let i=0;i<(mode==='backlog'?2:1);i++)this.manager.enqueueRequested({roomId:'commons',memberId:'agent',messageId:'message',eventId:'event_'+i});
  if(mode==='lease')this.store.db.prepare("UPDATE mcp_event_outbox SET state='leased',lease='crashed',lease_until=?,attempts=1").run(Date.now()+1500);
@@ -36,7 +39,7 @@ async function start(){
  return new Miniflare({modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'Probe',useSQLite:true}},kvNamespaces:['ROOM_BACKUPS_KV'],bindings:{ROOM_ORIGIN:'https://room.example',ROOM_MAINTENANCE:'0',ROOM_GMAIL_ENABLED:'0'}});
 }
 const read=async(mf,path)=>{const response=await mf.dispatchFetch('https://room.example'+path);const text=await response.text();assert.equal(response.status,200,text);return JSON.parse(text);};
-for(const mode of ['backlog','retry','lease','revoke'])test('native outbox alarm '+mode+' progresses without another write', {timeout:30000},async()=>{
+for(const mode of ['backlog','retry','lease','revoke','stale-alarm'])test('native outbox alarm '+mode+' progresses without another write', {timeout:30000},async()=>{
  const mf=await start();try{
  await read(mf,'/seed?mode='+mode);
  let state;const until=Date.now()+15000;

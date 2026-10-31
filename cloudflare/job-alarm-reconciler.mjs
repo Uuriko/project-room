@@ -28,10 +28,12 @@ export function createJobAlarmReconciler({ storage, calculate, now = Date.now, y
           // work while read traffic keeps advancing the generation. Only a
           // current empty decision may delete an alarm.
           if (owned !== generation && when == null) continue;
+          // A past timestamp is not a future wake: replace it rather than
+          // leaving due work waiting for the slower safety-net cron.
           if (when == null) {
             if (current != null) { stage('delete_alarm'); await storage.deleteAlarm(); }
             result = { armed: false, alarmAt: null };
-          } else if (current != null && current <= when) {
+          } else if (current != null && current > now() && current <= when) {
             result = { armed: false, alarmAt: current };
           } else {
             stage('set_alarm');
