@@ -1,7 +1,7 @@
 // Metadata-only comparison of outstanding message parity failures. Never certifies,
 // replays, repairs, or calls store.room(), whose recovery path can write.
 import { hydrateProjection } from './projection-at-rest.mjs';
-import { affectedMessageIds, messageRowParityFields, messageRecordParityDetail } from './messages-store.mjs';
+import { affectedMessageIds, archiveMarker, messagesBackfillCaughtUp, messageRowParityFields, messageRecordParityDetail } from './messages-store.mjs';
 
 const LIMITS = Object.freeze({ rooms: 5, rows: 500, events: 2000, bytes: 4 * 1024 * 1024, budgetMs: 150 });
 const exists = (db, table) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
@@ -24,7 +24,7 @@ export function operatorParityDiagnostics(store, { now = () => performance.now()
         const cursor = db.prepare('SELECT applied_seq,parity_at_seq FROM messages_backfill_cursor WHERE room_id=?').get(failure.roomId);
         result.appliedSequence = cursor?.applied_seq ?? null;
         result.certifiedSequence = cursor?.parity_at_seq ?? null;
-        if (cursor?.applied_seq !== size.sequence) return unknown('not_caught_up');
+        if (!messagesBackfillCaughtUp(db, failure.roomId)) return unknown('not_caught_up');
         const projection = JSON.parse(db.prepare('SELECT projection FROM rooms WHERE id=?').get(failure.roomId).projection);
         if (!Array.isArray(projection.messages) || projection.messages.length > LIMITS.rows) return unknown('row_limit');
         // Bound materialized rows and bytes before parsing or hydrating entities.
@@ -50,8 +50,8 @@ export function operatorParityDiagnostics(store, { now = () => performance.now()
           postedLastSequence = event.sequence;
           for (const id of affectedMessageIds(body)) if (!sequences.has(id)) { sequences.set(id, event.sequence); receipts.set(id, body.data?.receiptId ?? null); }
         }
-        const archive = state.messagesArchive, retained = new Set(archive?.retainedIds ?? []);
-        const archived = row => archive && row.seq <= archive.throughSeq && !retained.has(row.message_id);
+        const archive = archiveMarker(db, failure.roomId), retained = new Set(archive.retainedIds);
+        const archived = row => archive.throughSeq > 0 && row.seq <= archive.throughSeq && !retained.has(row.message_id);
         const threadMessages = new Map([...rows.filter(archived).map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
         const pins = new Set((state.pins ?? []).map(pin => pin.messageId));
         const fields = new Set(), keys = new Set(); let mismatchedRows = 0, legacyOnly = true;

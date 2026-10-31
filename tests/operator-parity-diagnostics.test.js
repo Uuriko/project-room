@@ -118,3 +118,21 @@ test('operator status exposes bounded metadata and truncated rooms remain explic
   assert.ok(result.rooms.slice(1).every(room => room.status === 'unknown' && room.reason === 'room_missing'));
   assert.equal(changes(), boundedBefore);
 });
+
+for (const mode of ['wrong_anchor', 'empty_anchor', 'missing_head_event']) test(`${mode} is not a caught-up comparison`, t => {
+  const store = fixture(t);
+  if (mode === 'missing_head_event') {
+    store.db.exec("DELETE FROM events WHERE room_id='commons' AND sequence=(SELECT sequence FROM rooms WHERE id='commons')");
+  } else {
+    store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id=? WHERE room_id='commons'").run(mode === 'empty_anchor' ? '' : 'wrong');
+  }
+  const result = diagnose(store);
+  assert.equal(result.reason, 'not_caught_up'); assert.equal(result.complete, false);
+  assert.equal(result.status, 'unknown'); assert.equal(result.exactLegacyShapeOnly, false);
+});
+for (const marker of [null, {throughSeq: '100', count: 1, retainedIds: ['card']}, {throughSeq: -1, count: 1}, {throughSeq: 1, count: '1', retainedIds: [null, 123, 'card']}]) test(`archive descriptor uses canonical normalization: ${JSON.stringify(marker)}`, t => {
+  const store = fixture(t);
+  store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.messagesArchive',json(?)) WHERE id='commons'").run(JSON.stringify(marker));
+  assert.equal(store.checkMessagesParity({roomId: 'commons'}).ok, true);
+  assert.equal(diagnose(store).status, 'clean');
+});
