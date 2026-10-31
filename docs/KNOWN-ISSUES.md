@@ -1,5 +1,13 @@
 # Known issues: the single ledger
 
+## Maintainer checkpoint — 2026-10-31
+
+The dated reports below remain historical evidence, not proof of the current deployment.
+- KI-001: scoped Operator repair through PR5481 verified all three affected rooms and cleared those failure rows. Normal scheduled integrity-job recovery is a separate check; do not substitute this targeted result for whole-job success. The earlier recommendation to land broad #4901 is superseded.
+- KI-194: PR5476 covers credential-text regressions across mint/create/join/invite and removes the actual wake-listener fencing-token text exposure. The room-create field already had a redaction; do not repeat the original report as a current verified leak.
+- Backup recovery: the backup's hashes and loaded content verify. PR5482 repairs known lazy-schema and replay-audit compatibility gaps. Strict recovery still refuses one preserved legacy quarantine:703 of704 rooms replay clean. This is not a clean-restore claim and does not authorize dropping that history.
+
+
 This is the one list of known Project Room problems. It replaces the scattered lists in dated audits, QA rounds, room posts and backlog inventories for anything about what is broken or what to cut. New findings go here (or into a GitHub issue that this file links), not into a new plan doc.
 
 Checked against main `2249dbb5` and production `dfe1848a` on 2026-10-30 (PT). Evidence is a merged or open PR, a code line on main, a production read, or a dated room report. "Open (fix in PR)" means a PR exists but has not merged. Nothing here claims a deploy.

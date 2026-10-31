@@ -1,3 +1,4 @@
+import { initialRoom } from "../server/bootstrap.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -441,4 +442,31 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /webhook_subscribe, webhook_list, and webhook_unsubscribe/);
   assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
+});
+
+test("identity access lists more than 100 rooms within the Worker bind limit and excludes archived seats", async t => {
+  const { origin, store } = await serve(t);
+  const identity = store.identities.create("Many rooms");
+  const live = [];
+  for (let index = 0; index < 102; index++) {
+    const roomId = `many-access-${index}`;
+    store.initialize(initialRoom(roomId));
+    const key = store.issueAccessKey(roomId, "owner");
+    linkWithProof(store, key, roomId, identity, { displayName: "Many rooms", permissions: [] });
+    if (index % 2) store.command(key, roomId, { id: `archive-${index}`, type: "room.archived", data: { reason: "Synthetic test" } });
+    else live.push(roomId);
+  }
+  const prepare = store.db.prepare.bind(store.db);
+  let queries = 0;
+  store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.includes("SELECT id FROM rooms WHERE archived_at IS NOT NULL AND id IN")) return statement;
+    return { all(...args) { queries++; assert.ok(args.length <= 100, "actual Worker SQL binding ceiling"); return statement.all(...args); } };
+  };
+  t.after(() => { store.db.prepare = prepare; });
+  const response = await call(origin, "room_check_access", {}, identity.secret);
+  assert.equal(response.body.error, undefined);
+  assert.equal(response.value.archivedRooms, 51);
+  assert.deepEqual(response.value.rooms.map(r => r.roomId).sort(), live.sort());
+  assert.ok(queries >= 2);
 });

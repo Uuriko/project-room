@@ -1,3 +1,4 @@
+import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed, mcpOAuthPrincipalDescriptor, authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
@@ -557,9 +558,13 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     })).filter(row => !allowed || allowed.includes(row.roomId));
     // Archived rooms are read-only and accept no writes; listing them beside
     // live rooms sent agents into 409 room_archived. Count them instead.
-    const archived = new Set(rooms.length ? store.db.prepare(
-      `SELECT id FROM rooms WHERE archived_at IS NOT NULL AND id IN (${rooms.map(() => "?").join(",")})`
-    ).all(...rooms.map(row => row.roomId)).map(row => row.id) : []);
+    const archived = new Set();
+    for (let offset = 0; offset < rooms.length; offset += SQL_BIND_CHUNK) {
+      const chunk = rooms.slice(offset, offset + SQL_BIND_CHUNK);
+      for (const row of store.db.prepare(
+        `SELECT id FROM rooms WHERE archived_at IS NOT NULL AND id IN (${chunk.map(() => "?").join(",")})`
+      ).all(...chunk.map(row => row.roomId))) archived.add(row.id);
+    }
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       identityId: identity.identityId, displayName: identity.displayName,

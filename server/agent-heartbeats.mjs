@@ -787,7 +787,7 @@ export class AgentHeartbeats {
       // transport (M-1 fix). Tests inject one via setPushTransport.
       result = await postDelivery({
         ...(this.pushFetchImpl ? { fetchImpl: this.pushFetchImpl } : {}),
-        url, envelope, headers,
+        url, envelope, headers, allowCrossOriginRedirects: false,
         timeoutMs: PUSH_DELIVERY_TIMEOUT_MS,
         dnsResolvers: this.pushDnsResolvers ?? undefined,
       });

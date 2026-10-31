@@ -657,3 +657,27 @@ test("trigger: collab assignment enqueues a durable assignment wake (#3257)", as
   assert.deepEqual(beat.pendingWakes.map(w => [w.kind, w.messageId]), [["assignment", assignmentId]],
     "the assignee's next heartbeat carries the assignment wake");
 });
+
+for (const crossOrigin of [false, true]) test(`wake credentials ${crossOrigin ? 'never follow another origin' : 'survive same-origin redirect'}`, async t => {
+  const calls = [];
+  const transport = {
+    dnsResolvers: { resolve4: async () => ['93.184.216.34'], resolve6: async () => [] },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, headers: options.headers });
+      return calls.length === 1 ? new Response(null, { status: 307, headers: {
+        location: crossOrigin ? 'https://other.example.test/receiver' : '/moved'
+      } }) : new Response(null, { status: 204 });
+    }
+  };
+  const { hb } = await offlineWithPush(t, transport,
+    { ...pushSub(), authentication: { schemes: ['bearer'], credentials: 'synthetic-sender-key' } });
+  hb.pushNotify({ identityId: 'ai_testagent', eventType: 'message.posted', roomId: 'room-1', id: 'redirect-test', ts: T0 });
+  await hb.flushPushes();
+  assert.equal(calls.length, crossOrigin ? 1 : 2);
+  assert.equal(calls[0].headers.Authorization, 'Bearer synthetic-sender-key');
+  if (!crossOrigin) {
+    assert.equal(calls[1].headers.Authorization, calls[0].headers.Authorization);
+    assert.equal(calls[1].headers['X-Room-Notification-Token'], TOKEN);
+  }
+  assert.equal(pushFailuresOf(hb).failures, crossOrigin ? 1 : 0);
+});

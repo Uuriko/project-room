@@ -710,6 +710,8 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const after = Math.min(roomWatermark(parsed, link.roomId, authority.sequence, freshWindow), authority.sequence);
     const floor = store.historyFloor(link.roomId, link.memberId, authority.sequence);
     const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
+    const pendingAfter = parsed.provided ? after : 0;
+    const pendingMessageAfter = Math.max(pendingAfter, floor ? floor.sequence - 1 : 0);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, messageAfter, sessionWatermark(after, authority.sequence));
     let candidates = [];
@@ -719,9 +721,9 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
         mentionsOf(store, link.roomId, link.memberId, messageAfter, through),
         roomDmsOf(store, link.roomId, link.memberId, messageAfter, state),
         peerDmsOf(store, link.roomId, identity.identityId, after),
-        bondRequestsOf(store, link.roomId, pendingBonds, after),
-        directAsksOf(store, link.roomId, link.memberId, messageAfter, state),
-        handoffsOf(store, link.roomId, link.memberId, after, state)
+        bondRequestsOf(store, link.roomId, pendingBonds, pendingAfter),
+        directAsksOf(store, link.roomId, link.memberId, pendingMessageAfter, state),
+        handoffsOf(store, link.roomId, link.memberId, pendingAfter, state)
       ];
       for (const kind of kinds) {
         if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);

@@ -16,11 +16,14 @@ test('cold needs-me skips mentions older than the fresh window; since 0 replays 
   linkWithProof(store, owner.secret, 'fresh-room', ada, { displayName: 'Ada', permissions: [] });
   const post = (id, body) => store.command(owner.secret, 'fresh-room', { id, type: 'message.posted', data: { messageId: id, body } });
   post('old-mention', '@Ada old ask');
+  store.command(owner.secret, 'fresh-room', { id: 'old-open-request', type: 'message.posted',
+    data: { messageId: 'old-open-request', body: 'Still needs an answer', toMemberId: ada.identityId, requestKind: 'reply' } });
   for (let i = 0; i < 15; i++) post(`filler-${i}`, 'filler');
   post('new-mention', '@Ada new ask');
   const ids = page => page.items.filter(item => item.kind === 'mention').map(item => item.id);
   const cold = collectNeedsMe(store, ada.secret, { roomId: 'fresh-room', freshWindow: 5 });
   assert.deepEqual(ids(cold), ['new-mention']);
+  assert.ok(cold.items.some(item => item.kind === 'direct_ask' && item.id === 'old-open-request'), 'open obligations survive the recent-history cutoff');
   const replay = collectNeedsMe(store, ada.secret, { roomId: 'fresh-room', since: 0, freshWindow: 5 });
   assert.ok(ids(replay).includes('old-mention'), 'since 0 still replays from the start');
 });
