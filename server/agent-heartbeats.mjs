@@ -718,14 +718,14 @@ export class AgentHeartbeats {
       const identityOnline = ownHosts.some(host => host.state === "online");
       if (ownHosts.length === 0 || identityOnline) return Object.freeze([]);
       const configs = new Map(this.db.prepare(
-        "SELECT host_id AS hostId, push_url AS pushUrl, push_token AS pushToken, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
+        "SELECT host_id AS hostId, push_url AS pushUrl, push_token AS pushToken, push_auth_json AS pushAuthJson, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
         .all(agentId).map(row => [row.hostId, row]));
       const targets = [];
       for (const host of ownHosts) {
         if (host.mode !== "wakeable") continue;
         const config = configs.get(host.hostId);
         if (!config || !config.pushUrl || config.pushSuspended) continue;
-        targets.push(Object.freeze({ agentId, hostId: host.hostId, url: config.pushUrl, token: config.pushToken }));
+        targets.push(Object.freeze({ agentId, hostId: host.hostId, url: config.pushUrl, token: config.pushToken, authJson: config.pushAuthJson ?? null }));
       }
       return Object.freeze(targets);
     } catch (error) {
@@ -769,11 +769,17 @@ export class AgentHeartbeats {
   // delivered (failures reset); anything else increments push_failures,
   // and 3 consecutive failures suspend the subscription until the agent
   // re-arms it with a fresh pushNotification.
-  async deliverPush({ agentId, hostId, url, token, eventType, roomId, id, ts }) {
+  async deliverPush({ agentId, hostId, url, token, authJson = null, eventType, roomId, id, ts }) {
     const envelope = Object.freeze({ eventType, roomId, id, ts });
+    // A2A-style receivers (and hosted assistant webhook triggers) verify a
+    // bearer key, not a custom header. Registered credentials were stored
+    // but never sent; send them as Authorization when present.
+    let bearer = null;
+    try { bearer = authJson ? JSON.parse(authJson)?.credentials ?? null : null; } catch { bearer = null; }
     const headers = Object.freeze({
       "Content-Type": "application/json",
       "X-Room-Notification-Token": token,
+      ...(typeof bearer === "string" && bearer ? { Authorization: `Bearer ${bearer}` } : {}),
     });
     let result;
     try {
@@ -781,7 +787,7 @@ export class AgentHeartbeats {
       // transport (M-1 fix). Tests inject one via setPushTransport.
       result = await postDelivery({
         ...(this.pushFetchImpl ? { fetchImpl: this.pushFetchImpl } : {}),
-        url, envelope, headers,
+        url, envelope, headers, allowCrossOriginRedirects: false,
         timeoutMs: PUSH_DELIVERY_TIMEOUT_MS,
         dnsResolvers: this.pushDnsResolvers ?? undefined,
       });

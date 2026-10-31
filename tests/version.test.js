@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, copyFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, copyFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -59,6 +59,7 @@ test("stamp-version writes immutable revision/build metadata and re-import verif
 
 test("M-55: stamp-version parses --flag value pairs structurally (target may follow flags)", t => {
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // .tmp is gitignored (KI-188)
   const directory = mkdtempSync(join(root, "room-stamp-"));
   const target = join(directory, "version.mjs");
   copyFileSync(new URL("../server/version.mjs", import.meta.url), target);
@@ -78,6 +79,7 @@ test("M-55: stamp-version parses --flag value pairs structurally (target may fol
 
 test("M-56: stamp-version escapes values and never leaves a broken target behind", t => {
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // .tmp is gitignored (KI-188)
   const directory = mkdtempSync(join(root, "room-stamp-"));
   const target = join(directory, "version.mjs");
   copyFileSync(new URL("../server/version.mjs", import.meta.url), target);

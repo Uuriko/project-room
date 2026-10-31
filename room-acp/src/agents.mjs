@@ -7,11 +7,23 @@ import { existsSync } from "node:fs";
 import { createPeer } from "./jsonrpc.mjs";
 
 export const KNOWN_AGENTS = Object.freeze([
-  Object.freeze({ id: "claude", label: "Claude Code", bin: "claude-agent-acp", args: [], npx: ["-y", "@agentclientprotocol/claude-agent-acp"] }),
-  Object.freeze({ id: "codex", label: "Codex", bin: "codex-acp", args: [], npx: ["-y", "@agentclientprotocol/codex-acp@2.5.0"] }),
+  Object.freeze({ id: "claude", label: "Claude Code", bin: "claude-agent-acp", args: [], npx: ["-y", "@agentclientprotocol/claude-agent-acp"], plainBin: "claude", adapter: "@agentclientprotocol/claude-agent-acp" }),
+  Object.freeze({ id: "codex", label: "Codex", bin: "codex-acp", args: [], npx: ["-y", "@agentclientprotocol/codex-acp@2.5.0"], plainBin: "codex", adapter: "@agentclientprotocol/codex-acp@2.5.0" }),
   Object.freeze({ id: "goose", label: "Goose", bin: "goose", args: ["acp"], npx: null }),
   Object.freeze({ id: "gemini", label: "Gemini CLI", bin: "gemini", args: ["--acp"], npx: null }),
 ]);
+
+// KI-032: plain `claude` and `codex` do not speak ACP; each needs its
+// adapter. One line per agent that names exactly what to install or pass.
+export function adapterHints(env = process.env) {
+  return KNOWN_AGENTS.map(entry => {
+    if (entry.adapter) {
+      const plain = onPath(entry.plainBin, env) ? `${entry.plainBin} is installed but does not speak ACP by itself. ` : "";
+      return `${entry.label}: ${plain}Install its adapter with \`npm i -g ${entry.adapter}\`, or pass --agent ${entry.id} to run it through npx.`;
+    }
+    return `${entry.label}: install ${entry.bin} and make sure \`${[entry.bin, ...entry.args].join(" ")}\` runs.`;
+  });
+}
 
 export const ACP_PROTOCOL_VERSION = 1;
 // The bridge advertises no fs or terminal capability: agents use their own

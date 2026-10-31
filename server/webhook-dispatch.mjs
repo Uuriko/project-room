@@ -250,7 +250,7 @@ async function checkDispatchTarget(target, dnsResolvers) {
 // so the Workers egress sandbox stays the backstop and plain fetch is used.
 // fetchImpl remains as an injectable override (tests); when it is given,
 // pinning is the caller's responsibility.
-export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
+export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers, allowCrossOriginRedirects = true } = {}) {
   check(fetchImpl === undefined || typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
@@ -258,6 +258,7 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   check(Number.isInteger(timeoutMs) && timeoutMs > 0, "timeoutMs must be a positive integer");
   check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
     "dnsResolvers must be an object");
+  check(typeof allowCrossOriginRedirects === "boolean", "allowCrossOriginRedirects must be a boolean");
   const body = JSON.stringify(envelope);
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
@@ -297,6 +298,9 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
       }
       if (next.protocol !== "https:") {
         return { ok: false, status, error: "redirect target must stay https (no protocol downgrade)", classification: "dead" };
+      }
+      if (!allowCrossOriginRedirects && next.origin !== new URL(current).origin) {
+        return { ok: false, status, error: "redirect target must stay on the registered origin", classification: "dead" };
       }
       current = next.toString();
       continue;
