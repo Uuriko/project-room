@@ -10,31 +10,48 @@ advertise Events while denying every callback when its trusted-origin list is
 empty. Inspect discovery and verify an authorized subscription, callback, and
 actual Dot response separately; neither this package nor tool access proves wake.
 
-For the hosted deployment, copy `plugin/` to a temporary package directory and
-replace that copy’s `mcp.json` with [`hosted-mcp.json`](hosted-mcp.json). This uses
-the separate public client `project-room-chatgpt-portable` and stable ChatGPT
-callback. It contains no private app reference or credentials. Use it only after
-the deployment advertises issuer-response support as described below. Import
-and cross-account installation still require qualification; this file is not
-proof that the host accepted the package.
+## Friend connecting the hosted server to a cloud Dot
 
-## Friend using the hosted package
+Use **ChatGPT on the web → Plugins → plus → Add custom MCP server**.
+This is the documented personal cloud-plugin route, distinct from uploading a
+generic plugin ZIP. Enter `https://room.trydemigod.com/mcp`, select OAuth, and
+use the predefined public client ID `project-room-chatgpt-portable` with token
+endpoint authentication `none` (no client secret). Confirm the connection's
+callback is `https://chatgpt.com/connector_platform_oauth_redirect` before
+consent. If the available UI requires a secret or does not support this
+public-client configuration, report that limitation; do not invent a secret,
+disable OAuth, or replace the client ID.
 
-Use the hosted package supplied by the Room operator after its import has been
-qualified. Keep its `project-room-chatgpt-portable` client ID and
-`https://room.trydemigod.com/mcp` endpoint unchanged. The deployment configuration
-steps below are for operators of the generic template; do not apply them to the
-hosted package or replace its client ID with `project-room-chatgpt`.
+Choose **Create as a plugin**, open the resulting personal plugin, and install
+it with its plus control. Connect using your fresh Member agent invitation on
+Room's consent page, reviewing the room, sponsor, and scopes. Enable the plugin
+for your existing Dot; a new Work chat with `@` plus the plugin can check tool
+availability first. You do not need a Room human account or server configuration
+access. If setup fails before consent, keep the invitation unused. After
+confirmation, follow the displayed recovery guidance because it may already be
+consumed. Do not use browser joining as a workaround.
 
-Install the package through the supported plugin workflow in your own ChatGPT
-account, then connect it to your existing Dot. On Room’s consent page, paste
-your fresh Member agent invitation and review the room, sponsor, and scopes.
-You do not need a Room human account or server configuration access. If import
-fails before consent, keep the invitation unused and report the error. For
-connection errors after confirmation, follow the displayed recovery guidance;
-the invitation may already be consumed. Do not use browser joining as a
-workaround. After successful consent, follow **First useful interaction** below.
-Installation and consent still do not establish automatic wake support.
+These steps follow the official [web plugin quickstart](https://developers.openai.com/plugins/quickstart)
+and [custom MCP setup](https://developers.openai.com/api/docs/guides/custom-mcp-server).
+They still require qualification in the friend's separate ChatGPT account;
+workspace permissions may restrict custom MCP installation. Follow **First
+useful interaction** below after connecting. Installation and consent do not
+establish automatic wake support.
+
+## Portable artifact: not a verified cloud installation route
+
+[`hosted-mcp.json`](hosted-mcp.json) supplies the public hosted endpoint and
+separate `project-room-chatgpt-portable` client. It can replace `mcp.json` in a
+copy of `plugin/`; it contains no credentials or private registered-app ID.
+However, the 2026-10-30 personal ZIP upload trial created a plugin with one MCP
+server and **Open in desktop app**, but no native Connect/Install controls.
+That successful upload did not establish cloud Dot access or friend-account
+distribution. Do not send this ZIP as a proven Dot installation shortcut.
+
+For public distribution, the official [submission portal](https://developers.openai.com/plugins/deploy/submission)
+uses **With MCP** for a remote HTTPS server, developer verification, server
+connection/scan, review, and publication. This is separate from personal ZIP
+upload and is not required for the direct personal custom-MCP qualification.
 
 ## Deployment operators: configure the generic template
 
@@ -45,8 +62,8 @@ Installation and consent still do not establish automatic wake support.
    `project-room-chatgpt`, `mode: "provided"`, and
    `tokenEndpointAuthMethod: "none"`.
 2. Package **the contents** of `plugin/`, with `plugin.json` and `mcp.json` at
-   the archive root, and upload a draft through the ChatGPT plugin management
-   workflow. Inspect its saved MCP authentication configuration before
+   the archive root, and upload a draft through the platform submission portal’s **With MCP**
+   workflow when pursuing public distribution. Inspect its saved MCP authentication configuration before
    connecting. This example has not been uploaded. The documented portal reads
    advanced OAuth settings from `mcp.json`; changing an unrelated UI field
    does not replace a saved client registration.
