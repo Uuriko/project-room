@@ -4780,6 +4780,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   insertCredential(roomId, memberId, kind, parent, expiresAt, identitySecretHash = null) {
+    // L05-C3: insertCredential is the single choke point for credential
+    // issuance and session creation — issueAccessKey, mintAccessKey,
+    // createSession, createJoinSession and createAgentSession all mint
+    // through here — so the archived freeze lives here and every one of
+    // those doors inherits it. Revocation stays open (cleanup), and
+    // authenticate() never mints, so existing credentials keep reading.
+    refuseArchivedWrite(this.room(roomId).state);
     if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
@@ -6429,6 +6436,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      // L05-C3: the catch-up cursor is a stored write, so it is frozen in
+      // an archived room like every other recorded write. Reading the
+      // brief (returnBrief / catchUpCursor) writes nothing and stays open.
+      refuseArchivedWrite(this.room(roomId).state);
       if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > this.room(roomId).sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
       this.db.prepare("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET sequence=max(cursors.sequence,excluded.sequence)").run(roomId, auth.member.id, sequence);
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
@@ -7249,6 +7260,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   setMentionTimeout(token, roomId, timeoutMs, expectedSessionBinding = null) {
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
     if (auth.member.id !== this.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
+    // L05-C3: room_mention_settings is a stored room write; frozen when archived.
+    refuseArchivedWrite(this.room(roomId).state);
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MENTION_TIMEOUT_MS_MIN || timeoutMs > MENTION_TIMEOUT_MS_MAX) {
       fail(422, "invalid_mention_timeout", `timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX}`);
     }

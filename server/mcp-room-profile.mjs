@@ -120,7 +120,8 @@ function failureValue(error) {
     const status = code === "unknown_bounty" || code === "unknown_flag" ? 404
       : code === "not_authorized" ? 403
       : code === "already_claimed" || code === "dispute_exists"
-        || code === "idempotency_actor_mismatch" || code === "idempotency_key_reused" ? 409
+        || code === "idempotency_actor_mismatch" || code === "idempotency_key_reused"
+        || code === "room_archived" ? 409
       : 422;
     return { status, code, message: error.message };
   }

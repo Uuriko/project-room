@@ -70,6 +70,7 @@ import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_C
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { disputabilityFor } from "./bounty-disputability.mjs";
+import { isArchivedRoomDb, ROOM_ARCHIVED_MESSAGE } from "./archived-guard.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -764,6 +765,18 @@ export class BountyEscrow {
 
   nowMs() { return this._now ? this._now() : this.store.now(); }
 
+  // EA2-002: bounty intake is frozen in an archived room. Only the two
+  // money-creating/locking writes are guarded — postBounty (creates the
+  // obligation) and fundBounty (locks real escrow). Every transition of
+  // a bounty that already exists when the room archives stays open,
+  // including claim/submit/accept/reject/dispute/decide and the keeper
+  // paths inside finalizeBounty (timeout refund, unfunded expiry), so
+  // escrow already locked in a room that later archives can still
+  // settle back to its owners instead of being stranded by the freeze.
+  _requireLiveRoomForIntake(roomId) {
+    check(!isArchivedRoomDb(this.db, roomId), "room_archived", ROOM_ARCHIVED_MESSAGE);
+  }
+
   // --- lane identity: membership validation ---------------------------------
   // A lane id is only meaningful when it names a CURRENT member of the room.
   // canonicalLane() is a pure string normalizer — it never consults
@@ -1434,6 +1447,7 @@ export class BountyEscrow {
   // locked, so posting never needs funds.
   postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, disputeDeciderId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
+      this._requireLiveRoomForIntake(roomId);
       this._ensure();
       this.ensureGenesis(roomId);
       const lane = this._requireLane(roomId, poster, "poster");
@@ -1568,6 +1582,7 @@ export class BountyEscrow {
   // Accept the proposal: locks the budget -> FUNDED, the only claimable state.
   fundBounty(roomId, bountyId, { funder, actor } = {}) {
     return this.store.transaction(() => {
+      this._requireLiveRoomForIntake(roomId);
       this._ensure();
       this.ensureGenesis(roomId);
       const { bounty, lane } = this._triageBounty(roomId, bountyId, funder);
