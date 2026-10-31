@@ -250,6 +250,10 @@ test('native Board review wakes deduplicate and reject changed revision and miss
   wakeNamedReviewers(f.store, 'commons', item, { actorId: 'owner' });
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, canReview ? 1 : 0);
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  const inbox = await f.rpc('tools/call', { name: 'room_read_inbox', arguments: {} });
+  assert.deepEqual(inbox.result.structuredContent.boardReviewRequests, [{ claimId: 'native-review', state: 'in_progress',
+    nextRead: { tool: 'room_read_board', arguments: { roomId: 'commons' } } }]);
+  assert.deepEqual(inbox.result.structuredContent.boardAssignments, []);
   item = { ...item, revision: 'two' }; f.store.workClaims.set('commons', item);
   wakeNamedReviewers(f.store, 'commons', item, { actorId: 'owner' });
   f.store.workClaims.set('commons', { ...item, revision: 'three' });
