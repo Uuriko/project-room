@@ -198,3 +198,23 @@ and content verification before promotion, and a new corrected release is
 verified before being marked latest. An invalid original release does not
 silently trigger a new revision. This input selects publication identity; it
 does not bypass deployment policy or change the deployed commit.
+
+### Automatic rollback source proof
+
+A rollback command and a restored Worker allocation do not prove that the
+shared Durable Object adopted the prior source. Recovery marks a rollback
+verified only after the allocation check and bounded reads of both
+`/api/version/worker` and `/api/version` agree with the expected sources through
+each affected door. The DO response must have `status: ok` and the expected
+40-hex source revision; its existing protocol omits `servedBy`, while an explicit
+marker is accepted only as `durable-object`. The edge requires `servedBy: worker`.
+The entry Worker's previous source can differ; its shared
+Durable Object must report the production Worker's previous source.
+
+Source observation starts after rollback commands finish and has one total
+420-second deadline, including HTTP time. Individual reads allow at most
+15 seconds and observations are separated by 15 seconds. Commands are never
+repeated by this observation loop. Missing, failed, mismatched or late evidence
+leaves `ROLLBACK NOT VERIFIED` with the last source observations and attempt
+count. This verifies source adoption, not compatibility of new data with old
+code; the existing schema and writer-fence gates still apply.

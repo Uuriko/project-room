@@ -89,7 +89,44 @@ export async function observeWorker({ status, readVersion, schema = schemaAt }) 
   const known = before.known && after.known && before.versionId === after.versionId && !!proof;
   return { known, versionId: before.versionId, sourceRevision, codeSchemaVersion: proof?.version ?? null, schemaSource: proof, allocationBefore: before, allocationAfter: after, error };
 }
-export async function recoverWorkers(snapshot, attempted, { status, rollback, readVersion }) {
+// The shared authority can retain candidate code after the edge allocation
+// rolls back. Observe both routes after all commands; never retry mutations.
+export async function verifyRollbackSources(expected, { readVersion, readDurableVersion,
+  timeoutMs = 420000, pollMs = 15000, now = Date.now,
+  sleep = ms => new Promise(done => setTimeout(done, ms)) } = {}) {
+  const started = now(), deadline = started + Math.min(420000, Math.max(1, timeoutMs));
+  const evidence = { verified: false, attempts: 0, elapsedMs: 0, doors: {} };
+  if (!Object.keys(expected).length || Object.values(expected).some(target => !shaPattern.test(target.edge ?? '') || !shaPattern.test(target.durable ?? ''))) return { ...evidence, reason: 'Expected edge or Durable Object source unknown' };
+  if (typeof readDurableVersion !== 'function') return { ...evidence, reason: 'Durable Object source reader unavailable' };
+  async function read(reader, name) {
+    const remaining = Math.min(15000, deadline - now());
+    if (remaining <= 0) return null;
+    const controller = new AbortController(); let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => reader(name, { signal: controller.signal, timeoutMs: remaining })),
+        new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, remaining); })
+      ]);
+    } catch { return null; } finally { clearTimeout(timer); }
+  }
+  while (now() < deadline) {
+    evidence.attempts++;
+    const rows = await Promise.all(Object.entries(expected).map(async ([name, target]) => {
+      const [edge, durable] = await Promise.all([read(readVersion, name), read(readDurableVersion, name)]);
+      const edgeRevision = edge?.status === 'ok' && edge.servedBy === 'worker' && shaPattern.test(edge.sourceRevision ?? '') ? edge.sourceRevision : null;
+      const durableRevision = durable?.status === 'ok' && (durable.servedBy === undefined || durable.servedBy === 'durable-object') && shaPattern.test(durable.sourceRevision ?? '') ? durable.sourceRevision : null;
+      return [name, { edgeRevision, durableRevision, expectedEdgeRevision: target.edge,
+        expectedDurableRevision: target.durable, matched: edgeRevision === target.edge && durableRevision === target.durable }];
+    }));
+    evidence.doors = Object.fromEntries(rows);
+    evidence.elapsedMs = Math.max(0, now() - started);
+    if (now() < deadline && rows.every(([, row]) => row.matched)) return { ...evidence, verified: true };
+    if (now() >= deadline) break;
+    await sleep(Math.min(Math.max(1, pollMs), deadline - now()));
+  }
+  return { ...evidence, elapsedMs: Math.max(0, now() - started), reason: 'Edge and shared Durable Object source convergence not verified within deadline' };
+}
+export async function recoverWorkers(snapshot, attempted, { status, rollback, readVersion, readDurableVersion, convergence = {} }) {
   const workers = {};
   for (const name of ['prod', 'entry']) {
     const previous = snapshot[name];
@@ -104,12 +141,22 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
       result.rollbackAttempted = true;
       await rollback(name, previous.versionId);
       result.observedAfter = allocation(await status(name));
-      const signal = await readVersion(name);
-      if (!result.observedAfter.known || result.observedAfter.versionId !== previous.versionId || signal?.status !== 'ok' || signal?.servedBy !== 'worker' || signal?.sourceRevision !== previous.sourceRevision) throw new Error('rollback command completed but version/source readback is not verified');
-      result.disposition = 'rollback_verified';
+      if (!result.observedAfter.known || result.observedAfter.versionId !== previous.versionId) throw new Error('rollback command completed but allocation readback is not verified');
+      result.disposition = 'rollback_unverified';
+      result.allocationRollbackVerified = true;
     } catch (failure) {
       result.disposition = result.rollbackAttempted ? 'rollback_unverified' : 'roll_forward_required';
       result.reason = failure.message;
+    }
+  }
+  const pending = Object.entries(workers).filter(([, row]) => row.allocationRollbackVerified);
+  if (pending.length) {
+    const expected = Object.fromEntries(pending.map(([name]) => [name, { edge: snapshot[name]?.sourceRevision, durable: snapshot.prod?.known === true ? snapshot.prod.sourceRevision : null }]));
+    const proof = await verifyRollbackSources(expected, { readVersion, readDurableVersion, ...convergence });
+    for (const [name, row] of pending) {
+      row.sourceConvergence = { ...proof, doors: { [name]: proof.doors[name] ?? null } };
+      if (proof.verified) row.disposition = 'rollback_verified';
+      else row.reason = proof.reason;
     }
   }
   const rows = Object.values(workers);
@@ -121,8 +168,9 @@ export function recoveryDescription(report) {
   return `${report.status} · ${Object.entries(report.workers).map(([name, row]) => `${name}: ${row.disposition} (previous schema ${row.previousCodeSchemaVersion ?? 'unknown'}, candidate schema ${row.candidateCodeSchemaVersion ?? 'unknown'}, target ${row.previousVersionId ?? 'unknown'})${row.reason ? `: ${row.reason}` : ''}`).join(' · ')}`;
 }
 const workerUrl = origin => `${origin.replace(/\/+$/, '')}/api/version/worker`;
-export async function readVersion(origin) {
-  const response = await fetch(workerUrl(origin), { redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 project-room-schema-recovery', accept: 'application/json', 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(15000) });
+export async function readVersion(origin, { signal, timeoutMs = 15000 } = {}, durable = false) {
+  const url = durable ? `${origin.replace(/\/+$/, '')}/api/version` : workerUrl(origin);
+  const response = await fetch(url, { redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 project-room-schema-recovery', accept: 'application/json', 'cache-control': 'no-cache' }, signal: signal ?? AbortSignal.timeout(timeoutMs) });
   if (response.status !== 200) throw new Error(`Worker version HTTP ${response.status}`);
   return response.json();
 }
@@ -224,7 +272,7 @@ async function main() {
     const held = heldRecovery(snapshot, rawSmoke, { sha: process.env.SHA, digest: process.env.SMOKE_REPORT_SHA256,
       origin: process.env.PROD_ORIGIN, entry: process.env.ENTRY_ORIGIN,
       prodOutcome: process.env.PROD_OUTCOME, entryOutcome: process.env.ENTRY_OUTCOME, smokeOutcome: process.env.SMOKE_OUTCOME });
-    const report = held ?? await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: name => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
+    const report = held ?? await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: (name, options) => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN, options), readDurableVersion: (name, options) => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN, options, true), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
     writeFileSync(output, JSON.stringify(report, null, 2) + '\n');
     console.log(recoveryDescription(report));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${recoveryDescription(report)}\n\n${report.compatibilityLimit}\n`);
