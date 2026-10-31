@@ -229,9 +229,7 @@ function validRoomArgs(name, args) {
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
-    const limitOk = args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= WORK_PAGE_MAX;
-    const cursorOk = args.cursor === undefined || decodeWorkCursor(args.cursor) !== null;
-    return limitOk && cursorOk && (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
+    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
   }
   if (name === "bond_propose") {
     const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
@@ -387,22 +385,6 @@ function workRecord(item, now) {
   };
 }
 
-// KI-191: room_list_work pages its work array. Default 25, max 100. The
-// cursor is an opaque offset into the same ordering; nextCursor is null on
-// the last page. Every other field keeps its existing shape.
-export const WORK_PAGE_DEFAULT = 25;
-export const WORK_PAGE_MAX = 100;
-export function encodeWorkCursor(offset) {
-  return Buffer.from(JSON.stringify({ o: offset })).toString("base64url");
-}
-export function decodeWorkCursor(cursor) {
-  if (typeof cursor !== "string" || cursor.length < 1 || cursor.length > 200 || !/^[A-Za-z0-9_-]+$/.test(cursor)) return null;
-  try {
-    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    return Number.isSafeInteger(value?.o) && value.o >= 0 ? value.o : null;
-  } catch { return null; }
-}
-
 function listWork(store, secret, args) {
   const focus = args.focus ?? "all";
   const help = focus === "help_wanted";
@@ -443,10 +425,6 @@ function listWork(store, secret, args) {
       .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
     sort = "curiosity";
   }
-  const limit = args.limit ?? WORK_PAGE_DEFAULT;
-  const offset = args.cursor === undefined ? 0 : decodeWorkCursor(args.cursor);
-  const page = work.slice(offset, offset + limit);
-  const nextCursor = offset + limit < work.length ? encodeWorkCursor(offset + limit) : null;
   const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
   const replyRequests = replyListing?.requests.map(request => ({
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
@@ -458,7 +436,7 @@ function listWork(store, secret, args) {
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     ...(sort ? { sort } : {}),
-    work: page, total: work.length, limit, nextCursor, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
+    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
 
@@ -917,9 +895,6 @@ function argumentFailure(requestId, name, args, schema) {
     if (name === "room_read_work" && args.workItemId === undefined && args.workItemIds === undefined && !report.missing.length) {
       report.missing.push("workItemId");
       report.invalid.workItemIds = "pass workItemId (one task) or workItemIds (1-4 tasks)";
-    }
-    if (name === "room_list_work" && args.cursor !== undefined && !report.invalid.cursor && decodeWorkCursor(args.cursor) === null) {
-      report.invalid.cursor = "pass nextCursor from the previous page unchanged";
     }
     if (name === "room_record_handoff") {
       for (const [alias, canonical] of [["done", "doneSummary"], ["next", "nextAction"], ["reason", "limitReason"]]) {
