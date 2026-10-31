@@ -65,6 +65,26 @@ export const workClaimSchema = `
   );
 `;
 
+// Inbox discovery reads metadata, never claim histories or artifact bodies.
+// Keep these expressions shared with the index: SQLite expression indexes
+// require the query expression to match the indexed expression.
+const inboxData = `(CASE WHEN json_type(item_json, '$.v') IN ('integer','real')
+  THEN json_extract(item_json, '$.data') ELSE item_json END)`;
+const inboxOwner = `json_extract(${inboxData}, '$.owner')`;
+const inboxState = `json_extract(${inboxData}, '$.state')`;
+const inboxReviewCandidate = `COALESCE(${inboxState}, 'unclaimed') NOT IN ('done','closed')
+  AND json_array_length(json_extract(${inboxData}, '$.tags')) > 0`;
+export const workClaimInboxIndexSchema = `
+  CREATE INDEX IF NOT EXISTS work_claim_inbox_owner ON work_claims(room_id, ${inboxOwner});
+  CREATE INDEX IF NOT EXISTS work_claim_inbox_review ON work_claims(room_id) WHERE ${inboxReviewCandidate};
+`;
+const inboxFields = ["id", "state", "owner", "supersededBy", "tags", "reviews",
+  "claimedAt", "revision", "deliveryGeneration", "pullRequest", "pullRequests"];
+const inboxProjection = `json_object(${inboxFields.map(field =>
+  `'${field}', ${field === 'state' ? `CASE WHEN json_type(${inboxData}, '$.state') IS NULL THEN 'unclaimed' ELSE ${inboxState} END` : `json_extract(${inboxData}, '$.${field}')`}`).join(", ")},
+  'ci', json_object('headSha', json_extract(${inboxData}, '$.ci.headSha')),
+  'delivery', json_object('digest', json_extract(${inboxData}, '$.delivery.digest')))`;
+
 const parse = text => {
   const value = JSON.parse(text);
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("work claim row is not an object");
@@ -162,6 +182,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     transaction,
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+      // Additive indexes may be absent on read-only pre-upgrade handles.
+      // A conflicting definition must not silently disable the optimization.
+      for (const sql of workClaimInboxIndexSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
+        const name = /CREATE INDEX IF NOT EXISTS ([a-z_]+)/.exec(sql)[1];
+        const actual = db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql;
+        if (actual !== undefined && normalize(sql) !== normalize(actual)) throw new Error("Work-claim inbox index requires operator reconciliation");
+      }
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
       const shapes = definitions.map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
       // work_claim_history is the purely additive spill sidecar (W3): an
@@ -203,6 +230,29 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       return item;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
+    // The caller applies semantic filters before its result limit. Keyset
+    // batches bound JS memory without hiding reviews after unrelated rows.
+    *inboxCandidates(roomId, ownerId, { review = false } = {}) {
+      let after = 0;
+      const query = `SELECT rowid AS ordinal, ${inboxProjection} AS metadata,
+        json_extract(item_json, '$.v') AS version,
+        json_extract(item_json, '$.kind') AS kind
+        FROM work_claims WHERE room_id=? AND rowid>?
+        AND ${inboxOwner} ${review ? "!=?" : "=?"}
+        ${review ? `AND ${inboxReviewCandidate}` : `AND ${inboxState} IN ('claimed','in_progress','blocked','delivered')`}
+        ORDER BY rowid ASC LIMIT 128`;
+      for (;;) {
+        const rows = db.prepare(query).all(roomId, after, ownerId);
+        for (const row of rows) {
+          const metadata = JSON.parse(row.metadata);
+          // Preserve the persisted codec's kind check for selected rows.
+          if (typeof row.version === "number") decodeRow({ v: row.version, kind: row.kind, data: {} }, { kind: WORK_CLAIM_ROW_KIND });
+          yield metadata;
+          after = row.ordinal;
+        }
+        if (rows.length < 128) return;
+      }
+    },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
       // #1527: readyClaims treats a missing dependency as "not done", so a
