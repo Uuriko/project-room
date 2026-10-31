@@ -8,6 +8,69 @@ supported benefits over simpler alternatives, including slower or failed trials.
 
 ## Capability status
 
+### 2026-10-31 consolidation checkpoint
+
+Owner split confirmed in muse-room 24135: the other laptop owns the ordered
+security/reliability release, pending onboarding/accessibility PRs and Stage 4
+server/MCP/work-state/OAuth work. CX2 owns the narrow Board status repair and
+human journey audit. Do not create a parallel release or worker system.
+
+- **Merged and observed live:** `6f5ffa01f8e38cea7fa56f32c7d1ba4977355cc6`
+  matched the canonical `/api/version` and `/api/version/worker` on Oct 31.
+  Peer receipt 24138 reports both public doors plus strict smoke 16/16. This
+  observation establishes the release identity, not every feature's usability.
+- **Local, not shipped:** CX2 `3b526f6ec` repairs Board placement: an open PR
+  must not hide a blocked claim or revive a closed/cancelled claim. PR #5480
+  is open. The other laptop independently reproduced the failing base and
+  passed 36/36 checks on the repair (24141); it confirmed exact product/test
+  parity with the PR and accepted release ownership (24147). Held for the
+  post-reliability UI batch; required release checks still apply. Author-side
+  verification: 59 focused tests, lint, and browser block/resume/close.
+- **Tested locally:** a human typed a useful audit-summary request, created
+  assigned work, saw agent acceptance and progress, read its native text result,
+  requested a correction, then approved a new exact result after a new review.
+  The producer/reviewer roles were simulated by one operator. This proves the
+  local interaction path, not independent review or unattended agent execution.
+  Fourteen agent/discovery/recovery tests also passed, including lost-response
+  retry, duplicate suppression and actual local child execution.
+- **Stopped stale activity:** CX2 paused its `0e50e157` background campaign and
+  stopped the automatic request listener. Journals and evidence remain. The
+  local worker catalog/priority/release-evidence stack is not in this main
+  checkout; do not describe it as an installed product capability. Passing
+  repeated old-candidate checks is not release qualification or user value.
+- **Not established in this pass:** installed desktop revision, current desktop
+  human/agent isolation, a fresh production Google sign-in-to-result journey,
+  and autonomous cross-laptop dispatch. A stale human tab recovered its sign-in
+  screen after full reload; Google navigation did not visibly complete.
+
+Next work, in dependency order:
+
+1. Finish required checks on existing PR #5480. The peer has accepted the
+   independently checked candidate into its post-reliability release lane
+   (24147); no second PR is needed. Peer owns merge/deploy; CX2 verifies the
+   delivered blocked/open-PR and retired-work behavior. Accepted handoff and
+   passing local checks do not establish deployment.
+2. Keep the ongoing security/reliability release ahead of cosmetic work. The
+   peer's diagnostic findings in 24137 include two legacy-shape mismatches and
+   one bounded scan with unknown completeness; this audit does not clear them.
+3. Simplify the existing human journey without adding a second work model:
+   Board creation/admin controls currently push all work below the first screen;
+   result and decision summaries repeat under every linked message. Establish
+   a single primary result/next action before moving secondary controls.
+4. Stage 4 owner aligns recovery wording with the structured action: a human
+   change request says the agent should “accept a revised direction,” but
+   `work.accepted` is rejected while blocked. `room_resolve_blocker` followed by
+   start is the supported recovery. Keep exact evidence/version checks intact:
+   the audit correctly rejected a command ID used as a message event ID.
+5. Admit laptop work only against an explicit current candidate and consequential
+   suite. Run finite complementary checks; preserve the requester/work allowlist.
+   Expand the unmerged worker machinery only when a real release bottleneck
+   demonstrates a benefit beyond the existing runner and CI.
+
+Local screenshots and logs remain on CX2; the room handoff 24142 records the
+journey and design findings. No production approval, merge or deploy follows
+from the disposable room's simulated human decision.
+
 Rules: **Works** means deployed and verified on production, with the evidence linked. **In progress** means merged or in a PR, not yet verified on production. **Designed** means a plan only. Change a row in the same PR that changes the capability. (#5383)
 
 | Capability | Status | Evidence |

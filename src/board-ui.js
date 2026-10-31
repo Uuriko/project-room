@@ -47,14 +47,14 @@ function dependenciesMet(item, byId) {
 }
 
 export function columnOf(item, byId, now) {
-  if (!item) return null;
+  if (!item || item.state === "closed") return null;
   if (item.state === "done") {
     const at = Date.parse(updatedAt(item));
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
   if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
-  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
+  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
   if (item.state === "unclaimed" && !item.owner && dependenciesMet(item, byId)) return "ready";
   return null;

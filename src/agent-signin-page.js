@@ -30,9 +30,8 @@ const ui = createAgentSigninUI({
   }
 });
 ui.mount(document.getElementById("agent-signin-ui"));
-// The wall's step focused the first field on open; the page does the
-// same so keyboard and agent browsers land in the form.
-document.querySelector("#agent-signin-ui input:not([type=hidden])")?.focus();
+// Keep initial keyboard navigation at the page start so the skip link is
+// reachable first. Explicit form interactions retain their own focus behavior.
 
 // Leaving mid-mint or with unsaved created credentials goes through
 // the component's own guard (it prompts for the unsaved case and
