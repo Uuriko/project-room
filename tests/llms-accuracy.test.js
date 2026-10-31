@@ -38,6 +38,7 @@ const CORE_10 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
   "dm_posted", "room_check_access", "room_join",
+  "room_list_work", "room_read_work", "room_claim",
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
@@ -132,12 +133,10 @@ test("outside identity gets the packet's seven public-work tools plus four join 
   assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 10 essential tools plus the 4 join readers", async () => {
+test("member core profile is the packet's 13 core tools; join readers drop once joined (#5468)", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "10 tools plus the 4 public join readers, so 14 total".
-  assert.equal(names.length, 14, `core profile must be 14 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 10), CORE_10);
-  assert.deepEqual(names.slice(10), JOIN_READERS);
+  assert.equal(names.length, 13, `core profile must be 13 tools, got ${names.length}`);
+  assert.deepEqual(names, CORE_10);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
