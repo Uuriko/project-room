@@ -497,6 +497,12 @@ export class GuestInvites {
     }
     return this.store.transaction(() => {
       const auth = this.ownerGate(token, roomId, binding);
+      // G8 (T2-L02b-C1): minting is a write into the room; redeem already
+      // refuses archived rooms (below), so a mint that lands in a frozen
+      // room creates a live-looking invite that can never be redeemed.
+      // Refuse at mint, in the same shape. Revoke stays open (it removes
+      // access — the benign direction).
+      refuseArchivedWrite(this.store.room(roomId).state);
       // Invitation issuance carries the f520ca69 email-verification gate,
       // same as agent-invites.create and share-link creation. Owner
       // delegates are accountless by design (no account to verify).

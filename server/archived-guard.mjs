@@ -16,6 +16,16 @@
 // check — read from the mirror at the moment of the write — is the choke
 // point every door (REST, MCP, bounty, commands) inherits.
 //
+// Routing (tranche-2 G8 cross-cut, coordinator verdict): the freeze
+// lands at the store / side-table write layer — this guard, called at
+// each store module's write-entry choke point (the work-claim registry,
+// bounty escrow intake, store.insertCredential, the collab store's
+// #transact funnel, the project-map store's push/pull entries, the
+// invite modules' mint/create) — never as per-route patches in
+// http.mjs: the funnel has no archived guards and a funnel-only fix
+// covers none of the executed archived-write acceptances, because the
+// side-table modules never pass through it.
+//
 // A registry whose database has no rooms table, or no row for the id
 // (isolated state-machine fixtures, public-work namespaces, which are
 // not rooms), is not an archived room and the write proceeds: the guard

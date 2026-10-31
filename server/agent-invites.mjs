@@ -342,6 +342,12 @@ export class AgentInvites {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    // G8 (T2-L02b-C1): invite creation is a membership write; redeem,
+    // reactivate and admit in this module already refuse archived rooms.
+    // Creation was the unguarded path (owner-level creates refused only
+    // by accident of their side-table event). Refuse here, at the store
+    // layer, for every scope of create.
+    refuseArchivedWrite(this.store.room(roomId).state);
     // The email gate bites only when verification is achievable. A deployment
     // whose mailer is unconfigured can never verify an account (the sign-in UI
     // says so honestly: "this account stays unverified"), so blocking invite
