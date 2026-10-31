@@ -1,3 +1,4 @@
+import { nativeClaimWakeAllowed } from "./work-claim-events.mjs";
 import { mayWake } from './agent-talk-policy.mjs';
 import { firstBlockedWakeTarget } from '../src/events.js';
 import { nextWorkStep } from '../src/workflow.js';
@@ -13,13 +14,16 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
   if (!resource || (isWorkersRuntime() && (!transport || !externalScheduler))) return null;
   const authorize = descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider, inviteProvider, resource, descriptor });
   const authorizeEvent = (descriptor, { context }) => {
-    if (!context || typeof context.actorId !== 'string' || !['mention', 'squad-mention', 'dm', 'work'].includes(context.kind)) return false;
+    if (!context || typeof context.actorId !== 'string' || !['mention', 'squad-mention', 'dm', 'work', 'board'].includes(context.kind)) return false;
     if (store.wakeQueue?.pauseStatus(descriptor.roomId, descriptor.memberId)
       || store.agentHeartbeats?.pausedRoomsOf(descriptor.identityId).some(row => row.roomId === descriptor.roomId)) return false;
     const state = store.room(descriptor.roomId).state;
     const actor = state.members[context.actorId], target = state.members[descriptor.memberId];
     if (!actor || actor.active === false || !target || target.active === false || context.actorId === descriptor.memberId || state.room.archivedAt
       || firstBlockedWakeTarget(state, context.actorId, [descriptor.memberId]) || mutedEvent(state, descriptor.memberId, { actorId: context.actorId })) return false;
+    if (context.kind === 'board') return descriptor.scopes.includes('work:read')
+      && mayWake(store.db, state, descriptor.roomId, context.actorId, descriptor.memberId)
+      && nativeClaimWakeAllowed(store, descriptor.roomId, descriptor.memberId, context.actorId, context.workClaimId, context.claimBasis);
     if (context.kind === 'work') {
       const item = state.workItems[context.workItemId];
       if (!item || item.revision !== context.workRevision || !store.workWakes.permitted(state, item, descriptor.memberId, context.actorId)) return false;
@@ -29,12 +33,12 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
     return mayWake(store.db, state, descriptor.roomId, context.actorId, descriptor.memberId);
   };
   const manager = createMcpEventSubscriptions({ store, authorize, authorizeEvent, transport, dnsResolvers });
-  const emit = ({ roomId, memberId, identityId, messageId, eventId = messageId, actorId, kind, workItemId, workRevision }) => {
+  const emit = ({ roomId, memberId, identityId, messageId, eventId = messageId, actorId, kind, workItemId, workRevision, workClaimId, claimBasis }) => {
     if (!memberId && identityId) memberId = store.db.prepare('SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?').get(roomId, identityId)?.member_id;
     if (!memberId) return 0;
     return manager.enqueueRequested({ roomId, memberId,
       ...(/^[A-Za-z0-9_-]{1,128}$/.test(messageId ?? '') ? { messageId } : {}),
-      context: { actorId, kind, ...(kind === 'work' ? { workItemId, workRevision } : {}) },
+      context: { actorId, kind, ...(kind === 'work' ? { workItemId, workRevision } : {}), ...(kind === 'board' ? { workClaimId, claimBasis } : {}) },
       eventId: 'mcp_' + createHash('sha256').update(JSON.stringify([roomId, memberId, eventId])).digest('hex') });
   };
   const handler = async (message, { descriptor }) => {

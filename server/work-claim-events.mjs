@@ -9,8 +9,8 @@
 // Same append path as the land queue (server/land-queue.mjs #emit): the event
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
-import { randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { createHash, randomUUID } from "node:crypto";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, ownMember, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
@@ -103,6 +103,24 @@ function claimWakeSkip(store, roomId, memberId, actorId) {
   return null;
 }
 
+// Private delivery basis: note-only edits do not invalidate an outstanding handoff.
+export function nativeClaimWakeBasis(item) {
+  return createHash("sha256").update(JSON.stringify([item.owner, item.state, item.claimedAt,
+    item.revision, item.ci?.headSha, item.supersededBy])).digest("hex");
+}
+export function nativeClaimWakeAllowed(store, roomId, memberId, actorId, claimId, basis) {
+  const item = store.workClaims?.get(roomId, claimId);
+  if (!item || nativeClaimWakeBasis(item) !== basis || ["done", "closed", "cancelled", "unclaimed"].includes(item.state)
+    || item.supersededBy || claimWakeSkip(store, roomId, memberId, actorId)) return false;
+  const members = store.room(roomId).state.members;
+  const member = ownMember(members, memberId);
+  if (member?.kind !== "agent" || member.active === false) return false;
+  if (item.owner === memberId) return member.permissions?.includes("accept_work") === true;
+  return member.permissions?.includes("verify") === true
+    && (item.state === "in_progress" || item.pullRequest || item.pullRequests?.length)
+    && resolveNamedReviewers(item, members).includes(memberId) && !hasCurrentReview(item, memberId);
+}
+
 export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, actorId } = {}) {
   if (!store?.agentHeartbeats || typeof memberId !== "string" || typeof messageId !== "string") return null;
   const skipped = claimWakeSkip(store, roomId, memberId, actorId);
@@ -127,6 +145,13 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
   }
   const agentId = identityId;
   try {
+    const item = workClaim && store.workClaims?.get(roomId, workClaim);
+    if (item && actorId) {
+      const claimBasis = nativeClaimWakeBasis(item);
+      if (nativeClaimWakeAllowed(store, roomId, memberId, actorId, workClaim, claimBasis))
+        store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: messageId, actorId,
+          kind: "board", workClaimId: workClaim, claimBasis });
+    }
     const result = store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
     if (result?.enqueued && identityId && store.agentPlugin?.deliverWakePing) {
       const signal = {
