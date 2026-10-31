@@ -65,7 +65,9 @@ test("default tools/list is the short core profile and every listed name is lega
   const body = await listed.json();
   const names = namesOf(body);
   assert.equal(body.result.profile, "core");
-  assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  // A joined member does not get the four join helpers in its default list.
+  assert.deepEqual(names, [...CORE_MCP_TOOLS]);
+  assert.equal(JOIN_TOOLS.some(tool => names.includes(tool)), false);
   // Core is trimmed to conversation for hosted/cloud agents: create, files,
   // land queue, wake and bond tools move to focus/full profiles.
   for (const moved of ["room_create", "room_put_file", "add_land_item", "wake_pause", "bond_propose"]) assert.equal(names.includes(moved), false, moved);
@@ -381,7 +383,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
   const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   assert.equal(defaultAgain.result.focus, undefined);
-  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS]);
   const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   assert.equal(full.result.focus, undefined);
   assert.ok(namesOf(full).includes("room_propose_work"));
@@ -577,7 +579,7 @@ test("every lean tool is callable with required business fields after a fresh jo
   }).secret;
 
   const catalog = await (await rpc(origin, "tools/list", { profile: "lean" }, key)).json();
-  assert.deepEqual(namesOf(catalog), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.deepEqual(namesOf(catalog), [...LEAN_MCP_TOOLS]);
   for (const tool of catalog.result.tools) {
     assert.equal((tool.inputSchema.required ?? []).includes("requestId"), false, `${tool.name} does not require a transport requestId`);
   }

@@ -894,6 +894,11 @@ function argumentFailure(requestId, name, args, schema) {
     if (name === "report_tip" && args.sourceRevision === undefined && args.buildId === undefined && !report.missing.length) {
       report.invalid.sourceRevision = "sourceRevision or buildId is required";
     }
+    // KI-192: room_read_work needs exactly one of workItemId / workItemIds.
+    if (name === "room_read_work" && args.workItemId === undefined && args.workItemIds === undefined && !report.missing.length) {
+      report.missing.push("workItemId");
+      report.invalid.workItemIds = "pass workItemId (one task) or workItemIds (1-4 tasks)";
+    }
     if (name === "room_record_handoff") {
       for (const [alias, canonical] of [["done", "doneSummary"], ["next", "nextAction"], ["reason", "limitReason"]]) {
         if (args[alias] !== undefined && args[canonical] !== undefined)
