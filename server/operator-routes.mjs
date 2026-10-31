@@ -1,3 +1,4 @@
+import { retireQaRoom } from "./operator-qa-retirement.mjs";
 // Operator HTTP surface. Mounted from createRoomServer. When the operator
 // secret is unset this returns false and the request falls through to the
 // same not_found path as any unknown URL.
@@ -23,6 +24,8 @@ const ROUTES = Object.freeze({
   "/api/operator/purge/find": POST,
   "/api/operator/purge/execute": POST,
   "/api/operator/archive": POST,
+  "/api/operator/qa-retirement/plan": POST,
+  "/api/operator/qa-retirement/execute": POST,
   "/api/operator/projection/plan": POST,
   "/api/operator/projection/execute": POST,
   "/api/operator/actions": GET,
@@ -87,6 +90,10 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
         ...result.headers
       });
       res.end(result.body);
+      return true;
+    }
+    if (path === "/api/operator/qa-retirement/plan" || path === "/api/operator/qa-retirement/execute") {
+      json(res, 200, retireQaRoom(store, await body(req), path.endsWith("/execute")));
       return true;
     }
     if (path === "/api/operator/purge/plan") {

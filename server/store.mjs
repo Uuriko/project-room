@@ -1,3 +1,4 @@
+const OPERATOR_QA_ARCHIVE = Symbol("operator QA room archive");
 import { authenticateMcpOAuthRequest } from './mcp-oauth.mjs';
 import { assertListenerFence } from "./listener-fence.mjs";
 import { isWriteSql } from './sql-write-classification.mjs';
@@ -6431,6 +6432,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
+  archiveQaRoomAsOperator(roomId, commandId, reason) {
+    if (roomId !== "qa-onb-10302113") fail(403, "operator_retirement_scope", "Only the approved QA room may be retired");
+    return this.command(OPERATOR_QA_ARCHIVE, roomId, { id: commandId, type: T.ROOM_ARCHIVED, data: { reason } });
+  }
   command(token, roomId, command, expectedSessionBinding = null, { agentConnectionSponsor = false, listenerToken } = {}) {
     validateCommand(command);
     // #2951: a flood token spent below lives in an in-memory bucket that the
@@ -6440,7 +6445,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     let floodSpend = null;
     try {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = token === OPERATOR_QA_ARCHIVE && roomId === "qa-onb-10302113" && command.type === T.ROOM_ARCHIVED
+        ? { member: ownMember(this.roomAuthority(roomId).members, this.roomAuthority(roomId).ownerId), kind: "operator" }
+        : this.authenticate(token, roomId, expectedSessionBinding);
       assertListenerFence(this, auth, roomId, listenerToken);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and vote in
