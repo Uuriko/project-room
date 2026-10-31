@@ -126,8 +126,13 @@ export function parseNeedsMeSince(since) {
   fail(422, "invalid_cursor", "since must be a sequence number or a cursor object");
 }
 
-function roomWatermark(parsed, roomId) {
-  if (!parsed.provided) return 0;
+// A first read with no cursor starts near the head instead of seq 0. In
+// muse-room (23.9k events) a cold room_needs_me returned 3-week-old mentions
+// and took 110+ calls to reach today. Pass since: 0 to replay from the start.
+export const NEEDS_ME_FRESH_WINDOW = 500;
+
+function roomWatermark(parsed, roomId, head = 0, window = NEEDS_ME_FRESH_WINDOW) {
+  if (!parsed.provided) return Math.max(0, head - window);
   if (Object.hasOwn(parsed.rooms, roomId)) return parsed.rooms[roomId];
   return parsed.number ?? 0;
 }
@@ -631,7 +636,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null, freshWindow = NEEDS_ME_FRESH_WINDOW } = {}) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -702,9 +707,11 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
-    const after = Math.min(roomWatermark(parsed, link.roomId), authority.sequence);
+    const after = Math.min(roomWatermark(parsed, link.roomId, authority.sequence, freshWindow), authority.sequence);
     const floor = store.historyFloor(link.roomId, link.memberId, authority.sequence);
     const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
+    const pendingAfter = parsed.provided ? after : 0;
+    const pendingMessageAfter = Math.max(pendingAfter, floor ? floor.sequence - 1 : 0);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, messageAfter, sessionWatermark(after, authority.sequence));
     let candidates = [];
@@ -714,9 +721,9 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
         mentionsOf(store, link.roomId, link.memberId, messageAfter, through),
         roomDmsOf(store, link.roomId, link.memberId, messageAfter, state),
         peerDmsOf(store, link.roomId, identity.identityId, after),
-        bondRequestsOf(store, link.roomId, pendingBonds, after),
-        directAsksOf(store, link.roomId, link.memberId, messageAfter, state),
-        handoffsOf(store, link.roomId, link.memberId, after, state)
+        bondRequestsOf(store, link.roomId, pendingBonds, pendingAfter),
+        directAsksOf(store, link.roomId, link.memberId, pendingMessageAfter, state),
+        handoffsOf(store, link.roomId, link.memberId, pendingAfter, state)
       ];
       for (const kind of kinds) {
         if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);

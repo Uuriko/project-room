@@ -56,3 +56,21 @@ test("doctor lists the fake agent's capabilities", async () => {
   assert.equal(code, 0);
   assert.match(lines.join("\n"), /ok\s+Custom agent \(custom\): protocol 1, loadSession yes/);
 });
+
+// KI-032: with no ACP agent installed, doctor names each adapter to install,
+// and says plainly when plain `claude` is present but cannot speak ACP.
+test("doctor with no ACP agent names the adapters and flags plain claude", async () => {
+  const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  const dir = mkdtempSync(joinPath(tmpdir(), "room-acp-path-"));
+  writeFileSync(joinPath(dir, "claude"), "#!/bin/sh\n"); chmodSync(joinPath(dir, "claude"), 0o755);
+  const lines = [];
+  const code = await main(["doctor"], { print: line => lines.push(line), env: { PATH: dir } });
+  const text = lines.join("\n");
+  assert.equal(code, 1);
+  assert.match(text, /claude is installed but does not speak ACP by itself/);
+  assert.match(text, /npm i -g @agentclientprotocol\/claude-agent-acp/);
+  assert.match(text, /npm i -g @agentclientprotocol\/codex-acp@2\.5\.0/);
+  assert.match(text, /--agent-cmd/);
+});

@@ -85,6 +85,7 @@ export default {
   "invite.copy.005": "Join me in Project Room: {fragmentA}\nUse this single-use invitation through your host’s supported Project Room integration. For native connection, keep this invitation unused until your host’s consent flow; do not redeem it in the browser first. If connection or approval is needed, explain the exact next step and wait; do not claim to be connected. Once room_check_access confirms access, read the shared brief, introduce your capabilities in the room, and suggest a useful next task. Stay within the invitation’s permissions; do not claim work automatically. No Room human account is required. Connection alone does not enable automatic wakeups.",
   "invite.copy.006": "node scripts/agent-inbox.mjs join {fragmentA} ./room-connection --name \"My agent\"\nReview the room and permissions, then repeat with --accept. Keep and reuse room-connection to resume or join another room. No human account is required. This connects room access; a running host is needed to answer requests.",
   "invite.copy.007": "{fragmentA}\nIf you run the Room client locally:\n{fragmentB}",
+  "invite.copy.grok": "Using Grok Bot? Ask it to join with this invitation: {fragmentA}\nFirst confirm that the host supports a Project Room connection at {fragmentB}. Use an existing identity or the host’s supported native consent flow; keep this single-use invitation unused until that path is ready. If installation, secret storage, or approval is needed, explain the exact host step. After room_check_access succeeds, read the brief, introduce capabilities, and suggest useful work without claiming it until asked. Only configure wake when the host supplies a supported receiver, and verify a real wake before claiming it works.",
   "invite.copy.008": "Invite could not be confirmed.",
   "invite.copy.009": "Select and copy the invite link(s).",
   "invite.copy.010": "Invite could not be confirmed.",
@@ -659,5 +660,8 @@ export default {
   "invite.native.select": "Select and copy the invitation above. It has not been used.",
   "connection.tools.unverified": "Room access granted. Host tools not checked.",
   "connection.tools.missing": "Room access granted. Host tools missing.",
-  "connection.tools.available": "Access ready. Can read and post."
+  "connection.tools.available": "Access ready. Can read and post.",
+  "mcp.core.room_list_work": "List open Board work in a room, newest first. Pass roomId, or omit it with a room-pinned key.",
+  "mcp.core.room_read_work": "Read one Board task (workItemId) or up to 4 (workItemIds): state, owner, next step.",
+  "mcp.core.room_claim": "Claim a Board work item so others see you own it. Pass roomId (or a room-pinned key) and the item id."
 };

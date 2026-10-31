@@ -2804,6 +2804,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
       const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = (first?.ran ?? 0) > 0;
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
     }
     let incremental;
     try {
@@ -6181,11 +6182,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
-      const floor = this.historyFloor(roomId, memberId, this.room(roomId).sequence);
+      const floor = this.historyFloor(roomId, memberId, this.roomAuthority(roomId).sequence);
       const historyAfter = floor ? floor.sequence - 1 : 0;
       const messageAfter = Math.max(after, historyAfter);
       const directMessages = [];
-      const currentMessages = messageRepository(this, roomId);
+      let currentMessages;
       const dmStatement = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
@@ -6203,6 +6204,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const parsed = JSON.parse(row.body);
           return { row, parsed, messageId: parsed.data.messageId ?? parsed.id };
         });
+        currentMessages ??= messageRepository(this, roomId);
         const records = currentMessages.getMany(decoded.map(item => item.messageId));
         for (const { row, parsed, messageId } of decoded) {
           if (directMessages.length === limit) break;
@@ -6272,6 +6274,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const cursorAfter = Math.max(after, dmScannedAfter,
         ...directMessages.map(row => row.sequence),
         ...directMentions.map(row => row.sequence));
+      // Idle polling needs no conversation/work hydration. A formal request
+      // candidate already loaded canonical records; reuse that room cache.
+      const requestStates = [...directMessages, ...directMentions].some(item => item.nextRead)
+        ? this.room(roomId).state.replyRequests
+        : {};
       const inbox = stampInbox({
         agentId: memberId,
         roomId,
@@ -6283,7 +6290,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         bondProposals,
         peerMessages,
         cursor: { after: cursorAfter },
-        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
+        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, requestStates),
         dmRequests,
       }, memberId);
       for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "cursor", "next", "dmRequests"]) {
@@ -6306,9 +6313,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // text. Archived messages resolve through current normalized records;
     // only genuinely absent legacy records fall back to the logged body. Deleted rows are skipped
     // inside the scan so they never consume one of the caller's limit slots.
-    let currentById = { get: () => undefined, hasReply: () => false };
-    try { currentById = messageRepository(this, roomId); }
-    catch (error) { if (error?.code !== 'room_not_found') throw error; }
+    let repository;
+    const records = () => {
+      if (!repository) {
+        try { repository = messageRepository(this, roomId); }
+        catch (error) {
+          if (error?.code !== 'room_not_found') throw error;
+          repository = { get: () => undefined, hasReply: () => false };
+        }
+      }
+      return repository;
+    };
+    const currentById = { get: id => records().get(id), hasReply: (author, id) => records().hasReply(author, id) };
     const rows = [];
     try {
       const stmt = this.db.prepare(

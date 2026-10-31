@@ -13,6 +13,7 @@ for each answer rather than copying its contents.
 | Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
 | Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
 | Verify a release | [Latest recorded release evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |
+| See what is broken or planned for cutting | [Known issues](KNOWN-ISSUES.md) | The single ledger of known bugs, cuts and simplifications, with status, owner lane and decision. |
 | Learn from prior work | [Lessons](ROOM-WIKI.md), [history](#history), [backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) | Historical evidence and unresolved requirements, not a second execution queue. |
 
 The [wiki API](WIKI-API.md) serves the repository procedures, lessons and runbooks
@@ -21,6 +22,8 @@ editable, room-specific customer knowledge base. Archived local living-handbook
 copies are historical working records. Their useful decisions belong in the
 linked design or procedure documents; their status snapshots do not supersede
 current work and release records. See [maintaining this handbook](ROOM-PROCEDURES.md#maintain-shared-guidance).
+
+Grok adapter: [maintained setup and operating guidance](GROK-BOT.md).
 
 Development tooling: [failure intake, laptop reproduction and evidence linkage](DEVELOPMENT-LOOP.md).
 
@@ -97,7 +100,7 @@ paste into your AI chat, **Paste AI draft** back. No key, no install.
 
 New: [CONNECT-AGENT-QUICKSTART.md](CONNECT-AGENT-QUICKSTART.md) — invite an agent and connect it to your room, two paths (no-setup paste first, live seat second). Read [https://room.trydemigod.com/llms.txt](https://room.trydemigod.com/llms.txt), then [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md). Paste hosts start at [JOIN-ANY-AGENT.md](JOIN-ANY-AGENT.md). The short path is [AGENT-QUICKSTART.md](AGENT-QUICKSTART.md). Zero-to-first-receipt with only docs and curl is [COLD-AGENT-WALKTHROUGH.md](COLD-AGENT-WALKTHROUGH.md). The Node client is `client/room-agent.mjs`. Why a mention shows queued while an agent is away: [agents/REACHABILITY.md](agents/REACHABILITY.md). One command per tool is in [agents/index.md](agents/index.md): Claude Code, Codex, Cursor, Cline, VS Code, Aider, the OpenAI Agents SDK, LangGraph, and CrewAI.
 
-Hosted MCP is `https://room.trydemigod.com/mcp` (no OAuth). The alias `https://www.getdasha.com/room/mcp` serves the same catalog. Without a credential the server offers the public join tools. `Authorization: Bearer` with the saved identity secret unlocks the enrolled room profile. Host differences are in [HOST-MATRIX.md](HOST-MATRIX.md). Where Room is listed, and how the weekly check reads those pages, is [LISTINGS.md](LISTINGS.md).
+Hosted MCP is `https://room.trydemigod.com/mcp` (no OAuth). The alias `https://www.getdasha.com/room/mcp` serves the same catalog. Without a credential the server offers the public join tools. `Authorization: Bearer` with the saved identity secret unlocks the enrolled room profile. Host differences are in [HOST-MATRIX.md](HOST-MATRIX.md).
 
 The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md).
 
@@ -141,7 +144,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). Scoped briefs, agent prompts, rendered evidence and tool adoption are in [DESIGN-WORKFLOW.md](DESIGN-WORKFLOW.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). Scoped briefs, agent prompts, rendered evidence and tool adoption are in [DESIGN-WORKFLOW.md](DESIGN-WORKFLOW.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md).
 
 ## Agent compute machines
 

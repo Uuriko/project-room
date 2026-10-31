@@ -69,7 +69,7 @@ test("authenticated MCP reports field reasons and serves replyToId", async t => 
 
   const listed = await mcp(rpc("tools/list"), { authorization: `Bearer ${identity.secret}` });
   assert.equal(listed.result.profile, "core");
-  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length + 4);
+  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length); // a joined member does not see the 4 join helpers (#5468)
   assert.ok(listed.result.tools.every(tool => MCP_TOOL_NAME_RE.test(tool.name)));
   const full = await mcp(rpc("tools/list", { profile: "full" }), { authorization: `Bearer ${identity.secret}` });
   assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);

@@ -117,6 +117,7 @@ const CONNECTED_STATUS = "Connected to room service · no peer read or processin
 // A first stream open this soon after a read that proved the credential skips
 // its revalidating re-read (see the stream "open" handler).
 const FRESH_OPEN_MS = 2000;
+const MAX_REFRESH_COOLDOWN_MS = 300000;
 
 export class RoomClient {
   constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
@@ -494,14 +495,16 @@ export class RoomClient {
     return this.session ? this.refresh(null, { revalidate: true }) : Promise.resolve();
   }
   // Background full read after a windowed first read (or a failed read). It never
-  // changes the status line: the page is already usable. A failure retries quietly
-  // with backoff; only an ended session (401/403) is surfaced.
+  // changes the status line for ordinary failures: the page is already usable.
+  // Overload shares the automatic-read cooldown; ended sessions still close.
   scheduleFill(delay = FILL_DELAY_MS) {
     if (this.fillTimer || this.backfilling) return;
     const generation = this.generation, session = this.session;
     this.fillTimer = setTimeout(() => {
       this.fillTimer = null;
       if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull || this.backfilling) return;
+      const cooldown = (this.refreshRetryNotBefore ?? 0) - Date.now();
+      if (cooldown > 0) { this.scheduleFill(cooldown); return; }
       this.backfilling = true;
       (async () => {
         try {
@@ -524,6 +527,7 @@ export class RoomClient {
       })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
         if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
+        if ([429, 503].includes(error.status)) this.handleFailure(error);
         const next = this.fillDelay || 1000;
         this.fillDelay = Math.min(next * 2, 30000);
         this.scheduleFill(next + Math.random() * next / 4);
@@ -536,6 +540,8 @@ export class RoomClient {
   // loop revalidates the credential on the interval whenever no snapshot
   // read has just done it; it runs only while a stream is held, because
   // manual-refresh mode has no live deltas to protect and reads on demand.
+  // Deliberately independent of snapshot/history overload cooldown: retain the
+  // ten-second revocation bound using one small authorization probe per interval.
   scheduleLiveness(delay = this.livenessInterval) {
     if (this.livenessTimer) return;
     const generation = this.generation, session = this.session;
@@ -1237,21 +1243,48 @@ export class RoomClient {
       this.refreshInterrupted = false;
       clearTimeout(this.refreshRetry); this.refreshRetry = null;
       this.refreshRetryDelay = 1000;
+      this.refreshRetryNotBefore = 0;
+      this.refreshRecoveryNeedsFull = false;
       this.onStatus(CONNECTED_STATUS);
     };
-    const refreshStream = (receipt, options) => this.refresh(receipt, options).then(value => {
-      markRecovered();
-      return value;
-    }, error => { if (ownsStream()) this.handleFailure(error); });
+    const refreshStream = (receipt, options) => {
+      let recoveringFull = false;
+      if (Date.now() < (this.refreshRetryNotBefore ?? 0)) {
+        // Preserve older-message mutation coverage while collapsing automatic
+        // notifications into one recovery read. Explicit user refresh stays usable.
+        if (receipt?.event && !RECENT_REFRESH_EVENTS.has(receipt.event.type)) this.refreshRecoveryNeedsFull = true;
+        this.scheduleRefreshRecovery();
+        return Promise.resolve();
+      }
+      // Recovery requires a successful read; a local delta cannot prove that
+      // the failed read's access and older-message obligations are satisfied.
+      if (this.refreshInterrupted) {
+        if (receipt?.event && !RECENT_REFRESH_EVENTS.has(receipt.event.type)) this.refreshRecoveryNeedsFull = true;
+        recoveringFull = this.refreshRecoveryNeedsFull;
+        options = { revalidate: !recoveringFull };
+        receipt = null;
+        this.refreshRecoveryNeedsFull = false;
+      }
+      return this.refresh(receipt, options).then(value => {
+        markRecovered();
+        return value;
+      }, error => {
+        if (ownsStream()) {
+          if (recoveringFull) this.refreshRecoveryNeedsFull = true;
+          this.handleFailure(error);
+        }
+      });
+    };
     let opens = 0;
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       opens += 1;
       this.streamRetryDelay = 1000;
-      this.refreshRetryDelay = 1000;
-      clearTimeout(this.refreshRetry); this.refreshRetry = null;
-      this.refreshInterrupted = false;
-      this.onStatus(CONNECTED_STATUS);
+      if (!this.refreshInterrupted) {
+        this.refreshRetryDelay = 1000;
+        clearTimeout(this.refreshRetry); this.refreshRetry = null;
+        this.onStatus(CONNECTED_STATUS);
+      }
       // First open right after a read that proved access: the stream resumes
       // from the held sequence (after=), so it replays anything newer, and a
       // revoked credential is refused by the stream itself. Re-reading the
@@ -1259,7 +1292,7 @@ export class RoomClient {
       // Reconnects (later opens) still revalidate.
       // Only when the latest read attempt succeeded: after a failed read this
       // re-read is the recovery.
-      if (opens === 1 && this.provedAttempt === this.readAttempts && Date.now() - this.lastReadAt < FRESH_OPEN_MS) return;
+      if (!this.refreshInterrupted && opens === 1 && this.provedAttempt === this.readAttempts && Date.now() - this.lastReadAt < FRESH_OPEN_MS) return;
       refreshStream(null, { revalidate: true });
     });
     stream.addEventListener("room-event", message => {
@@ -1304,28 +1337,51 @@ export class RoomClient {
       return;
     }
     this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
-    // A closed stream already reconnects. An open stream does not, so a failed
-    // follow-up read would otherwise stay stale until some later event.
-    if (!this.stream || this.stream.readyState !== 1 || this.refreshRetry) return;
+    // A reconnect must preserve the server's cooldown rather than turn a
+    // successful transport open into permission to retry an overloaded read.
     this.refreshInterrupted = true;
-    const delay = this.refreshRetryDelay || 1000;
+    const alreadyScheduled = Boolean(this.refreshRetry);
+    const backoff = this.refreshRetryDelay || 1000;
+    const retryAfter = [429, 503].includes(error.status) && Number.isFinite(error.retryAfterMs)
+      ? Math.min(MAX_REFRESH_COOLDOWN_MS, Math.max(0, error.retryAfterMs)) : 0;
+    // Repeated catches of the same failure do not advance exponential backoff,
+    // but a later server response may extend an already scheduled cooldown.
+    if (alreadyScheduled && !retryAfter) return;
+    const previousDeadline = this.refreshRetryNotBefore ?? 0;
+    const delay = Math.max(backoff, retryAfter);
+    this.refreshRetryNotBefore = Math.max(this.refreshRetryNotBefore ?? 0,
+      Date.now() + Math.min(MAX_REFRESH_COOLDOWN_MS, delay + Math.random() * delay / 4));
+    if (alreadyScheduled && this.refreshRetryNotBefore === previousDeadline) return;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null;
+    if (!alreadyScheduled) this.refreshRetryDelay = Math.min(backoff * 2, 30000);
+    this.scheduleRefreshRecovery();
+  }
+  scheduleRefreshRecovery() {
+    if (!this.stream || this.stream.readyState !== 1 || this.refreshRetry) return;
+    const generation = this.generation, session = this.session;
     this.refreshRetry = setTimeout(() => {
       this.refreshRetry = null;
-      if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
-      this.refresh(null, { revalidate: true }).then(() => {
-        if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
+      if (generation !== this.generation || session !== this.session || !this.session
+        || !this.stream || this.stream.readyState !== 1) return;
+      const full = this.refreshRecoveryNeedsFull === true;
+      this.refreshRecoveryNeedsFull = false;
+      this.refresh(null, { revalidate: !full }).then(() => {
+        if (generation !== this.generation || session !== this.session || !this.session) return;
         this.refreshInterrupted = false;
         this.refreshRetryDelay = 1000;
+        this.refreshRetryNotBefore = 0;
         this.onStatus(CONNECTED_STATUS);
       }).catch(retryError => {
-        if (this.stream && this.stream.readyState === 1 && this.session) this.handleFailure(retryError);
+        if (generation !== this.generation || session !== this.session || !this.session) return;
+        if (full) this.refreshRecoveryNeedsFull = true;
+        this.handleFailure(retryError);
       });
-    }, delay + Math.random() * delay / 4);
-    this.refreshRetryDelay = Math.min(delay * 2, 30000);
+    }, Math.max(0, (this.refreshRetryNotBefore ?? 0) - Date.now()));
   }
   disconnect() {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
+    this.refreshRetryNotBefore = 0; this.refreshRecoveryNeedsFull = false;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
     this.historyWanted = false; this.backfilling = false;
     clearTimeout(this.livenessTimer); this.livenessTimer = null;

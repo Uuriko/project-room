@@ -41,8 +41,16 @@ test("visible entry choices open focused flows without hiding pending agent sign
     // (decision #37); the whole flow below lives on /agent-signin.
     await page.locator("#agent-signin-button").click();
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
-    assert.equal(page.url().endsWith("/agent-signin"), true);
-    assert.equal(await page.evaluate(() => document.activeElement.name), "identityId");
+    assert.equal(new URL(page.url()).pathname === "/agent-signin", true);
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "page load preserves the start of keyboard navigation");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement.className), "skip-link");
+    const skipBox = await page.locator(".skip-link").boundingBox();
+    assert.ok(skipBox && skipBox.x >= 0 && skipBox.y >= 0, "focused skip link is visible");
+    await page.keyboard.press("Enter");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "main");
+    await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+    assert.equal(await page.evaluate(() => document.activeElement.name), "identityId", "invalid submission still focuses the required field");
     let pendingRoute;
     const pending = new Promise(resolve => { pendingRoute = resolve; });
     await page.route("**/api/auth/agent/rooms", route => pendingRoute(route));
@@ -54,7 +62,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     // the pending request stays on screen (the wall step behaved the
     // same way through the same leave()).
     await page.locator("#agent-signin-home").click();
-    assert.equal(page.url().endsWith("/agent-signin"), true, "pending request stays visible");
+    assert.equal(new URL(page.url()).pathname === "/agent-signin", true, "pending request stays visible");
     assert.equal(await page.locator('[data-agent-form="credentials"]').isVisible(), true);
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
@@ -65,7 +73,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator("#agent-signin-home").click();
     await page.locator("#agent-signin-button").click();
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
-    assert.equal(await page.evaluate(() => document.activeElement.name), "identityId", "leaving clears the phase and reopening focuses the saved identity field");
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "leaving clears the phase and reopening preserves page navigation");
     await page.unroute("**/api/auth/agent/rooms");
     await page.route("**/api/auth/agent/rooms", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rooms: [], displayName: "Synthetic UI agent" }) }));
     await page.route("**/api/agent-identities", route => route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ identityId: "ai_synthetic_ui", secret: "synthetic-test-secret", privateKey: "synthetic-test-private-key" }) }));
@@ -164,7 +172,8 @@ for (const width of [1280, 390]) {
       assert.equal(await page.locator('[data-agent-status]').textContent(), 'That agent ID and secret don’t match. Check both and try again.');
       assert.equal(await page.locator('[name="identityId"]').inputValue(), bad.identityId, 'the ID remains editable for correction');
       assert.equal(await page.locator('[name="secret"]').inputValue(), '', 'failed credential is not left rendered');
-      assert.equal(await page.locator('#main').isVisible(), false);
+      assert.equal(new URL(page.url()).pathname, "/agent-signin", "rejected credentials stay on the sign-in page");
+      assert.equal(await page.locator('[data-agent-form="credentials"]').isVisible(), true);
       assert.equal(await page.evaluate(value=>Object.values(localStorage).concat(Object.values(sessionStorage)).some(entry=>entry.includes(value)), bad.secret),false);
     }
     await page.locator('[name="identityId"]').fill(identity.identityId);

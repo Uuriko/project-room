@@ -626,6 +626,7 @@ test("M-53: corrupt pending-access file fails loudly and is backed up", async t 
   const { fileURLToPath } = await import("node:url");
   const { readPendingAccessFile } = await import("../scripts/grok-room-host.mjs");
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // .tmp is gitignored, so a fresh checkout has none (KI-188)
   const directory = mk(join(root, "grok-host-m53-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const file = join(directory, "pending-access.json");
@@ -648,6 +649,7 @@ test("M-53: journal write replaces the file instead of truncating in place", asy
   const { mkdtempSync: mk, readdirSync: rd, statSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
+  mkdirSync(root, { recursive: true }); // .tmp is gitignored, so a fresh checkout has none (KI-188)
   const directory = mk(join(root, "grok-host-m53-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const file = join(directory, "journal.json");

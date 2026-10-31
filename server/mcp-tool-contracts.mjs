@@ -45,7 +45,9 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_mcp_snippet: { access: `read, ${STATIC}`, cost: READ, rest: "none, static host config snippets" },
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
-  room_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (claim.acquired, claim.renewed, claim.released)` },
+  room_list_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims" },
+  room_read_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}" },
+  room_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `POST /api/rooms/{roomId}/work-claims/{claimId}/claim; ${COMMANDS} (claim.acquired, claim.renewed, claim.released)` },
   room_handoff: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.handoff_recorded)` },
   // AUX-08b batch 1: bonds, heartbeats and wakes, identity trust reads, squads, webhooks.
   bond_accept: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.accept)` },

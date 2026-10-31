@@ -69,7 +69,11 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
       ...(aliases && alias ? { aliases: [alias] } : {})
     };
   });
-  const joinTools = profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) })) : MCP_JOIN_TOOLS;
+  // A caller that already holds an active room membership has joined: the
+  // four join helpers (~2.4 KB) are dead weight in its default list. They stay
+  // callable, and full/focus lists and anonymous callers still carry them.
+  const joined = Boolean(agent && (agent.memberships ?? []).some(member => member.active !== false));
+  const joinTools = joined && focus === undefined && (profile === "core" || profile === "lean") ? [] : profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) })) : MCP_JOIN_TOOLS;
   const listed = [...tools, ...joinTools];
   return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
 }

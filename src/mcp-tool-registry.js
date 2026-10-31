@@ -1,3 +1,4 @@
+import { uiText } from './strings.js';
 // MCP tool registry — the single metadata source for catalog selection.
 //
 // Before this module, a tool's catalog identity was hand-declared in up to
@@ -46,7 +47,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "wake_resume", blurb: "Resume your queued wakes in this room.", alias: "wake.resume", focus: ["automation"] },
   { name: "bond_propose", blurb: "Request a bond. Pass roomId and to. They answer with bond_accept; then peer.dm opens.", alias: "bond.propose" },
   { name: "get_room_context", focus: ["common"] },
-  { name: "room_list_work", focus: ["work", "review"] },
+  { name: "room_list_work", core: true, blurb: uiText("mcp.core.room_list_work"), focus: ["work", "review"] },
   { name: "bond_accept", alias: "bond.accept", focus: ["conversation"] },
   { name: "bond_decline", alias: "bond.decline", focus: ["conversation"] },
   { name: "bond_revoke", alias: "bond.revoke", focus: ["conversation"] },
@@ -67,7 +68,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_read_result", focus: ["work", "review"] },
-  { name: "room_read_work", focus: ["work", "review"] },
+  { name: "room_read_work", core: true, blurb: uiText("mcp.core.room_read_work"), focus: ["work", "review"] },
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
@@ -85,7 +86,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_release_claim", focus: ["work"] },
   { name: "room_renew_claim", focus: ["work"] },
   { name: "room_record_handoff", focus: ["work"] },
-  { name: "room_claim", focus: ["work"] },
+  { name: "room_claim", core: true, blurb: uiText("mcp.core.room_claim"), focus: ["work"] },
   { name: "room_handoff", focus: ["work"] },
   { name: "room_request_history", focus: ["conversation"] },
   { name: "room_request_reply", focus: ["common"] },

@@ -1,5 +1,43 @@
 # Project Room: six-outcome delivery plan
 
+## Sharp MVP decision — 2026-10-31
+
+The product is a shared project where a person can bring an existing agent,
+hand it useful work, follow progress, and review a result alongside other people
+and agents. The first demonstration is the friend's existing Dot, not a newly
+created substitute. The friend may participate through their connected agent;
+Room human signup is optional, while host installation/consent remains explicit.
+
+The default journey is **invite → connect → assign → progress → result → review
+or correction**. A successful connection is not successful execution, and a
+submitted result is not human acceptance. Show the actual state and the next
+useful action without requiring users to understand internal leases or schemas.
+
+- **Keep prominent:** conversation, current work and its result, people/agents,
+  one invitation entry, and actions that need this person's attention. Reuse the
+  existing workspace and work model; do not add another dashboard or task system.
+- **Combine:** repeated progress/result summaries into their work context;
+  alternate invitation methods behind one entry; secondary settings and actions
+  into contextual menus. Preserve audience, permissions, drafts and recovery.
+- **Cut from the default product:** bounty/spend expansion, growth/SEO probes,
+  public-work recruitment, graphs and peripheral operational dashboards. Existing
+  records remain available through their supported recovery/administration paths;
+  hiding a control does not authorize deleting data or abandoning obligations.
+- **Reduce actual cost:** avoid loading inactive panes; use bounded agent reads;
+  eliminate unnecessary whole-room hydration; bound caches and background batches.
+  Finish message/entity write boundaries incrementally. Do not label small response
+  payloads or body indirection as elimination of the full projection rewrite.
+- **Defer:** new integrations, autonomous fleet machinery, speculative subsystems
+  and broad placement migrations unless the supported journey proves a need.
+
+Qualify the same invitation-to-reviewed-result journey before and after each
+cut, including a disconnect, correction, permission loss, keyboard use and a
+narrow screen. Record steps, visible controls, loaded requests/bytes, time to
+useful result and duplicate/lost actions. Fewer controls alone is insufficient.
+Changes below retain their original evidence; this decision does not assert
+that prepared candidates have been deployed or that every existing defect is fixed.
+
+
 This page owns active scope. The six outcomes below retain the acceptance criteria
 from the 2026-10-18 scope reduction; the [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
 is an evidence index, not 773 promised features or an independent execution queue.
@@ -7,6 +45,69 @@ Previous discussion or implementation alone does not justify adoption: retain
 supported benefits over simpler alternatives, including slower or failed trials.
 
 ## Capability status
+
+### 2026-10-31 consolidation checkpoint
+
+Owner split confirmed in muse-room 24135: the other laptop owns the ordered
+security/reliability release, pending onboarding/accessibility PRs and Stage 4
+server/MCP/work-state/OAuth work. CX2 owns the narrow Board status repair and
+human journey audit. Do not create a parallel release or worker system.
+
+- **Merged and observed live:** `6f5ffa01f8e38cea7fa56f32c7d1ba4977355cc6`
+  matched the canonical `/api/version` and `/api/version/worker` on Oct 31.
+  Peer receipt 24138 reports both public doors plus strict smoke 16/16. This
+  observation establishes the release identity, not every feature's usability.
+- **Local, not shipped:** CX2 `3b526f6ec` repairs Board placement: an open PR
+  must not hide a blocked claim or revive a closed/cancelled claim. PR #5480
+  is open. The other laptop independently reproduced the failing base and
+  passed 36/36 checks on the repair (24141); it confirmed exact product/test
+  parity with the PR and accepted release ownership (24147). Held for the
+  post-reliability UI batch; required release checks still apply. Author-side
+  verification: 59 focused tests, lint, and browser block/resume/close.
+- **Tested locally:** a human typed a useful audit-summary request, created
+  assigned work, saw agent acceptance and progress, read its native text result,
+  requested a correction, then approved a new exact result after a new review.
+  The producer/reviewer roles were simulated by one operator. This proves the
+  local interaction path, not independent review or unattended agent execution.
+  Fourteen agent/discovery/recovery tests also passed, including lost-response
+  retry, duplicate suppression and actual local child execution.
+- **Stopped stale activity:** CX2 paused its `0e50e157` background campaign and
+  stopped the automatic request listener. Journals and evidence remain. The
+  local worker catalog/priority/release-evidence stack is not in this main
+  checkout; do not describe it as an installed product capability. Passing
+  repeated old-candidate checks is not release qualification or user value.
+- **Not established in this pass:** installed desktop revision, current desktop
+  human/agent isolation, a fresh production Google sign-in-to-result journey,
+  and autonomous cross-laptop dispatch. A stale human tab recovered its sign-in
+  screen after full reload; Google navigation did not visibly complete.
+
+Next work, in dependency order:
+
+1. Finish required checks on existing PR #5480. The peer has accepted the
+   independently checked candidate into its post-reliability release lane
+   (24147); no second PR is needed. Peer owns merge/deploy; CX2 verifies the
+   delivered blocked/open-PR and retired-work behavior. Accepted handoff and
+   passing local checks do not establish deployment.
+2. Keep the ongoing security/reliability release ahead of cosmetic work. The
+   peer's diagnostic findings in 24137 include two legacy-shape mismatches and
+   one bounded scan with unknown completeness; this audit does not clear them.
+3. Simplify the existing human journey without adding a second work model:
+   Board creation/admin controls currently push all work below the first screen;
+   result and decision summaries repeat under every linked message. Establish
+   a single primary result/next action before moving secondary controls.
+4. Stage 4 owner aligns recovery wording with the structured action: a human
+   change request says the agent should “accept a revised direction,” but
+   `work.accepted` is rejected while blocked. `room_resolve_blocker` followed by
+   start is the supported recovery. Keep exact evidence/version checks intact:
+   the audit correctly rejected a command ID used as a message event ID.
+5. Admit laptop work only against an explicit current candidate and consequential
+   suite. Run finite complementary checks; preserve the requester/work allowlist.
+   Expand the unmerged worker machinery only when a real release bottleneck
+   demonstrates a benefit beyond the existing runner and CI.
+
+Local screenshots and logs remain on CX2; the room handoff 24142 records the
+journey and design findings. No production approval, merge or deploy follows
+from the disposable room's simulated human decision.
 
 Rules: **Works** means deployed and verified on production, with the evidence linked. **In progress** means merged or in a PR, not yet verified on production. **Designed** means a plan only. Change a row in the same PR that changes the capability. (#5383)
 
