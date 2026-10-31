@@ -118,6 +118,21 @@ async function deliverAndVerify(f, id, verifyKey) {
   return done;
 }
 
+// EA-006 (expiry-at-delivery): an approval recorded before the delivery
+// no longer verifies it. Tests whose approvals were scaffolding recorded
+// in flight deliver first, approve the delivery that exists, then verify.
+async function deliverApproveAndVerify(f, id, verifyKey, summary = "Approved the delivered bundle") {
+  const delivered = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "delivered", delivery: BUNDLE });
+  assert.equal(delivered.status, 200);
+  assert.equal(delivered.value.state, "delivered");
+  const approved = await f.call(verifyKey, `/work-claims/${id}/review`, { verdict: "approve", summary });
+  assert.equal(approved.status, 200);
+  const done = await f.call(verifyKey, `/work-claims/${id}/update`, { state: "done" });
+  assert.equal(done.status, 200);
+  assert.equal(done.value.state, "done");
+  return done;
+}
+
 async function refusedCompletion(f, id, reviewedBy, { status = 422, code = "work_not_delivered" } = {}) {
   const before = f.store.workClaims.get("commons", id);
   const sequence = f.store.room("commons").sequence;
@@ -338,11 +353,14 @@ test("reviewed completion requires the named reviewer's latest explicit approval
         const after = (await f.call(f.ownerKey, `/work-claims/${id}`)).value;
         assert.ok(after.history.length > approved.value.history.length, "supersession retains the review history");
         if (negative.note) {
-          assert.equal(after.reviews.some(entry => entry.memberId === reviewer && entry.verdict === "approve"), false);
+          // EA-007: a note-only attestation must NOT clear the standing
+          // approve (verdict-carrying negatives above still replace it);
+          // the note itself is recorded on the reviewer's attestation.
+          assert.equal(after.reviews.some(entry => entry.memberId === reviewer && entry.verdict === "approve"), true);
           assert.equal(after.attestations.find(entry => entry.memberId === reviewer).note, negative.note);
         }
         assert.equal((await review({ verdict: "approve", summary: "Rechecked after the latest feedback" })).status, 200);
-        const done = await deliverAndVerify(f, id, key);
+        const done = await deliverApproveAndVerify(f, id, key);
         assert.equal(done.value.state, "done");
         assert.equal(done.value.reviewedBy, reviewer);
         assert.equal(done.value.verification.state, "verified");
@@ -358,7 +376,7 @@ test("manual completion uses the named reviewer's approval, not another member's
   assert.equal((await f.call(f.coordKey, path, { verdict: "comment", summary: "Still reviewing" })).status, 200);
   assert.equal((await f.call(f.verifierKey, path, { verdict: "approve", summary: "Verified this result" })).status, 200);
   await refusedCompletion(f, "named-reviewer", "coord");
-  const done = await deliverAndVerify(f, "named-reviewer", f.verifierKey);
+  const done = await deliverApproveAndVerify(f, "named-reviewer", f.verifierKey, "Verified this delivered result");
   assert.equal(done.value.reviewedBy, "verifier");
   assert.equal(done.value.reviews.find(entry => entry.memberId === "coord").verdict, "comment");
 });
@@ -379,8 +397,9 @@ test("human verify permits review without granting Board writes, and self-attest
   assert.equal(approved.status, 200);
   assert.deepEqual(f.store.roomAuthority("commons").members.verifier.permissions, ["verify"]);
   // the verify itself is a review action: the verify-only human performs it
-  // from their own session without gaining Board writes
-  const done = await deliverAndVerify(f, "human-review", f.verifierKey);
+  // from their own session without gaining Board writes (EA-006: the
+  // approval that gates is the one recorded against the delivery)
+  const done = await deliverApproveAndVerify(f, "human-review", f.verifierKey, "Verified the delivery");
   assert.equal(done.value.reviewedBy, "verifier");
   await startReviewedClaim(f, "self-review", "self_attested");
   await refusedCompletion(f, "self-review", "verifier", { status: 403, code: "work_review_rejected" });
@@ -480,7 +499,7 @@ test("approval remains bound to the reviewed revision and observed pull-request 
       const fresh = await f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed the updated work" });
       assert.equal(fresh.status, 200);
       assert.notDeepEqual(fresh.value.reviews[0].basis, basis);
-      await deliverAndVerify(f, id, f.coordKey);
+      await deliverApproveAndVerify(f, id, f.coordKey, "Reviewed the delivered updated work");
     });
   }
 });
@@ -504,7 +523,7 @@ test("persisted approvals retain their basis while older unbound records need a 
   assert.equal((await f.call(f.ownerKey, "/work-claims/persisted-review")).status, 200);
   await refusedCompletion(f, "persisted-review", "coord");
   assert.equal((await f.call(f.coordKey, "/work-claims/persisted-review/review", { verdict: "approve", summary: "Fresh review with the current context" })).status, 200);
-  await deliverAndVerify(f, "persisted-review", f.coordKey);
+  await deliverApproveAndVerify(f, "persisted-review", f.coordKey, "Fresh review of the delivered work");
 });
 
 test("a superseded claim cannot be manually completed with an otherwise valid approval", async t => {

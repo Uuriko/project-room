@@ -78,20 +78,19 @@ test("canary: approval of bundle A does not verify re-delivered bundle B", () =>
   assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), false);
 });
 
-// CANARY-3 (#3684, kernel): an approval recorded before any delivery
-// exists attests the work in flight — the board's designed review flow
-// (the repo's own board tests record the review, then the holder
-// finishes, then the reviewer verifies) — so it covers the round's FIRST
-// delivery. But it was recorded against no delivery, so a REPLACEMENT
-// delivery is outside what it attested and the gate closes. (The league's
-// sketch asserted the pre-delivery approval never counts at all; that
-// reading contradicts the PR's pinned board flows, so the canary pins
-// the strongest binding compatible with them: in-flight approvals die
-// with the first replacement, exactly like delivery-bound ones.)
-test("canary: pre-delivery approval never survives a delivery replacement", () => {
+// CANARY-3 (#3684, kernel; amended by EA-006, 2026-10-31): an approval
+// recorded before any delivery exists attests only the work in flight.
+// The expert audit executed the old first-delivery coverage on
+// production (EA-006): the resulting receipt's verification basis named
+// a delivery digest no reviewer had attested. The coordinator ruling is
+// EXPIRY-AT-DELIVERY — the pre-delivery approval is current while no
+// delivery exists and expires for gating the moment a delivery lands,
+// so it covers neither the first delivery nor any replacement; the
+// reviewer must approve the delivery that exists.
+test("canary: pre-delivery approval expires when the first delivery lands", () => {
   let item = recordReview(reviewedItem(), "sage", { verdict: "approve", summary: "reviewed in flight" });
   item = updateWork(item, "quill", { state: "delivered", delivery: goodBundle });
-  assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), true);
+  assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), false);
   item = updateWork(item, "quill", { state: "in_progress" });              // send-back
   item = updateWork(item, "quill", { state: "delivered", delivery: junkBundle });
   assert.equal(canCloseWork(item, "sage", { policy: "distinct_member", reviewMembers: ["sage"] }), false);

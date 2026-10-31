@@ -295,14 +295,15 @@ export function canReviewClaim(item, viewer, members) {
 // Mirrors the kernel's currentReviewBasis (work-claims.mjs): the owner round,
 // revision and CI head must match, and — since #3684 — so must the delivery:
 // an approval bound to a delivery digest counts only for that delivery, and
-// an approval recorded before any delivery (generation 0) counts only for
-// the round's first delivery; a re-delivery stales it like a head move.
+// an approval recorded before any delivery (generation 0) expires for
+// gating when a delivery lands (EA-006 expiry-at-delivery); a re-delivery
+// stales a delivery-bound approval like a head move.
 function basisCurrent(review, item) {
   const basis = review?.basis;
   if (!basis || basis.version !== 1) return false;
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === (item.delivery?.digest ?? null)
-    : (basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1;
+    : (item.delivery?.digest ?? null) === null;
   return deliveryCurrent && basis.owner === item.owner && basis.claimedAt === item.claimedAt
     && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
 }
