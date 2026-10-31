@@ -56,13 +56,14 @@ const fixtureCard = buildFixtureCard();
 async function door(t, prefix, failure) {
   const requests = [];
   const responses = new Map([
-    ["/api/health", { status: "ok" }],
+    ["/api/health", { status: "ok", liveness: "ok", jobs: { status: "ok" } }],
+    ["/api/health/jobs", { schema: "room.job-health/1", status: "ok", generatedAt: new Date().toISOString(), jobs: [{ name: "room-backup", required: true, status: "ok", stale: false, consecutiveFailures: 0 }] }],
     ["/api/ready", { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" }],
     ...versionPaths.map(path => [path, { sourceRevision: revision }]),
     ...["/terms", "/privacy", "/"].map(path => [path, "<!doctype html><title>Room</title>"]),
     [cardPath, fixtureCard],
   ].map(([path, body]) => [`${prefix}${path}`, { status: 200, body }]));
-  if (failure) responses.set(`${prefix}${failure.path}`, failure);
+  for (const item of Array.isArray(failure) ? failure : failure ? [failure] : []) responses.set(`${prefix}${item.path}`, item);
   const server = createServer((req, res) => {
     requests.push(req.url);
     const response = req.method === "GET" && responses.get(req.url);
@@ -119,11 +120,11 @@ for (const withSha of [false, true]) {
     assert.equal(report.sha, withSha ? revision : null);
     assert.equal(report.origin, origin.url);
     assert.equal(report.entry, entry.url);
-    const paths = [...smokePaths, ...(withSha ? versionPaths : []), cardPath];
+    const paths = [...smokePaths, "/api/health/jobs", ...(withSha ? versionPaths : []), cardPath];
     for (const current of [origin, entry]) {
       assert.deepEqual(current.requests.toSorted(), paths.map(path => `${current.prefix}${path}`).toSorted());
     }
-    assert.equal(report.checks.length, paths.length * 2);
+    assert.equal(report.checks.length, (paths.length - 1) * 2);
     assert.ok(report.checks.every(check => check.pass));
   });
 
@@ -328,4 +329,20 @@ test("target revision in an HTTP503 version response cannot pass smoke or propag
   assert.equal(failure.status, 503);
   assert.equal(failure.got, revision);
   assert.equal(propagationRetry(result.report, { sha: revision, origin: origin.url, entry: entry.url }), false);
+});
+
+
+test("real HTTP smoke admits an honest optional rate-limit wait and retains its receipt", async t => {
+  const body = { schema: "room.job-health/1", status: "degraded", generatedAt: new Date().toISOString(), jobs: [
+    { name: "room-backup", required: true, status: "ok", stale: false, consecutiveFailures: 0 },
+    { name: "claim-prs", required: false, status: "degraded", stale: false, consecutiveFailures: 0, degraded: "github_rate_limited", lastSummary: { rateLimited: true } }
+  ] };
+  const origin = await door(t, "/canonical", [
+    { path: "/api/health", status: 200, body: { status: "degraded", liveness: "ok", jobs: { status: "degraded" } } },
+    { path: "/api/health/jobs", status: 200, body }
+  ]);
+  const entry = await door(t, "/room");
+  const result = await runSmoke(origin, entry, true);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(result.report.checks.find(c => c.name === `health ${origin.url}/api/health`).degradedJobs, [{ name: "claim-prs", reason: "github_rate_limited" }]);
 });

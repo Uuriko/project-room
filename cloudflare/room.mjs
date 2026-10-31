@@ -43,7 +43,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -51,6 +51,7 @@ import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mj
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
 const durableObjectHealth = createHealthProbe();
+const durableObjectJobsHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -66,6 +67,7 @@ function cronDeadline() {
 // handler/RPC surface and cannot carry test-only exports — workerd
 // rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
+const WEBHOOK_RETENTION_CURSOR_KEY = 'retention-webhook-cursor';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -572,7 +574,9 @@ export class ProjectRoom extends DurableObject {
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
     try {
-      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      const cursor = await this.ctx.storage.get(WEBHOOK_RETENTION_CURSOR_KEY);
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries({ cursor: cursor ?? null });
+      await this.ctx.storage.put(WEBHOOK_RETENTION_CURSOR_KEY, webhookDeliveries.nextCursor);
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
     } finally {
@@ -596,13 +600,14 @@ export class ProjectRoom extends DurableObject {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
-    const selected = selectWorkerJobs(this.env, this.store).filter(job => {
-      if (onlyJob !== null && job.name !== onlyJob) return false;
-      if (job.slow && !includeSlow) return false;
+    const selected = selectWorkerJobs(this.env, this.store, { onlyJob, includeSlow }).filter(job => {
       return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name]));
     });
     const outcomes = [];
     for (const job of selected) {
+      // Each runCronJobs call below contains one job, so its own between-job
+      // yield never runs. Open the input gate before the next synchronous job.
+      if (outcomes.length) await yieldToQueuedRequests();
       const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
@@ -797,7 +802,7 @@ export default {
         return finish(workerErrorResponse({ httpStatus: 403, code: 'origin_denied', message: 'Request origin is not allowed', headers: { 'Cache-Control': 'no-store' } }), 'worker');
       }
     }
-    // Liveness is the Worker. It does not construct or query the Durable Object.
+    // HTTP200 describes Worker liveness; bounded job health grades service health.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
       // #3272: report the mailer state exactly as the DO's server does —
       // magicLinkMailerFromEnv(env) non-null is the same derivation the
@@ -805,7 +810,14 @@ export default {
       // Worker liveness answer and the handler can never disagree about
       // whether email gates are enforced or relaxed.
       const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
-      return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
+      const response = await durableObjectJobsHealth({
+        start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
+        onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })
+      });
+      return finish(response, 'worker');
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.

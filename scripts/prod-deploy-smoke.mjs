@@ -18,7 +18,7 @@
 //
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
-// then requires /api/health status "ok", /api/ready status "ready", and HTTP
+// then validates health liveness and its job summary, /api/ready status "ready", and HTTP
 // 200 for /terms, /privacy and / on both doors. Prints one JSON report;
 // exits 1 on any failure.
 // Without --sha it skips the revision wait (used after a rollback, where the
@@ -116,6 +116,59 @@ export function readinessDetail(result) {
   if (Number.isInteger(probe?.statusCode) && probe.statusCode >= 100 && probe.statusCode <= 599) detail.do.statusCode = probe.statusCode;
   if (result.status === 0) detail.transport = choose(result.errorKind, ["fetch_timeout", "fetch_error"], "fetch_error");
   return detail;
+}
+
+// Keep operational waits distinct from failed safety work. This follows the
+// external probe's required/failed/stale checks, but admits only the known
+// recoverable GitHub rate-limit wait and also verifies the summary contract.
+export function deploymentHealth(health, jobResponse, now = Date.now()) {
+  const states = ["ok", "degraded", "stale", "failing", "disabled"];
+  const names = new Set(["native-mcp-events", "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol", "project-map", "store-growth"]);
+  const body = health.json, view = jobResponse.json;
+  const result = { pass: false, status: health.status, body: ["ok", "degraded"].includes(body?.status) ? body.status : "unknown", jobsStatus: ["ok", "degraded", "stale", "failing"].includes(view?.status) ? view.status : "unknown", reason: "invalid_health", degradedJobs: [] };
+  const fail = reason => ({ ...result, reason });
+  if (health.status !== 200 || !body || typeof body !== "object") return result;
+  if (![200, 503].includes(jobResponse.status) || view?.schema !== "room.job-health/1" || !Array.isArray(view.jobs) || !view.jobs.length || view.jobs.length > 100) return fail("invalid_jobs");
+  const generated = Date.parse(view.generatedAt);
+  if (!Number.isFinite(generated) || generated > now + 5000 || now - generated > 60000) return fail("stale_snapshot");
+  const seen = new Set();
+  for (const job of view.jobs) {
+    if (!job || typeof job.name !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(job.name) || seen.has(job.name)
+      || !states.includes(job.status) || typeof job.required !== "boolean" || typeof job.stale !== "boolean"
+      || !Number.isSafeInteger(job.consecutiveFailures) || job.consecutiveFailures < 0) return fail("invalid_jobs");
+    seen.add(job.name);
+  }
+  const backup = view.jobs.find(job => job.name === "room-backup");
+  if (!backup || backup.required !== true) return fail("required_backup_missing");
+  if (view.jobs.some(job => job.required && job.status !== "ok")) return fail("required_job_unhealthy");
+  const active = view.jobs.filter(job => job.status !== "disabled");
+  if (active.some(job => job.status === "failing" || job.consecutiveFailures > 0)) return fail("job_failing");
+  if (active.some(job => job.status === "stale" || job.stale)) return fail("job_stale");
+  const degraded = active.filter(job => job.status === "degraded");
+  if (degraded.some(job => job.required || job.degraded !== "github_rate_limited" || job.lastSummary?.rateLimited !== true)) return fail("unsupported_degradation");
+  if (active.some(job => job.status === "ok" && (job.degraded != null || job.lastSummary?.rateLimited === true))) return fail("inconsistent_jobs");
+  const expected = degraded.length ? "degraded" : "ok";
+  if (view.status !== expected || jobResponse.status !== 200) return fail("inconsistent_jobs");
+  // Older rollback targets have neither field. A partial new envelope cannot
+  // use that compatibility path, and legacy liveness never masks bad jobs.
+  const legacy = !Object.hasOwn(body, "liveness") && !Object.hasOwn(body, "jobs");
+  if (legacy ? body.status !== "ok" : body.liveness !== "ok" || body.jobs?.status !== expected || body.status !== expected) return fail("inconsistent_health");
+  return { ...result, pass: true, reason: "verified", legacy, degradedJobs: degraded.map(job => ({ name: names.has(job.name) ? job.name : "job", reason: "github_rate_limited" })) };
+}
+
+// These endpoints take independent snapshots. Re-read only when both complete
+// snapshots are internally valid and disagree across an ok/rate-limit transition.
+// Required-job failures and internally lying or unknown envelopes never retry.
+export async function readDeploymentHealth(readHealth, readJobs, now = () => Date.now()) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const health = await readHealth(), jobs = await readJobs();
+    const result = deploymentHealth(health, jobs, now());
+    const summary = health.json;
+    const transition = result.reason === "inconsistent_health" && summary?.liveness === "ok"
+      && ["ok", "degraded"].includes(summary.status) && summary.jobs?.status === summary.status
+      && ["ok", "degraded"].includes(jobs.json?.status) && summary.status !== jobs.json.status;
+    if (!transition || attempt === 3) return { ...result, attempts: attempt };
+  }
 }
 
 // Deploy-time consistency check for one served agent card (#1524). Returns
@@ -278,8 +331,8 @@ async function main() {
   }
 
   for (const door of [origin, entry]) {
-    const health = await get(`${door}/api/health`);
-    record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
+    const healthCheck = await readDeploymentHealth(() => get(`${door}/api/health`), () => get(`${door}/api/health/jobs`));
+    record(`health ${door}/api/health`, healthCheck.pass, healthCheck);
     const ready = await get(`${door}/api/ready`);
     record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", readinessDetail(ready));
     for (const page of ["/terms", "/privacy", "/"]) {

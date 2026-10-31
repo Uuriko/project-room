@@ -35,8 +35,10 @@ export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.inclu
 })));
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
-export function selectWorkerJobs(env, store) {
-  return REGISTRY.filter(job => job.runtimes.includes("worker") && jobEnabled(job, env, store));
+export function selectWorkerJobs(env, store, { onlyJob = null, includeSlow = true } = {}) {
+  return REGISTRY.filter(job => job.runtimes.includes("worker")
+    && (onlyJob === null || job.name === onlyJob) && (includeSlow || !job.slow)
+    && jobEnabled(job, env, store));
 }
 
 // Kept for callers that still ask by name. The registry gate is the source.

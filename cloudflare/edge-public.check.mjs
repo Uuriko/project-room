@@ -16,10 +16,16 @@ test('static assets and discovery documents do not enter the Durable Object', as
         import worker, { ProjectRoom } from './room.mjs';
         let doFetches = 0;
         let doProbes = 0;
+        let doJobReads = 0;
         const original = ProjectRoom.prototype.fetch;
         ProjectRoom.prototype.fetch = async function(request) {
           doFetches += 1;
           return original.call(this, request);
+        };
+        const originalJobs = ProjectRoom.prototype.readJobHealth;
+        ProjectRoom.prototype.readJobHealth = function() {
+          doJobReads += 1;
+          return originalJobs.call(this);
         };
         const originalProbe = ProjectRoom.prototype.probeStorage;
         ProjectRoom.prototype.probeStorage = function() {
@@ -33,10 +39,12 @@ test('static assets and discovery documents do not enter the Durable Object', as
             if (url.pathname === '/__do_fetches') return new Response(String(doFetches));
             const fetchesBefore = doFetches;
             const probesBefore = doProbes;
+            const jobsBefore = doJobReads;
             const response = await worker.fetch(request, env, ctx);
             const headers = new Headers(response.headers);
             headers.set('X-Test-Do-Fetches', String(doFetches - fetchesBefore));
             headers.set('X-Test-Do-Probes', String(doProbes - probesBefore));
+            headers.set('X-Test-Do-Job-Reads', String(doJobReads - jobsBefore));
             return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
           }
         };
@@ -75,6 +83,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
     assert.equal(page.headers.get('x-test-do-fetches'), '0');
+    assert.equal(page.headers.get('x-test-do-job-reads'), '0');
     assert.match(await page.text(), /message-input/);
     assert.match(page.headers.get('server-timing'), /total;dur=/);
     assert.match(page.headers.get('link'), /llms\.txt/);
@@ -87,14 +96,17 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const manifest = await call('/manifest.webmanifest');
     assert.equal(manifest.status, 200);
     assert.equal(manifest.headers.get('x-test-do-fetches'), '0');
+    assert.equal(manifest.headers.get('x-test-do-job-reads'), '0');
     assert.match(manifest.headers.get('content-type'), /application\/manifest\+json/);
     const security = await call('/.well-known/security.txt');
     assert.equal(security.status, 404);
     assert.equal(security.headers.get('x-test-do-fetches'), '0');
+    assert.equal(security.headers.get('x-test-do-job-reads'), '0');
     assert.match(await security.text(), /Not found/);
 
     const about = await call('/about');
     assert.equal(about.headers.get('x-test-do-fetches'), '0');
+    assert.equal(about.headers.get('x-test-do-job-reads'), '0');
     assert.equal(about.headers.get('x-robots-tag'), 'all');
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
     // /about is the one public page with a first-party script: its policy
@@ -194,6 +206,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const missing = await call('/compare/project-room-vs-slack', { headers: { Accept: 'text/html' } });
     assert.equal(missing.status, 404);
     assert.equal(missing.headers.get('x-test-do-fetches'), '0');
+    assert.equal(missing.headers.get('x-test-do-job-reads'), '0');
     assert.equal(missing.headers.get('x-robots-tag'), 'noindex');
     assert.match(missing.headers.get('content-type'), /text\/html/);
     const missingHtml = await missing.text();
@@ -206,15 +219,17 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const missingClient = await call('/compare/project-room-vs-slack');
     assert.equal(missingClient.status, 404);
     assert.equal(missingClient.headers.get('x-test-do-fetches'), '0');
+    assert.equal(missingClient.headers.get('x-test-do-job-reads'), '0');
     assert.equal(await missingClient.text(), 'Not found\n');
 
     const health = await call('/api/health', { ip: '192.0.2.9' });
     assert.equal(health.status, 200, await health.clone().text());
     assert.equal(health.headers.get('x-test-do-fetches'), '0');
     assert.equal(health.headers.get('x-test-do-probes'), '0');
+    assert.equal(health.headers.get('x-test-do-job-reads'), '1');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     const healthBody = await health.json();
-    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
+    assert.deepEqual(healthBody, { status: 'degraded', liveness: 'ok', jobs: { status: 'stale' }, mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
 
     const ready = await call('/api/ready', { ip: '192.0.2.9' });
     assert.equal(ready.status, 200, await ready.clone().text());

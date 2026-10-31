@@ -43,7 +43,7 @@ test("charter preserves exact versions, clearing and old receipt retries without
   try { assert.equal(reopened.charter(f.keys.owner, "commons").revision, 3); assert.equal(reopened.command(f.keys.owner, "commons", original).duplicate, true); auditRecovery(reopened); } finally { reopened.close(); }
 });
 
-test("only active human owner updates; invalid and stale instructions leave no writes", async t => {
+test("only active owner updates; invalid and stale instructions leave no writes", async t => {
   const f = await setup(t), before = auditRecovery(f.store).dataSha256;
   for (const actor of ["guest", "producer", "reviewer"]) assert.throws(() => f.send(data(), undefined, actor), { code: "command_rejected" });
   for (const patch of [{ purpose: "" }, { purpose: " " }, { purpose: "a".repeat(1001) }, { purpose: "\uD800" }, { outputs: {} }, { purpose: null }, { expectedRevision: null }, { expectedRevision: Number.MAX_SAFE_INTEGER }, { extra: "not allowed" }]) {
