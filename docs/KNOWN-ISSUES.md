@@ -483,3 +483,7 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | KI-191 | room_list_work returns ~88 KB with no cursor/limit on a busy room (muse-room) | MCP call, 2026-10-30 |
 | KI-192 | room_read_work with no id says only "does not match the tool input"; it should name workItemId/workItemIds | MCP call |
 | KI-193 | 38 exports referenced nowhere (incl. startGmailSync, createTrialTaskRegistry, roomMcpFetchPost); 615 used only in their own file | token scan of server/src/scripts |
+| KI-194 | Security: room_create puts the new room-scoped API key (mcpToken.credential) in plain text content; room_join and room_identity_mint withhold it ("value is in structuredContent") | prod MCP, qa-onb room, 2026-10-30 |
+| KI-195 | Friend onboarding over hosted MCP works in 5 calls, ~4.5 s (mint, join, list, post, needs_me); empty room_join still says only "does not match the tool input" in prod (#5467 unlanded) | qa-onb e2e |
+| KI-196 | Home page lacks a main landmark (axe landmark-one-main); /join and other public pages pass axe; no console errors, no 390px overflow | Playwright + axe |
+| KI-197 | Signed-in human views (room thread, needs-me, Board, approvals) cannot be audited by an agent: no human test session; /needs-me and /r/<id> are 404 deep links | Playwright |
