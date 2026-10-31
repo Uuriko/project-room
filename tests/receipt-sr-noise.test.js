@@ -12,8 +12,7 @@ test("empty participant lists read 'none', not an em dash", () => {
 
 test("badge alt does not repeat the title", () => {
   const alt = html.match(/<img [^>]*alt="([^"]*)"/)?.[1] ?? "";
-  if (alt) {
-    assert.doesNotMatch(alt, /A long receipt title/);
-    assert.match(alt, /^Project Room receipt badge/);
-  }
+  assert.ok(alt, "receipt badge image must have nonempty alternative text");
+  assert.doesNotMatch(alt, /A long receipt title/);
+  assert.match(alt, /^Project Room receipt badge/);
 });
