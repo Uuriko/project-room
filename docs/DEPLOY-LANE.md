@@ -198,3 +198,15 @@ and content verification before promotion, and a new corrected release is
 verified before being marked latest. An invalid original release does not
 silently trigger a new revision. This input selects publication identity; it
 does not bypass deployment policy or change the deployed commit.
+
+### Bounded health probe budget
+
+Worker readiness and job-health RPC probes each allow 2.5 seconds. Successful
+1.2–1.8 second RPCs fit within this budget; a stalled RPC still reports timeout,
+and failed storage or an unready result remains unready. Concurrent callers
+share only an in-flight RPC and retain their own deadlines; completed results
+are not cached. Static and discovery responses do not start these probes.
+
+This trades up to 1.5 seconds of additional failure-detection latency for fewer
+false timeouts under observed service latency. It does not make slow requests
+fast, retry until a check passes, or explain the original long-stall incident.
