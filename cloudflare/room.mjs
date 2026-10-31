@@ -1,4 +1,5 @@
 import { createWorkersMcpEventTransport } from './mcp-event-transport.mjs';
+import { createSchedulerDiagnostics, readSchedulerDiagnostics } from "./job-scheduler-diagnostics.mjs";
 import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
@@ -381,7 +382,9 @@ export class ProjectRoom extends DurableObject {
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
-    return { ...view, publicReports: countOpenPublicReports(this.store) };
+    return { ...view, publicReports: countOpenPublicReports(this.store),
+      scheduler: await readSchedulerDiagnostics({ storage: this.ctx.storage, store: this.store, diagnostics: this.schedulerDiagnostics,
+        requestWriteWatermark: this.requestAlarmWrites, alarmArmedSinceBoot: this.alarmArmedSinceBoot }) };
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -614,12 +617,14 @@ export class ProjectRoom extends DurableObject {
   // Set the alarm only when the new time is earlier than the one already set.
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
   #armJobAlarm(options) {
-    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options));
+    this.schedulerDiagnostics ??= createSchedulerDiagnostics();
+    return this.schedulerDiagnostics.reconcile(() => this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options)));
   }
   async #armJobAlarmBody({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
     this.jobAlarmReconciler ??= createJobAlarmReconciler({
       storage: this.ctx.storage,
+      observeStage: stage => this.schedulerDiagnostics?.observeStage(stage),
       calculate: async () => {
         const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
         return earliestFutureAlarm(JOBS, {

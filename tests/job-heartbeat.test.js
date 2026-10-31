@@ -673,3 +673,19 @@ test("escrow-epochs overdue streak: sustained overdue degrades the job with an a
   assert.equal(patrolView.overdueStreak, null);
   assert.equal(patrolView.overdueSinceAt, null);
 });
+
+test("DO job health includes scheduler evidence without reconciling alarms", async () => {
+  const store = new RoomStore(':memory:');
+  try {
+    let alarmReads = 0;
+    const self = { store, env: {}, requestAlarmWrites: 20, alarmArmedSinceBoot: true,
+      ctx: { storage: { get: async () => ({}), getAlarm: async () => { alarmReads++; return 12345; },
+        setAlarm: () => assert.fail('health must not set alarm'), deleteAlarm: () => assert.fail('health must not delete alarm') } } };
+    const result = await ProjectRoom.prototype.readJobHealth.call(self);
+    assert.equal(result.scheduler.alarmAt, 12345);
+    assert.equal(result.scheduler.requestWriteWatermark, 20);
+    assert.equal(result.scheduler.alarmArmedSinceBoot, true);
+    assert.equal(result.scheduler.scope, 'current-isolate');
+    assert.equal(alarmReads, 1);
+  } finally { store.close(); }
+});
