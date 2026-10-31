@@ -52,7 +52,7 @@ async function doors(t, failure) {
       res.writeHead(200, { "content-type": "application/json" }).end("{}");
       return;
     }
-    const match = req.url.match(/^\/(canonical|room)(\/api\/(version(?:\/worker)?|health|ready)|\/terms|\/privacy|\/|\/\.well-known\/agent-card\.json)$/);
+    const match = req.url.match(/^\/(canonical|room)(\/api\/(version(?:\/worker)?|health(?:\/jobs)?|ready)|\/terms|\/privacy|\/|\/\.well-known\/agent-card\.json)$/);
     if (req.method !== "GET" || !match) return res.writeHead(404).end("Unexpected request");
     if (match[2] === "/.well-known/agent-card.json") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -61,7 +61,11 @@ async function doors(t, failure) {
     }
     let body = { sourceRevision: revision }, code = 200;
     if (match[3] === 'version/worker') body = { ...body, status: 'ok', servedBy: 'worker' };
-    if (match[3] === "health") body = { status: "ok" };
+    // #5487: the strict smoke reads truthful health (liveness plus a job
+    // summary) and the room.job-health/1 view; serve both as healthy.
+    if (match[3] === "health") body = { status: "ok", liveness: "ok", jobs: { status: "ok" } };
+    if (match[3] === "health/jobs") body = { schema: "room.job-health/1", status: "ok", generatedAt: new Date().toISOString(),
+      jobs: [{ name: "room-backup", status: "ok", required: true, stale: false, consecutiveFailures: 0 }] };
     if (match[3] === "ready") body = { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" };
     if (failure?.ready && match[1] === failure.door && match[3] === "ready") body = failure.body;
     if (!match[3]) body = "<!doctype html><title>Room</title>";
