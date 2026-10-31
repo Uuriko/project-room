@@ -246,12 +246,12 @@ explicit configuration pin. Do not add an ignored field or force immediate
 resets. A separately qualified Wrangler upgrade can make that policy explicit
 on the canonical production Worker; entry bindings reference that Worker.
 
-Rollback is also a deployment and can wait for adoption. Automatic recovery's
-`rollback_verified` currently proves traffic allocation and Worker source only,
-not shared Durable Object convergence. Manual preflight-bound readback checks
-the shared object too, but may fail closed while adoption is pending. A recovery
-receipt must not be treated as proof that the shared object has adopted code
-until its `/api/version` agrees. Existing pending adoption timers adopt the
+Rollback is also a deployment and can wait for adoption. Automatic recovery now
+requires the shared Durable Object source proof described above before setting
+`rollback_verified`; older receipts proved allocation and Worker source only.
+Manual preflight-bound readback also checks the shared object and may fail closed
+while adoption is pending. A receipt without matching `/api/version` evidence
+is not proof that the shared object adopted the rollback source. Existing pending adoption timers adopt the
 latest deployed version when they expire; redeployment is not a safe way to
 force the object through every intervening version.
 
