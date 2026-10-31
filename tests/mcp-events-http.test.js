@@ -159,3 +159,12 @@ test('authenticated subscription rejection logs only code and canonical blocked 
   assert.ok(malformed.error);
   assert.deepEqual(warnings.map(value => JSON.parse(value)), [{ event: 'room.mcp_event_subscription_rejected', code: -32602 }]);
 });
+
+test('subscription rejection survives an unavailable diagnostic sink', async t => {
+  const f = await fixture(t, { callbackError: Object.assign(new Error('callback blocked'), {
+    code: -32015, data: { reason: 'callback_origin_not_allowed', origin: 'https://callback.example' },
+  }) });
+  t.mock.method(console, 'warn', () => { throw new Error('log sink unavailable'); });
+  assert.equal((await f.subscribe()).error.code, -32015);
+  assert.equal((await f.subscribe({ ttlMs: 'invalid' })).error.code, -32602);
+});

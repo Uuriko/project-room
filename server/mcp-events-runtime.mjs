@@ -66,7 +66,7 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
             if (origin.protocol === 'https:' && origin.origin.length <= 2048) diagnostic.origin = origin.origin;
           } catch { /* Malformed diagnostics must not expose the original value. */ }
         }
-        console.warn(JSON.stringify(diagnostic));
+        try { console.warn(JSON.stringify(diagnostic)); } catch { /* Diagnostics cannot replace the protocol error. */ }
       }
       return { jsonrpc: '2.0', id: message.id, error: { code,
         message: Number.isInteger(error.code) ? error.message : 'Event operation failed', ...(error.data ? { data: error.data } : {}) } };
