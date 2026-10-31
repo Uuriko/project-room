@@ -68,7 +68,7 @@ export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
       && review.basis.revision === (item.revision ?? null) && review.basis.headSha === (item.ci?.headSha ?? null)
       && (review.basis.deliveryDigest !== null && review.basis.deliveryDigest !== undefined
         ? review.basis.deliveryDigest === (item.delivery?.digest ?? null)
-        : (review.basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1));
+        : (item.delivery?.digest ?? null) === null));
     // Delivered work is reviewable too — recordReview accepts it, and the
     // verdict on the delivery is the review that matters (#3754).
     const reviewable = open || item.state === "delivered" || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);

@@ -362,11 +362,19 @@ test("send-back retry fails closed after a later note or identical redelivery in
   assert.deepEqual(effects(r, id), afterDelivery);
 });
 
-test("generation-zero approval still verifies only the first delivery and replays that success", async t => {
+test("generation-zero approval expires at the first delivery (EA-006); a fresh approval verifies and replays", async t => {
   const r = await claimed(t, "preapproved", { reviewPolicy: "distinct_member" });
   await r.call("review", "preapproved", { verdict: "approve", summary: "work reviewed before first delivery" }, { auth: REVIEWER });
   assert.equal(r.get("preapproved").reviews[0].basis.deliveryGeneration, 0);
   await r.call("update", "preapproved", { state: "delivered", delivery: bundle }, { auth: WORKER });
+  // EA-006 expiry-at-delivery: the sight-unseen approve no longer gates.
+  const expired = await outcome(r.call("update", "preapproved", { state: "done", requestId: "preapproved-first" }, { auth: REVIEWER }));
+  assert.equal(expired.status, 403);
+  assert.equal(expired.value.error.code, "work_review_rejected");
+  assert.equal(r.get("preapproved").state, "delivered");
+  // The reviewer approves the delivery that exists; that verify lands
+  // and its exact retry still replays.
+  await r.call("review", "preapproved", { verdict: "approve", summary: "delivered bundle reviewed" }, { auth: REVIEWER });
   const request = { state: "done", requestId: "preapproved-first" };
   await r.call("update", "preapproved", request, { auth: REVIEWER });
   const before = effects(r, "preapproved");
@@ -383,6 +391,21 @@ test("generation-zero approval still verifies only the first delivery and replay
   assert.equal(refused.status, 403);
   assert.equal(refused.value.error.code, "work_review_rejected");
   assert.deepEqual(effects(s, "preapproved-replaced"), beforeRejected);
+});
+
+test("EA-007 route: a note-only review after an approve preserves the verdict and the verify still lands", async t => {
+  const r = await claimed(t, "note-after-approve", { reviewPolicy: "distinct_member" });
+  await r.call("update", "note-after-approve", { state: "delivered", delivery: bundle }, { auth: WORKER });
+  await r.call("review", "note-after-approve", { verdict: "approve", summary: "bundle verified" }, { auth: REVIEWER });
+  const noted = await r.call("review", "note-after-approve", { note: "clarifying note" }, { auth: REVIEWER });
+  assert.equal(noted.status, 200);
+  assert.equal(noted.value.reviews.length, 1, "the note must not delete the standing approve");
+  assert.equal(noted.value.reviews[0].verdict, "approve");
+  assert.equal(noted.value.attestations.find(entry => entry.memberId === "reviewer").note, "clarifying note");
+  const done = await r.call("update", "note-after-approve", { state: "done" }, { auth: REVIEWER });
+  assert.equal(done.status, 200);
+  assert.equal(done.value.state, "done");
+  assert.equal(done.value.verification.state, "verified");
 });
 
 for (const exit of reviewerExits) {
