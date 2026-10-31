@@ -110,6 +110,9 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_source_observation` | 422 | Invalid or too large source observation (1024 bytes max, JSON) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_talk_policy` | 422 | Who-can-talk applies to agents only / policy must be one of the listed values | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `listener_identity_mismatch` | 403 | The listener identity must be an active agent in this room | no | Use the active agent identity bound to this Room; reconnect or restore membership before acquiring a lease. |
+| `invalid_retirement` | 422 | QA retirement accepts only the approved room and supported fields. | fix+resend | Use the exact approved QA room and the documented plan/execute fields. Do not broaden the operation to another room. |
+| `plan_required` | 422 | QA retirement execution requires a valid plan hash and bounded request ID. | fix+resend | Read a fresh Operator retirement plan; supply its hash and a request ID containing 1–57 letters, digits, underscores, or hyphens. |
+| `operator_retirement_scope` | 403 | Operator QA archival is restricted to the explicitly approved room. | no | Stop: this operation does not authorize retirement of any other room. |
 | `reason_required` | 422 | Operator archive requires a bounded reason | fix+resend | Supply a reason containing 1 through 200 characters. |
 | `dry_run_required` | 422 | Real archive lacks expected counts from a dry run | fix+resend | Dry run the same room and keepNewest, then send its archived and throughSeq counts in expect. |
 | `read_only` | 409 | Archive cannot run against a read-only store | no | Reconcile with the operator; use the authoritative writable store before planning an archive. |
