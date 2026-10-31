@@ -1,3 +1,4 @@
+/* global document, getComputedStyle */
 // Measures the default room as the owner of a seeded human+agent journey:
 // visible controls, requests (and JS module requests), DOM nodes and ready
 // time at 390px and 1280px. Usage: node scripts/default-room-measure.mjs [label] [shotDir]
@@ -8,7 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-export async function measureDefaultRoom({ label = "run", shotDir = null, widths = [390, 1280] } = {}) {
+export async function measureDefaultRoom({ label = "run", shotDir = null, widths = [390, 1280], modes = ["cold", "warm"] } = {}) {
   const f = createAcceptanceFixture(); f.store.roomFlood = { consume() {} };
   const say = (who, id, body) => f.store.command(f.keys[who], "commons", { id, type: "message.posted", data: { messageId: id, body } });
   say("owner", "m1", "Could you draft the onboarding checklist?");
@@ -22,11 +23,14 @@ export async function measureDefaultRoom({ label = "run", shotDir = null, widths
   const browser = await chromium.launch({ headless: true });
   const results = [];
   try {
-    for (const width of widths) {
+    for (const width of widths) for (const mode of modes) {
       const page = await browser.newPage({ viewport: { width, height: width < 600 ? 844 : 900 } });
       await page.goto(origin);
       await signInFixture(page, f.keys.owner);
       await page.locator('[data-message-record-id="m2"]').waitFor({ timeout: 15000 });
+      // cold: HTTP cache disabled for the reload; warm: an ordinary reload.
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Network.setCacheDisabled", { cacheDisabled: mode === "cold" });
       const requests = [];
       page.on("request", request => requests.push(request));
       const started = Date.now();
@@ -43,8 +47,8 @@ export async function measureDefaultRoom({ label = "run", shotDir = null, widths
           labels: controls.map(el => (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || el.id || el.tagName).trim().replace(/\s+/g, " ").slice(0, 40)) };
       });
       const modules = requests.filter(r => r.resourceType() === "script").map(r => new URL(r.url()).pathname);
-      if (shotDir) { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: join(shotDir, `${label}-${width}.png`), fullPage: false }); }
-      results.push({ width, readyMs, requests: requests.length, scripts: modules.length, apiReads: requests.filter(r => new URL(r.url()).pathname.startsWith("/api/")).length, ...counts, modules });
+      if (shotDir) { mkdirSync(shotDir, { recursive: true }); await page.screenshot({ path: join(shotDir, `${label}-${width}-${mode}.png`), fullPage: false }); }
+      results.push({ width, mode, readyMs, requests: requests.length, scripts: modules.length, apiReads: requests.filter(r => new URL(r.url()).pathname.startsWith("/api/")).length, ...counts, modules });
       await page.close();
     }
   } finally {
@@ -56,6 +60,6 @@ export async function measureDefaultRoom({ label = "run", shotDir = null, widths
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const results = await measureDefaultRoom({ label: process.argv[2] ?? "run", shotDir: process.argv[3] ?? null });
-  for (const r of results) console.log(JSON.stringify({ width: r.width, readyMs: r.readyMs, requests: r.requests, scripts: r.scripts, apiReads: r.apiReads, controls: r.controls, domNodes: r.domNodes }));
+  for (const r of results) console.log(JSON.stringify({ width: r.width, mode: r.mode, readyMs: r.readyMs, requests: r.requests, scripts: r.scripts, apiReads: r.apiReads, controls: r.controls, domNodes: r.domNodes }));
   if (process.env.MEASURE_VERBOSE) for (const r of results) console.log(r.width, JSON.stringify(r.labels), JSON.stringify(r.modules));
 }

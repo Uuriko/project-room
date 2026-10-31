@@ -38,7 +38,6 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
-import { installPairing } from "./pairing-ui.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -46,7 +45,6 @@ import { createNeedsAttentionCard, installMemberPermissions } from "./needs-atte
 import { createOwnerCockpit } from "./owner-cockpit.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
-import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
@@ -61,7 +59,6 @@ import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, h
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
-import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
@@ -620,6 +617,7 @@ const client = new RoomClient({
     portableWorkUI?.reset();
     resultCopyUI?.reset();
     remindersUI?.reset();
+    remindersFeature.reset(); reminderClicks.cancel();
     resetNotifications();
     resetAttention();
     // JDOT-MEMBER-PERMS-UI begin
@@ -787,9 +785,76 @@ function lazyDisclosure({ panel, load, install, onError }) {
   };
 }
 
-remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
+// One loader for features that stay off the room-entry path (reminders,
+// device pairing, human push). The first trigger imports the module once;
+// repeated triggers share that flight. A room reset bumps the generation so a
+// late import cannot install into the next room. A failed import is reported
+// once and the next trigger retries with a fresh URL, since a browser may keep
+// the failed module record for the original specifier.
+function onDemand({ label, specifier, install }) {
+  let view = null, flight = null, generation = 0, attempt = 0;
+  function ensure() {
+    if (view) return Promise.resolve(view);
+    if (flight) return flight;
+    const epoch = generation;
+    const url = new URL(specifier, import.meta.url);
+    if (attempt) url.searchParams.set("retry", String(attempt));
+    const pending = import(url.href).then(module => {
+      if (epoch !== generation) return null;
+      view = install(module);
+      return view;
+    }, () => {
+      attempt++;
+      if (epoch === generation) notice(`Could not load ${label}. Try again.`, true);
+      return null;
+    }).finally(() => { if (flight === pending) flight = null; });
+    flight = pending;
+    return pending;
+  }
+  return {
+    ensure,
+    get view() { return view; },
+    loading: () => Boolean(flight),
+    reset() { generation++; flight = null; view?.reset?.(); }
+  };
+}
+// A click on a trigger before its feature has loaded is held, then replayed on
+// the same element once the module has installed its own listener. Further
+// clicks while loading are absorbed (no double-open); Escape or a room switch
+// during the load drops the replay, and focus stays on the trigger.
+function replayClicksOnDemand(feature, selector) {
+  let held = null;
+  document.addEventListener("keydown", event => { if (event.key === "Escape") held = null; }, true);
+  document.addEventListener("click", event => {
+    const trigger = event.target.closest?.(selector);
+    if (!trigger || feature.view) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (held) return;
+    const ticket = held = { trigger, room: state };
+    trigger.setAttribute("aria-busy", "true");
+    void feature.ensure().then(view => {
+      trigger.removeAttribute("aria-busy");
+      if (held !== ticket) return;
+      held = null;
+      if (view && trigger.isConnected && ticket.room === state && !trigger.disabled) trigger.click();
+    });
+  }, true);
+  return { cancel() { held = null; } };
+}
+const remindersFeature = onDemand({ label: "reminders", specifier: "./reminders.js",
+  install: ({ installReminders }) => {
+    remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
+    remindersUI.sync();
+    return remindersUI;
+  } });
+const reminderClicks = replayClicksOnDemand(remindersFeature, "[data-reminder-work]");
+const pairingFeature = onDemand({ label: "device pairing", specifier: "./pairing-ui.js",
+  install: ({ installPairing }) => installPairing({ client, getState: () => state }) });
+$("#agent-connect-dialog")?.addEventListener("toggle", () => {
+  if (!$("#agent-connect-dialog").open || pairingFeature.view) return;
+  void pairingFeature.ensure().then(view => { if (view && $("#agent-connect-dialog").open) void view.refresh(); });
+});
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
-installPairing({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
@@ -6527,6 +6592,8 @@ function openCatchUp() {
   $("#return-brief-panel").open = true;
   $("#return-brief-panel > summary").focus({ preventScroll: true });
   loadReturnBrief();
+  if (state) void remindersFeature.ensure();
+  loadHumanPushIfNeeded();
 }
 function selectWorkView(view) {
   if (view !== "results") return;
@@ -7064,9 +7131,10 @@ function renderNotifications() {
     const label = `${actor} ${item.kind === "access_decision" ? (item.outcome === "approved" ? "approved your access request" : "declined your access request") : NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
-  humanPushUi?.refresh();
+  loadHumanPushIfNeeded();
 }
-humanPushUi = installHumanPush({
+const humanPushFeature = onDemand({ label: "notification settings", specifier: "./human-push.js",
+  install: ({ installHumanPush }) => (humanPushUi = installHumanPush({
   client,
   button: $("#human-push-button"),
   note: $("#human-push-note"),
@@ -7076,7 +7144,16 @@ humanPushUi = installHumanPush({
     dm: $("#human-push-pref-dm")
   },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
-});
+})) });
+// Push settings live in the catch-up dialog. Load them when it opens, or at
+// once when this browser already granted notifications, so an existing push
+// subscription is still re-confirmed on every room open.
+function loadHumanPushIfNeeded() {
+  if (humanPushUi) { humanPushUi.refresh(); return; }
+  if (!state) return;
+  if (globalThis.Notification?.permission === "granted" || $("#catchup-dialog")?.open)
+    void humanPushFeature.ensure().then(view => view?.refresh());
+}
 async function loadNotifications() {
   const pagingFocus = ["notification-older", "notification-newest"].includes(document.activeElement?.id) ? document.activeElement : null;
   const ticket = notificationOwner, request = ++notificationSerial;
