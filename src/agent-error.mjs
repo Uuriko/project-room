@@ -37,6 +37,49 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  invalid_work_page: {
+    "status": "action_required",
+    "hint": uiText("agentError.invalid_work_page.hint"),
+    "next": [
+      {
+        "command": uiText("agentError.invalid_work_page.recovery")
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": uiText("agentError.invalid_work_page.recovery")
+    }
+  },
+  invalid_work_cursor: {
+    "status": "action_required",
+    "hint": uiText("agentError.invalid_work_cursor.hint"),
+    "next": [
+      {
+        "command": uiText("agentError.invalid_work_cursor.recovery")
+      }
+    ],
+    "catalog": {
+      "http": 422,
+      "retry": "fix+resend",
+      "recovery": uiText("agentError.invalid_work_cursor.recovery")
+    }
+  },
+  stale_work_cursor: {
+    "status": "action_required",
+    "hint": uiText("agentError.stale_work_cursor.hint"),
+    "next": [
+      {
+        "command": uiText("agentError.stale_work_cursor.recovery")
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "fix+resend",
+      "recovery": uiText("agentError.stale_work_cursor.recovery")
+    }
+  },
+
   // Operator archive: refuse unsafe requests with an explicit recovery.
   invalid_archive_request: {
     "status": "action_required",

@@ -90,6 +90,9 @@ export function agentConnectionFromEnvironment(env = process.env) {
 }
 
 const messages = Object.freeze({
+  invalid_work_page: "Use limit 1–100 and a returned cursor.",
+  invalid_work_cursor: "Invalid work cursor. Restart room_list_work without cursor.",
+  stale_work_cursor: "Work, access, or selection changed. Restart room_list_work without cursor.",
   usage_error: "Choose a documented command. Use --help.",
   invalid_config: "Check the service address, room, member and private key configuration.",
   config_not_found: "Saved connection not found. Choose its private directory.",
@@ -146,7 +149,7 @@ export function connectionDiagnostic(error) {
       : error.status === 403 && error.code === "insufficient_scope" ? "insufficient_scope"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
       : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
-      : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
+      : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable", "invalid_work_page", "invalid_work_cursor", "stale_work_cursor"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
   const httpStatus = error instanceof RoomClientError ? error.status : 0;

@@ -1127,3 +1127,11 @@ response's own `hint`/`next` when it names something more specific.
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |
 | `wrong_link_kind` | 422 | Human invitation links are not agent credentials. | follow hint | Follow this error's hint and next steps. |
+
+### Work-list pagination
+
+| Code | HTTP | Meaning | Retry | Recovery |
+|---|---|---|---|---|
+| `invalid_work_page` | 422 | Use limit 1–100 and a returned cursor. | fix+resend | Restart room_list_work with a valid limit and without cursor. |
+| `invalid_work_cursor` | 422 | The work cursor is invalid for this connection. | fix+resend | Restart the same room_list_work selection without cursor; do not edit or reuse cursors from another connection. |
+| `stale_work_cursor` | 409 | Work, access, or selection changed between pages. | fix+resend | Discard the partial listing and restart the same room_list_work selection without cursor. |

@@ -168,6 +168,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
+  paths.add('server/work-list-page.mjs'); // Shared hosted/stdio work pagination
   paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
   paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)

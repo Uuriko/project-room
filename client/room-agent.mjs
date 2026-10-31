@@ -1,9 +1,10 @@
+import { pageWorkListing, validWorkPage } from "../server/work-list-page.mjs";
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
-import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
+import { searchWork, searchWorkMatches, completedResults, currentResult } from "../src/work-selectors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown, validSourceObservation } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
@@ -1464,7 +1465,21 @@ export class RoomAgentClient {
     }
     return board;
   }
-  async orient({ signal, focus = "all", query, sort } = {}) {
+  async orient({ paginate = false, limit, cursor, ...options } = {}) {
+    if (paginate || limit !== undefined || cursor !== undefined) {
+      if (!validWorkPage({ limit, cursor })) throw new RoomClientError(0, "invalid_work_page", "Use limit 1–100 and a returned cursor");
+      const listing = await this.#orientFull({ ...options, fullQuery: true });
+      try { return pageWorkListing(listing, { ...options, limit, cursor }, this.#token, "stdio"); }
+      catch (error) {
+        if (["invalid_work_page", "invalid_work_cursor", "stale_work_cursor"].includes(error.code)) {
+          throw new RoomClientError(error.status, error.code, error.message);
+        }
+        throw error;
+      }
+    }
+    return this.#orientFull(options);
+  }
+  async #orientFull({ signal, focus = "all", query, sort, fullQuery = false } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
@@ -1485,7 +1500,7 @@ export class RoomAgentClient {
         const next = nextWorkStep(item, now);
         return member.active && next.memberId === member.id && next.needsAttention;
       });
-      const matches = query === undefined ? null : searchWork({ members: snapshot.state.members,
+      const matches = query === undefined ? null : (fullQuery ? searchWorkMatches : searchWork)({ members: snapshot.state.members,
         workItems: Object.fromEntries(candidates.map(item => [item.id, item])) }, query);
       const replyListing = focus === "needs_me" ? await this.replyRequests({ direction: "incoming", status: "open", signal }) : null;
       const openReplies = replyListing?.requests.map(request => ({
@@ -1518,7 +1533,7 @@ export class RoomAgentClient {
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
-          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
+          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
             + (focus === "needs_me" ? " Reply requests are listed separately at replyRequestsEvaluatedThrough and are not filtered by the work query; follow nextRead before answering." : "")
             + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
           : focus === "results" ? { totalWork: items.length, results: work.length,

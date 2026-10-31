@@ -659,5 +659,11 @@ export default {
   "invite.native.select": "Select and copy the invitation above. It has not been used.",
   "connection.tools.unverified": "Room access granted. Host tools not checked.",
   "connection.tools.missing": "Room access granted. Host tools missing.",
-  "connection.tools.available": "Access ready. Can read and post."
+  "connection.tools.available": "Access ready. Can read and post.",
+  "agentError.invalid_work_page.hint": "Use limit 1–100 and a returned cursor.",
+  "agentError.invalid_work_page.recovery": "Restart room_list_work with a valid limit and without cursor.",
+  "agentError.invalid_work_cursor.hint": "The work cursor is invalid for this connection.",
+  "agentError.invalid_work_cursor.recovery": "Restart the same room_list_work selection without cursor; do not edit or reuse cursors from another connection.",
+  "agentError.stale_work_cursor.hint": "Work, access, or selection changed between pages.",
+  "agentError.stale_work_cursor.recovery": "Discard the partial listing and restart the same room_list_work selection without cursor."
 };

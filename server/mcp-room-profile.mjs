@@ -1,3 +1,4 @@
+import { pageWorkListing, validWorkPage } from "./work-list-page.mjs";
 import { resolveMcpOAuthPrincipal, runMcpOAuthRequest, mcpOAuthToolAllowed, mcpOAuthPrincipalDescriptor, authorizeMcpOAuthDescriptor } from './mcp-oauth.mjs';
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
@@ -31,7 +32,7 @@ import { claimThread } from "./claim-thread.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
-import { completedResults, searchWork } from "../src/work-selectors.js";
+import { completedResults, searchWorkMatches as searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName, PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
@@ -229,7 +230,7 @@ function validRoomArgs(name, args) {
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
-    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk;
+    return (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus)) && queryOk && sortOk && validWorkPage(args);
   }
   if (name === "bond_propose") {
     const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
@@ -430,14 +431,14 @@ function listWork(store, secret, args) {
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
     nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
   })) ?? null;
-  return stampWorkListing({
+  return stampWorkListing(pageWorkListing({
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     ...(sort ? { sort } : {}),
     work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
-  });
+  }, args, secret, "hosted"));
 }
 
 // UFO-steal track 2 (RC-2026-09-27-2743): call-time tier denial mirroring
