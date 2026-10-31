@@ -5123,8 +5123,11 @@ paths:
         `<channel>:` prefix (`sms:`, `messenger:`, `email:`) which is surfaced
         as `channel`, else `channel` is null. Credential: the agent's room
         credential, `pri_` identity secret, or a `rak_` API key with the
-        `inbox:read` scope alone (403 `insufficient_scope` without it;
-        least privilege — `rooms:read` is neither required nor implied). The
+        `inbox:read` scope alone (`rooms:read` is neither required nor
+        implied). A `rak_` key with `rooms:read` but not `inbox:read` gets
+        only its own `directMessages` and `directMentions` plus `cursor`,
+        marked `scope: own_messages`; a key with neither scope gets 403
+        `insufficient_scope`. The
         human `/api/inbox/*` account-session surface is separate and unchanged.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -9323,11 +9326,7 @@ paths:
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Node returns `{ status: "ok", mode, emailVerification }`.
-        Worker adds `liveness: ok` and `jobs.status`, using a bounded one-second
-        Durable Object job-health probe. Worker `status` is `ok` only when that
-        classifier is healthy, otherwise `degraded` (including unknown, timeout,
-        or error). HTTP 200 still reports liveness, not successful background work;
+        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
         operational metadata only. `emailVerification` is `enforced` when a
         magic-link mailer is configured, or `relaxed-no-mailer` when it is not
         and the email-verification gates follow the agent-invites escape hatch.
@@ -9336,7 +9335,7 @@ paths:
         bound Durable Object. Use `/api/ready` for the authority policy.
       security: []
       responses:
-        '200': { description: "Liveness response; Worker status ok or degraded, liveness ok, jobs.status; Node status ok" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -9354,7 +9353,7 @@ paths:
         Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "Liveness response; Worker status ok or degraded, liveness ok, jobs.status; Node status ok" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -9589,8 +9588,7 @@ paths:
         Worker readiness also reports the bound authority's `emailVerification`
         and `emailVerificationScope: durable-object` when that authority supports
         policy reporting. Missing policy is unknown, never proof of enforcement.
-        `/api/health` retains HTTP liveness semantics; the Worker separately probes
-        job health with the same time bound, while `/api/ready` checks storage.
+        `/api/health` stays Worker and Node liveness and does not run this probe.
       security: []
       responses:
         '200': { description: "{ status: ready }" }

@@ -10,8 +10,11 @@
         `<channel>:` prefix (`sms:`, `messenger:`, `email:`) which is surfaced
         as `channel`, else `channel` is null. Credential: the agent's room
         credential, `pri_` identity secret, or a `rak_` API key with the
-        `inbox:read` scope alone (403 `insufficient_scope` without it;
-        least privilege — `rooms:read` is neither required nor implied). The
+        `inbox:read` scope alone (`rooms:read` is neither required nor
+        implied). A `rak_` key with `rooms:read` but not `inbox:read` gets
+        only its own `directMessages` and `directMentions` plus `cursor`,
+        marked `scope: own_messages`; a key with neither scope gets 403
+        `insufficient_scope`. The
         human `/api/inbox/*` account-session surface is separate and unchanged.
       parameters:
         - $ref: '#/components/parameters/RoomId'
