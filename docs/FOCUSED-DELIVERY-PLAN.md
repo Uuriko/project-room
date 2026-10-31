@@ -20,9 +20,12 @@ human journey audit. Do not create a parallel release or worker system.
   Peer receipt 24138 reports both public doors plus strict smoke 16/16. This
   observation establishes the release identity, not every feature's usability.
 - **Local, not shipped:** CX2 `3b526f6ec` repairs Board placement: an open PR
-  must not hide a blocked claim or revive a closed/cancelled claim. Patch and
-  independent-review request are in 24139. Required release checks still apply.
-  Local verification: 59 focused tests, lint, and browser block/resume/close.
+  must not hide a blocked claim or revive a closed/cancelled claim. PR #5480
+  is open. The other laptop independently reproduced the failing base and
+  passed 36/36 checks on the repair (24141); it confirmed exact product/test
+  parity with the PR and accepted release ownership (24147). Held for the
+  post-reliability UI batch; required release checks still apply. Author-side
+  verification: 59 focused tests, lint, and browser block/resume/close.
 - **Tested locally:** a human typed a useful audit-summary request, created
   assigned work, saw agent acceptance and progress, read its native text result,
   requested a correction, then approved a new exact result after a new review.
@@ -42,10 +45,11 @@ human journey audit. Do not create a parallel release or worker system.
 
 Next work, in dependency order:
 
-1. Peer independently checks the exact Board candidate, publishes it through
-   the existing PR lane, retains required checks, and verifies the delivered
-   revision. CX2 verifies the same blocked/open-PR and retired-work behavior;
-   a posted patch is not a completed handoff.
+1. Finish required checks on existing PR #5480. The peer has accepted the
+   independently checked candidate into its post-reliability release lane
+   (24147); no second PR is needed. Peer owns merge/deploy; CX2 verifies the
+   delivered blocked/open-PR and retired-work behavior. Accepted handoff and
+   passing local checks do not establish deployment.
 2. Keep the ongoing security/reliability release ahead of cosmetic work. The
    peer's diagnostic findings in 24137 include two legacy-shape mismatches and
    one bounded scan with unknown completeness; this audit does not clear them.
