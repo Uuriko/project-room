@@ -91,6 +91,12 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 // verified result or permission to act. No external evidence/history is fetched.
 export function searchWork(state, query, limit = 25) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new RangeError("Work search limit must be 1–25");
+  const result = searchWorkMatches(state, query);
+  return { work: result.work.slice(0, limit), total: result.total };
+}
+
+// Internal complete selection; callers must bound their delivered page.
+export function searchWorkMatches(state, query) {
   const term = String(query).trim().slice(0, 200).toLocaleLowerCase();
   if (!term) return { work: [], total: 0 };
   const matches = [];
@@ -118,7 +124,7 @@ export function searchWork(state, query, limit = 25) {
   }
   matches.sort((a, b) => Number(terminalWork(a.item)) - Number(terminalWork(b.item))
     || b.item.updatedAt.localeCompare(a.item.updatedAt) || a.item.id.localeCompare(b.item.id));
-  return { work: matches.slice(0, limit), total: matches.length };
+  return { work: matches, total: matches.length };
 }
 
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
