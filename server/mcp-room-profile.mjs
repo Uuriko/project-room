@@ -455,6 +455,9 @@ function listWork(store, secret, args) {
 // text block hosts log and show (issue #3750): a minted invite code, and the
 // identity secret or room token that room_join and room_create hand back.
 function credentialRedactions(name, value) {
+  if (["heartbeat_set", "wake_register", "wake_clear"].includes(name)) {
+    return [mcpRedaction(value?.listener?.fencingToken, "structuredContent.listener.fencingToken")];
+  }
   if (name === "room_create_agent_invite") return [mcpRedaction(value?.code, "structuredContent.code")];
   if (name !== "room_join" && name !== "room_create") return [];
   return [
@@ -1078,7 +1081,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
         }
-        return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
+        const value = await callWakeTool(store, secret, identity, name, args);
+        return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
       const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential);
       // A minted invite code is a one-time credential: it rides in
