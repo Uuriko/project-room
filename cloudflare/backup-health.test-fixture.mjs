@@ -1,4 +1,5 @@
 import worker, { ProjectRoom } from './room.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS } from './health-probe.mjs';
 import { HEARTBEAT_STORAGE_KEY, CRON_JOBS } from './job-heartbeat.mjs';
 export class BackupHealthProbe extends ProjectRoom {
   constructor(ctx, env) {
@@ -36,7 +37,7 @@ export class BackupHealthProbe extends ProjectRoom {
   }
   async readJobHealth() {
     if (this.healthMode === 'error') throw Error('PRIVATE_HEALTH_RPC_DETAIL');
-    if (this.healthMode === 'timeout') await new Promise(resolve => setTimeout(resolve, 1500));
+    if (this.healthMode === 'timeout') await new Promise(resolve => setTimeout(resolve, HEALTH_PROBE_TIMEOUT_MS + 500));
     return super.readJobHealth();
   }
 }

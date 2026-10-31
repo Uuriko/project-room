@@ -282,6 +282,7 @@ jobs:
       - name: Smoke version, health, ready, legal pages
         id: smoke
         shell: bash
+        # Allow the provider default 300s DO adoption grace plus 120s margin.
         # Retry only verified propagation or complete timeout-only readiness evidence.
         # Preserve the original report; observe within the existing 150s budget,
         # then require a fresh complete strict smoke. No Worker re-upload.
@@ -292,7 +293,7 @@ jobs:
             fi
           }
           trap record_smoke_digest EXIT
-          if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
+          if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 420000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
             cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
           else
             cp "$RUNNER_TEMP/prod-smoke-attempt1.log" "$RUNNER_TEMP/prod-smoke.json"

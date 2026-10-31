@@ -198,3 +198,42 @@ and content verification before promotion, and a new corrected release is
 verified before being marked latest. An invalid original release does not
 silently trigger a new revision. This input selects publication identity; it
 does not bypass deployment policy or change the deployed commit.
+
+### Bounded health probe budget
+
+Worker readiness and job-health RPC probes each allow 2.5 seconds. Successful
+1.2–1.8 second RPCs fit within this budget; a stalled RPC still reports timeout,
+and failed storage or an unready result remains unready. Concurrent callers
+share only an in-flight RPC and retain their own deadlines; completed results
+are not cached. Static and discovery responses do not start these probes.
+
+This trades up to 1.5 seconds of additional failure-detection latency for fewer
+false timeouts under observed service latency. It does not make slow requests
+fast, retry until a check passes, or explain the original long-stall incident.
+### Durable Object adoption grace
+
+Cloudflare changed the default on October 30, 2026: active Durable Objects can
+keep their previous code for up to 300 seconds before adopting the latest
+deployment. The initial production smoke allows 420 seconds for both Worker
+and shared Durable Object source readbacks to converge. This margin does not
+relax the exact revision, readiness, health, or signed-card checks, nor the
+existing evidence-gated retry policy.
+
+The pinned Wrangler 4.116.0 schema and CLI do not support
+`durable_objects.code_update_strategy` or `--durable-objects-code-update-mode`.
+We therefore rely on the provider's current deferred-300s default; it is not an
+explicit configuration pin. Do not add an ignored field or force immediate
+resets. A separately qualified Wrangler upgrade can make that policy explicit
+on the canonical production Worker; entry bindings reference that Worker.
+
+Rollback is also a deployment and can wait for adoption. Automatic recovery's
+`rollback_verified` currently proves traffic allocation and Worker source only,
+not shared Durable Object convergence. Manual preflight-bound readback checks
+the shared object too, but may fail closed while adoption is pending. A recovery
+receipt must not be treated as proof that the shared object has adopted code
+until its `/api/version` agrees. Existing pending adoption timers adopt the
+latest deployed version when they expire; redeployment is not a safe way to
+force the object through every intervening version.
+
+Primary references: [October 30 change](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/)
+and [code update semantics](https://developers.cloudflare.com/durable-objects/deployments/durable-objects-code-updates/).
