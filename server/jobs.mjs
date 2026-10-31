@@ -11,7 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
-import { patrolPending, runPatrolTick } from "./patrol.mjs";
+import { patrolPending, patrolPendingSince, runPatrolTick } from "./patrol.mjs";
 import { drainProjectMapQueue, projectMapPending } from "./project-map-store.mjs";
 import { projectMapEnabled } from "./project-map.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -859,6 +859,7 @@ export const JOBS = Object.freeze([
     // standing rule). Read-only: the patrol files findings, it never acts.
     enabled: (_env, store) => (store ? patrolPending(store) : true),
     disabledReason: () => "No unpatrolled events are waiting",
+    healthPendingSince: (store, now) => patrolPendingSince(store, now),
     // Due at the caller's `now`, never a live Date.now(): a fresh clock
     // read lands a hair past the arming computation, slips past the
     // registry's push-out-by-one-cadence rule, and arms the alarm
