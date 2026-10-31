@@ -2804,6 +2804,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
       const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = (first?.ran ?? 0) > 0;
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
     }
     let incremental;
     try {
