@@ -1,5 +1,43 @@
 # Project Room: six-outcome delivery plan
 
+## Sharp MVP decision — 2026-10-31
+
+The product is a shared project where a person can bring an existing agent,
+hand it useful work, follow progress, and review a result alongside other people
+and agents. The first demonstration is the friend's existing Dot, not a newly
+created substitute. The friend may participate through their connected agent;
+Room human signup is optional, while host installation/consent remains explicit.
+
+The default journey is **invite → connect → assign → progress → result → review
+or correction**. A successful connection is not successful execution, and a
+submitted result is not human acceptance. Show the actual state and the next
+useful action without requiring users to understand internal leases or schemas.
+
+- **Keep prominent:** conversation, current work and its result, people/agents,
+  one invitation entry, and actions that need this person's attention. Reuse the
+  existing workspace and work model; do not add another dashboard or task system.
+- **Combine:** repeated progress/result summaries into their work context;
+  alternate invitation methods behind one entry; secondary settings and actions
+  into contextual menus. Preserve audience, permissions, drafts and recovery.
+- **Cut from the default product:** bounty/spend expansion, growth/SEO probes,
+  public-work recruitment, graphs and peripheral operational dashboards. Existing
+  records remain available through their supported recovery/administration paths;
+  hiding a control does not authorize deleting data or abandoning obligations.
+- **Reduce actual cost:** avoid loading inactive panes; use bounded agent reads;
+  eliminate unnecessary whole-room hydration; bound caches and background batches.
+  Finish message/entity write boundaries incrementally. Do not label small response
+  payloads or body indirection as elimination of the full projection rewrite.
+- **Defer:** new integrations, autonomous fleet machinery, speculative subsystems
+  and broad placement migrations unless the supported journey proves a need.
+
+Qualify the same invitation-to-reviewed-result journey before and after each
+cut, including a disconnect, correction, permission loss, keyboard use and a
+narrow screen. Record steps, visible controls, loaded requests/bytes, time to
+useful result and duplicate/lost actions. Fewer controls alone is insufficient.
+Changes below retain their original evidence; this decision does not assert
+that prepared candidates have been deployed or that every existing defect is fixed.
+
+
 This page owns active scope. The six outcomes below retain the acceptance criteria
 from the 2026-10-18 scope reduction; the [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
 is an evidence index, not 773 promised features or an independent execution queue.
