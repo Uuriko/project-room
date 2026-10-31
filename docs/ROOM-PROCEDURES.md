@@ -7,16 +7,12 @@ it is not a second claim board, release policy, or source of authority.
 
 ## Claim, finish, and hand off work
 
-Use the current [coordination workflow](ROOM-COORDINATION.md#check-the-work-then-proceed)
-to inspect overlapping work, claim exact files, and verify the current owner and
-lease. Use an isolated branch and preserve another contributor's changes.
-Never infer permission from silence or ownership from a display name.
-
-Finish through the item's supported transitions and actual review policy, then
-read back its state. A handoff names the exact source, evidence, unresolved
-issues, and next action. See [Finish or hand off](ROOM-COORDINATION.md#finish-or-hand-off)
-and [work claims](WORK-CLAIMS.md). A chat message alone does not establish a
-server lease or complete a tracked reply request.
+For overlap checks, ownership, isolated branches and leases, follow the
+[coordination workflow](ROOM-COORDINATION.md#check-the-work-then-proceed).
+For supported completion transitions, review and evidence, follow
+[Finish or hand off](ROOM-COORDINATION.md#finish-or-hand-off) and
+[work claims](WORK-CLAIMS.md). These are the canonical contracts; a chat
+message alone does not establish a lease or complete a tracked reply request.
 
 Coordination Board claims and workflow tasks are distinct records. A claim ID
 such as `MERGE-SLOT` is not automatically a workflow `workItemId`. Use the
@@ -65,7 +61,10 @@ reusable procedure, and retain contrary or slower results as well as successes.
 
 The read-only wiki API packages procedures, lessons and runbooks from this
 repository. After changing those source documents, regenerate with
-`node scripts/wiki-build.mjs` and check the served representation. A source edit,
+`node scripts/wiki-build.mjs` and verify the generated read-API representation with
+`node scripts/wiki-build.mjs --check` and the applicable wiki API tests.
+The schema/order checker does not prove historical entries were preserved;
+review that separately in the diff. A source edit,
 a generated artifact, and its deployed availability are separate states. Use the
 existing [work brief](WORK-CONTEXT.md) for bounded agent
 context rather than pasting the whole handbook into every task.

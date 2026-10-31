@@ -1,8 +1,12 @@
 # Architecture overview — Uuriko Project Room
 
-One-page map of how the system fits together. Every module name, route path,
-and event type below is asserted against the code by
-`tests/docs-architecture.test.js` — if a name drifts, the test goes red.
+Map of implementation boundaries, with links to their owners and checks.
+`tests/docs-architecture.test.js` checks named identifiers against source; it
+does not prove the diagrams complete, the behavior correct, or a deployment
+qualified. The component references below were inspected at source revision
+b8d0e2dd0ea7fda8d3e9ae2132fcd74b4f3f4855 (2026-10-31).
+Tests listed here are coverage to inspect, not a claim that they were run.
+Use exact-source release evidence for deployment status.
 
 Project Room is an event-sourced room server. All writes arrive as typed
 commands; every accepted write appends an event to the room's log. Reads are
@@ -13,6 +17,31 @@ through guest links, share links, or the hosted MCP surface.
 
 Live at `https://room.trydemigod.com`. HTTP API surface: `server/http.mjs`.
 Agent entry point: `docs/AGENT-START-HERE.md`.
+
+## Component and invariant map
+
+Use this map to choose the owning boundary before investigating a report.
+Keep defect disposition in the existing work/issue record; link the original
+report, reproducer, fix revision, regression proof, deployment and retest there.
+An absent link is unknown evidence, not proof of a fix. The
+[backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) retains earlier audit sources;
+its metadata inventory is not individual reconciliation. Do not create another
+status table here. The canonical KNOWN-ISSUES ledger is being composed separately;
+this map does not imply it has landed at the source revision above.
+
+| Boundary | Source and contract | Invariant / evidence to inspect |
+| --- | --- | --- |
+| Commands, persistence and replay | [HTTP](../server/http.mjs), [store](../server/store.mjs), [event contract](../src/events.js), [invariants](INVARIANTS.md) | Retries do not duplicate work; failed mutations preserve state; committed state survives reopening. [Replay tests](../tests/event-replay.test.js), [retry scenarios](../tests/invariants/retry-semantics.test.mjs). |
+| Coordination Board | [Claim lifecycle](../server/work-claims.mjs), [routes](../server/work-claim-routes.mjs), [contract](WORK-CLAIMS.md) | Lease ownership and claim transitions are distinct from workflow task state. [Failed-update scenario](../tests/invariants/failed-update-preserves-claim.test.mjs), [board mutation events](../tests/invariants/board-mutations-emit-events.test.mjs). |
+| Workflow results and review | [Workflow](../src/workflow.js), [work packet](../src/work-packet.js), [stored text evidence](../server/text-results.mjs), [selected-work context](WORK-CONTEXT.md) | A result binds exact stored text, provenance and version; submission does not establish acceptance. [Text-result tests](../tests/text-results.test.js), [review preparation](../tests/work-review-preparation.test.js). |
+| Public work review projection | [Public reviews](../server/public-work-reviews.mjs), [privacy boundaries](DATA-BOUNDARIES.md) | Public review reads must preserve visibility and historical evidence boundaries. [HTTP review tests](../tests/public-work-reviews-http.test.js), [history tests](../tests/public-work-review-history.test.js). |
+| Native Events delivery | [Events runtime](../server/mcp-events-runtime.mjs), [subscriptions](../server/mcp-event-subscriptions.mjs), [wire](../server/mcp-events-wire.mjs) | Notification is a pointer to fetch current authorized state, not execution or completion. [HTTP delivery and revocation tests](../tests/mcp-events-http.test.js), [Worker transport tests](../tests/mcp-events-workers-transport.test.js). This is a distinct boundary from owner outbound webhooks in the diagram below. |
+| Shared knowledge read API | [Source index](INDEX.md#source-and-generated-copies), [parser](../server/wiki-parse.mjs), [read API](../server/wiki-read-api.mjs), [API contract](WIKI-API.md) | Source edits require regenerated data; historical lesson IDs and read-only behavior remain stable. [Wiki API tests](../tests/wiki-read-api.test.js). |
+
+For each investigation, distinguish implementation found, test found, test run,
+and behavior observed in the intended environment. Follow dependencies across
+these boundaries when evidence points there; neither a green structural doc
+check nor a closed issue settles a disputed product requirement.
 
 ## System components
 
@@ -111,7 +140,7 @@ sequenceDiagram
 ```
 
 Event types are the contract: the full catalog lives in `src/events.js`
-(`EVENT_TYPES` — 65 types, e.g. `room.created`, `member.added`,
+(`EVENT_TYPES`, e.g. `room.created`, `member.added`,
 `member.joined_via_invitation`, `message.posted`, `message.edited`,
 `message.deleted`, `dm.posted`, `land.updated`, `room.exported`).
 Writes are idempotent (idempotencyKey on every command); reads paginate with

@@ -1,25 +1,26 @@
 # Room Wiki — the swarm's experience log
 
-A WikiSkill-style experience compiler for the Project Room agent swarm.
+Historical lessons and their evidence, not a merge checklist or a task board.
+Use [Room procedures](ROOM-PROCEDURES.md#maintain-shared-guidance) for current
+guidance and [the handbook index](INDEX.md) to find its canonical owner.
 
-**Lineage.** This design follows WikiSkill (arXiv 2608.27454, Google Research):
-raw execution traces → persistent wiki → atomic skill updates, validated before
-keeping, with the wiki itself append-only. Validation gates take after GEPA's
-outperform-parent rule (arXiv 2507.19457): a procedure change must prove itself
-against what it replaces. The closest open-source analog is srlabs/skillforge
-(git-backed `skills/` + `wiki/` + immutable `raw/`, one skill change per
-iteration). We keep **three planes**: immutable raw traces
-(`docs/ROOM-TRACES.jsonl`, one line per merged slice), the distilled wiki (this
-file), and the validated procedures (`docs/ROOM-PROCEDURES.md`).
+**When to write.** Record a lesson when a surprise changes a decision or a
+reusable procedure. Ordinary merges require no wiki entry, trace row or
+separate maintainer/proposer ceremony. Link the original evidence, including
+failed attempts and rejected approaches. Promote a lesson into the owning
+procedure when its scope and evidence justify it; a historical entry alone
+does not establish a current rule. A procedure change must show, with evidence
+proportionate to its risk and scope, how it improves on what it replaces.
+Record the comparison, tradeoffs and verification limits. For an urgent,
+confirmed safety incident, act without waiting for repeated incidents or a
+completed comparison: document the rationale and follow-up comparative
+verification needed to retain or revise the change.
 
-**Two roles.**
-
-- **Wiki Maintainer** — runs at merge time: reads the trace and the raw
-  handoff/builder reports for the merged slice, distills *one* wiki entry.
-- **Skill Proposer** — turns recurring wiki patterns into procedure PRs.
-
-In this room the merging agent plays both roles, but the steps stay separate:
-never write a procedure change directly from a single trace.
+**Retained lineage.** The original WikiSkill-inspired design separated raw
+traces ([ROOM-TRACES.jsonl](ROOM-TRACES.jsonl)), distilled lessons (this file),
+and maintained procedures ([ROOM-PROCEDURES.md](ROOM-PROCEDURES.md)). Those
+records remain available. Its per-merge recording requirement is superseded
+by the selective-learning guidance above.
 
 **The rule that makes it work: this file is append-only.**
 
@@ -32,7 +33,9 @@ never write a procedure change directly from a single trace.
   survive into the next iteration.
 
 **How to add an entry.** Append at the bottom, newest last. Follow the schema
-exactly — `node scripts/check-wiki.mjs` enforces it. Then run
+exactly. `node scripts/check-wiki.mjs` checks entry fields and date order,
+plus trace schema/order; it does not compare Git history or prove that old
+entries were preserved. Review the diff for history preservation. Then run
 `node scripts/wiki-build.mjs` so the read API's embedded data stays current.
 
 ```
