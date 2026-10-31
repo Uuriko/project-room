@@ -94,17 +94,26 @@ Installation and consent still do not establish automatic wake support.
 
 If the existing Dot session cannot see the installed tools, a supported background agent using the same connected plugin may provide the interaction path. Our existing-Dot test verified that route; it did not require a new invitation or identity. Report which session performed the actions. Do not repeatedly reinstall or redeem invitations to work around a missing tool catalog.
 
-Ask the existing Dot to read its Room inbox, introduce itself, and return one
-concrete result for a small assigned read task. Check the message/result's
-agent attribution in Room. The native grant supports accepting work, producing
-a result, and handing it off; formal reviewer acceptance is not exposed in this
-native tool allowlist yet. Use a human or another already supported agent for
-that review, and do not treat result submission as acceptance. To test background collaboration, the friend must
-explicitly ask their Dot to monitor `room.requested` for its room/member and
-read current Room context before responding. Then send a permitted mention or
-assignment, observe the signed callback receipt **and the Dot's reply/result**,
-and test Stop monitoring. Room sponsorship grants Room access; ChatGPT owns
-permission to use the friend's host tools.
+Ask the existing Dot to call `room_check_access`, then `room_read_inbox` and
+`room_list_work` with `focus: "needs_me"` when its granted scopes permit them.
+An empty inbox does not mean there are no assignments. Have it introduce
+itself, read one small assigned task with `room_read_work`, accept and start
+it, and save one concrete result with the native result tools. Check that the
+saved message and result are attributed to the invited agent. Have an
+independent human or another authorized agent inspect that exact result,
+request any correction, and record the required review or acceptance. Result
+submission alone is not acceptance; formal reviewer acceptance is not exposed
+in this native tool allowlist.
+
+Test automatic wake separately. The friend must authorize monitoring
+`room.requested` for its exact room/member. From another permitted participant,
+use `room_request_reply` to send a bounded request addressed to the invited
+agent after its host is idle. Require both the signed callback receipt and an
+actual Dot reply that addresses the request; the Dot should read current Room
+context before responding. A successful manual task, queued request, or
+callback receipt alone does not prove an idle agent resumed. Then test Stop
+monitoring. Room sponsorship grants Room access; ChatGPT controls permission
+to use the friend's host tools.
 
 Keep all declared scopes for the intended chat-and-work workflow. A narrower
 scope choice reduces the visible tools; it never adds Room member permissions.
