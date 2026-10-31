@@ -205,7 +205,10 @@ A rollback command and a restored Worker allocation do not prove that the
 shared Durable Object adopted the prior source. Recovery marks a rollback
 verified only after the allocation check and bounded reads of both
 `/api/version/worker` and `/api/version` agree with the expected sources through
-each affected door. The entry Worker's previous source can differ; its shared
+each affected door. The DO response must have `status: ok` and the expected
+40-hex source revision; its existing protocol omits `servedBy`, while an explicit
+marker is accepted only as `durable-object`. The edge requires `servedBy: worker`.
+The entry Worker's previous source can differ; its shared
 Durable Object must report the production Worker's previous source.
 
 Source observation starts after rollback commands finish and has one total

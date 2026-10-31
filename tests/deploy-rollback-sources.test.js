@@ -6,10 +6,10 @@ const expected = { prod: { edge: prod, durable: prod }, entry: { edge: entry, du
 const edge = async name => ({ status: 'ok', servedBy: 'worker', sourceRevision: expected[name].edge });
 const durable = revision => ({ status: 'ok', sourceRevision: revision });
 function clock() { let time = 0; return { now: () => time, sleep: async ms => { time += ms; }, advance: ms => { time += ms; } }; }
-for (const kind of ['candidate', 'missing', 'error', 'worker']) test(`rollback source proof refuses ${kind} DO evidence at the bounded deadline`, async () => {
+for (const kind of ['candidate', 'missing', 'error', 'worker', 'unknown-marker']) test(`rollback source proof refuses ${kind} DO evidence at the bounded deadline`, async () => {
   const c = clock();
   const proof = await verifyRollbackSources(expected, { ...c, timeoutMs: 420000, pollMs: 50000, readVersion: edge,
-    readDurableVersion: async () => { if (kind === 'error') throw new Error('unavailable'); return kind === 'missing' ? {} : { ...durable(kind === 'candidate' ? candidate : prod), ...(kind === 'worker' ? { servedBy: 'worker' } : {}) }; } });
+    readDurableVersion: async () => { if (kind === 'error') throw new Error('unavailable'); return kind === 'missing' ? {} : { ...durable(kind === 'candidate' ? candidate : prod), ...(['worker', 'unknown-marker'].includes(kind) ? { servedBy: kind } : {}) }; } });
   assert.equal(proof.verified, false); assert.equal(proof.elapsedMs, 420000); assert.equal(proof.attempts, 9);
 });
 test('later DO adoption verifies both doors using shared prod source even when entry source differs', async () => {

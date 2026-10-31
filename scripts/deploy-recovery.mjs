@@ -114,7 +114,7 @@ export async function verifyRollbackSources(expected, { readVersion, readDurable
     const rows = await Promise.all(Object.entries(expected).map(async ([name, target]) => {
       const [edge, durable] = await Promise.all([read(readVersion, name), read(readDurableVersion, name)]);
       const edgeRevision = edge?.status === 'ok' && edge.servedBy === 'worker' && shaPattern.test(edge.sourceRevision ?? '') ? edge.sourceRevision : null;
-      const durableRevision = durable?.status === 'ok' && durable.servedBy !== 'worker' && shaPattern.test(durable.sourceRevision ?? '') ? durable.sourceRevision : null;
+      const durableRevision = durable?.status === 'ok' && (durable.servedBy === undefined || durable.servedBy === 'durable-object') && shaPattern.test(durable.sourceRevision ?? '') ? durable.sourceRevision : null;
       return [name, { edgeRevision, durableRevision, expectedEdgeRevision: target.edge,
         expectedDurableRevision: target.durable, matched: edgeRevision === target.edge && durableRevision === target.durable }];
     }));
