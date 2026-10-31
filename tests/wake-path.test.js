@@ -253,6 +253,23 @@ test("push delivery POSTs a pointer-only body with the token header", async t =>
   assert.deepEqual(pushFailuresOf(hb), { failures: 0, suspended: 0 }, "2xx resets failures");
 });
 
+test("push delivery sends registered bearer credentials as Authorization", async t => {
+  const transport = mockTransport();
+  const { hb } = await offlineWithPush(t, transport,
+    { ...pushSub(), authentication: { schemes: ["bearer"], credentials: "sender-key-test" } });
+  hb.pushNotify({ identityId: "ai_testagent", eventType: "message.posted", roomId: "room-1", id: "evt-2", ts: T0 });
+  await hb.flushPushes();
+  assert.equal(transport.calls[0].headers.Authorization, "Bearer sender-key-test");
+});
+
+test("push delivery omits Authorization when no credentials were registered", async t => {
+  const transport = mockTransport();
+  const { hb } = await offlineWithPush(t, transport);
+  hb.pushNotify({ identityId: "ai_testagent", eventType: "message.posted", roomId: "room-1", id: "evt-3", ts: T0 });
+  await hb.flushPushes();
+  assert.equal(transport.calls[0].headers.Authorization, undefined);
+});
+
 test("all four event types flow through the pointer body", async t => {
   const transport = mockTransport();
   const { hb } = await offlineWithPush(t, transport);
