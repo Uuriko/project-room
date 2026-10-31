@@ -390,10 +390,17 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   }
   if (name === "room_read_inbox") {
     const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after ?? 0 });
+    // Same work snapshot authorization as room_read_board; return only the caller's
+    // standing assignments, independent of the chat delivery cursor.
+    store.snapshot(secret, roomId, null, "work");
+    const owned = store.workClaims.list(roomId).filter(item => item.owner === auth.member.id
+      && ["claimed", "in_progress", "blocked", "delivered"].includes(item.state) && !item.supersededBy);
+    const boardAssignments = owned.slice(0, 50).map(item => ({ claimId: item.id, state: item.state,
+      nextRead: { tool: "room_read_board", arguments: { roomId } } }));
     const stamp = rows => rows.map(row => row.nextRead ? { ...row,
       nextRead: { ...row.nextRead, arguments: { roomId, ...row.nextRead.arguments } }
     } : row);
-    return { value: { ...inbox, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
+    return { value: { ...inbox, boardAssignments, boardAssignmentsHasMore: owned.length > 50, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
   if (name === "room_read_messages") return { value: await roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };

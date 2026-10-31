@@ -1,3 +1,4 @@
+import { enqueueClaimWake, wakeNamedReviewers } from "../server/work-claim-events.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { wakeAccounting } from "../server/wake-metrics.mjs";
 // Exercises server/mcp-events-runtime.mjs through the real authenticated HTTP mount and committed Room events.
@@ -190,4 +191,72 @@ test('legacy initialize advertises Events only for authenticated OAuth with a mo
   assert.deepEqual((await disabled(initialization, { authorization: 'Bearer ' + f.tokens.accessToken })).result.capabilities, { tools: {} });
   f.native.provider.revoke(f.tokens.refreshToken);
   assert.ok((await legacy(initialization, f.tokens.accessToken)).error);
+});
+
+test('Board assignments use native subscription without desktop opt-in and fence stale owner or revoked grant', async t => {
+  const f = await fixture(t); await f.subscribe();
+  const board = (path, data) => new Promise((resolve, reject) => {
+    const req = request(f.base + '/api/rooms/commons/work-claims' + path, { method: 'POST', headers: {
+      Host: 'room.example', 'Content-Type': 'application/json', Authorization: 'Bearer ' + f.owner,
+    } }, res => { let body = ''; res.on('data', x => body += x); res.on('end', () => resolve({ status: res.statusCode, body })); });
+    req.on('error', reject); req.end(JSON.stringify(data));
+  });
+  assert.equal(f.store.agentHeartbeats.statusOf(f.grant.identity_id).hosts.length, 0);
+  const created = await board('', { id: 'native-board', title: 'Review this small task', assignee: f.grant.member_id });
+  assert.equal(created.status, 201, created.body);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 1);
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  assert.deepEqual(JSON.parse(f.deliveries[0].body).data, { roomId: 'commons', memberId: f.grant.member_id });
+  assert.ok(!f.deliveries[0].body.includes('claimBasis'));
+  const assigned = await board('', { id: 'stale-board', title: 'Old assignment', assignee: f.grant.member_id });
+  assert.equal(assigned.status, 201, assigned.body);
+  const item = f.store.workClaims.get('commons', 'stale-board');
+  f.store.workClaims.set('commons', { ...item, owner: 'owner' });
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  const owned = await board('', { id: 'reassigned-board', title: 'Reassign to native agent', assignee: 'owner' });
+  assert.equal(owned.status, 201, owned.body);
+  const prior = f.store.workClaims.get('commons', 'reassigned-board');
+  const moved = await board('/reassigned-board/reassign', { newOwner: f.grant.member_id,
+    expectedClaimedAt: prior.claimedAt, expectedHistoryLength: prior.history.length });
+  assert.equal(moved.status, 200, moved.body);
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 2);
+  const read = await f.rpc('tools/call', { name: 'room_read_board', arguments: {} });
+  assert.notEqual(read.result?.isError, true, JSON.stringify(read));
+  assert.ok(JSON.stringify(read).includes('reassigned-board'));
+  const inbox = await f.rpc('tools/call', { name: 'room_read_inbox', arguments: {} });
+  assert.ok(JSON.stringify(inbox).includes('reassigned-board'), 'inbox exposes own standing Board assignment');
+  assert.ok(!JSON.stringify(inbox).includes('stale-board'), 'another owner assignment is excluded');
+  const catalog = await f.rpc('tools/list');
+  assert.ok(!catalog.result.tools.some(tool => tool.name === 'room_reassign_work_claim'), 'do not widen native Board mutation capabilities');
+  const revoked = await board('', { id: 'revoked-board', title: 'Revoked assignment', assignee: f.grant.member_id });
+  assert.equal(revoked.status, 201, revoked.body);
+  f.native.provider.revoke(f.tokens.refreshToken);
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 2);
+});
+
+
+test('native Board review wakes deduplicate and reject changed revision and missing permission', async t => {
+  const f = await fixture(t); await f.subscribe();
+  const { createWork, claimWork } = await import('../server/work-claims.mjs');
+  let item = claimWork(createWork({ id: 'native-review', title: 'Review this', tags: ['rev-' + f.grant.member_id] },
+    { agentId: 'owner', now: Date.now() }), 'owner', { now: Date.now() });
+  item = { ...item, state: 'in_progress', revision: 'one' };
+  f.store.workClaims.set('commons', item);
+  const member = f.store.room('commons').state.members[f.grant.member_id];
+  // The fixture's Member grant already carries reviewer authority, or this wake must be refused.
+  const canReview = member.permissions.includes('verify');
+  assert.equal(canReview, true, 'fixture must exercise actual reviewer delivery');
+  wakeNamedReviewers(f.store, 'commons', item, { actorId: 'owner' });
+  wakeNamedReviewers(f.store, 'commons', item, { actorId: 'owner' });
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, canReview ? 1 : 0);
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  item = { ...item, revision: 'two' }; f.store.workClaims.set('commons', item);
+  wakeNamedReviewers(f.store, 'commons', item, { actorId: 'owner' });
+  f.store.workClaims.set('commons', { ...item, revision: 'three' });
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
+  enqueueClaimWake(f.store, 'commons', f.grant.member_id, 'work-claim:native-review:review:three', { actorId: 'owner' });
+  f.store.command(f.owner, 'commons', { id: 'remove-review-permission', type: 'member.access_changed',
+    data: { memberId: member.id, expectedMemberRevision: member.revision, active: true,
+      permissions: member.permissions.filter(permission => permission !== 'verify') } });
+  await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
 });
