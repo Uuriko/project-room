@@ -496,6 +496,8 @@ test("recovery distinguishes no upload, verified rollback and failed/unverified 
       status: async () => recoveryAllocation(rolled && kind !== "wrong-allocation" ? recoveryOld : recoveryNew),
       rollback: async () => { rolled = true; if (kind === "command-failed") throw new Error("rollback failed"); },
       readVersion: async () => ({ status: "ok", servedBy: "worker", sourceRevision: kind === "wrong-source" ? "c".repeat(40) : recoveryRevision }),
+      readDurableVersion: async () => ({ status: "ok", sourceRevision: recoveryRevision }),
+      convergence: { timeoutMs: 10, pollMs: 1 },
     });
     assert.equal(report.status, kind === "verified" ? "ROLLBACK VERIFIED" : "ROLLBACK NOT VERIFIED");
     assert.equal(report.workers.entry.disposition, "unchanged");

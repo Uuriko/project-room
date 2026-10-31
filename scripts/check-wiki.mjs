@@ -1,4 +1,5 @@
-// Wiki schema check: docs/ROOM-WIKI.md must be a well-formed append-only log.
+// Wiki and trace schema/order check. Does not compare revisions or enforce
+// append-only history; preservation of existing entries requires diff review.
 // Standalone: `node scripts/check-wiki.mjs`. Exit 0 on success, 1 on failure.
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -52,7 +53,7 @@ for (const e of entries) {
 
 for (let i = 1; i < entries.length; i++) {
   if (entries[i].date < entries[i - 1].date) {
-    fail(`entries out of order: ${entries[i].date} (line ${entries[i].line}) after ${entries[i - 1].date} (line ${entries[i - 1].line}) — wiki is append-only, newest last`);
+    fail(`entries out of order: ${entries[i].date} (line ${entries[i].line}) after ${entries[i - 1].date} (line ${entries[i - 1].line}) — expected chronological order, newest last`);
   }
 }
 

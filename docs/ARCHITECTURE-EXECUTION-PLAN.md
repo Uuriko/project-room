@@ -249,3 +249,23 @@ required; new research does not supersede unfinished architecture work.
 The [adaptive master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) sequences the
 overhaul, automation and bounded improvement loop into concrete integration
 packages. It preserves all seven exit criteria above.
+
+
+## Bounded runtime hardening — 2026-10-31 candidate
+
+This candidate composes body-memo bounds (`a6b10d52b`), idle inbox hydration
+avoidance (`ea80987ef`) and rollback source proof (`40b9e174f`, tightened by
+`4a2958160`). The memo now limits retained text per database and drops obsolete
+plaintext on nonmemoizing rewrites. An idle inbox uses narrow authority and
+pending-work reads before loading any required message records. Rollback proof
+checks edge and shared Durable Object sources within a fixed observation window;
+an allocated old Worker alone cannot establish runtime adoption.
+
+Focused regressions cover cache eviction/deletion/rollback, idle read hydration,
+authorization and pending-work preservation, and missing or delayed DO source
+proof. These are incremental fixes, not a completed architecture cutover or a
+claim that this candidate is deployed. Whole-room projection serialization and
+remaining aggregate writers still require the stage 1–3 work above. The carrier
+remains; bounding a cache and avoiding an idle read do not make every operation
+independent of room size. Release qualification belongs to the exact-source CI
+and deployment receipt rather than this dated design checkpoint.
