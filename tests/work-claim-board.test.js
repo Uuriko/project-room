@@ -10,6 +10,8 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { createWork, claimWork } from "../server/work-claims.mjs";
+import { recordPullOutcome } from "../server/claim-coordination.mjs";
 import { migrateLandQueueClaims } from "../server/land-queue.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
@@ -517,15 +519,28 @@ test("a superseded claim cannot be manually completed with an otherwise valid ap
   await refusedCompletion(f, "superseded-review", "coord");
 });
 
-test("a deploy claim closes when the live revision matches, and status reports main", async t => {
-  const { call, coordKey } = await fixture(t);
+test("a deploy claim closes on a live revision only when held with a merged pull, and status reports main", async t => {
+  const { store, call, coordKey } = await fixture(t);
   const created = await call(coordKey, "/work-claims", { id: "ship", kind: "deploy", revision: SOURCE_REVISION, title: "Ship" });
   assert.equal(created.status, 201);
   assert.equal(created.value.kind, "deploy");
+  // L04-C4: a plain GET read must not move an unclaimed claim to done — a
+  // preset revision matching the live one is not delivered work.
   const read = await call(coordKey, "/work-claims/ship");
   assert.equal(read.status, 200);
-  assert.equal(read.value.state, "done");
-  assert.equal(read.value.deliveryMode, "production");
+  assert.equal(read.value.state, "unclaimed");
+  // The legitimate live close: the claim is held, the poller has recorded
+  // its pull merged, and that revision is the live one.
+  const now = Date.now();
+  let shipped = createWork({ id: "shipped", kind: "deploy", revision: SOURCE_REVISION,
+    pullRequest: "https://github.com/Uuriko/project-room/pull/31" }, { now, agentId: "coord" });
+  shipped = claimWork(shipped, "coord", { now, leaseHours: 6 });
+  shipped = recordPullOutcome(shipped, "https://github.com/Uuriko/project-room/pull/31", "merged", now);
+  store.workClaims.set("commons", shipped);
+  const closedRead = await call(coordKey, "/work-claims/shipped");
+  assert.equal(closedRead.status, 200);
+  assert.equal(closedRead.value.state, "done");
+  assert.equal(closedRead.value.deliveryMode, "production");
   const status = await call(coordKey, "/work-claims/status");
   assert.equal(status.status, 200);
   assert.equal(status.value.live, SOURCE_REVISION);

@@ -1536,15 +1536,34 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
   return withHistory({ ...item, reviews, attestations }, atMs, agent, "reviewed", summary.slice(0, 512));
 }
 // Land and deploy claims close when this server's live revision matches the
-// claim's revision. Any non-done state can close; the history stamp is the
-// same state:done the receipts search already looks for.
+// claim's revision — but only along the evidence chain that makes "done"
+// true for these kinds, the same chain settlePullRequest (the other designed
+// system mover) requires before it completes a claim on a merged pull:
+//   - the claim is HELD: state claimed, in_progress, blocked or delivered,
+//     with a non-null owner. An unclaimed claim can never close here —
+//     canCloseWork refuses unclaimed/ownerless work for the same reason:
+//     no round exists whose work could have been delivered or verified.
+//   - every linked pull is settled (outcome merged or closed) and at least
+//     one is merged. The outcome is recorded by the pull poller/webhook,
+//     never by the claim's holder, so a preset revision string alone — the
+//     shape an ordinary GET used to close on — proves nothing.
+//   - the claim's lease has not lapsed (a dead round is released, never
+//     settled as done; delivered claims carry no expiring lease).
+//   - the live revision matches the claim's revision or its CI head.
+// The history stamp is the same state:done the receipts search looks for.
 export function closeWhenLive(work, liveRevision, now) {
   const item = workOf(work);
   if (item.kind !== "land" && item.kind !== "deploy") return null;
   if (isTerminalClaimState(item.state) || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) && item.state !== "delivered") return null;
+  if (item.owner === null) return null;
+  const atMs = nowMsOf(now);
+  if (isLeaseExpired(item, atMs)) return null;
+  const links = item.pullRequests?.length ? item.pullRequests : (item.pullRequest ? [item.pullRequest] : []);
+  if (links.length === 0 || !links.every(pull => pull.outcome === "merged" || pull.outcome === "closed")) return null;
+  if (!links.some(pull => pull.outcome === "merged")) return null;
   const head = item.ci?.headSha ?? null;
   if (item.revision !== liveRevision && head !== liveRevision) return null;
-  const atMs = nowMsOf(now);
   return withHistory({ ...item, state: "done", deliveryMode: item.deliveryMode ?? "production" }, atMs, item.owner ?? "system", "state:done",
     `live revision matches ${liveRevision}`);
 }

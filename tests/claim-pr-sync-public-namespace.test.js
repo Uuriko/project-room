@@ -24,6 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createWork, claimWork, appendWorkPullRequest, claimHistoryLength } from "../server/work-claims.mjs";
+import { recordPullOutcome } from "../server/claim-coordination.mjs";
 import * as claimSync from "../server/claim-pr-sync.mjs";
 const { syncClaimPullRequests, sweepStaleUnclaimedClaims, applyPullRequestWebhook, isPublicClaimNamespace, publicNamespaceSqlExclusion } = claimSync;
 import { autoLinkPullRequest, linkDeployToSettledClaims } from "../server/claim-autolink.mjs";
@@ -157,9 +158,11 @@ test("G3: the deployed-close phase closes a private land claim and never selects
     createWork({ id: "sync-land-shaped", kind: "land", revision: SOURCE_REVISION }, { now: Date.now() }),
     "owner", { leaseHours: 6, now: Date.now() });
   permitSet(store, namespace, landShaped);
-  const privLand = claimWork(
-    createWork({ id: "sync-land-private", kind: "land", revision: SOURCE_REVISION }, { now: Date.now() }),
-    "owner", { leaseHours: 6, now: Date.now() });
+  // L04-C4: the private control must be legitimately closable — held with
+  // its pull recorded merged — not merely at the live revision.
+  const privLand = recordPullOutcome(claimWork(
+    createWork({ id: "sync-land-private", kind: "land", revision: SOURCE_REVISION, pullRequest: PR_URL }, { now: Date.now() }),
+    "owner", { leaseHours: 6, now: Date.now() }), PR_URL, "merged", Date.now());
   store.workClaims.set("commons", privLand);
 
   assert.equal(landShaped.state, "claimed");
@@ -309,8 +312,13 @@ test('namespace detection tolerates an absent legacy table but propagates storag
 for (const kind of ['lease', 'deploy']) test(`housekeeping excludes public ${kind} rows before materializing candidates`, async t => {
   const { store, namespace } = fixture(t);
   const now = Date.now();
-  const make = id => claimWork(createWork({ id, ...(kind === 'deploy' ? { kind: 'land', revision: SOURCE_REVISION } : {}) }, { now: now - 3 * HOUR }),
-    'owner', { now: now - 3 * HOUR, leaseHours: 1 });
+  // The lease branch needs a lapsed lease; the deploy branch needs the
+  // L04-C4 legitimate live-close shape: a live lease and a merged pull.
+  const make = id => {
+    const base = claimWork(createWork({ id, ...(kind === 'deploy' ? { kind: 'land', revision: SOURCE_REVISION, pullRequest: PR_URL } : {}) }, { now: now - 3 * HOUR }),
+      'owner', { now: now - 3 * HOUR, leaseHours: kind === 'deploy' ? 6 : 1 });
+    return kind === 'deploy' ? recordPullOutcome(base, PR_URL, 'merged', now - 3 * HOUR) : base;
+  };
   withPublicWorkClaimWriter(store, () => {
     for (let i = 0; i < 300; i++) store.workClaims.set(namespace, make(`public-${i}`));
   });

@@ -143,7 +143,7 @@
                   description: work is the default. land holds a pull request. deploy names the revision that must be live.
                 revision:
                   type: string
-                  description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
+                  description: Required for kind deploy. A held land or deploy claim whose linked pulls are settled with at least one merged closes when this server's live revision matches it; an unclaimed claim never closes this way.
                 assignee:
                   type: string
                   description: |
