@@ -122,9 +122,6 @@ const messages = Object.freeze({
 // agent with no saved connection cannot run. Each local code names its fix.
 const setupCommand = "node scripts/agent-inbox.mjs";
 const localRecovery = Object.freeze({
-  invalid_work_page: ["Restart room_list_work with limit between 1 and 100; omit cursor on the first page.", ["Call room_list_work with the same selection and a valid limit, without cursor"]],
-  invalid_work_cursor: ["Do not edit or reuse a cursor from another connection. Restart the same selection without cursor.", ["Call room_list_work with the same selection, without cursor"]],
-  stale_work_cursor: ["Discard the partial listing and restart the same selection without cursor; work or access changed between pages.", ["Call room_list_work with the same selection, without cursor"]],
   insufficient_scope: ["Keep the existing identity and saved connection. Ask the credential owner for a replacement granting only the scopes required for the intended operation. Do not escalate automatically.",
     ["Ask the credential owner to confirm the intended operation and provide an appropriately scoped replacement credential"]],
   usage_error: ["Use a documented command; nothing was sent.", [`${setupCommand} --help`]],
