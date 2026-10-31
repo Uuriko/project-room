@@ -20,7 +20,7 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
@@ -826,6 +826,7 @@ export const JOBS = Object.freeze([
   defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
+    failureRetryMs: 30 * MINUTE_MS,
     slow: true,
     // #3894: a required job's disable is a configuration failure, not
     // healthy idle. Work-gated jobs are disabled whenever nothing is
@@ -842,8 +843,9 @@ export const JOBS = Object.freeze([
       if (!ctx.room) return { skipped: 1 };
       try { return await writeDailyBackup(ctx.env, ctx.room); }
       catch (error) {
-        console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
-        return { errors: 1 };
+        const failureDetail = backupFailureDetail(error);
+        console.error(`[room-backup] ${failureDetail.code}`);
+        return { errors: 1, failureDetail };
       }
     }
   }),
@@ -959,6 +961,12 @@ export function jobNextDue(job, store, now, lastRanAt) {
   return last + job.cadenceMs;
 }
 
+// Failed backups retry on the existing slow cron; successful runs remain daily.
+export function jobRetryCadence(job, record) {
+  return Number(record?.consecutiveFailures) > 0 && Number.isFinite(job.failureRetryMs)
+    ? job.failureRetryMs : job.cadenceMs;
+}
+
 export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) {
   if (typeof job.nextDueAt === "function") {
     const next = jobNextDue(job, store, now, lastRanAt);
@@ -967,7 +975,7 @@ export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) 
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
   // Only slow jobs get slack: they run from the safety-net cron, so a tick
   // landing a few seconds before the anchor would otherwise skip a period.
-  const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
+  const slack = job.slow && cadenceMs === job.cadenceMs ? SLOW_JOB_DUE_SLACK_MS : 0;
   return last + cadenceMs - slack <= now;
 }
 

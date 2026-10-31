@@ -37,7 +37,7 @@ import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, jobRetryCadence, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -599,7 +599,7 @@ export class ProjectRoom extends DurableObject {
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
       if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
-      return jobIsDue(job, this.store, now, lastRan[job.name]);
+      return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name]));
     });
     const outcomes = [];
     for (const job of selected) {
