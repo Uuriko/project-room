@@ -102,6 +102,7 @@ export const webResearchSchema = `
     plan_only INTEGER NOT NULL CHECK(plan_only IN (0,1)),
     created_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS web_research_log_retention ON web_research_log(created_at, request_id);
   CREATE INDEX IF NOT EXISTS web_research_log_room_time ON web_research_log(room_id, created_at);
   CREATE INDEX IF NOT EXISTS web_research_log_member_time ON web_research_log(room_id, member_id, created_at);
 `;
