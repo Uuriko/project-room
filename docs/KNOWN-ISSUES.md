@@ -478,3 +478,8 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | KI-186 | Duplicate open PRs: board_vtwo removal (#4521, #4975, #5431), per-kind journal removal (#4615, #4971, #5432), ServiceError retarget (#4982, #5032) | keep newest, close rest after review |
 | KI-187 | Open PR queue is 536 with 85 CONFLICTING; MCP default-catalog PRs overlap (#4933, #5029, #5434, #5436, #5468) | pick one (#5468), close others |
 | KI-188 | grok-host and runtime-package tests fail on a fresh checkout: need a .tmp dir and devDeps installed | env, not code |
+| KI-189 | Prod job health is "stale": integrity job 418 consecutive failures (messages_parity_failed), no success for ~19 days; required room-backup last success ~28h ago | /api/health/jobs, 2026-10-30 |
+| KI-190 | Human client ships 80 unbundled ES modules (~1.7 MB raw; src/app.js 521 KB), all cache-control: no-cache, so every load revalidates 80 requests | /src/entry.js graph; bundling PR #5047 open |
+| KI-191 | room_list_work returns ~88 KB with no cursor/limit on a busy room (muse-room) | MCP call, 2026-10-30 |
+| KI-192 | room_read_work with no id says only "does not match the tool input"; it should name workItemId/workItemIds | MCP call |
+| KI-193 | 38 exports referenced nowhere (incl. startGmailSync, createTrialTaskRegistry, roomMcpFetchPost); 615 used only in their own file | token scan of server/src/scripts |
