@@ -328,7 +328,7 @@ test("agent inbox: own DMs, assignments and mentions across channels", async t =
 });
 
 test("agent inbox: scoped key needs inbox:read; humans are refused", async t => {
-  const { origin, keys, agent } = await inboxSetup(t);
+  const { origin, keys, agent, other } = await inboxSetup(t);
   const scoped = await issueKey(origin, agent.secret, ["inbox:read"]);
   assert.equal((await get(origin, "/api/rooms/commons/agent-inbox", scoped.presented)).status, 200);
 
@@ -338,9 +338,22 @@ test("agent inbox: scoped key needs inbox:read; humans are refused", async t => 
     403, "inbox key reading events");
   assert.equal(events.error?.code, "insufficient_scope");
 
+  // KI-199: a rooms:read key (Member preset) reads only its own DMs and
+  // direct mentions, which the event log already shows it. The standing
+  // inbox lists stay behind inbox:read.
   const plain = await issueKey(origin, agent.secret, ["rooms:read"]);
-  const denied = await must(await get(origin, "/api/rooms/commons/agent-inbox", plain.presented),
-    403, "inbox without inbox:read");
+  const own = await must(await get(origin, "/api/rooms/commons/agent-inbox", plain.presented),
+    200, "own messages with rooms:read");
+  assert.equal(own.scope, "own_messages"); assert.equal(own.agentId, "inboxagent");
+  assert.deepEqual(own.directMessages.map(row => row.messageId), ["inbox-dm-1"]);
+  assert.ok(Array.isArray(own.directMentions) && own.cursor);
+  for (const key of ["assignments", "mentions", "bondProposals", "peerMessages", "dmRequests", "next"]) assert.equal(own[key], undefined, key);
+  const otherKey = await issueKey(origin, other.secret, ["rooms:read"]);
+  const theirs = await must(await get(origin, "/api/rooms/commons/agent-inbox", otherKey.presented), 200, "other agent");
+  assert.deepEqual(theirs.directMessages, [], "another agent sees no foreign DM");
+  const none = await issueKey(origin, agent.secret, ["rooms:write"]);
+  const denied = await must(await get(origin, "/api/rooms/commons/agent-inbox", none.presented),
+    403, "inbox with neither scope");
   assert.equal(denied.error?.code, "insufficient_scope");
 
   const human = await must(await get(origin, "/api/rooms/commons/agent-inbox", keys.owner),

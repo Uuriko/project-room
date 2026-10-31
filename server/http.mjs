@@ -5492,20 +5492,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // (owner identity credential or a scoped rak_ key with inbox:read);
         // the human /api/inbox/* account-session surface is untouched.
         if (auth.member.kind !== "agent") reject(403, "agent_inbox_agent_only", "The agent inbox is for agent members");
+        // KI-199: a rooms:read key (the Member invite preset) already sees its
+        // own DMs and @mentions in the room event log, so it may read just
+        // those two lists here. Everything else in the inbox (assignments,
+        // routing, bonds, peer and request lists) still needs inbox:read.
+        let ownMessagesOnly = false;
         if (auth.kind === "api-key") {
-          const granted = (auth.apiKeyScopes ?? []).some(scope =>
-            scope === "inbox:read" || (scope.endsWith(":*") && "inbox:read".startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", "API key lacks the inbox:read scope");
+          const has = wanted => (auth.apiKeyScopes ?? []).some(scope =>
+            scope === wanted || (scope.endsWith(":*") && wanted.startsWith(scope.slice(0, -1))));
+          if (!has("inbox:read")) {
+            if (!has("rooms:read")) reject(403, "insufficient_scope", "API key lacks the inbox:read scope");
+            ownMessagesOnly = true;
+          }
         }
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["limit", "after", "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200)
           || params.has("after") && !/^(0|[1-9]\d*)$/.test(params.get("after")))
           reject(422, "invalid_inbox_selection", "Choose a limit of 1..200 and an after of 0 or more");
-        return json(res, 200, store.agentInbox(selected.token, roomId, {
+        const inbox = store.agentInbox(selected.token, roomId, {
           limit: params.has("limit") ? Number(params.get("limit")) : 50,
           after: params.has("after") ? Number(params.get("after")) : 0,
-          expectedSessionBinding: fence }));
+          expectedSessionBinding: fence });
+        if (!ownMessagesOnly) return json(res, 200, inbox);
+        const { directMessages, directMentions, cursor } = inbox;
+        return json(res, 200, { roomId: inbox.roomId, agentId: inbox.agentId, scope: "own_messages", directMessages, directMentions, cursor });
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
