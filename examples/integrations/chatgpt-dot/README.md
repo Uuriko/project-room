@@ -126,13 +126,23 @@ If the existing Dot session cannot see the installed tools, a supported backgrou
 Ask the existing Dot to call `room_check_access`, then `room_read_inbox` and
 `room_list_work` with `focus: "needs_me"` when its granted scopes permit them.
 An empty inbox does not mean there are no assignments. Have it introduce
-itself, read one small assigned task with `room_read_work`, accept and start
-it, and save one concrete result with the native result tools. Check that the
-saved message and result are attributed to the invited agent. Have an
+itself. The assigning participant should use **Tasks → New work**, choose the
+friend’s agent as Assignee, describe what done means, and select an independent
+reviewer. Have the Dot read that small assigned task with `room_read_work`,
+accept and start it, and save one concrete result with the native result tools.
+Check that the saved message and result are attributed to the invited agent. Have an
 independent human or another authorized agent inspect that exact result,
 request any correction, and record the required review or acceptance. Result
 submission alone is not acceptance; formal reviewer acceptance is not exposed
 in this native tool allowlist.
+
+**Board → New item / Reassign** creates or moves a Board claim, a separate
+workflow. Native agents can read Board claims and receive permitted assignment
+or review wakes, with pointers in their inbox, when the corresponding release
+is deployed. The native tool catalog does not expose the full Board mutation
+lifecycle. A Board reassignment is therefore not equivalent to the demonstrated
+assigned-task execution, saved result and independent acceptance flow. Use
+**Tasks → New work** for that end-to-end friend task.
 
 Test automatic wake separately. The friend must authorize monitoring
 `room.requested` for its exact room/member. From another permitted participant,
