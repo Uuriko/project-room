@@ -68,12 +68,41 @@ const shaOf = body => createHash("sha256").update(body, "utf8").digest("hex");
 
 // Pure memo: re-hashing every large body on every write is the main cost of
 // the serializer. A string comparison is cheaper and cannot be wrong.
+// Independent from the parsed projection cache: bound retained text across
+// rooms here too. Eviction only loses a hash optimization; persisted authority
+// and immediate body release never depend on this memo. UTF-16 text plus an
+// entry allowance is an accounting budget, not a claim about exact JS heap size.
+export class ProjectionBodyHashMemo {
+  constructor({ maxBytes = 8 * 1024 * 1024, maxRooms = 32, maxEntries = 8192 } = {}) {
+    this.maxBytes = maxBytes; this.maxRooms = maxRooms; this.maxEntries = maxEntries;
+    this.rooms = new Map(); this.bytes = 0; this.entries = 0;
+  }
+  get(roomId) { return this.rooms.get(roomId)?.records ?? new Map(); }
+  delete(roomId) {
+    const previous = this.rooms.get(roomId);
+    if (!previous) return;
+    this.bytes -= previous.bytes; this.entries -= previous.records.size;
+    this.rooms.delete(roomId);
+  }
+  set(roomId, candidates) {
+    this.delete(roomId);
+    const records = new Map(); let bytes = 0;
+    for (const [id, record] of candidates) {
+      const weight = 128 + 2 * (String(id).length + record.body.length + record.sha.length);
+      if (weight > this.maxBytes - bytes || records.size >= this.maxEntries) continue;
+      records.set(id, record); bytes += weight;
+    }
+    if (!records.size || this.maxRooms < 1) return;
+    while (this.rooms.size && (this.rooms.size >= this.maxRooms
+      || this.bytes + bytes > this.maxBytes || this.entries + records.size > this.maxEntries))
+      this.delete(this.rooms.keys().next().value);
+    this.rooms.set(roomId, { records, bytes }); this.bytes += bytes; this.entries += records.size;
+  }
+}
 const hashMemo = new WeakMap();
-function memoFor(db, roomId) {
-  let rooms = hashMemo.get(db);
-  if (!rooms) { rooms = new Map(); hashMemo.set(db, rooms); }
-  let memo = rooms.get(roomId);
-  if (!memo) { memo = new Map(); rooms.set(roomId, memo); }
+function memoFor(db) {
+  let memo = hashMemo.get(db);
+  if (!memo) { memo = new ProjectionBodyHashMemo(); hashMemo.set(db, memo); }
   return memo;
 }
 const statements = new WeakMap();
@@ -148,6 +177,11 @@ export function storedProjection(db, roomId, state, options = {}) {
   return serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
 }
 function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [], retainedMessageIds = [] } = {}) {
+  // A nonmemoizing rewrite (deletion, inline rollback or entity cutover) must
+  // not retain the old plaintext. Keep the previous memo only for this call;
+  // publish the newly referenced set below if serialization uses it.
+  const previousMemo = hashMemo.get(db)?.get(roomId);
+  hashMemo.get(db)?.delete(roomId);
   if (state?.messages?.some(isMessageEntityRef)) state = { ...state, messages: hydrateMessageEntities(db,roomId,state.messages) };
   if (messageEntities && Array.isArray(state?.messages)) {
     if (state.messages.some(message => typeof message?.bodyRef === "string" || hasMarker(message))) {
@@ -185,7 +219,7 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
   }
   const { known, insert } = prepared(db);
   const present = new Set(known.all(roomId).map(row => row.sha));
-  const memo = memoFor(db, roomId), seen = new Map();
+  const cache = memoFor(db), memo = previousMemo ?? new Map(), seen = new Map();
   const slim = messages.map(original => {
     const message = nullEnvelope(original) ? slimEnvelope(original) : original;
     if (!slimmable(original)) return message;
@@ -195,7 +229,7 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
     if (!present.has(sha)) { insert.run(roomId, sha, message.body); present.add(sha); }
     return renameKey(message, "body", "bodyRef", sha);
   });
-  hashMemo.get(db).set(roomId, seen);
+  cache.set(roomId, seen);
   const referenced = new Set();
   for (const message of slim) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);
   // The `present` set above is the pre-write index (plus this write's
