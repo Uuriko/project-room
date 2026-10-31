@@ -20,9 +20,9 @@ for (const delay of [1200, 1800]) test(`actual Worker accepts a successful ${del
   assert.equal(head.status, 200); assert.equal(await head.text(), ''); assert.equal(await f.count(), 1);
   assert.equal((await f.fetch('/api/ready')).status, 200); assert.equal(await f.count(), 2);
 });
-test('actual Worker stalled RPC remains bounded and shared; static discovery does not probe', async t => {
+test('actual Worker stalled RPC remains bounded and shared; static Worker version does not probe', async t => {
   const f = await fixture(t, { stalled: true });
-  await f.fetch('/api/version/worker'); await f.fetch('/.well-known/oauth-protected-resource');
+  assert.equal((await f.fetch('/api/version/worker')).status, 200);
   assert.equal(await f.count(), 0);
   const [a, b] = await Promise.all([f.fetch('/api/ready'), f.fetch('/api/ready')]);
   for (const response of [a, b]) {

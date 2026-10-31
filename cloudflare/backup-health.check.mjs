@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
+import { HEALTH_PROBE_TIMEOUT_MS } from './health-probe.mjs';
 const origin = 'https://room.example.test';
 async function setup(t, binding = true) {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./backup-health.test-fixture.mjs', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
@@ -30,7 +31,7 @@ test('actual Worker health distinguishes live process from failed stale and time
     const body = await response.json(); assert.equal(body.liveness, 'ok');
     assert.equal(body.status, mode === 'normal' ? 'ok' : 'degraded');
     assert.equal(body.jobs.status, mode === 'normal' ? 'ok' : mode);
-    if (mode === 'timeout') assert.ok(Date.now() - started < 1400, 'bounded response before delayed DO result');
+    if (mode === 'timeout') assert.ok(Date.now() - started < HEALTH_PROBE_TIMEOUT_MS + 400, 'bounded response before delayed DO result');
     const head = await call('/api/health', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
   }
 });

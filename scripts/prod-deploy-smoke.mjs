@@ -125,7 +125,7 @@ export function deploymentHealth(health, jobResponse, now = Date.now()) {
   const states = ["ok", "degraded", "stale", "failing", "disabled"];
   const names = new Set(["native-mcp-events", "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol", "project-map", "store-growth"]);
   const body = health.json, view = jobResponse.json;
-  const result = { pass: false, status: health.status, body: ["ok", "degraded"].includes(body?.status) ? body.status : "unknown", jobsStatus: ["ok", "degraded", "stale", "failing"].includes(view?.status) ? view.status : "unknown", reason: "invalid_health", degradedJobs: [] };
+  const result = { pass: false, status: health.status, body: ["ok", "degraded"].includes(body?.status) ? body.status : "unknown", healthJobsStatus: ["ok", "degraded", "stale", "failing", "timeout", "error"].includes(body?.jobs?.status) ? body.jobs.status : "unknown", jobsStatus: ["ok", "degraded", "stale", "failing"].includes(view?.status) ? view.status : "unknown", reason: "invalid_health", degradedJobs: [] };
   const fail = reason => ({ ...result, reason });
   if (health.status !== 200 || !body || typeof body !== "object") return result;
   if (![200, 503].includes(jobResponse.status) || view?.schema !== "room.job-health/1" || !Array.isArray(view.jobs) || !view.jobs.length || view.jobs.length > 100) return fail("invalid_jobs");

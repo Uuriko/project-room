@@ -5,6 +5,7 @@ export class BudgetProbe extends DurableObject {
   config = {};
   configure(config) { this.config = config; }
   count() { return this.calls; }
+  fetch() { this.calls++; throw new Error('Unexpected Durable Object fetch forwarding'); }
   async result() {
     this.calls++;
     const config = this.config;
