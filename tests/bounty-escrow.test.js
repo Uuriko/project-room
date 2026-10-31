@@ -607,6 +607,74 @@ test("unresolved disputes default to RELEASE after 14 days via permissionless fi
   expectConserved(escrow);
 });
 
+test("EA2-001: decideDispute past the 14-day timeout is refused — both run orders settle as the keeper timeout-default", () => {
+  // Long (30d) deadline isolates the dispute clock from the bounty deadline.
+  const toDisputed = escrow => {
+    const bounty = post(escrow, { amount: 10, verifierId: INSTINCT, deadline: isoFuture(30 * 24 * 3_600_000) });
+    escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+    escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+    escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+      evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
+      verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+    escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+    return bounty.bountyId;
+  };
+  const assertTimeoutDefault = escrow => {
+    const settled = escrow.getBounty(ROOM, escrow.listBounties(ROOM)[0].bountyId);
+    assert.equal(settled.state, "approved");
+    assert.equal(settled.resolution.outcome, "timeout-default");
+    assert.equal(bal(escrow, JILL).total, 90); // poster: award not refunded
+    assert.equal(bal(escrow, CODEX).payable, 97.5); // challenger bond forfeited
+    assert.equal(bal(escrow, GROK).total, 110); // worker: award approved, no strike
+    assert.equal(bal(escrow, GROK).approved, 10);
+    assert.equal(bal(escrow, GROK).flake.strikes, 0);
+    assert.equal(bal(escrow, "pool").payable, 2.5);
+    expectConserved(escrow);
+  };
+  // Order 1 — decider first at dispute-open +14d+1ms: refused, nothing
+  // settles, and the keeper then applies the timeout-default.
+  {
+    const { escrow } = makeEscrow();
+    const bountyId = toDisputed(escrow);
+    tick(14 * 24 * 3_600_000 + 1);
+    expectCode(() => escrow.decideDispute(ROOM, bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "invalid_state");
+    assert.equal(escrow.getBounty(ROOM, bountyId).state, "disputed");
+    assert.equal(bal(escrow, JILL).total, 90);
+    assert.equal(bal(escrow, GROK).total, 110);
+    assert.equal(escrow.finalizeBounty(ROOM, bountyId, {}).action, "released");
+    assertTimeoutDefault(escrow);
+  }
+  // Order 2 — keeper first at the same instant: timeout-default, and the
+  // late decide is still refused. Balances identical to order 1.
+  {
+    const { escrow } = makeEscrow();
+    const bountyId = toDisputed(escrow);
+    tick(14 * 24 * 3_600_000 + 1);
+    assert.equal(escrow.finalizeBounty(ROOM, bountyId, {}).action, "released");
+    expectCode(() => escrow.decideDispute(ROOM, bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "invalid_state");
+    assertTimeoutDefault(escrow);
+  }
+  // Boundary — at exactly dispute-open +14d the keeper has not fired
+  // (strict >), so a decider ruling is still timely and lands.
+  {
+    const { escrow } = makeEscrow();
+    const bountyId = toDisputed(escrow);
+    tick(14 * 24 * 3_600_000);
+    expectCode(() => escrow.finalizeBounty(ROOM, bountyId, {}), "invalid_state");
+    const { bounty: settled } = escrow.decideDispute(ROOM, bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
+    assert.equal(settled.state, "refunded");
+    assert.equal(bal(escrow, JILL).payable, 100);
+    assert.equal(bal(escrow, CODEX).payable, 100);
+    assert.equal(bal(escrow, GROK).total, 99);
+    assert.equal(bal(escrow, "pool").payable, 1);
+    expectConserved(escrow);
+  }
+});
+
 test("idempotency keys replay the original response without re-executing", () => {
   const { escrow } = makeEscrow();
   const first = escrow.idemExecute(ROOM, "k-1", "bounty.post", 201, () =>
