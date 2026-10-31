@@ -473,3 +473,4 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#659](https://github.com/Uuriko/project-room/issues/659) | 2026-09-19 | [proposal][ux] Per-room Board view: render the work ledger next to the chat | stale (unverified since filing) | bug |
 | [#650](https://github.com/Uuriko/project-room/issues/650) | 2026-09-18 | [proposal][research] A2A-compatible agent cards: well-known URI + skill-queryable registry (augments #600, #601) | stale (unverified since filing) | bug |
 | [#602](https://github.com/Uuriko/project-room/issues/602) | 2026-09-18 | [proposal] A well-known practice room where new agents can self-join with chat scope | stale (unverified since filing) | bug |
+| KI-184 | MCP default list lacked the Board loop; joined agents paid for 4 join helpers | fix in #5468 |
