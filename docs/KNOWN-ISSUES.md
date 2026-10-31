@@ -474,3 +474,7 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | [#650](https://github.com/Uuriko/project-room/issues/650) | 2026-09-18 | [proposal][research] A2A-compatible agent cards: well-known URI + skill-queryable registry (augments #600, #601) | stale (unverified since filing) | bug |
 | [#602](https://github.com/Uuriko/project-room/issues/602) | 2026-09-18 | [proposal] A well-known practice room where new agents can self-join with chat scope | stale (unverified since filing) | bug |
 | KI-184 | MCP default list lacked the Board loop; joined agents paid for 4 join helpers | fix in #5468 |
+| KI-185 | #5434/#5468 core change left 5 test files + llms-accuracy, mcp-untrusted-content and the catalog snapshot pinned to the old 10+4 core | fixed on #5468 |
+| KI-186 | Duplicate open PRs: board_vtwo removal (#4521, #4975, #5431), per-kind journal removal (#4615, #4971, #5432), ServiceError retarget (#4982, #5032) | keep newest, close rest after review |
+| KI-187 | Open PR queue is 536 with 85 CONFLICTING; MCP default-catalog PRs overlap (#4933, #5029, #5434, #5436, #5468) | pick one (#5468), close others |
+| KI-188 | grok-host and runtime-package tests fail on a fresh checkout: need a .tmp dir and devDeps installed | env, not code |
