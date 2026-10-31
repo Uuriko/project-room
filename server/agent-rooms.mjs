@@ -89,10 +89,10 @@ export function onboardingRotateNext(roomId, withinReplayWindow = true) {
   };
 }
 
-export function roomCreateNext(roomId) {
+export function roomCreateNext(roomId, { starter = false } = {}) {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const starterUpdate = `${room}/work-claims/${encodeURIComponent(AGENT_STARTER_ID)}/update`;
-  return [
+  const steps = [
     { action: "start-work", method: "POST", path: starterUpdate, body: { state: "in_progress" },
       description: "Start the starter task. It is already claimed for you." },
     { action: "post-message", method: "POST", path: `${room}/commands`,
@@ -101,7 +101,7 @@ export function roomCreateNext(roomId) {
       description: "Close the starter task with a result note of what you did. The starter is claimed until you start it: if you have not run start-work yet, POST {\"state\":\"in_progress\"} first — claimed cannot move straight to done." },
     { action: "claim-work", tool: "room_claim", arguments: { action: "take", requestId: "<stable-id>", workItemId: "<workItemId>",
       expectedRevision: 0, repository: "<owner/repo>", ref: "<branch>", paths: ["<path>"], expiresAt: "<ISO date-time>" },
-      description: "Projected work items: claim the task assigned to you with MCP room_claim action=take, declaring repository, ref, paths and expiresAt. The starter above is already claimed; use start-work for it, not this." },
+      description: `Projected work items: claim the task assigned to you with MCP room_claim action=take, declaring repository, ref, paths and expiresAt.${starter ? " The starter above is already claimed; use start-work for it, not this." : ""}` },
     { action: "handoff-work", tool: "room_handoff", arguments: { requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
       doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" },
       description: "If you cannot finish a projected task you claimed, hand it back to the Board with MCP room_handoff. It records the receipt; it does not close, complete or reassign the work." },
@@ -114,6 +114,10 @@ export function roomCreateNext(roomId) {
     { action: "read-quickstart", doc: "docs/AGENT-START-HERE.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-START-HERE.md",
       description: "The one agent doc: your first claimed task in under 10 minutes." },
   ];
+  // A new room starts empty: the starter task (already claimed by the room's
+  // creator) is opt-in with starter: true, so the steps that drive it appear
+  // only when it exists.
+  return starter ? steps : steps.filter(step => step.action !== "start-work" && step.action !== "finish-work");
 }
 
 function starterView(store, roomId) {
@@ -268,7 +272,7 @@ export class AgentRooms {
     if (Object.hasOwn(request, "starter") && typeof request.starter !== "boolean") {
       fail(422, "invalid_room_request", "starter must be true or false");
     }
-    const wantStarter = request.starter !== false;
+    const wantStarter = request.starter === true;
     if (!Object.hasOwn(request, "title")) fail(422, "invalid_room_request", "Missing title");
     if (!text(request.title, 120)) fail(422, "invalid_room_request", "title must be 1 to 120 characters");
     if (!Object.hasOwn(request, "purpose")) fail(422, "invalid_room_request", "Missing purpose");
@@ -361,7 +365,7 @@ export class AgentRooms {
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
-        next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+        next: roomCreateNext(roomId, { starter: starter !== null }), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }
 

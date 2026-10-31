@@ -89,13 +89,13 @@ test("a duplicate agent room returns the same starter, and starter:false creates
     headers: { "content-type": "application/json", authorization: `Bearer ${minted.secret}` },
     body: JSON.stringify(body)
   });
-  const firstResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task." });
+  const firstResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task.", starter: true });
   const first = await firstResponse.json();
   assert.equal(firstResponse.status, 201, JSON.stringify(first));
   assert.equal(first.next[0].action, "start-work");
   assert.equal(first.next[0].path, "/api/rooms/agent-start/work-claims/starter/update");
   assert.deepEqual(first.starter, { claimId: "starter", state: "claimed" });
-  const againResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task." });
+  const againResponse = await create({ roomId: "agent-start", title: "Agent start", purpose: "Close one task.", starter: true });
   const again = await againResponse.json();
   assert.equal(againResponse.status, 200, JSON.stringify(again));
   assert.equal(again.duplicate, true);
@@ -104,5 +104,5 @@ test("a duplicate agent room returns the same starter, and starter:false creates
   const opted = await optedResponse.json();
   assert.equal(optedResponse.status, 201, JSON.stringify(opted));
   assert.equal(opted.starter, null);
-  assert.equal(opted.next[0].action, "start-work");
+  assert.ok(!opted.next.some(step => step.action === "start-work" || step.action === "finish-work"), "no starter, no starter steps");
 });

@@ -12,7 +12,7 @@ async function fixture(t) {
   const store = new RoomStore(":memory:");
   const identity = store.identities.create("Board reader");
   const rooms = new AgentRooms(store);
-  const created = rooms.create(identity.secret, { roomId: "board-read", title: "Board read", purpose: "Read parity", kind: "personal", displayName: "Board reader" });
+  const created = rooms.create(identity.secret, { roomId: "board-read", title: "Board read", purpose: "Read parity", kind: "personal", displayName: "Board reader", starter: true });
   const roomId = created.roomId;
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

@@ -48,7 +48,7 @@ function setup(t, { createCapacity = 1000 } = {}) {
 
 const createArgs = (roomId = "agent-den") => ({
   roomId, title: "Agent Den", purpose: "A room owned by an agent, for agent things.",
-  kind: "personal", displayName: "Den Keeper"
+  kind: "personal", displayName: "Den Keeper", starter: true
 });
 
 test("an identity creates a room self-serve and becomes its owner", async t => {

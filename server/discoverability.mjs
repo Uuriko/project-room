@@ -60,7 +60,7 @@ const AGENT_ROOM_CREATE_BODY = Object.freeze({ required: true, content: { "appli
     purpose: { type: "string", maxLength: 1000, description: "Required. 1 to 1000 characters." },
     kind: { type: "string", enum: ["personal", "organization"], default: "personal", description: "Optional. Defaults to personal." },
     displayName: { type: "string", maxLength: 80, description: "Optional. Defaults to the identity display name." },
-    starter: { type: "boolean", default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." },
+    starter: { type: "boolean", default: false, description: "Optional. Pass true to seed a starter work-claim task already claimed by you. Defaults to false: a new room starts with an empty Board." },
   },
 } } } });
 // POST /api/access-requests: diagnoseArguments in http.mjs

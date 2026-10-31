@@ -103,9 +103,9 @@ test("requestId replay with a different starter flag is a 409 request_conflict",
 
 test("requestId replay dropping the starter is a 409 request_conflict", t => {
   const { store, rooms, identity } = setup(t);
-  const first = rooms.create(identity.secret, createArgs({ requestId: "req-starter-2" }));
+  const first = rooms.create(identity.secret, createArgs({ requestId: "req-starter-2", starter: true }));
   assert.equal(first.duplicate, false);
-  assert.ok(first.starter, "omitting starter defaults to wanting one");
+  assert.ok(first.starter, "starter: true seeds one");
 
   const clash = attempt(rooms, identity.secret, createArgs({ requestId: "req-starter-2", starter: false }));
   assert.equal(clash.ok, false);
