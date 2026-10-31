@@ -10,8 +10,8 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
 async function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 10000 });
   t.mock.method(Math, 'random', () => 0);
-  const streams = [], reads = [];
-  let pending = null, active = 0, maximum = 0;
+  const streams = [], reads = [], probes = [], responses = [];
+  let pending = null, active = 0, maximum = 0, probeResponse = null;
   class Events extends EventTarget {
     readyState = 1;
     constructor() { super(); streams.push(this); }
@@ -19,14 +19,19 @@ async function fixture(t) {
   }
   const client = new RoomClient({ events: Events, fetcher: async path => {
     if (path === '/api/session') return Response.json(identity);
+    if (path.includes("view=work")) {
+      probes.push(path); return probeResponse ?? Response.json(snapshot);
+    }
     reads.push(path); active++; maximum = Math.max(maximum, active);
-    try { if (pending) await pending; return Response.json(snapshot); } finally { active--; }
+    const response = responses.shift();
+    try { if (pending) await pending; return response ?? Response.json(snapshot); } finally { active--; }
   } });
-  client.livenessInterval = 3600000;
   await client.restore(); streams.at(-1).dispatchEvent(new Event('open')); await settle();
   t.after(() => client.disconnect());
   reads.length = 0;
-  return { client, streams, reads, maximum: () => maximum,
+  return { client, streams, reads, probes, maximum: () => maximum,
+    respond(response) { responses.push(response); },
+    probeRespond(response) { probeResponse = response; },
     hold() { let resolve; pending = new Promise(r => { resolve = r; }); return () => { pending = null; resolve(); }; },
     event(type = 'message.posted') { streams.at(-1).dispatchEvent(new MessageEvent('room-event', { data: JSON.stringify({ sequence: 2, event: { type, roomId: 'commons' } }) })); } };
 }
@@ -82,4 +87,49 @@ test('an event racing an overdue recovery timer cannot clear deferred older-edit
   f.event(); await settle();
   assert.equal(f.reads.length, 1); assert.equal(f.reads[0], '/api/rooms/commons');
   t.mock.timers.tick(0); await settle(); assert.equal(f.reads.length, 1);
+});
+
+const overloaded = (status, seconds) => Response.json({ error: 'Busy' }, { status, headers: { 'Retry-After': String(seconds) } });
+
+for (const status of [429, 503]) test(`HTTP ${status} delays fill and extends an existing retry without delaying revocation probes`, async t => {
+  const f = await fixture(t);
+  f.respond(overloaded(status, 60)); f.event(); await settle();
+  assert.equal(f.reads.length, 1); assert.equal(f.client.refreshRetryNotBefore, 70000);
+  f.client.held.owesFull = true; f.client.scheduleFill(0);
+  t.mock.timers.tick(1000); await settle(); assert.equal(f.reads.length, 1);
+  f.respond(overloaded(status, 120));
+  await f.client.refresh().catch(error => f.client.handleFailure(error));
+  assert.equal(f.client.refreshRetryNotBefore, 131000, 'later actual response lengthens the server cooldown');
+  t.mock.timers.tick(59000); await settle();
+  assert.equal(f.reads.length, 2, 'neither fill nor the older recovery timer bypasses the new deadline');
+  assert.ok(f.probes.length > 0, 'ordinary bounded authorization probes continue during cooldown');
+  f.probeRespond(Response.json({ error: 'Revoked' }, { status: 403 }));
+  t.mock.timers.tick(f.client.livenessInterval); await settle();
+  assert.equal(f.client.session, null, 'revocation terminates access before the two-minute recovery deadline');
+  assert.equal(f.reads.length, 2);
+});
+
+test('a history fill HTTP 429 establishes the shared automatic cooldown', async t => {
+  const f = await fixture(t);
+  f.client.held.owesFull = true;
+  f.respond(overloaded(429, 60)); f.client.scheduleFill(0);
+  t.mock.timers.tick(0); await settle();
+  assert.equal(f.reads.length, 1); assert.equal(f.client.refreshRetryNotBefore, 70000);
+  t.mock.timers.tick(59000); await settle(); assert.equal(f.reads.length, 1);
+  t.mock.timers.tick(1000); await settle();
+  assert.equal(f.reads.length, 3, 'recovery revalidates the recent view, then the outstanding history fill completes');
+  assert.equal(f.maximum(), 1);
+});
+
+test('a rejected old-room recovery cannot restore a full-read obligation in the new session', async t => {
+  const f = await fixture(t);
+  f.client.handleFailure(Object.assign(new Error('Busy'), { status: 503, retryAfterMs: 1000 }));
+  f.client.refreshRecoveryNeedsFull = true;
+  let reject;
+  f.client.refresh = () => new Promise((resolve, no) => { reject = no; });
+  t.mock.timers.tick(1000); await settle();
+  f.client.disconnect(); f.client.session = { roomId: 'different-room' };
+  reject(new Error('Old room failed')); await settle();
+  assert.equal(f.client.refreshRecoveryNeedsFull, false);
+  assert.equal(f.client.refreshRetryNotBefore, 0);
 });

@@ -495,14 +495,16 @@ export class RoomClient {
     return this.session ? this.refresh(null, { revalidate: true }) : Promise.resolve();
   }
   // Background full read after a windowed first read (or a failed read). It never
-  // changes the status line: the page is already usable. A failure retries quietly
-  // with backoff; only an ended session (401/403) is surfaced.
+  // changes the status line for ordinary failures: the page is already usable.
+  // Overload shares the automatic-read cooldown; ended sessions still close.
   scheduleFill(delay = FILL_DELAY_MS) {
     if (this.fillTimer || this.backfilling) return;
     const generation = this.generation, session = this.session;
     this.fillTimer = setTimeout(() => {
       this.fillTimer = null;
       if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull || this.backfilling) return;
+      const cooldown = (this.refreshRetryNotBefore ?? 0) - Date.now();
+      if (cooldown > 0) { this.scheduleFill(cooldown); return; }
       this.backfilling = true;
       (async () => {
         try {
@@ -525,6 +527,7 @@ export class RoomClient {
       })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
         if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
+        if ([429, 503].includes(error.status)) this.handleFailure(error);
         const next = this.fillDelay || 1000;
         this.fillDelay = Math.min(next * 2, 30000);
         this.scheduleFill(next + Math.random() * next / 4);
@@ -537,6 +540,8 @@ export class RoomClient {
   // loop revalidates the credential on the interval whenever no snapshot
   // read has just done it; it runs only while a stream is held, because
   // manual-refresh mode has no live deltas to protect and reads on demand.
+  // Deliberately independent of snapshot/history overload cooldown: retain the
+  // ten-second revocation bound using one small authorization probe per interval.
   scheduleLiveness(delay = this.livenessInterval) {
     if (this.livenessTimer) return;
     const generation = this.generation, session = this.session;
@@ -1335,14 +1340,20 @@ export class RoomClient {
     // A reconnect must preserve the server's cooldown rather than turn a
     // successful transport open into permission to retry an overloaded read.
     this.refreshInterrupted = true;
-    if (this.refreshRetry) return;
+    const alreadyScheduled = Boolean(this.refreshRetry);
     const backoff = this.refreshRetryDelay || 1000;
     const retryAfter = [429, 503].includes(error.status) && Number.isFinite(error.retryAfterMs)
       ? Math.min(MAX_REFRESH_COOLDOWN_MS, Math.max(0, error.retryAfterMs)) : 0;
+    // Repeated catches of the same failure do not advance exponential backoff,
+    // but a later server response may extend an already scheduled cooldown.
+    if (alreadyScheduled && !retryAfter) return;
+    const previousDeadline = this.refreshRetryNotBefore ?? 0;
     const delay = Math.max(backoff, retryAfter);
     this.refreshRetryNotBefore = Math.max(this.refreshRetryNotBefore ?? 0,
       Date.now() + Math.min(MAX_REFRESH_COOLDOWN_MS, delay + Math.random() * delay / 4));
-    this.refreshRetryDelay = Math.min(backoff * 2, 30000);
+    if (alreadyScheduled && this.refreshRetryNotBefore === previousDeadline) return;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null;
+    if (!alreadyScheduled) this.refreshRetryDelay = Math.min(backoff * 2, 30000);
     this.scheduleRefreshRecovery();
   }
   scheduleRefreshRecovery() {
@@ -1361,8 +1372,9 @@ export class RoomClient {
         this.refreshRetryNotBefore = 0;
         this.onStatus(CONNECTED_STATUS);
       }).catch(retryError => {
+        if (generation !== this.generation || session !== this.session || !this.session) return;
         if (full) this.refreshRecoveryNeedsFull = true;
-        if (generation === this.generation && session === this.session && this.session) this.handleFailure(retryError);
+        this.handleFailure(retryError);
       });
     }, Math.max(0, (this.refreshRetryNotBefore ?? 0) - Date.now()));
   }
