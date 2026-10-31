@@ -230,7 +230,12 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
     const source = REGISTRY.find(item => item.name === job.name);
     const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
-    const reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
+    // Work-gating stops idle delivery attempts, but cannot erase the last
+    // terminal callback failure from health. Feature-off remains disabled.
+    const idleNativeFailure = !enabled && job.name === 'native-mcp-events' && store?.nativeMcpEventsEnabled === true
+      && (record.consecutiveFailures ?? 0) > 0 && (Number(record.lastSummary?.exhausted) > 0 || Number(record.lastSummary?.dead) > 0);
+    const reason = idleNativeFailure ? 'Callback delivery failed; no pending deliveries'
+      : enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
     const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
     const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
@@ -243,7 +248,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     // That is a stall, not a wait — degrade so the surface (and anything
     // polling it) can see it; still not a 503: no tick has failed, the
     // work is late, and the streak fields below carry its age.
-    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
+    const degraded = idleNativeFailure ? 'native_callback_failed' : enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
       : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue' : null;
     return {
       name: job.name,
@@ -276,7 +281,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      status: idleNativeFailure ? 'degraded' : !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');

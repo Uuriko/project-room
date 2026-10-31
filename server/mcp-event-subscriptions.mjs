@@ -1,4 +1,5 @@
 // Durable MCP Events receipts. A webhook receipt is not proof an agent ran.
+import { recordWakeEvent } from "./wake-metrics.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { eventSigningKey, verifyMcpEventCallback, deliverMcpEvent } from "./mcp-events-wire.mjs";
 
@@ -134,7 +135,14 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       const sub = JSON.parse(row.document);
       if (sub.arguments.roomId !== roomId || sub.arguments.memberId !== memberId) continue;
       if (db.prepare("SELECT 1 FROM mcp_event_outbox WHERE subscription_id=? AND event_id=?").get(row.id, eventId)) continue;
-      if (db.prepare("SELECT count(*) AS n FROM mcp_event_outbox WHERE subscription_id=? AND state IN ('pending','leased')").get(row.id).n >= 1000) throw new Error("Event outbox capacity exceeded");
+      if (db.prepare("SELECT count(*) AS n FROM mcp_event_outbox WHERE subscription_id=? AND state IN ('pending','leased')").get(row.id).n >= 1000) {
+        // Callback availability must not roll back the task/message transaction.
+        // This pointer is lost, not delivered: retain the bound and journal it
+        // for the existing operator wake-failure view. Current work remains readable.
+        recordWakeEvent(db, { at: now(), roomId, store: "queue", event: "doorbell_failed",
+          door: "native-mcp", kind: "native-mcp", subjectId: memberId, reason: "native_callback_capacity" });
+        continue;
+      }
       queued += Number(db.prepare("INSERT OR IGNORE INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)").run(row.id, eventId, JSON.stringify(event), now()).changes);
     }
     return queued;
@@ -171,8 +179,17 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
       } catch { result = { classification: "retry" }; }
       const retry = result.classification === "retry" && job.attempts < 8 && row?.expires_at > now();
       const state = result.classification === "delivered" ? "delivered" : retry ? "pending" : "dead";
-      db.prepare("UPDATE mcp_event_outbox SET state=?,next_at=?,lease=NULL,lease_until=NULL WHERE subscription_id=? AND event_id=? AND lease=?").run(state, now() + Math.min(60000, 1000 * 2 ** job.attempts), job.subscription_id, job.event_id, job.lease);
-      results.push({ eventId: job.event_id, subscriptionId: job.subscription_id, classification: result.classification });
+      const updated = db.prepare("UPDATE mcp_event_outbox SET state=?,next_at=?,lease=NULL,lease_until=NULL WHERE subscription_id=? AND event_id=? AND lease=?").run(state, now() + Math.min(60000, 1000 * 2 ** job.attempts), job.subscription_id, job.event_id, job.lease).changes;
+      // Report the committed outcome, not the HTTP retry suggestion after its
+      // budget has run out. A superseded lease cannot claim a final outcome.
+      const classification = !updated ? "superseded" : result.classification === "retry" && !retry
+        ? (row?.expires_at > now() ? "exhausted" : "expired") : result.classification;
+      if (classification === "exhausted" || classification === "dead") {
+        recordWakeEvent(db, { at: now(), roomId: event.data.roomId, store: "queue", event: "doorbell_failed",
+          door: "native-mcp", kind: "native-mcp", subjectId: event.data.memberId,
+          reason: classification === "exhausted" ? "native_callback_exhausted" : "native_callback_delivery_failed" });
+      }
+      results.push({ eventId: job.event_id, subscriptionId: job.subscription_id, classification });
     }
     return results;
   }

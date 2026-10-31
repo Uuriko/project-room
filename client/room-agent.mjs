@@ -1560,7 +1560,9 @@ export function workContextMarkdown(result) {
       ? "Replacement next read (does not transfer approval or assignment): " + JSON.stringify(result.next.replacement.nextRead)
       : "Replacement is unavailable in this room. Historical work remains readable."] : []),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
-    "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
+    (result.work.displayStatus ?? result.work.status) === "queued" && result.work.attempt_count === 0 && result.work.started_at === null
+      ? "Worker session: no start reported (task progress shown above; recorded controls below)"
+      : "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
     ...(result.dependencies?.length ? [
       "Prerequisites (Board claim IDs; checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),

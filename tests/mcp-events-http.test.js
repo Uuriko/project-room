@@ -1,3 +1,4 @@
+import { wakeAccounting } from "../server/wake-metrics.mjs";
 // Exercises server/mcp-events-runtime.mjs through the real authenticated HTTP mount and committed Room events.
 import { writeTalkPolicy } from '../server/agent-talk-policy.mjs';
 import test from 'node:test';
@@ -10,7 +11,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 const version = '2026-07-28', origin = 'https://room.example', resource = origin + '/mcp';
 const client = { clientId: 'events-test', name: 'Events test', redirectUris: ['https://client.example/callback'] };
-async function fixture(t) {
+async function fixture(t, { callbackError } = {}) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   const invite = store.invites.create(owner, 'commons', { profile: 'member' });
@@ -25,6 +26,7 @@ async function fixture(t) {
     mcpEventDnsResolvers: { lookup: async () => [{ address: '8.8.8.8', family: 4 }] },
     mcpEventTransport: async (url, addresses, req) => {
       const body = JSON.parse(req.body);
+      if (body.type === 'verification' && callbackError) throw callbackError;
       if (body.type === 'verification') return { status: 200, text: async () => JSON.stringify({ challenge: body.challenge }) };
       deliveries.push(req); return { status: 200, text: async () => '{}' };
     } });
@@ -106,4 +108,63 @@ test('pause blocks pending native deliveries but never prevents unsubscribe', as
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 0);
   assert.equal((await f.rpc('events/unsubscribe', { id: sub.result.id })).result.resultType, 'complete');
   assert.equal(f.store.db.prepare('SELECT state FROM mcp_event_subscriptions').get().state, 'inactive');
+});
+
+test('saturated native callback retains bounded backlog without rolling back useful work', async t => {
+  const f = await fixture(t); const sub = await f.subscribe(); assert.ok(sub.result.id);
+  const insert = f.store.db.prepare("INSERT INTO mcp_event_outbox(subscription_id,event_id,document,next_at) VALUES(?,?,?,?)");
+  for (let i = 0; i < 1000; i++) insert.run(sub.result.id, 'stalled_' + i, '{}', Date.now() + 600000);
+  const command = { id: 'capacity-assignment', type: 'work.proposed', data: {
+    workItemId: 'capacity-task', title: 'Useful task', definitionOfDone: 'Concrete result',
+    accountableMemberId: f.grant.member_id, mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: false,
+  } };
+  f.store.command(f.owner, 'commons', command);
+  assert.equal(f.store.room('commons').state.workItems['capacity-task'].title, 'Useful task');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox').get().n, 1000);
+  const accounting = wakeAccounting(f.store.db, { roomId: 'commons', now: Date.now() });
+  assert.equal(accounting.failures.byReason.native_callback_capacity, 1);
+  assert.equal(accounting.byStore.queue.doorbell_failed, 1);
+  assert.equal(accounting.byStore.queue.doorbell_delivered, 0);
+  // Retrying the committed work does not create another loss or duplicate task.
+  f.store.command(f.owner, 'commons', command);
+  assert.equal(wakeAccounting(f.store.db, { roomId: 'commons' }).failures.byReason.native_callback_capacity, 1);
+  // Another healthy callback for the same agent remains independently usable.
+  const healthy = await f.subscribe({ delivery: { mode: 'webhook', url: 'https://callback.example/healthy', secret: 'whsec_' + Buffer.alloc(32, 9).toString('base64') } });
+  assert.ok(healthy.result.id);
+  f.mention('capacity-message');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox WHERE subscription_id=?').get(sub.result.id).n, 1000);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM mcp_event_outbox WHERE subscription_id=?').get(healthy.result.id).n, 1);
+  await f.server.drainMcpEvents();
+  assert.equal(f.deliveries.length, 1);
+  assert.equal(JSON.parse(f.deliveries[0].body).data.messageId, 'capacity-message');
+});
+
+test('authenticated subscription rejection logs only code and canonical blocked origin', async t => {
+  const secretPath = '/private-callback-token', secretQuery = 'signing=private-query-token';
+  const f = await fixture(t, { callbackError: Object.assign(new Error('private-error-message'), {
+    code: -32015, data: { reason: 'callback_origin_not_allowed', origin: 'https://callback.example' + secretPath + '?' + secretQuery },
+  }) });
+  const warnings = []; t.mock.method(console, 'warn', value => warnings.push(value));
+  const response = await f.subscribe({ delivery: { mode: 'webhook', url: 'https://callback.example' + secretPath + '?' + secretQuery,
+    secret: 'whsec_' + Buffer.alloc(32, 9).toString('base64') } });
+  assert.equal(response.error.code, -32015);
+  assert.deepEqual(warnings.map(value => JSON.parse(value)), [{ event: 'room.mcp_event_subscription_rejected', code: -32015,
+    reason: 'callback_origin_not_allowed', origin: 'https://callback.example' }]);
+  for (const privateValue of [secretPath, secretQuery, 'private-error-message', f.tokens.accessToken, f.grant.member_id,
+    'whsec_' + Buffer.alloc(32, 9).toString('base64')]) assert.equal(warnings.join('').includes(privateValue), false);
+  warnings.length = 0;
+  assert.equal((await f.rpc('events/subscribe', {}, 'iat_invalid')).status, 401);
+  assert.deepEqual(warnings, []);
+  const malformed = await f.subscribe({ ttlMs: 'private-invalid-ttl' });
+  assert.ok(malformed.error);
+  assert.deepEqual(warnings.map(value => JSON.parse(value)), [{ event: 'room.mcp_event_subscription_rejected', code: -32602 }]);
+});
+
+test('subscription rejection survives an unavailable diagnostic sink', async t => {
+  const f = await fixture(t, { callbackError: Object.assign(new Error('callback blocked'), {
+    code: -32015, data: { reason: 'callback_origin_not_allowed', origin: 'https://callback.example' },
+  }) });
+  t.mock.method(console, 'warn', () => { throw new Error('log sink unavailable'); });
+  assert.equal((await f.subscribe()).error.code, -32015);
+  assert.equal((await f.subscribe({ ttlMs: 'invalid' })).error.code, -32602);
 });
