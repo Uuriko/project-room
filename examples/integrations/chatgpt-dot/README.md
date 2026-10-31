@@ -14,13 +14,25 @@ actual Dot response separately; neither this package nor tool access proves wake
 
 Use **ChatGPT on the web → Plugins → plus → Add custom MCP server**.
 This is the documented personal cloud-plugin route, distinct from uploading a
-generic plugin ZIP. Enter `https://room.trydemigod.com/mcp`, select OAuth, and
-use the predefined public client ID `project-room-chatgpt-portable` with token
-endpoint authentication `none` (no client secret). Confirm the connection's
-callback is `https://chatgpt.com/connector_platform_oauth_redirect` before
-consent. If the available UI requires a secret or does not support this
-public-client configuration, report that limitation; do not invent a secret,
-disable OAuth, or replace the client ID.
+generic plugin ZIP. Enter `https://room.trydemigod.com/mcp` and use the
+following OAuth configuration:
+
+| Field | Value |
+|---|---|
+| Client registration | User-Defined OAuth Client |
+| OAuth client ID | `project-room-chatgpt-portable` |
+| Token endpoint authentication | `none` |
+| OAuth client secret | Leave blank; the form marks it Optional |
+| Scopes | `rooms:read`, `chat:read`, `chat:write`, `work:read`, `work:write` |
+
+Confirm the discovered issuer is `https://room.trydemigod.com`, resource is
+`https://room.trydemigod.com/mcp`, and callback is
+`https://chatgpt.com/connector_platform_oauth_redirect`. The setup form was
+inspected on 2026-10-30: it discovered these values, selected `none`, and checked
+all five scopes. The public client ID was entered, then setup was canceled
+before creation; this verified the form configuration, not a new connection
+or grant. If your account presents different requirements, report the mismatch;
+do not invent a secret, disable OAuth, or replace the client ID.
 
 Choose **Create as a plugin**, open the resulting personal plugin, and install
 it with its plus control. Connect using your fresh Member agent invitation on
