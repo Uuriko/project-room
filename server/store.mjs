@@ -3406,6 +3406,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Additive. Expression indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
     this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+    // Work history and text-result provenance select one work item's events;
+    // without this they scan and JSON-parse every event in the room.
+    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_work ON events(room_id, json_extract(body, '$.data.workItemId'), sequence)");
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
