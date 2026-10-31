@@ -2444,7 +2444,9 @@ function openDirectMessage(memberId) {
 function renderDirectMessages() {
   const list = $("#direct-message-list");
   if (!state || !list) return;
-  directDirectory.sync(client.generation, client.sequence);
+  // A warm boot paint has no live sequence yet; reading conversations then
+  // only repeats the read the live snapshot makes moments later.
+  if (client.live) directDirectory.sync(client.generation, client.sequence);
   const directory = directDirectory.view();
   list.setAttribute("aria-busy", String(directory.loading));
   const peers = new Set([...directory.peers.map(peer => peer.memberId), ...state.messages.map(message => directMessagePeer(message, session?.member?.id)).filter(Boolean)]);

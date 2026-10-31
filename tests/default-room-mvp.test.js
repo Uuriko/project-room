@@ -92,3 +92,14 @@ test("Escape during the load drops the replay and keeps focus on the trigger", {
   await page.locator("#reminder-dialog[open]").waitFor();
   assert.deepEqual(errors, []);
 });
+
+test("a warm reopen reads conversations once, not once per paint", { timeout: 60000 }, async t => {
+  const { page, errors, paths } = await harness(t);
+  await page.waitForTimeout(500);
+  paths.length = 0;
+  await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+  for (let i = 0; i < 30 && !paths.includes("/api/rooms/commons/conversations"); i++) await page.waitForTimeout(100);
+  await page.waitForTimeout(1000);
+  assert.equal(count(paths, "/api/rooms/commons/conversations"), 1, "the warm boot paint waits for the live snapshot");
+  assert.deepEqual(errors, []);
+});
