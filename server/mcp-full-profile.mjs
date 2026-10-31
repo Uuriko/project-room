@@ -391,9 +391,9 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   }
   if (name === "room_read_inbox") {
     const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after ?? 0 });
-    // Same work snapshot authorization as room_read_board; return only the caller's
-    // standing assignments, independent of the chat delivery cursor.
-    const workSnapshot = store.snapshot(secret, roomId, null, "work");
+    // Dispatch and agentInbox already authenticate; OAuth also requires work:read.
+    // Read fresh membership without materializing the full formal-work snapshot.
+    const { members } = store.roomAuthority(roomId);
     const boardItems = store.workClaims.list(roomId);
     const owned = boardItems.filter(item => item.owner === auth.member.id
       && ["claimed", "in_progress", "blocked", "delivered"].includes(item.state) && !item.supersededBy);
@@ -402,7 +402,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const reviews = auth.member.permissions.includes("verify") ? boardItems.filter(item => item.owner
       && item.owner !== auth.member.id && !["done", "closed"].includes(item.state) && !item.supersededBy
       && (item.state === "in_progress" || item.pullRequest || item.pullRequests?.length)
-      && resolveNamedReviewers(item, workSnapshot.state.members).includes(auth.member.id)
+      && resolveNamedReviewers(item, members).includes(auth.member.id)
       && !hasCurrentReview(item, auth.member.id)) : [];
     const boardReviewRequests = reviews.slice(0, 50).map(item => ({ claimId: item.id, state: item.state,
       nextRead: { tool: "room_read_board", arguments: { roomId } } }));
