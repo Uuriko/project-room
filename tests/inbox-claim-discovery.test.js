@@ -51,7 +51,7 @@ test('legacy/enveloped rows preserve reviewer aliases, delivery basis and supers
   const alias = members.owner.displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
   const basis = { version: 1, owner: 'other', claimedAt: null, revision: null, headSha: null, deliveryDigest: 'first', deliveryGeneration: 1 };
   const items = [
-    claim('legacy-alias', { tags: [`rev-${alias}`] }),
+    claim('legacy-alias', { v: true, tags: [`rev-${alias}`] }),
     claim('current', { delivery: { digest: 'first' }, reviews: [{ memberId: 'owner', basis }] }),
     claim('new-delivery', { delivery: { digest: 'second' }, reviews: [{ memberId: 'owner', basis }] }),
     claim('new-generation', { deliveryGeneration: 2, reviews: [{ memberId: 'owner', basis: { ...basis, deliveryDigest: null, deliveryGeneration: 0 } }] }),
