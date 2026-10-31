@@ -67,7 +67,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_read_result", focus: ["work", "review"] },
-  { name: "room_read_work", focus: ["work", "review"] },
+  { name: "room_read_work", core: true, blurb: "Read one Board task (workItemId) or up to 4 (workItemIds): state, owner, next step.", focus: ["work", "review"] },
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
