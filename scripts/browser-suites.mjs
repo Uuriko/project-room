@@ -58,8 +58,6 @@ export const BROWSER_SUITE_EXCLUSIONS = {
   "syntax-check.mjs": "imported and run by scripts/check.mjs (npm run check)",
   "skills-sync-check.mjs": "run by the lint gate (scripts/lint.mjs)",
   // Dedicated workflows run these.
-  "answer-engine-check.mjs": "run by .github/workflows/answer-engine-check.yml",
-  "listing-check.mjs": "run by .github/workflows/listing-check.yml",
   "pr-diff-size-check.mjs": "run by .github/workflows/pr-gates.yml; it is the diff-size gate, not a suite",
   "quarantine-check.mjs": "run by .github/workflows/pr-gates.yml",
   "review-scope-check.mjs": "run by .github/workflows/review-mechanical.yml",
