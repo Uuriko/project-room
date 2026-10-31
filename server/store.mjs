@@ -1221,7 +1221,7 @@ const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_s
 // that a check has failed. Rows are written when a failure is isolated and
 // deleted when the record next verifies clean, so an outstanding row always
 // means "still failing, still reported" — never a silent pass.
-const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures (
+export const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures (
   step TEXT NOT NULL,
   record_id TEXT NOT NULL DEFAULT '',
   code TEXT NOT NULL DEFAULT '',

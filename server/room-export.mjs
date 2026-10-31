@@ -6,7 +6,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { RoomStore } from "./store.mjs";
+import { RoomStore, INTEGRITY_FAILURES_SCHEMA } from "./store.mjs";
+import { wakeListenerLeaseSchema, wakeRoomActivitySchema } from "./agent-heartbeats.mjs";
+import { PATROL_SCHEMA } from "./patrol.mjs";
+import { PROJECT_MAP_SCHEMA, PROJECT_MAP_TABLES } from "./project-map-store.mjs";
+import { PROJECTION_SHAPE_UPGRADES_SCHEMA } from "./legacy-message-shape.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { Buffer } from "node:buffer";
 import { ensureOAuthProviderSchema, OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
@@ -540,6 +544,14 @@ export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TA
 // Restore only the known lazy schemas, never backup-supplied DDL. Streaming
 // restore calls this when it encounters the first row in a native namespace.
 export function ensureNativeAgentRestoreSchema(db, names) {
+  // Production also creates these application schemas lazily. Restore their
+  // rows using code-owned DDL; never accept schema supplied by the export.
+  if (["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_host_disconnects"].some(table => names.has(table))) db.exec(wakeListenerLeaseSchema);
+  if (names.has("agent_wake_room_activity")) db.exec(wakeRoomActivitySchema);
+  if (names.has("integrity_failures")) db.exec(INTEGRITY_FAILURES_SCHEMA);
+  if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
+  if (PROJECT_MAP_TABLES.some(table => names.has(table))) db.exec(PROJECT_MAP_SCHEMA);
+  if (names.has("projection_shape_upgrades")) db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_provider_") && names.has(table))) ensureOAuthProviderSchema(db);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_invite_") && names.has(table))) {
     ensureMcpInviteOAuthSchema(db);
