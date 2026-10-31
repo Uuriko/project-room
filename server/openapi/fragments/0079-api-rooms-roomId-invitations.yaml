@@ -56,4 +56,4 @@
         '200': { description: Exact retry of a journaled issuance }
         '403': { description: account_session_required or access_denied }
         '409': { description: "idempotency_conflict, stale revision or token_conflict" }
-        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}. Any other inexact body still says to supply the exact invitation scope." }
+        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"member|guest|owner\"}. Any other inexact body still says to supply the exact invitation scope." }

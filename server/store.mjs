@@ -6560,7 +6560,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.WORK_HANDOFF_RECORDED, T.WORK_SUPERSEDED].includes(command.type)) {
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
-          fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+          fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a Member (or older contribute, review, or collaborate) profile.");
         }
       }
       assertMessageCommandReferences(this, roomId, room.state, command, auth.member.id);

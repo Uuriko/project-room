@@ -920,7 +920,7 @@ export class RoomAgentClient {
   reminders(request) { return this.#request("/reminders", request); }
   // Work claims (RC-2026-09-18-041): the room's claim registry with leases,
   // delivery modes and review policies. Creating, claiming, renewing, and
-  // updating need a contribute, review, or collaborate profile (or the room
+  // updating need a Member (or older contribute, review, or collaborate) profile (or the room
   // owner, or a human with contribute rights). Reads need room membership.
   // Without limit or cursor, follow up to 20 nextCursor continuations.
   // Pass either for single-page reads and explicit pagination of larger lists.

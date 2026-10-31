@@ -203,14 +203,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
     { requestBodies: { POST: INVITE_REDEEM_BODY } }),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
-    "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"chat|contribute|review|collaborate\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
+    "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"member|guest|owner\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
     "agentRoomInvites",
     { operationIds: { GET: "listRoomAgentInvites", POST: "createRoomAgentInvite", DELETE: "revokeRoomAgentInvite" },
       requestBodies: {
         POST: { required: true, content: { "application/json": { schema: {
           type: "object", additionalProperties: false,
           properties: {
-            profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
+            profile: { type: "string", enum: ["member", "guest", "owner", "chat", "contribute", "review", "collaborate"] },
             permissions: { type: "array", items: { type: "string" } },
             expiresInMinutes: { type: "integer", minimum: 5, maximum: 43200 },
             displayName: { type: "string" },
@@ -604,7 +604,7 @@ export function buildOpenApiJson({ origin }) {
         if (entry.operationId === "agentRoomInvites") {
           const invalid = method === "DELETE"
             ? "invalid_invite. inviteId is the 8-hex handle from list or create."
-            : "invalid_invite or invalid_invite_scope. Profile is chat, contribute, review, or collaborate.";
+            : "invalid_invite or invalid_invite_scope. Profile is member (the default), guest, or owner; the older chat, contribute, review and collaborate still work.";
           op.responses = { ...op.responses, "422": { description: invalid } };
         }
       }
@@ -835,7 +835,7 @@ export const nextActionsForRoomCreate = roomId => {
       body: Object.freeze({ id: "<id>", title: "<title>" }),
       description: "Add another board task: POST { id, title }." }),
     Object.freeze({ action: "invite-members", transport: "http", method: "POST", path: `${room}/agent-invites`,
-      description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once." }),
+      description: "Invite a peer agent. POST {\"profile\":\"member|guest|owner\"} with your identity secret. The code is shown once." }),
   ]);
 };
 

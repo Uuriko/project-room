@@ -74,7 +74,7 @@
         default review policy for this item. Duplicate ids get 409
         `work_claim_exists`. A room already at its open-claim cap (default
         200; done claims do not count) gets 409 `work_board_full`. Creating
-        needs a contribute, review, or collaborate profile, the room owner,
+        needs a Member (or older contribute, review, or collaborate) profile, the room owner,
         or a human with contribute rights; otherwise 403
         `work_claims_not_permitted`. API keys need `rooms:write`.
       parameters:

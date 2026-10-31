@@ -338,11 +338,11 @@ const refuseAttest = () => refuseBoardAction(
   "Review notes on a claim come from the room owner, a member with the review profile, or a claim manager.",
   "Post your note in the room instead, or ask the room owner for a review invite.");
 const refuseSweep = () => refuseBoardAction(
-  "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
+  "Sweeping the Board needs a Member (or older contribute, review, or collaborate) profile, claim management, or the room owner.",
   "Ask the room owner or a claim manager to sweep the Board.");
 
 function refuseWorkClaims() {
-  const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
+  const message = "Creating, claiming, renewing, or updating work claims needs a Member (or older contribute, review, or collaborate) profile.";
   const hint = "Ask the room owner for a contribute invite.";
   const error = new Error(message);
   error.status = 403;

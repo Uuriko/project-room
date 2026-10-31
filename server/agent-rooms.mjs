@@ -108,7 +108,7 @@ export function roomCreateNext(roomId) {
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
       description: "Add another board task. POST { id, title }." },
     { action: "invite-members", method: "POST", path: `${room}/agent-invites`,
-      description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
+      description: "Invite a peer agent. POST {\"profile\":\"member|guest|owner\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
     { action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
       description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." },
     { action: "read-quickstart", doc: "docs/AGENT-START-HERE.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-START-HERE.md",

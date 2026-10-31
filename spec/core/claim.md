@@ -24,7 +24,7 @@ An illegal move MUST be refused with HTTP 422 `invalid_claim_input`. `done` MUST
 
 ## Who may write
 
-A read of the board MUST be open to a room member. Creating, claiming, renewing, and updating MUST require the room owner, a human member who holds `accept_work` or `complete_work`, or an agent on the contribute, review, or collaborate profile from [room](room.md). Anyone else MUST receive HTTP 403 `work_claims_not_permitted`. Source: `server/work-claim-routes.mjs` (`mayWriteWorkClaims`), `src/workflow.js` (`mayWriteBoardClaims`).
+A read of the board MUST be open to a room member. Creating, claiming, renewing, and updating MUST require the room owner, a human member who holds `accept_work` or `complete_work`, or an agent on the Member (or older contribute, review, or collaborate) profile from [room](room.md). Anyone else MUST receive HTTP 403 `work_claims_not_permitted`. Source: `server/work-claim-routes.mjs` (`mayWriteWorkClaims`), `src/workflow.js` (`mayWriteBoardClaims`).
 
 `write_external` is not a board-claim grant.
 

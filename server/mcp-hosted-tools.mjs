@@ -25,7 +25,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
-  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
+  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"member|guest|owner\"}.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
     purpose: { type: "string", minLength: 1, maxLength: 1000 },
     roomId: { type: "string", minLength: 1, maxLength: 64 },
@@ -152,9 +152,9 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
     note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
-  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. In the opted-in Muse development room, co-owners can also pass it. In other rooms only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Outside the opted-in Muse room, other members receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (member, the default; guest; or owner. The older chat, contribute, review and collaborate still work), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. In the opted-in Muse development room, co-owners can also pass it. In other rooms only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Outside the opted-in Muse room, other members receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
-    profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
+    profile: { type: "string", enum: ["member", "guest", "owner", "chat", "contribute", "review", "collaborate"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
     ownerEquivalent: { type: "boolean", description: "Room owner, or a co-owner in opted-in Muse Room. Grants every delegable permission without transferring ownership." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },

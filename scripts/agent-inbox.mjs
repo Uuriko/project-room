@@ -316,7 +316,7 @@ if (action === "join") {
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs leave-room
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
-  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code profile:member|guest|owner [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code owner [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
@@ -426,7 +426,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "room-create" && !parseRoomCreate(checkpoint, extra))
       || (action === "identity-link" && (checkpoint === undefined || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
-        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review", "collaborate"].includes(checkpoint.slice("profile:".length)))
+        || (checkpoint.startsWith("profile:") && !["member", "guest", "chat", "contribute", "review", "collaborate"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
       || (action === "agent-keys" && parseAgentKeysArgs(checkpoint, extra) === null)

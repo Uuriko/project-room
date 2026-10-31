@@ -74,7 +74,7 @@
                 starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
 
       responses:
-        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"member|guest|owner\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists, request_conflict, or pilot_limit }

@@ -47,7 +47,7 @@
               type: object
               properties:
                 permissions: { type: array, items: { type: string } }
-                profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                profile: { type: string, enum: [member, guest, owner, chat, contribute, review, collaborate] }
                 ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room owner, or a co-owner in opted-in Muse Room, including agents on their own connections. Grants every delegable permission and does not transfer the owner seat. Other rooms keep owner-only issuance." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }

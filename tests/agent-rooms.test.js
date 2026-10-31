@@ -503,7 +503,7 @@ test("HTTP: a cold agent follows room-create next hints and invites a peer", asy
   assert.equal(inviteAction?.method, "POST");
   assert.equal(invite.path, inviteAction.path);
   assert.match(invite.path, /\/api\/rooms\/[^/]+\/agent-invites$/);
-  assert.match(invite.description, /chat\|contribute\|review\|collaborate/);
+  assert.match(invite.description, /member\|guest\|owner/);
   const mintedInvite = await post(invite.path, {
     token: minted.body.secret,
     data: { profile: "chat" }
@@ -517,7 +517,7 @@ test("HTTP: a cold agent follows room-create next hints and invites a peer", asy
   assert.equal(agentBody.status, 422);
   assert.equal(agentBody.body.error.code, "invalid_invitation");
   assert.match(agentBody.body.error.message, /\/agent-invites/);
-  assert.match(agentBody.body.error.message, /chat\|contribute\|review\|collaborate/);
+  assert.match(agentBody.body.error.message, /member\|guest\|owner/);
   assert.ok(agentBody.body.next.some(step => step.path?.endsWith("/agent-invites") && step.method === "POST"));
   const humanMiss = await post(`/api/rooms/${created.body.roomId}/invitations`, {
     token: minted.body.secret,

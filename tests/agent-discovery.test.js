@@ -88,7 +88,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(full, /\/room\/api\/agent-rooms/);
   assert.match(full, /\/room\/api\/agent-invites\/redeem/);
   assert.match(full, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
-  assert.match(full, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.match(full, /\{"profile":"member\|guest\|owner"\}/);
   assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
   assert.match(full, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/room\.trydemigod\.com\/mcp/);

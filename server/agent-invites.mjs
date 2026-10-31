@@ -335,7 +335,8 @@ export class AgentInvites {
   // without manage_members/decide): mint a one-time code. The raw code is
   // returned once; only its hash is stored. Callers may pass an explicit
   // permissions list or a standing profile name
-  // (chat/contribute/review/collaborate); the profile maps server-side to
+  // (member, the default, or guest; the older chat/contribute/review/
+  // collaborate stay as aliases); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
   create(token, roomId, { permissions, profile, ownerEquivalent, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
     { emailVerificationUnachievable = false } = {}) {
@@ -376,7 +377,7 @@ export class AgentInvites {
       permissions = [...PERMISSIONS];
     } else if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
-        fail(422, "invalid_invite_scope", `profile must be one of: ${Object.keys(agentAccessProfiles).join(", ")}`);
+        fail(422, "invalid_invite_scope", "profile must be member (the default), guest, or owner; the older chat, contribute, review and collaborate still work");
       if (permissions !== undefined)
         fail(422, "invalid_invite_scope", "Choose a profile or explicit permissions, not both");
       profileName = profile;

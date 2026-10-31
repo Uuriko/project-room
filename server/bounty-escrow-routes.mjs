@@ -95,7 +95,7 @@ export const canReadLaneLedger = (store, roomId, auth, laneIdentity) => {
 // worker. Only claim and submit are gated; posting/funding/acceptance and
 // the other lifecycle writes keep their existing rules.
 export const WORK_CLAIMS_GATE_MESSAGE =
-  "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
+  "Creating, claiming, renewing, or updating work claims needs a Member (or older contribute, review, or collaborate) profile.";
 
 export function mayWorkOnBounties(store, roomId, auth) {
   let authority = null;

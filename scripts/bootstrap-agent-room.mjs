@@ -13,7 +13,7 @@ import { connectionDiagnostic, ConnectionError } from "../client/agent-connectio
 // (no /room path), then:
 //   node scripts/agent-inbox.mjs bootstrap-agent-room "Grok Bot"
 
-const INVITE_PROFILES = Object.freeze(["chat", "contribute", "review", "collaborate"]);
+const INVITE_PROFILES = Object.freeze(["member", "guest", "owner", "chat", "contribute", "review", "collaborate"]);
 
 export function slugRoomId(displayName, entropy = randomBytes(4).toString("hex")) {
   const base = String(displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "den";

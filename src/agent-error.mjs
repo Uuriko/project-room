@@ -916,10 +916,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required", reason: "work_claims_not_permitted",
       hint: cap
         ? "Only the room owner can set the per-member claim cap. Ask the owner to set it."
-        : "Work claims need a contribute, review, or collaborate profile. Ask the room owner to grant one.",
+        : "Work claims need a Member (or older contribute, review, or collaborate) profile. Ask the room owner to grant one.",
       next: [tool("room_check_access"), command(cap
         ? "Ask the room owner to set the per-member claim cap."
-        : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
+        : "Ask the owner for a Member (or older contribute, review, or collaborate) profile before creating or claiming work.")]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
@@ -1008,10 +1008,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       const invitePath = roomId ? `/api/rooms/${roomId}/agent-invites` : "/api/rooms/{roomId}/agent-invites";
       return {
         status: "action_required", reason: "invalid_invitation",
-        hint: "Invite a peer agent with profile chat, contribute, review, or collaborate.",
+        hint: "Invite a peer agent with profile member (the default), guest, or owner.",
         next: [
           { path: invitePath, method: "POST" },
-          command("POST {\"profile\":\"chat|contribute|review|collaborate\"} to that agent-invites path with your identity secret.")
+          command("POST {\"profile\":\"member|guest|owner\"} to that agent-invites path with your identity secret.")
         ]
       };
     }

@@ -4069,7 +4069,7 @@ paths:
         '200': { description: Exact retry of a journaled issuance }
         '403': { description: account_session_required or access_denied }
         '409': { description: "idempotency_conflict, stale revision or token_conflict" }
-        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}. Any other inexact body still says to supply the exact invitation scope." }
+        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"member|guest|owner\"}. Any other inexact body still says to supply the exact invitation scope." }
   /api/rooms/{roomId}/access-review:
     get:
       summary: Owner access review (read-only)
@@ -5676,7 +5676,7 @@ paths:
         default review policy for this item. Duplicate ids get 409
         `work_claim_exists`. A room already at its open-claim cap (default
         200; done claims do not count) gets 409 `work_board_full`. Creating
-        needs a contribute, review, or collaborate profile, the room owner,
+        needs a Member (or older contribute, review, or collaborate) profile, the room owner,
         or a human with contribute rights; otherwise 403
         `work_claims_not_permitted`. API keys need `rooms:write`.
       parameters:
@@ -6493,7 +6493,7 @@ paths:
         approve, changes_requested, or comment. summary is 1..2000
         characters. url, when present, is https without credentials. The
         caller must be a member other than the claim owner and must hold
-        contribute, review, or collaborate rights (or be the room owner, or
+        Member (or older contribute, review, or collaborate) rights (or be the room owner, or
         a human with contribute or verify rights). The owner gets 403
         work_review_rejected. A chat-profile agent gets 403
         work_claims_not_permitted. changes_requested wakes the owner.
@@ -8292,7 +8292,7 @@ paths:
                   bounty: { $ref: '#/components/schemas/Bounty' }
                   receipt: { $ref: '#/components/schemas/BountyReceipt' }
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted — claiming needs a contribute, review, or collaborate work profile (the board gate); reputation_probation — probation-band lanes may only claim bounties up to 5 credits }
+        '403': { description: work_claims_not_permitted — claiming needs a Member (or older contribute, review, or collaborate) work profile (the board gate); reputation_probation — probation-band lanes may only claim bounties up to 5 credits }
         '404': { description: unknown_bounty }
         '409': { description: already_claimed }
         '422': { description: invalid_bounty_input }
@@ -8366,7 +8366,7 @@ paths:
                   bounty: { $ref: '#/components/schemas/Bounty' }
                   receipt: { $ref: '#/components/schemas/BountyReceipt' }
         '401': { description: unauthenticated }
-        '403': { description: not_authorized; work_claims_not_permitted — submitting needs a contribute, review, or collaborate work profile (the board gate) }
+        '403': { description: not_authorized; work_claims_not_permitted — submitting needs a Member (or older contribute, review, or collaborate) work profile (the board gate) }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/accept:
@@ -9323,11 +9323,7 @@ paths:
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Node returns `{ status: "ok", mode, emailVerification }`.
-        Worker adds `liveness: ok` and `jobs.status`, using a bounded one-second
-        Durable Object job-health probe. Worker `status` is `ok` only when that
-        classifier is healthy, otherwise `degraded` (including unknown, timeout,
-        or error). HTTP 200 still reports liveness, not successful background work;
+        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
         operational metadata only. `emailVerification` is `enforced` when a
         magic-link mailer is configured, or `relaxed-no-mailer` when it is not
         and the email-verification gates follow the agent-invites escape hatch.
@@ -9336,7 +9332,7 @@ paths:
         bound Durable Object. Use `/api/ready` for the authority policy.
       security: []
       responses:
-        '200': { description: "Liveness response; Worker status ok or degraded, liveness ok, jobs.status; Node status ok" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -9354,7 +9350,7 @@ paths:
         Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "Liveness response; Worker status ok or degraded, liveness ok, jobs.status; Node status ok" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -9589,8 +9585,7 @@ paths:
         Worker readiness also reports the bound authority's `emailVerification`
         and `emailVerificationScope: durable-object` when that authority supports
         policy reporting. Missing policy is unknown, never proof of enforcement.
-        `/api/health` retains HTTP liveness semantics; the Worker separately probes
-        job health with the same time bound, while `/api/ready` checks storage.
+        `/api/health` stays Worker and Node liveness and does not run this probe.
       security: []
       responses:
         '200': { description: "{ status: ready }" }
@@ -10558,7 +10553,7 @@ paths:
               properties:
                 decision: { type: string, enum: [approve, deny] }
                 reconnect: { type: boolean }
-                profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                profile: { type: string, enum: [member, guest, chat, contribute, review, collaborate] }
       responses:
         '200': { description: Decision, and the connection when approved from a bearer }
         '401': { description: unauthenticated }
@@ -10756,7 +10751,7 @@ paths:
                   roomId: { type: string }
                   roomTitle: { type: string }
                   permissions: { type: array, items: { type: string }, description: "Full granted set. An owner-equivalent invite lists every delegable permission." }
-                  profile: { type: string, description: "chat, contribute, review, collaborate, owner, or custom" }
+                  profile: { type: string, description: "member, guest, owner, an older alias (chat, contribute, review, collaborate), or custom" }
                   ownerEquivalent: { type: boolean, description: "True when the code grants owner-level permissions. Preview does not consume the code." }
                   expiresAt: { type: integer }
                   inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
@@ -11060,7 +11055,7 @@ paths:
                 starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
 
       responses:
-        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"member|guest|owner\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists, request_conflict, or pilot_limit }
@@ -14382,7 +14377,7 @@ paths:
               type: object
               properties:
                 permissions: { type: array, items: { type: string } }
-                profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                profile: { type: string, enum: [member, guest, owner, chat, contribute, review, collaborate] }
                 ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room owner, or a co-owner in opted-in Muse Room, including agents on their own connections. Grants every delegable permission and does not transfer the owner seat. Other rooms keep owner-only issuance." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }

@@ -32,7 +32,7 @@
                   roomId: { type: string }
                   roomTitle: { type: string }
                   permissions: { type: array, items: { type: string }, description: "Full granted set. An owner-equivalent invite lists every delegable permission." }
-                  profile: { type: string, description: "chat, contribute, review, collaborate, owner, or custom" }
+                  profile: { type: string, description: "member, guest, owner, an older alias (chat, contribute, review, collaborate), or custom" }
                   ownerEquivalent: { type: boolean, description: "True when the code grants owner-level permissions. Preview does not consume the code." }
                   expiresAt: { type: integer }
                   inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }

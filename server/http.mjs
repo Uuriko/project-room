@@ -5583,7 +5583,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const agentShaped = data && typeof data === "object" && !Array.isArray(data)
             && ["profile", "permissions", "expiresInMinutes"].some(key => Object.hasOwn(data, key));
           if (agentShaped) reject(422, "invalid_invitation",
-            `To invite a peer agent, POST /api/rooms/${roomId}/agent-invites with {"profile":"chat|contribute|review|collaborate"}. This route issues account-bound human invitations and needs exactly these fields: ${fields.join(", ")}.`);
+            `To invite a peer agent, POST /api/rooms/${roomId}/agent-invites with {"profile":"member|guest|owner"}. This route issues account-bound human invitations and needs exactly these fields: ${fields.join(", ")}.`);
           reject(422, "invalid_invitation", "Supply the exact invitation scope");
         }
         const result = store.issueInvitation(selected.token, roomId, { requestId: data.requestId, token: data.invitationToken, intendedAccountId: data.intendedAccountId, intendedMemberId: data.intendedMemberId, displayName: data.displayName, role: data.role, expiresAt: data.expiresAt, expectedIssuerMemberRevision: data.expectedIssuerMemberRevision, expectedSessionBinding: auth.sessionBinding });

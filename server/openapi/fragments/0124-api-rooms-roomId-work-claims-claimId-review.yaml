@@ -6,7 +6,7 @@
         approve, changes_requested, or comment. summary is 1..2000
         characters. url, when present, is https without credentials. The
         caller must be a member other than the claim owner and must hold
-        contribute, review, or collaborate rights (or be the room owner, or
+        Member (or older contribute, review, or collaborate) rights (or be the room owner, or
         a human with contribute or verify rights). The owner gets 403
         work_review_rejected. A chat-profile agent gets 403
         work_claims_not_permitted. changes_requested wakes the owner.
