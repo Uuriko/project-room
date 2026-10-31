@@ -597,9 +597,7 @@ export class ProjectRoom extends DurableObject {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
-    const selected = selectWorkerJobs(this.env, this.store).filter(job => {
-      if (onlyJob !== null && job.name !== onlyJob) return false;
-      if (job.slow && !includeSlow) return false;
+    const selected = selectWorkerJobs(this.env, this.store, { onlyJob, includeSlow }).filter(job => {
       return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name]));
     });
     const outcomes = [];
