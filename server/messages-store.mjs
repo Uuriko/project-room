@@ -210,6 +210,57 @@ function currentRecord(message) {
   return { ...record, body: storedBody(message) };
 }
 
+// Shared, pure comparison: diagnostics must use the same fields as certification.
+export function messageRowParityFields(row, message, { sequence, pinned, threadMessages }) {
+  let record, extras;
+  try { record = JSON.parse(row.record_json); } catch { /* invalid records fail parity */ }
+  try { extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
+  catch { /* invalid extras fail parity */ }
+  // Report allowlisted field names only, never stored or expected values.
+  // Operators can distinguish index drift from content/history drift without
+  // copying private message text into failure records or logs.
+  let differences = null;
+  if (!message) differences = ['projection_message'];
+  else {
+    if (!isDeepStrictEqual(record, currentRecord(message))) (differences ??= []).push('record_json');
+    if (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message))) (differences ??= []).push('reducer_extras_json');
+    if (row.seq !== sequence) (differences ??= []).push('seq');
+    if (row.author_id !== message.authorId) (differences ??= []).push('author_id');
+    if (row.body !== storedBody(message)) (differences ??= []).push('body');
+    if (row.channel_id !== textOrNull(message.channelId)) (differences ??= []).push('channel_id');
+    if (row.thread_root_id !== threadRootId(threadMessages, message)) (differences ??= []).push('thread_root_id');
+    if (row.reply_to_id !== textOrNull(message.replyToId)) (differences ??= []).push('reply_to_id');
+    if (row.to_member_id !== textOrNull(message.toMemberId)) (differences ??= []).push('to_member_id');
+    if (row.work_item_id !== textOrNull(message.workItemId)) (differences ??= []).push('work_item_id');
+    if (row.created_at !== message.createdAt) (differences ??= []).push('created_at');
+    if (row.edited_at !== textOrNull(message.editedAt)) (differences ??= []).push('edited_at');
+    if (row.deleted_at !== textOrNull(message.deletedAt)) (differences ??= []).push('deleted_at');
+    if (row.pinned !== (pinned ? 1 : 0)) (differences ??= []).push('pinned');
+  }
+  return differences ?? [];
+}
+
+export function messageRecordParityDetail(row, message, receiptId = null) {
+  let record;
+  try { record = JSON.parse(row.record_json); } catch { return { keys: ['invalid_json'], legacyShapeOnly: false }; }
+  const expected = currentRecord(message);
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return { keys: ['invalid_record'], legacyShapeOnly: false };
+  const differing = [...new Set([...Object.keys(record), ...Object.keys(expected)])]
+    .filter(key => !isDeepStrictEqual(record[key], expected[key]) || Object.hasOwn(record, key) !== Object.hasOwn(expected, key));
+  const allowed = new Set(['id', 'authorId', 'body', 'kind', 'claimId', 'receiptId', 'reactions', 'revision', 'channelId', 'replyToId', 'toMemberId', 'workItemId', 'createdAt', 'editedAt', 'deletedAt']);
+  const keys = [...new Set(differing.map(key => allowed.has(key) ? key : 'other_fields'))].sort();
+  const normalize = value => {
+    const copy = { ...value };
+    delete copy.reactions;
+    if (copy.kind === 'receipt_card' && copy.receiptId == null && typeof copy.claimId === 'string' && copy.claimId) {
+      copy.receiptId = receiptId || `rc_${copy.claimId}`;
+    }
+    return copy;
+  };
+  return { keys, legacyShapeOnly: differing.length > 0 && differing.every(key => ['receiptId', 'reactions'].includes(key))
+    && isDeepStrictEqual(normalize(record), normalize(expected)) };
+}
+
 // Upsert one row per message the event touched. seq stays at the earliest
 // event that wrote the row, so an edit does not reorder history. Calling
 // this twice for the same event leaves one row.
@@ -1436,32 +1487,10 @@ function certifyMessagesParity(store, target = null) {
   const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
   for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
-    let record, extras;
-    try { record = JSON.parse(row.record_json); } catch { /* invalid records fail parity */ }
-    try { extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
-    catch { /* invalid extras fail parity */ }
-    // Report allowlisted field names only, never stored or expected values.
-    // Operators can distinguish index drift from content/history drift without
-    // copying private message text into failure records or logs.
-    let differences = null;
-    if (!message) differences = ['projection_message'];
-    else {
-      if (!isDeepStrictEqual(record, currentRecord(message))) (differences ??= []).push('record_json');
-      if (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message))) (differences ??= []).push('reducer_extras_json');
-      if (row.seq !== sequences.get(message.id)) (differences ??= []).push('seq');
-      if (row.author_id !== message.authorId) (differences ??= []).push('author_id');
-      if (row.body !== storedBody(message)) (differences ??= []).push('body');
-      if (row.channel_id !== textOrNull(message.channelId)) (differences ??= []).push('channel_id');
-      if (row.thread_root_id !== threadRootId(threadMessages, message)) (differences ??= []).push('thread_root_id');
-      if (row.reply_to_id !== textOrNull(message.replyToId)) (differences ??= []).push('reply_to_id');
-      if (row.to_member_id !== textOrNull(message.toMemberId)) (differences ??= []).push('to_member_id');
-      if (row.work_item_id !== textOrNull(message.workItemId)) (differences ??= []).push('work_item_id');
-      if (row.created_at !== message.createdAt) (differences ??= []).push('created_at');
-      if (row.edited_at !== textOrNull(message.editedAt)) (differences ??= []).push('edited_at');
-      if (row.deleted_at !== textOrNull(message.deletedAt)) (differences ??= []).push('deleted_at');
-      if (row.pinned !== (pinned.has(message.id) ? 1 : 0)) (differences ??= []).push('pinned');
-    }
-    if (differences) {
+    const differences = messageRowParityFields(row, message, {
+      sequence: sequences.get(message?.id), pinned: pinned.has(message?.id), threadMessages
+    });
+    if (differences.length) {
       throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs (${differences.join(', ')})`);
     }
   }

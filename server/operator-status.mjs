@@ -1,3 +1,4 @@
+import { operatorParityDiagnostics } from "./operator-parity-diagnostics.mjs";
 // Operator status. One read of version, readiness, the largest tables, and
 // the latest operator actions. The server does not call GitHub. Job heartbeats
 // live on the Worker, which this process does not reach without the Durable
@@ -80,6 +81,7 @@ export function operatorStatus(store, options = {}) {
     // sanitized detail (code, sub-check, class, and the failing room's
     // id). Stores predating batch isolation have no such rows.
     integrityFailures: typeof store.integrityFailures === "function" ? store.integrityFailures() : [],
+    messageParityDiagnostics: operatorParityDiagnostics(store),
     lastColdStart: lastColdStart(store),
     tables: tables.tables,
     partial: tables.partial,
