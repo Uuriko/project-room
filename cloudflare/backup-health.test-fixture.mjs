@@ -35,6 +35,7 @@ export class BackupHealthProbe extends ProjectRoom {
     return {};
   }
   async readJobHealth() {
+    if (this.healthMode === 'error') throw Error('PRIVATE_HEALTH_RPC_DETAIL');
     if (this.healthMode === 'timeout') await new Promise(resolve => setTimeout(resolve, 1500));
     return super.readJobHealth();
   }

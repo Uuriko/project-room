@@ -43,7 +43,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -51,6 +51,7 @@ import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mj
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
 const durableObjectHealth = createHealthProbe();
+const durableObjectJobsHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -797,7 +798,7 @@ export default {
         return finish(workerErrorResponse({ httpStatus: 403, code: 'origin_denied', message: 'Request origin is not allowed', headers: { 'Cache-Control': 'no-store' } }), 'worker');
       }
     }
-    // Liveness is the Worker. It does not construct or query the Durable Object.
+    // HTTP200 describes Worker liveness; bounded job health grades service health.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
       // #3272: report the mailer state exactly as the DO's server does —
       // magicLinkMailerFromEnv(env) non-null is the same derivation the
@@ -805,7 +806,14 @@ export default {
       // Worker liveness answer and the handler can never disagree about
       // whether email gates are enforced or relaxed.
       const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
-      return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
+      const response = await durableObjectJobsHealth({
+        start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
+        onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })
+      });
+      return finish(response, 'worker');
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.

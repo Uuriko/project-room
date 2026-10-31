@@ -1,5 +1,5 @@
-// Shared probe for /api/ready. /api/health is Worker liveness and does not
-// enter the Durable Object. Readiness asks invite-only-pilot to run SELECT 1.
+// Shared bounded probe for readiness and job health (separate instances).
+// Readiness asks invite-only-pilot to run SELECT 1.
 // One in-flight probe is shared so a 1 Hz checker does not queue a call per
 // tick while the constructor holds the input gate. Concurrent callers share
 // only the storage snapshot: Origin is checked before this helper, and each
@@ -74,13 +74,14 @@ async function snapshotResponse(response) {
   };
 }
 
-export function workerLivenessResponse(request, { mode, deployment, emailVerification }) {
+export function workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus = "unknown" }) {
   // emailVerification is part of the documented /api/health contract
   // (docs/openapi.yaml): the Node handler reports it so a deploy that lost
   // its mail secret cannot silently relax every email gate. #3272: the Worker
   // liveness answer describes this Worker only. An entry Worker may bind a
   // different Worker's Durable Object; /api/ready reports that authority's policy.
-  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification, emailVerificationScope: "worker" } : {}) };
+  const jobStatus = ["ok", "stale", "failing", "degraded", "timeout", "error"].includes(jobsStatus) ? jobsStatus : "unknown";
+  const body = { status: jobStatus === "ok" ? "ok" : "degraded", liveness: "ok", jobs: { status: jobStatus }, mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification, emailVerificationScope: "worker" } : {}) };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 200,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
@@ -121,3 +122,13 @@ export function healthLivenessResponse(request, { mode, deployment, readiness, e
   });
 }
 
+
+// Only the existing job-health classifier determines readiness. Missing or
+// malformed snapshots must never turn a live Worker into a false health pass.
+export function jobHealthSnapshotStatus(snapshot) {
+  try {
+    const body = JSON.parse(new TextDecoder().decode(snapshot.body));
+    if (body.schema !== 'room.job-health/1') return 'unknown';
+    return ['ok', 'stale', 'failing', 'degraded'].includes(body.status) ? body.status : 'unknown';
+  } catch { return 'unknown'; }
+}

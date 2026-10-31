@@ -14,9 +14,28 @@ test('actual DO failed backup retries at slowcron boundary and successful daily 
   const call = await setup(t);
   const first = await (await call('/test/run')).json(); assert.equal(first.manifests, 0);
   assert.equal(first.health.jobs.find(row => row.name === 'room-backup').lastErrorCode, 'backup_part_write_failed');
+  assert.equal(first.health.jobs.find(row => row.name === 'room-backup').lastErrorComponent, 'part_write');
   const immediate = await (await call('/test/run')).json(); assert.equal(immediate.puts, first.puts);
   await call('/test/age');
   const retry = await (await call('/test/run')).json(); assert.equal(retry.manifests, 1);
   assert.equal(retry.health.jobs.find(row => row.name === 'room-backup').consecutiveFailures, 0);
   const success = await (await call('/test/run')).json(); assert.equal(success.puts, retry.puts);
+});
+test('actual Worker health distinguishes live process from failed stale and timed-out jobs, including HEAD', async t => {
+  const call = await setup(t);
+  for (const mode of ['normal', 'failing', 'stale', 'error', 'timeout']) {
+    await call('/test/mode?mode=' + mode);
+    const started = Date.now(), response = await call('/api/health');
+    assert.equal(response.status, 200);
+    const body = await response.json(); assert.equal(body.liveness, 'ok');
+    assert.equal(body.status, mode === 'normal' ? 'ok' : 'degraded');
+    assert.equal(body.jobs.status, mode === 'normal' ? 'ok' : mode);
+    if (mode === 'timeout') assert.ok(Date.now() - started < 1400, 'bounded response before delayed DO result');
+    const head = await call('/api/health', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  }
+});
+test('actual Worker missing required backup binding reports degraded while remaining live', async t => {
+  const call = await setup(t, false); await call('/test/mode?mode=normal');
+  const response = await call('/api/health'), body = await response.json();
+  assert.equal(response.status, 200); assert.equal(body.status, 'degraded'); assert.equal(body.liveness, 'ok'); assert.equal(body.jobs.status, 'failing');
 });
