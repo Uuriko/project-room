@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
+import { createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -129,4 +129,14 @@ test('HEAD liveness has an empty body', async () => {
   const response = healthLivenessResponse(healthRequest('HEAD'), { mode: 'cloudflare-staging', readiness: 'timeout' });
   assert.equal(response.status, 503);
   assert.equal(await response.text(), '');
+});
+
+test('unknown or malformed job health cannot claim service health while Worker liveness stays explicit', async () => {
+  for (const value of ['', '{bad', JSON.stringify({ status: 'ok' }), JSON.stringify({ schema: 'room.job-health/1', status: 'unexpected' })]) {
+    const status = jobHealthSnapshotStatus({ body: new TextEncoder().encode(value) });
+    assert.equal(status, 'unknown');
+    const response = workerLivenessResponse(healthRequest(), { mode: 'test', jobsStatus: status });
+    assert.equal(response.status, 200);
+    const body = await response.json(); assert.equal(body.status, 'degraded'); assert.equal(body.liveness, 'ok'); assert.equal(body.jobs.status, 'unknown');
+  }
 });

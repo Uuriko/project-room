@@ -168,7 +168,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
+    assert.deepEqual(leftoverHealth, { status: 'degraded', liveness: 'ok', jobs: { status: 'stale' }, mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
