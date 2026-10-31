@@ -11,7 +11,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
 const version = '2026-07-28', origin = 'https://room.example', resource = origin + '/mcp';
 const client = { clientId: 'events-test', name: 'Events test', redirectUris: ['https://client.example/callback'] };
-async function fixture(t) {
+async function fixture(t, { callbackError } = {}) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons', 'owner');
   const invite = store.invites.create(owner, 'commons', { profile: 'member' });
@@ -26,6 +26,7 @@ async function fixture(t) {
     mcpEventDnsResolvers: { lookup: async () => [{ address: '8.8.8.8', family: 4 }] },
     mcpEventTransport: async (url, addresses, req) => {
       const body = JSON.parse(req.body);
+      if (body.type === 'verification' && callbackError) throw callbackError;
       if (body.type === 'verification') return { status: 200, text: async () => JSON.stringify({ challenge: body.challenge }) };
       deliveries.push(req); return { status: 200, text: async () => '{}' };
     } });
@@ -136,4 +137,25 @@ test('saturated native callback retains bounded backlog without rolling back use
   await f.server.drainMcpEvents();
   assert.equal(f.deliveries.length, 1);
   assert.equal(JSON.parse(f.deliveries[0].body).data.messageId, 'capacity-message');
+});
+
+test('authenticated subscription rejection logs only code and canonical blocked origin', async t => {
+  const secretPath = '/private-callback-token', secretQuery = 'signing=private-query-token';
+  const f = await fixture(t, { callbackError: Object.assign(new Error('private-error-message'), {
+    code: -32015, data: { reason: 'callback_origin_not_allowed', origin: 'https://callback.example' + secretPath + '?' + secretQuery },
+  }) });
+  const warnings = []; t.mock.method(console, 'warn', value => warnings.push(value));
+  const response = await f.subscribe({ delivery: { mode: 'webhook', url: 'https://callback.example' + secretPath + '?' + secretQuery,
+    secret: 'whsec_' + Buffer.alloc(32, 9).toString('base64') } });
+  assert.equal(response.error.code, -32015);
+  assert.deepEqual(warnings.map(value => JSON.parse(value)), [{ event: 'room.mcp_event_subscription_rejected', code: -32015,
+    reason: 'callback_origin_not_allowed', origin: 'https://callback.example' }]);
+  for (const privateValue of [secretPath, secretQuery, 'private-error-message', f.tokens.accessToken, f.grant.member_id,
+    'whsec_' + Buffer.alloc(32, 9).toString('base64')]) assert.equal(warnings.join('').includes(privateValue), false);
+  warnings.length = 0;
+  assert.equal((await f.rpc('events/subscribe', {}, 'iat_invalid')).status, 401);
+  assert.deepEqual(warnings, []);
+  const malformed = await f.subscribe({ ttlMs: 'private-invalid-ttl' });
+  assert.ok(malformed.error);
+  assert.deepEqual(warnings.map(value => JSON.parse(value)), [{ event: 'room.mcp_event_subscription_rejected', code: -32602 }]);
 });

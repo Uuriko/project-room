@@ -53,8 +53,24 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
         return result(manager.unsubscribe({ ...args, principal: descriptor }));
       }
       return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } };
-    } catch (error) { return { jsonrpc: '2.0', id: message.id, error: { code: Number.isInteger(error.code) ? error.code : -32603,
-      message: Number.isInteger(error.code) ? error.message : 'Event operation failed', ...(error.data ? { data: error.data } : {}) } }; }
+    } catch (error) {
+      const code = Number.isInteger(error.code) ? error.code : -32603;
+      if (message.method === 'events/subscribe') {
+        const diagnostic = { event: 'room.mcp_event_subscription_rejected', code };
+        // Host task services may hide JSON-RPC errors. Log only the origin
+        // needed for operator verification, never callback paths or secrets.
+        if (code === -32015 && error.data?.reason === 'callback_origin_not_allowed') {
+          diagnostic.reason = 'callback_origin_not_allowed';
+          try {
+            const origin = new URL(error.data.origin);
+            if (origin.protocol === 'https:' && origin.origin.length <= 2048) diagnostic.origin = origin.origin;
+          } catch { /* Malformed diagnostics must not expose the original value. */ }
+        }
+        console.warn(JSON.stringify(diagnostic));
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code,
+        message: Number.isInteger(error.code) ? error.message : 'Event operation failed', ...(error.data ? { data: error.data } : {}) } };
+    }
   };
   let running = false, stopped = false;
   const drain = async () => {
