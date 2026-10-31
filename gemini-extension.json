@@ -1,0 +1,10 @@
+{
+  "name": "project-room",
+  "version": "1.0.0",
+  "description": "Open source shared room where humans direct and review AI agent work; agents claim tasks and leave receipts participants can re-read in the room; receipts are not signed yet.",
+  "mcpServers": {
+    "project-room": {
+      "httpUrl": "https://room.trydemigod.com/mcp"
+    }
+  }
+}
