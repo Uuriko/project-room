@@ -241,7 +241,13 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
     const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
-    const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
+    let pendingSince = null;
+    if (enabled && store && typeof source?.healthPendingSince === "function") {
+      try { pendingSince = source.healthPendingSince(store, now); } catch { /* unknown remains fail-closed */ }
+    }
+    const recentPending = Number.isFinite(pendingSince) && pendingSince <= now
+      && now - pendingSince <= staleAfterSeconds * 1000;
+    const stale = enabled && !waiting && !recentPending && (ageSeconds === null || ageSeconds > staleAfterSeconds);
     const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
@@ -256,6 +262,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       name: job.name,
       periodSeconds: job.periodSeconds,
       staleAfterSeconds,
+      ...(source?.healthPendingSince ? { pendingSinceAt: iso(pendingSince) } : {}),
       lastRunAt: iso(record.lastRunAt),
       lastSuccessAt: iso(record.lastSuccessAt),
       secondsSinceSuccess: enabled ? ageSeconds : null,

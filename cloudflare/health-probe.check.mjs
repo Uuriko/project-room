@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -28,7 +28,7 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(firstBody, secondBody);
   assert.equal(secondBody.status, 'degraded');
   assert.deepEqual(secondBody.durableObject, { ready: false, status: 'timeout' });
-  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
+  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: HEALTH_PROBE_TIMEOUT_MS });
 });
 
 test('concurrent probes share storage but shape separate GET/HEAD responses and do not cache completion', async () => {

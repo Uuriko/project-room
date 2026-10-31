@@ -228,6 +228,37 @@ export function patrolPending(store) {
   } catch { return true; }
 }
 
+// Health grace starts at the oldest event actually waiting, not at an idle
+// job's last run. Inspect one indexed successor per room; a missing/gapped
+// or malformed record cannot grant freshness. Never use the newest tail,
+// which would let continuous writes hide an old stalled backlog.
+export function patrolPendingSince(store, now) {
+  const db = store?.db;
+  if (!db?.prepare || !Number.isFinite(now)) return null;
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('rooms','patrol_cursor','patrol_blocks')").all().map(row => row.name));
+  if (!tables.has("rooms")) return null;
+  // Bound even a large fleet of caught-up rooms, not only pending results.
+  if (db.prepare("SELECT COUNT(*) AS n FROM (SELECT 1 FROM rooms LIMIT 1001)").get().n > 1000) return null;
+  const hasCursor = tables.has("patrol_cursor");
+  const sequence = hasCursor ? "COALESCE(c.sequence, 0)" : "0";
+  const parkedClause = tables.has("patrol_blocks")
+    ? "AND NOT EXISTS (SELECT 1 FROM patrol_blocks b WHERE b.room_id=r.id AND b.head_seq=r.sequence)" : "";
+  const rows = db.prepare(`SELECT json_extract(e.body, '$.at') AS pending_at FROM rooms r
+    ${hasCursor ? "LEFT JOIN patrol_cursor c ON c.room_id=r.id" : ""}
+    LEFT JOIN events e ON e.room_id=r.id AND e.sequence=${sequence}+1
+    WHERE r.sequence > ${sequence}
+      ${hasCursor ? "AND (COALESCE(c.blocked, 0)=0 OR r.sequence!=c.blocked_head)" : ""}
+      ${parkedClause} LIMIT 1001`).all();
+  if (!rows.length || rows.length > 1000) return null;
+  let oldest = Infinity;
+  for (const row of rows) {
+    const at = typeof row.pending_at === "string" ? Date.parse(row.pending_at) : NaN;
+    if (!Number.isFinite(at) || at > now) return null;
+    oldest = Math.min(oldest, at);
+  }
+  return oldest;
+}
+
 // The durable parked set: rooms whose stored state the patrol cannot
 // process, named with the cursor position, the head they were parked at,
 // and the error class — the operator's repair list. Internal read model

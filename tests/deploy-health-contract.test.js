@@ -79,3 +79,14 @@ test('lying summaries and required failure never use transition retries', async 
     assert.equal(result.pass, false); assert.equal(reads, 1);
   }
 });
+
+for (const status of ['stale', 'failing', 'timeout', 'error', 'private callback URL or credential']) {
+  test(`health receipt retains sanitized probe state: ${status}`, () => {
+    const f = fixture(); f.health.json.status = 'degraded'; f.health.json.jobs.status = status;
+    const result = check(f);
+    assert.equal(result.pass, false); assert.equal(result.reason, 'inconsistent_health');
+    assert.equal(result.jobsStatus, 'ok');
+    assert.equal(result.healthJobsStatus, status.startsWith('private') ? 'unknown' : status);
+    assert.equal(JSON.stringify(result).includes('private callback'), false);
+  });
+}
