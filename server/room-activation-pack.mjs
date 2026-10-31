@@ -14,6 +14,7 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "..
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
+import { releaseExpired } from "./work-claims.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -214,10 +215,22 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
         return { id: item.id, title: item.title, state: item.state, revision: item.revision,
           step: next.action, addressedToViewer: next.memberId === viewerId, untrusted: true };
       });
+    // Board claims the viewer holds (an owner can assign one straight to an
+    // agent) are current work too; without them a freshly assigned agent
+    // read "nothing open". Lease liveness is derived, as needs-me does.
+    let board = boardList(roomSlug);
+    try { board = releaseExpired(board, nowMs); } catch { /* keep the stored rows */ }
+    for (const claim of board) {
+      if (!claim || claim.owner !== viewerId || claim.supersededBy || !LIVE_CLAIM_STATES.has(claim.state)) continue;
+      pack.yourWork.push({ id: claim.id, kind: "claim", title: claim.title, state: claim.state,
+        step: "continue", addressedToViewer: true, untrusted: true });
+    }
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
   }
   return pack;
 }
+
+const LIVE_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked"]);
 
 // GET …/activation-pack?view=brief: the first read for a newly joined agent.
 // The full pack lists every member and every open item; in a long-lived room
@@ -282,11 +295,12 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
   const firstClaim = claims[0]?.claimAction;
-  const ownNext = own[0] ? { why: "continue your current work", method: "GET",
-    endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(own[0].id)}` } : null;
+  const ownNext = !own[0] ? null : own[0].kind === "claim"
+    ? { why: "continue your current work", method: "GET", endpoint: `${roomPath}/work-claims/${encodeURIComponent(own[0].id)}/thread` }
+    : { why: "continue your current work", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(own[0].id)}` };
   const next = ownNext ?? (firstClaim ? { why: "claim the top open task", ...firstClaim }
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` });
+      : { why: "nothing to pick up; read what needs you (mentions, asks, DMs)", method: "GET", endpoint: `/api/needs-me?roomId=${encodeURIComponent(pack.room.slug)}` });
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",

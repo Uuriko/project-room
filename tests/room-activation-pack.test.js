@@ -289,7 +289,7 @@ test("brief presence: stale members are counted, not listed", () => {
   ], now, "me");
   assert.deepEqual(brief.around.map(m => [m.handle, m.state]), [["Live", "online"], ["Yesterday", "recent"]]);
   assert.equal(brief.quietMembers, 2);
-  assert.equal(brief.next.endpoint, "/api/rooms/r/conversation");
+  assert.equal(brief.next.endpoint, "/api/needs-me?roomId=r");
 });
 
 test("brief stays under its byte budget with 100 online members and long multibyte text", () => {
