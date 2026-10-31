@@ -128,12 +128,16 @@ test("readonly Room membership preserves independent public contribution authori
   assert.equal(store.publicWorkClaims.read("visibility-task").claim.identityId, peer.identityId);
 });
 
+const JOIN_HELPERS = new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"]);
+
 test("owner keeps the full catalog: withholding changes nothing for the unrestricted", async t => {
   const { owner, call } = await demotedPeer(t);
   for (const profile of ["core", "full"]) {
     const listed = await call("tools/list", { profile }, owner.secret);
     const names = toolNames(listed.result.tools);
-    assert.deepEqual([...names].sort(), [...toolNames(listedMcpTools(profile, false))].sort(),
+    // Joined members skip the join helpers on core; that is not withholding.
+    const unfiltered = [...toolNames(listedMcpTools(profile, false))].filter(name => profile === "full" || !JOIN_HELPERS.has(name));
+    assert.deepEqual([...names].sort(), [...unfiltered].sort(),
       `${profile}: owner catalog must equal the unfiltered list`);
   }
 });
