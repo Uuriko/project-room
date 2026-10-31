@@ -38,7 +38,9 @@ export function agentInviteHandoff(code, locationLike = globalThis.location) {
   const link = agentInviteJoinLink(code, locationLike);
   const hosted = uiText("invite.copy.005", { fragmentA: link });
   const local = uiText("invite.copy.006", { fragmentA: JSON.stringify(link) });
-  return { link, code, hosted, local, text: uiText("invite.copy.007", { fragmentA: hosted, fragmentB: local }) };
+  const mcp = new URL("mcp", `${humanJoinShareBase(locationLike).replace(/\/$/, "")}/`).href;
+  const grok = uiText("invite.copy.grok", { fragmentA: link, fragmentB: mcp });
+  return { link, code, hosted, local, grok, text: [uiText("invite.copy.007", { fragmentA: hosted, fragmentB: local }), grok].join("\n\n") };
 }
 
 // Mint one invite and build its self-serve join link. The caller loops for
