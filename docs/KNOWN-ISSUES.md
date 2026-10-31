@@ -38,7 +38,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 
 | ID | Issue | Sev | Lane | Next step |
 | --- | --- | --- | --- | --- |
-| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | P1 | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
+| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | P1 | Potter (one operator read) then Delta | Potter: GET /api/operator/status, share integrityFailures messages_parity recordId + field labels only; if record_json (receiptId/reactions) -> land #4901 (merges clean on 3bb35417, 10/10 tests) |
 | KI-024 | Stop does not stop a paused agent's writes | P1 | Codex | Rebase #4828; then flag ROOM_PAUSE_BLOCKS_POSTS=1 |
 | KI-026 | room-acp not on npm; recommended npx command 404s | P1 | Grok (+Potter npm login) | #5415 serves /room-acp.tgz; publish when npm login exists |
 | KI-031 | Friend journey proven only with a scripted agent, not a real model | P1 | Jill-Dot | Jill-Dot runs packaged install + real model on second laptop |
@@ -53,7 +53,7 @@ Plus 201 open GitHub issues in the appendix: 7 open, 48 see, 109 stale, 37 super
 
 | ID | Issue | Source | Status | Evidence | Category | Sev | Effort | Lane | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | Delta 23644/23712, UNFIXED #1 | open | prod /api/health/jobs 2026-10-30 4:17 PM PT at 260d4366 (includes #4930): integrity failing 416, last success 2026-10-11; deploy did not clear it, so the parity gap is real data, not the check | bug | P1 | S (human read) + M | Potter (one operator read) then Delta | Potter does the one bounded operator read; Delta routes to #4901 or #4931 |
+| KI-001 | Integrity job failing: messages_parity_failed (416 consecutive on prod, still failing after #4930 deploy) | Delta 23644/23712, UNFIXED #1 | open | prod /api/health/jobs 2026-10-30 4:17 PM PT at 260d4366 (includes #4930): integrity failing 416, last success 2026-10-11; deploy did not clear it, so the parity gap is real data, not the check | bug | P1 | S (human read) + M | Potter (one operator read) then Delta | Potter: GET /api/operator/status, share integrityFailures messages_parity recordId + field labels only; if record_json (receiptId/reactions) -> land #4901 (merges clean on 3bb35417, 10/10 tests) |
 | KI-002 | Patrol job stale: claim_legality illegal_transition; replay false-positive after land-queue row delete | Delta 23636, Grok 23101 | open (fix in PR) | prod 4:17 PM PT at 260d4366: patrol stale (last success 23:00Z), not failing; #5334 rebased d9a20874: kind stamped on land/deploy receipts + shadow; deleted-row replay tests (stamped, legacy) fail before, pass after | bug | P1 | S | Grok | Fix #5334: replay-stable claim kind + deleted-row replay test |
 | KI-003 | claim-prs job: SQLITE_CONSTRAINT in public claim writer | Grok 22968 | open | prod jobs: claim-prs stale, same error | bug | P2 | M | Jill fleet | Find the constraint row; fix writer; frozen area so keep minimal |
 | KI-004 | webhook-dispatch goes stale between 30-min crons (60s alarm not running) | Grok 22968 | open | prod jobs: webhook-dispatch stale | bug | P2 | M | Codex | Check DO alarm re-arm after code reset |
