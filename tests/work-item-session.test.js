@@ -575,6 +575,33 @@ test("a round-limit pause records its reason; resume without approval is refused
       data: { status: "suspended", suspendReason: "lunch" } }), /suspendReason/);
 });
 
+test("L02-C2: a non-supervisor cannot self-resume a round-limit pause via store.command resumeApproved; the owner can", async t => {
+  const { store, ownerKey, agentKey } = await serve(t);
+  const item = () => store.room("commons").state.workItems["session-one"];
+  const cmd = (key, type, data) => store.command(key, "commons", {
+    id: randomUUID(), type, data: { workItemId: "session-one", expectedRevision: item().revision, ...data }
+  });
+  cmd(agentKey, T.SESSION_STARTED, {});
+  cmd(agentKey, T.SESSION_STATUS_CHANGED, { status: "active", rounds: 9 });
+  cmd(agentKey, T.SESSION_STATUS_CHANGED, { status: "suspended", suspendReason: "round_limit" });
+  assert.equal(item().status, "suspended");
+  assert.equal(sessionRecord(item()).suspended_by, "round_limit");
+  assert.equal(sessionRecord(item()).round_count, 9);
+  // The paused worker (not owner, no manage_claims) supplies resumeApproved
+  // themself: the flag is stripped at live admission, so the reducer refuses.
+  assert.throws(() => cmd(agentKey, T.SESSION_STATUS_CHANGED, { status: "active", resumeApproved: true }), /resumeApproved/);
+  assert.equal(item().status, "suspended", "self-resume must not change the session");
+  assert.equal(sessionRecord(item()).suspended_by, "round_limit");
+  assert.equal(sessionRecord(item()).round_count, 9, "self-resume must not reset the round count");
+  // Positive control: the owner supplying the same flag resumes, resets the
+  // round count, and hands the session back to the paused worker.
+  cmd(ownerKey, T.SESSION_STATUS_CHANGED, { status: "active", resumeApproved: true });
+  assert.equal(item().status, "active");
+  assert.equal(sessionRecord(item()).suspended_by, null);
+  assert.equal(sessionRecord(item()).round_count, 0);
+  assert.equal(sessionRecord(item()).worker_member_id, "agent");
+});
+
 test("#603: claim moves proposed->accepted, first active heartbeat moves accepted->working, release moves back to proposed", () => {
   const item = { id: "ladder", title: "Test", state: "proposed", revision: 0, accountableMemberId: "agent" };
   // Claim (set_status: processing) -> accepted

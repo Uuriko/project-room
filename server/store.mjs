@@ -6529,6 +6529,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const heldItem = room.state.workItems?.[command.data?.workItemId];
         const supervisedResume = command.data?.resumeApproved === true
           && (room.state.room?.ownerId === auth.member.id || memberCan(room.state, auth.member.id, "manage_claims"));
+        // L02-C2: resumeApproved is a supervisor/server-set flag, not caller
+        // authority. A non-supervisor who supplies it has it stripped before
+        // the event is built, so the reducer's round-limit gate refuses the
+        // resume instead of honouring a flag the caller minted themself.
+        // Supervised callers (owner / manage_claims, e.g. mutateWorkSession
+        // acting for them) keep the flag and the legitimate resume path.
+        if (command.data?.resumeApproved === true && !supervisedResume) {
+          command = { ...command, data: { ...command.data } };
+          delete command.data.resumeApproved;
+        }
         if (heldItem && !supervisedResume && !memberCan(room.state, auth.member.id, "manage_claims")) {
           const conflict = sessionClaimConflict(heldItem, auth.member.id, this.now());
           if (conflict) fail(409, "session_claimed", conflict);
