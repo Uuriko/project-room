@@ -84,6 +84,11 @@ export function createWorkClaimRegistry() {
     get(roomId, id) { return room(roomId).items.get(id) ?? null; },
     set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
     list(roomId) { return [...room(roomId).items.values()]; },
+    *inboxCandidates(roomId, ownerId, { review = false } = {}) {
+      for (const item of room(roomId).items.values()) {
+        if (review ? item.owner && item.owner !== ownerId : item.owner === ownerId) yield item;
+      }
+    },
     has(roomId, id) { return room(roomId).items.has(id); },
     configure(roomId, config) {
       const entry = room(roomId);
