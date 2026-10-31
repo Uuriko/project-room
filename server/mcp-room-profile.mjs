@@ -909,6 +909,10 @@ function argumentFailure(requestId, name, args, schema) {
       }
     }
   }
+  if (name === "room_join" && !report.missing.length && !report.unexpected.length && !Object.keys(report.invalid).length
+    && args.linkToken === undefined && args.inviteCode === undefined && args.roomId === undefined && args.pairId === undefined) {
+    report.missing.push("linkToken or inviteCode");
+  }
   if (!report.missing.length && !report.unexpected.length && !Object.keys(report.invalid).length) {
     report.invalid.arguments = "does not match the tool input";
   }
