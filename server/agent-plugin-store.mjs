@@ -118,6 +118,9 @@ export const agentPluginSchema = `
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_retention
+    ON agent_webhook_deliveries(created_at, delivery_id)
+    WHERE state IN ('delivered','dead_letter');
   CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_due
     ON agent_webhook_deliveries(state, next_attempt_at);
   CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_agent
@@ -1635,48 +1638,66 @@ export class AgentPluginStore {
   // Drop delivered and dead-letter rows that are both outside the newest
   // WEBHOOK_DELIVERY_KEEP per subscription and older than the retention
   // window. Pending and failed rows stay: they can still be attempted.
-  // One cron tick deletes at most WEBHOOK_DELIVERY_PRUNE_BATCH rows; the
-  // next tick continues. The cache drops any id this batch removed.
-  pruneWebhookDeliveries({ now = this.store.now() } = {}) {
+  // One cron tick examines at most WEBHOOK_DELIVERY_PRUNE_BATCH terminal
+  // candidates and up to 100 indexed history entries per distinct subscription.
+  // The cursor passes protected histories; the cache drops only deleted ids.
+  pruneWebhookDeliveries({ now = this.store.now(), cursor = this.webhookRetentionCursor ?? null } = {}) {
     if (!Number.isSafeInteger(now)) throw new Error("Invalid webhook delivery retention clock");
     const cutoff = now - WEBHOOK_DELIVERY_RETENTION_MS;
-    return this.mutate(() => {
-      const doomed = this.db.prepare(
-        `SELECT delivery_id FROM (
-           SELECT delivery_id, state, created_at,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY subscription_id
-                    ORDER BY created_at DESC, rowid DESC
-                  ) AS rn
-           FROM agent_webhook_deliveries
-         )
-         WHERE state IN ('delivered', 'dead_letter')
-           AND rn > ?
-           AND created_at < ?
-         ORDER BY created_at ASC, delivery_id ASC
-         LIMIT ?`
-      ).all(WEBHOOK_DELIVERY_KEEP, cutoff, WEBHOOK_DELIVERY_PRUNE_BATCH);
-      const remove = this.db.prepare(
-        "DELETE FROM agent_webhook_deliveries WHERE delivery_id=? AND state IN ('delivered','dead_letter')");
-      const gone = new Set();
-      let deleted = 0;
-      for (const { delivery_id } of doomed) {
-        deleted += remove.run(delivery_id).changes;
-        gone.add(delivery_id);
-      }
-      if (gone.size) {
-        for (const sub of this.subs.values()) {
-          if (!Array.isArray(sub.deliveries) || sub.deliveries.length === 0) continue;
-          const next = sub.deliveries.filter(delivery => !gone.has(delivery.deliveryId));
-          if (next.length !== sub.deliveries.length) sub.deliveries = next;
+    // A malformed or missing checkpoint restarts a safe, idempotent sweep.
+    const after = cursor && Number.isSafeInteger(cursor.createdAt) && cursor.createdAt >= 0
+      && typeof cursor.deliveryId === "string" && cursor.deliveryId.length > 0 && cursor.deliveryId.length <= 256
+      ? cursor : null;
+    const previousArrays = new Map();
+    let result;
+    try {
+      result = this.store.transaction(() => {
+        // Pin the bounded order: the general state/due index otherwise lets
+        // SQLite scan and sort every terminal row before applying LIMIT.
+        const candidates = this.db.prepare(`SELECT delivery_id, subscription_id, created_at, rowid AS row_id
+          FROM agent_webhook_deliveries INDEXED BY agent_webhook_deliveries_retention
+          WHERE state IN ('delivered','dead_letter') AND created_at < ?
+            ${after ? "AND (created_at, delivery_id) > (?, ?)" : ""}
+          ORDER BY created_at, delivery_id LIMIT ?`).all(cutoff,
+          ...(after ? [after.createdAt, after.deliveryId] : []), WEBHOOK_DELIVERY_PRUNE_BATCH);
+        const thresholds = new Map();
+        const threshold = this.db.prepare(`SELECT created_at, rowid AS row_id FROM agent_webhook_deliveries
+          INDEXED BY agent_webhook_deliveries_sub_created WHERE subscription_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1 OFFSET ?`);
+        const remove = this.db.prepare("DELETE FROM agent_webhook_deliveries WHERE delivery_id=? AND state IN ('delivered','dead_letter')");
+        const gone = new Map();
+        let deleted = 0;
+        for (const row of candidates) {
+          if (!thresholds.has(row.subscription_id)) thresholds.set(row.subscription_id,
+            threshold.get(row.subscription_id, WEBHOOK_DELIVERY_KEEP - 1) ?? null);
+          const keep = thresholds.get(row.subscription_id);
+          if (!keep || row.created_at > keep.created_at
+            || (row.created_at === keep.created_at && row.row_id >= keep.row_id)) continue;
+          deleted += remove.run(row.delivery_id).changes;
+          if (!gone.has(row.subscription_id)) gone.set(row.subscription_id, new Set());
+          gone.get(row.subscription_id).add(row.delivery_id);
         }
-      }
-      return Object.freeze({
-        deleted,
-        moreMayRemain: doomed.length === WEBHOOK_DELIVERY_PRUNE_BATCH,
-        batchLimit: WEBHOOK_DELIVERY_PRUNE_BATCH,
+        // Only these bounded subscription arrays change. Do not clone every
+        // credential/card/subscription just to discover an empty prune batch.
+        for (const [id, removed] of gone) {
+          const sub = this.subs.get(id);
+          if (!Array.isArray(sub?.deliveries)) continue;
+          previousArrays.set(sub, sub.deliveries);
+          sub.deliveries = sub.deliveries.filter(delivery => !removed.has(delivery.deliveryId));
+        }
+        const moreMayRemain = candidates.length === WEBHOOK_DELIVERY_PRUNE_BATCH;
+        const last = candidates.at(-1);
+        return Object.freeze({ deleted, examined: candidates.length, moreMayRemain,
+          batchLimit: WEBHOOK_DELIVERY_PRUNE_BATCH,
+          nextCursor: moreMayRemain ? { createdAt: last.created_at, deliveryId: last.delivery_id } : null });
       });
-    });
+    } catch (error) {
+      for (const [sub, deliveries] of previousArrays) sub.deliveries = deliveries;
+      throw error;
+    }
+    // Worker persists this returned checkpoint after the SQL commit. Node also
+    // progresses across ticks; a process restart simply repeats a safe prefix.
+    this.webhookRetentionCursor = result.nextCursor;
+    return result;
   }
 
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).

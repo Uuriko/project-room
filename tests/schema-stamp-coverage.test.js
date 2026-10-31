@@ -152,3 +152,27 @@ test("a room stamped by the pre-receipts deploy converges the rotation-receipts 
     } finally { woken.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("retention indexes converge on a deferred warm wake without changing delivery history", () => {
+  const dir = mkdtempSync(join(tmpdir(), "retention-index-stamp-"));
+  const filename = join(dir, "room.sqlite");
+  const names = ["web_fetch_log_retention", "web_research_log_retention", "agent_webhook_deliveries_retention"];
+  try {
+    const first = new RoomStore(filename);
+    first.db.prepare(`INSERT INTO agent_webhook_deliveries
+      (delivery_id,idempotency_key,subscription_id,agent_id,event_type,payload_json,signature,state,attempts,next_attempt_at,created_at,updated_at)
+      VALUES ('retained','retained','sub','agent','message.posted','{}','synthetic','pending',0,0,0,0)`).run();
+    const stamp = first.db.prepare("SELECT stamp FROM room_schema_stamp WHERE singleton=1").get().stamp;
+    for (const name of names) first.db.exec(`DROP INDEX ${name}`);
+    first.db.prepare("UPDATE room_schema_stamp SET stamp=? WHERE singleton=1").run("pre-retention-indexes");
+    const count = first.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n;
+    first.close();
+    const woken = new RoomStore(filename, { integrity: "deferred" });
+    try {
+      const present = woken.db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name);
+      for (const name of names) assert.ok(present.includes(name), name);
+      assert.equal(woken.db.prepare("SELECT stamp FROM room_schema_stamp WHERE singleton=1").get().stamp, stamp);
+      assert.equal(woken.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n, count);
+    } finally { woken.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

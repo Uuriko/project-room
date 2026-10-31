@@ -256,7 +256,8 @@ async function runNodeRetention(store, ctx) {
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
   try {
-    webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
+    webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries({ cursor: ctx.webhookRetentionCursor });
+    ctx.webhookRetentionCursor = webhookDeliveries.nextCursor;
     oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
     abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
   } catch { /* a room that has never stored these caches has no table */ }

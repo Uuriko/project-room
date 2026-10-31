@@ -67,6 +67,7 @@ function cronDeadline() {
 // handler/RPC surface and cannot carry test-only exports — workerd
 // rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
+const WEBHOOK_RETENTION_CURSOR_KEY = 'retention-webhook-cursor';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -573,7 +574,9 @@ export class ProjectRoom extends DurableObject {
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
     try {
-      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      const cursor = await this.ctx.storage.get(WEBHOOK_RETENTION_CURSOR_KEY);
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries({ cursor: cursor ?? null });
+      await this.ctx.storage.put(WEBHOOK_RETENTION_CURSOR_KEY, webhookDeliveries.nextCursor);
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
     } finally {
