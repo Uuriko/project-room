@@ -316,7 +316,7 @@ export class DmConsents {
 
   // pendingFor: incoming pending requests for a member (agentInbox surface).
   pendingFor(roomId, memberId) {
-    const state = this._roomState(roomId);
+    const state = { members: this.store.roomAuthority(roomId).members };
     this._requireActiveMember(state, memberId, "member_not_found");
     const rows = this.db.prepare(
       "SELECT * FROM dm_consents WHERE room_id=? AND target_id=? AND status='pending' ORDER BY created_at ASC"

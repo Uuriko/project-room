@@ -21,6 +21,10 @@ function makeStore(states) {
       try { const out = fn(); db.exec("COMMIT"); return out; }
       catch (e) { if (db.isTransaction) db.exec("ROLLBACK"); throw e; }
     },
+    roomAuthority(id) {
+      if (!states[id]) throw Object.assign(new Error("Room not found"), { status: 404, code: "room_not_found" });
+      return { members: states[id].members };
+    },
     room(id) {
       const state = states[id];
       return state ? { state } : null;
