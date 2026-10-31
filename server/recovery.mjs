@@ -1,6 +1,6 @@
 // Read-only offline audit. It neither repairs data nor proves post-capture authority.
 import { createHash } from "node:crypto";
-import { EVENT_TYPES, validId } from "../src/events.js";
+import { EVENT_TYPES, RETIRED_REPLAY_EVENT_TYPES, validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { applicationTables, lazyAdditiveTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
@@ -167,7 +167,7 @@ export function auditRecovery(store) {
         const event = JSON.parse(entry.body);
         requireState(entry.sequence === index + 1 && event.id === entry.id && event.roomId === row.id);
         requireState([event.id, event.idempotencyKey, event.actorId, event.roomId].every(validId)
-          && Object.values(EVENT_TYPES).includes(event.type) && typeof event.at === "string" && Number.isFinite(Date.parse(event.at))
+          && (Object.values(EVENT_TYPES).includes(event.type) || Object.values(RETIRED_REPLAY_EVENT_TYPES).includes(event.type)) && typeof event.at === "string" && Number.isFinite(Date.parse(event.at))
           && event.data && typeof event.data === "object" && !Array.isArray(event.data));
       });
       auditTextResults(store.db, actual.state, history);

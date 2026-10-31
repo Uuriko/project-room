@@ -16,6 +16,9 @@ import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-sess
 export const MAX_MESSAGE_BODY_CHARS = 65536;
 export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
 
+// Retained history only. These types must not re-enter the live command catalog.
+export const RETIRED_REPLAY_EVENT_TYPES = Object.freeze({ MESSAGE_REACTION_SET: "message.reaction_set" });
+
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_DEVELOPMENT_ACCESS_SET: "room.development_access_set",
@@ -707,7 +710,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
     // message.reaction_set; replay skips them.
-    "message.reaction_set": () => {},
+    [RETIRED_REPLAY_EVENT_TYPES.MESSAGE_REACTION_SET]: () => {},
     [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
