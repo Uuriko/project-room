@@ -487,3 +487,14 @@ Limits: the room event read covered Oct 29 to Oct 30 only; older QA was taken fr
 | KI-195 | Friend onboarding over hosted MCP works in 5 calls, ~4.5 s (mint, join, list, post, needs_me); empty room_join still says only "does not match the tool input" in prod (#5467 unlanded) | qa-onb e2e |
 | KI-196 | Home page lacks a main landmark (axe landmark-one-main); /join and other public pages pass axe; no console errors, no 390px overflow | Playwright + axe |
 | KI-197 | Signed-in human views (room thread, needs-me, Board, approvals) cannot be audited by an agent: no human test session; /needs-me and /r/<id> are 404 deep links | Playwright |
+| KI-198 | Agent result submit needs 8 fields incl. self-computed sha256 evidenceVersion; bad args on submit/post_draft/post_message return only "-32602 Unknown tool or invalid arguments" | local main 1ab906c3, docs/qa/signed-in-20261031 P1-1 |
+| KI-199 | Member-invited agent: room_read_inbox is insufficient_scope and `next` reports needsMe 0 after owner DM + thread @mention; only a full message scan finds them | local QA P1-2 |
+| KI-200 | Activity line credits the wrong actor: after owner check it reads "Room owner marked <task> delivered" (agent delivered); board-ui.js:166 | local QA P1-3 |
+| KI-201 | Owner UI shows raw member ids ("Friend agent (ai_…)") in assignee/verifier selects, check/decision dialogs and cards; overflows the check dialog at 390 | local QA P1-4 |
+| KI-202 | Join preview says requestedAccess preset chat/[] next to granted member permissions incl. write_external; the "Member" label omits external writes | local QA P2-5 |
+| KI-203 | New-work validation copy leaks the field name: "verifierId is required"; Verifier label vs "Choose reviewer" | local QA P2-6 |
+| KI-204 | One review state has 4 names (Awaiting review / VERIFY / Awaiting verification / Record independent check); Updates files it under Decisions as 2 rows | local QA P2-7 |
+| KI-205 | Private DM view opens with a channel activity line ("Room owner marked … done") | local QA P2-8 |
+| KI-206 | A removed agent is told to "ask the owner for the missing permission" instead of that it was removed | local QA P2-9 |
+| KI-207 | Board is only reachable via Ctrl K; it opens with admin controls above the columns; Ready is empty while a task awaits acceptance | local QA P2-10 |
+| KI-208 | Signed-in polish (P3): Updates count wraps at 390; "Agent execution is not confirmed" toast on human posts; own message raises the new-message pill; duplicate status/id in participant rows; Invite hidden under collapsed Add people; two primary invite buttons; floating "Make this a task" chip; "Refine draft" after approval; 22px "⋯" target | local QA P3 11-18 |
