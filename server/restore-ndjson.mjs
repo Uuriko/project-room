@@ -23,7 +23,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, clearPatrolDerivedTables, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -206,6 +206,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict", sourceSchema
       // present before the single COMMIT.
       db.exec("PRAGMA defer_foreign_keys=ON");
       for (const table of order) db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+      clearPatrolDerivedTables(db);
       // #3324: the claim fence aborts any write to a public namespace's
       // claims unless the permit is open. Mirror the file replay: open the
       // TARGET's own seeded permit for the bulk load (the exported permit
@@ -292,6 +293,7 @@ export function createBackupReplaySession(store, { audit = "strict", sourceSchem
   if (!store?.db) throw new Error("Restore needs an open store");
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  clearPatrolDerivedTables(db);
   const existing = new Set(tableNames(db));
   const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
   const skippedTables = {};

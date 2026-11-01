@@ -526,11 +526,27 @@ function insertOrder(names) {
 // acked / stranded) is derived from the wake tables themselves, which do
 // replay. Replay skips these and reports the row counts; the export itself
 // still holds the rows.
+export const PATROL_DERIVED_TABLES = Object.freeze(["patrol_idem_keys", "patrol_idem_coverage"]);
+// Dot 25625: a restore target with zero rooms may still hold derived patrol
+// rows; skipped incoming rows would leave them certifying restored history.
+// Clearing a rebuildable cache is always safe, whatever the export holds.
+export function clearPatrolDerivedTables(db) {
+  for (const table of PATROL_DERIVED_TABLES) {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) db.prepare(`DELETE FROM ${table}`).run();
+  }
+}
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // Dot 25585: the patrol key index and its coverage are a rebuildable
+  // cache that certifies ABSENCE of earlier keys. Export pages are not one
+  // snapshot, so a supported import landing between the coverage page and
+  // the (alphabetically later) keys page yields old coverage over an
+  // emptied index. A restore never trusts them: it starts uncovered and the
+  // legacy catch-up rebuilds from the restored events.
+  ...PATROL_DERIVED_TABLES
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
@@ -555,7 +571,7 @@ export function ensureNativeAgentRestoreSchema(db, names) {
   if (["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_host_disconnects"].some(table => names.has(table))) db.exec(wakeListenerLeaseSchema);
   if (names.has("agent_wake_room_activity")) db.exec(wakeRoomActivitySchema);
   if (names.has("integrity_failures")) db.exec(INTEGRITY_FAILURES_SCHEMA);
-  if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks", "patrol_rotation"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
+  if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks", "patrol_rotation", "patrol_idem_keys", "patrol_idem_coverage"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
   if (PROJECT_MAP_TABLES.some(table => names.has(table))) db.exec(PROJECT_MAP_SCHEMA);
   if (names.has("projection_shape_upgrades")) db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_provider_") && names.has(table))) ensureOAuthProviderSchema(db);
@@ -639,7 +655,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
     const existing = retained ?? new Set(tableNames(store.db));
     const skipped = {};
     for (const table of REPLAY_SKIPPED_TABLES) {
-      if (existing.has(table) || !byTable.has(table)) continue;
+      if (!byTable.has(table) || (existing.has(table) && !PATROL_DERIVED_TABLES.includes(table))) continue;
       skipped[table] = byTable.get(table).length;
       byTable.delete(table);
     }

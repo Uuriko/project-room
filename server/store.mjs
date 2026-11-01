@@ -6089,6 +6089,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {
         this.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
       }
+      // The patrol key index certifies absence of earlier idempotency keys;
+      // replaced history may keep the cursor's event id while changing keys
+      // below it, so the index and its coverage do not carry either.
+      for (const table of ["patrol_idem_keys", "patrol_idem_coverage"]) {
+        if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+          this.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(roomId);
+        }
+      }
       this.db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so

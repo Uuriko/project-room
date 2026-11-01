@@ -564,7 +564,7 @@ test('large idempotency look-back stays within Workers SQL binding limits', () =
     let lookbacks=0;
     store.db.prepare=sql=>{
       const statement=prepare(sql);
-      if(sql.includes("AS k") && sql.includes('FROM events')) {
+      if(sql.includes("AS k") && (sql.includes('FROM events') || sql.includes('FROM patrol_idem_keys'))) {
         lookbacks++;
         const all=statement.all.bind(statement);
         statement.all=(...args)=>{assert.ok(args.length<=100,'Workers SQL parameter ceiling');return all(...args);};

@@ -88,6 +88,9 @@ import { ACTIVE_CLAIM_STATES, CLAIM_LIFECYCLE, STATES as CLAIM_STATES } from "./
 import { hydrateProjection } from "./projection-at-rest.mjs";
 import { affectedMessageIds, archiveMarker } from "./messages-store.mjs";
 
+// Preceding events a not-yet-covered room indexes per attempt, so legacy
+// coverage catches up over ticks without one unbounded pass.
+export const PATROL_IDEM_BACKFILL = 500;
 // Events tailed per room per tick — the messages backfill's batch size, so a
 // long room catches up over ticks instead of holding one tick open.
 export const PATROL_BATCH = 200;
@@ -148,6 +151,12 @@ export const PATROL_SCHEMA = `
 -- Fair continuation for the per-tick room bound; persisted so a DO restart
 -- does not send the patrol back to the alphabetically first rooms.
 CREATE TABLE IF NOT EXISTS patrol_rotation (id INTEGER PRIMARY KEY CHECK (id = 1), last_room TEXT NOT NULL);
+-- Idempotency key index for the look-back: first sequence per key, and the
+-- sequence through which a room's keys are indexed contiguously from the
+-- start of its log. Without coverage the look-back falls back to the full
+-- scan, so rooms patrolled before the index existed miss nothing.
+CREATE TABLE IF NOT EXISTS patrol_idem_keys (room_id TEXT NOT NULL, idem_key TEXT NOT NULL, first_sequence INTEGER NOT NULL, PRIMARY KEY (room_id, idem_key));
+CREATE TABLE IF NOT EXISTS patrol_idem_coverage (room_id TEXT PRIMARY KEY, through INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS patrol_cursor (
   room_id TEXT PRIMARY KEY,
   sequence INTEGER NOT NULL,
@@ -582,14 +591,24 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
   }
 
   // Idempotency look-back: a key first used before this batch must not be
-  // re-used inside it. A JSON binding keeps even large batches within SQL's parameter limit.
+  // re-used inside it. With the key index covering everything through the
+  // batch start this is a keyed lookup; otherwise (a room patrolled before
+  // the index existed) it is the legacy scan of the preceding history.
+  // A JSON binding keeps even large batches within SQL's parameter limit.
+  const coveredThrough = batchStart === 0 ? 0
+    : (db.prepare("SELECT through FROM patrol_idem_coverage WHERE room_id=?").get(roomId)?.through ?? -1);
+  const covered = coveredThrough >= batchStart;
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
     const keys = [...new Set(keyUses.map(use => use.key))];
-    const prior = db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
+    const prior = covered
+      ? db.prepare(`SELECT first_sequence AS sequence, idem_key AS k FROM patrol_idem_keys
+        WHERE room_id=? AND first_sequence<=? AND idem_key IN (SELECT value FROM json_each(?))`).all(roomId, batchStart, JSON.stringify(keys))
+      : db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
       FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (SELECT value FROM json_each(?))`)
-      .all(roomId, batchStart, JSON.stringify(keys));
+        .all(roomId, batchStart, JSON.stringify(keys));
     if (prior.length) {
-      const firstByKey = new Map(prior.map(row => [row.k, row.sequence]));
+      const firstByKey = new Map();
+      for (const row of prior) if (!firstByKey.has(row.k) || row.sequence < firstByKey.get(row.k)) firstByKey.set(row.k, row.sequence);
       for (const use of keyUses) {
         if (firstByKey.has(use.key)) {
           file(use.sequence, use.eventId, "sequence", "idempotency_duplicate", null,
@@ -598,6 +617,11 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
       }
     }
   }
+  // Legacy coverage catch-up: index a bounded slice of preceding history.
+  const legacySlice = !covered && coveredThrough < batchStart
+    ? db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k FROM events
+      WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?`).all(roomId, Math.max(coveredThrough, 0), batchStart, PATROL_IDEM_BACKFILL)
+    : [];
 
   let blocked = 0;
   let blockedHead = null;
@@ -617,6 +641,19 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
     if (snapshot.reset) {
       db.prepare("DELETE FROM patrol_claims WHERE room_id=?").run(roomId);
       db.prepare("DELETE FROM patrol_messages WHERE room_id=?").run(roomId);
+      db.prepare("DELETE FROM patrol_idem_keys WHERE room_id=?").run(roomId);
+      db.prepare("DELETE FROM patrol_idem_coverage WHERE room_id=?").run(roomId);
+    }
+    {
+      const indexKey = db.prepare(`INSERT INTO patrol_idem_keys (room_id, idem_key, first_sequence) VALUES (?,?,?)
+        ON CONFLICT(room_id, idem_key) DO UPDATE SET first_sequence=MIN(first_sequence, excluded.first_sequence)`);
+      for (const row of legacySlice) if (typeof row.k === "string" && row.k) indexKey.run(roomId, row.k, row.sequence);
+      for (const use of keyUses) indexKey.run(roomId, use.key, use.sequence);
+      // A short slice means nothing else precedes the batch start (a log gap
+      // there must not stall coverage on a sequence that will never appear).
+      const legacyEnd = legacySlice.length < PATROL_IDEM_BACKFILL ? batchStart : legacySlice[legacySlice.length - 1].sequence;
+      const through = covered || legacyEnd >= batchStart ? processedEnd : legacyEnd;
+      db.prepare("INSERT INTO patrol_idem_coverage (room_id, through) VALUES (?,?) ON CONFLICT(room_id) DO UPDATE SET through=excluded.through").run(roomId, through);
     }
     const insert = db.prepare(`INSERT OR IGNORE INTO patrol_findings
       (room_id, sequence, event_id, invariant, kind, subject_id, detail, at) VALUES (?,?,?,?,?,?,?,?)`);
