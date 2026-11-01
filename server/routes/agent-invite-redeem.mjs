@@ -24,7 +24,7 @@ async function redeemInvite(ctx) {
     if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
     if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
     for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-    ctx.reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
+    ctx.reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId. Already have an identity? Send its secret as Authorization: Bearer <saved-identity-secret> to join as that identity; without it, redeeming creates a new identity (the 201 answers identityMinted: true).`);
   }
   // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
   // requestId makes an uncertain retry safe — the retry replays the
