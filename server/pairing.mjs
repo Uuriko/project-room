@@ -9,9 +9,16 @@
 // usable credential. An approved connection is delivered to the polling
 // device from a process-local buffer held only for the replay window,
 // never from the database; a restart inside that window ends the delivery
-// and the agent re-pairs. Poll errors for a live pair are RFC 8628
+// and the agent re-pairs — unless a delivery key is configured
+// (PAIR_DELIVERY_KEY, a base64 32-byte key held in the process
+// environment, never in the database): then approval also persists an
+// AES-256-GCM sealed copy of the delivery in pair_delivery_sealed,
+// bound to the pair id as GCM AAD, and a post-restart poll recovers the
+// connection from the sealed record. Without the key, or on any seal
+// mismatch, recovery fails closed to expired_token exactly as before.
+// Poll errors for a live pair are RFC 8628
 // codes (authorization_pending, slow_down, access_denied, expired_token).
-import { createHash, createPublicKey, randomBytes, randomUUID, scryptSync, timingSafeEqual, verify } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createPublicKey, randomBytes, randomUUID, scryptSync, timingSafeEqual, verify } from "node:crypto";
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { isValidPublicKey } from "./agent-card-signing.mjs";
@@ -70,6 +77,10 @@ export const pairingSchema = `
     last_poll_at INTEGER,
     decided_by TEXT
   );
+  CREATE TABLE IF NOT EXISTS pair_delivery_sealed (
+    pair_id TEXT PRIMARY KEY,
+    sealed TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS pairs_room_status ON pairs(room_id, status);
   CREATE INDEX IF NOT EXISTS pairs_code ON pairs(user_code_hash);
   CREATE TABLE IF NOT EXISTS pair_code_locks (
@@ -102,6 +113,51 @@ const sameDigest = (value, salt, hex) => {
 };
 
 const canonicalName = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+
+// Sealed durable delivery (the durable pair-delivery semantics in
+// W2-5517-SPEC.md, design Codex seq 25343). The key is read from the
+// process environment on every use and is never written to the
+// database; without a valid key, sealing is off and recovery is
+// impossible, which is exactly the pre-existing buffer-only behaviour.
+// The pair id is the GCM AAD, so a sealed record cannot be replayed
+// onto a different pair.
+const DELIVERY_KEY_ENV = "PAIR_DELIVERY_KEY";
+const deliveryKey = () => {
+  const raw = process.env[DELIVERY_KEY_ENV];
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const key = Buffer.from(raw, "base64");
+    return key.length === 32 ? key : null;
+  } catch {
+    return null;
+  }
+};
+
+function sealDelivery(key, pairId, payload) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(pairId, "utf8"));
+  const ct = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  return `v1.${iv.toString("base64")}.${cipher.getAuthTag().toString("base64")}.${ct.toString("base64")}`;
+}
+
+function unsealDelivery(key, pairId, sealed) {
+  try {
+    if (typeof sealed !== "string" || !sealed.startsWith("v1.")) return null;
+    const parts = sealed.slice(3).split(".");
+    if (parts.length !== 3) return null;
+    const [iv, tag, ct] = parts.map(part => Buffer.from(part, "base64"));
+    if (iv.length !== 12 || tag.length !== 16 || ct.length === 0) return null;
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAAD(Buffer.from(pairId, "utf8"));
+    decipher.setAuthTag(tag);
+    const payload = JSON.parse(Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8"));
+    if (typeof payload?.token !== "string" || typeof payload?.replayUntil !== "number") return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 // Dual-read shapes (T2-L10c-C1): a stored credential value is either a
 // legacy plaintext value written before the hashes-only fix or a 64-hex
@@ -163,6 +219,40 @@ export class Pairing {
     const now = this.store.now();
     for (const [id, entry] of this.delivery) if (now > entry.replayUntil) this.delivery.delete(id);
     this.delivery.set(pairId, { token, identitySecret: identitySecret ?? null, replayUntil });
+    // Durable sealed copy, only when a delivery key is configured; the
+    // database then holds ciphertext keyed from outside itself.
+    const key = deliveryKey();
+    if (key) {
+      try {
+        const sealed = sealDelivery(key, pairId, { token, identitySecret: identitySecret ?? null, replayUntil });
+        this.db.prepare("INSERT INTO pair_delivery_sealed(pair_id, sealed) VALUES(?,?) ON CONFLICT(pair_id) DO UPDATE SET sealed=excluded.sealed")
+          .run(pairId, sealed);
+      } catch {
+        // A failed seal never breaks in-process delivery; it only
+        // means this approval will not survive a restart.
+      }
+    }
+  }
+
+  // Post-restart recovery: unseal the durable copy for a hash row whose
+  // process-local buffer is gone. Any mismatch — no key, no record,
+  // bad tag, stale replay bound — returns null and the caller fails
+  // closed to expired_token; there is no plaintext fallback.
+  #recoverDelivery(row, now) {
+    const key = deliveryKey();
+    if (!key) return null;
+    let record;
+    try {
+      record = this.db.prepare("SELECT sealed FROM pair_delivery_sealed WHERE pair_id=?").get(row.pair_id);
+    } catch {
+      return null;
+    }
+    if (!record) return null;
+    const payload = unsealDelivery(key, row.pair_id, record.sealed);
+    if (!payload || payload.replayUntil !== row.replay_until || now > payload.replayUntil) return null;
+    const entry = { token: payload.token, identitySecret: payload.identitySecret ?? null, replayUntil: payload.replayUntil };
+    this.delivery.set(row.pair_id, entry);
+    return entry;
   }
 
   ensureSchema() {
@@ -433,6 +523,11 @@ export class Pairing {
     if (row.status === "pending") throw new PairPollError("authorization_pending");
     if (row.status !== "approved" || !row.issued_token || now > row.replay_until) {
       this.delivery.delete(pairId);
+      try {
+        this.db.prepare("DELETE FROM pair_delivery_sealed WHERE pair_id=?").run(pairId);
+      } catch {
+        // Sealed-row cleanup is hygiene only; never mask the poll error.
+      }
       throw new PairPollError("expired_token");
     }
     // Dual-read (T2-L10c-C1): a legacy row carries the live token and
@@ -444,7 +539,8 @@ export class Pairing {
     let token;
     let identitySecret;
     if (isHashHex(row.issued_token)) {
-      const held = this.delivery.get(pairId);
+      let held = this.delivery.get(pairId);
+      if (!held || now > held.replayUntil) held = this.#recoverDelivery(row, now);
       if (!held || now > held.replayUntil) {
         this.delivery.delete(pairId);
         throw new PairPollError("expired_token");
