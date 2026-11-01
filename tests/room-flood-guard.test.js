@@ -115,7 +115,7 @@ test("only chat posts and replies count; pins, edits, deletes, reads, work, and 
   try {
     f.send("owner", T.CLAIM_ACQUIRED, {
       workItemId: "w1", expectedRevision: 0, repository: "https://example.test/agenda",
-      ref: "draft", paths: ["agenda.md"], expiresAt: "2030-01-01T00:00:00.000Z",
+      ref: "draft", paths: ["agenda.md"], expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
     }, "claim-1");
   } catch (error) { assert.ok(notLimited(error)); }
   f.send("owner", "bond.list", {}, "bond-list-1");
