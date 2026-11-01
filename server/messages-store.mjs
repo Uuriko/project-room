@@ -12,6 +12,7 @@ export { closeKeepSet };
 // do not double-write. The integrity cron runs that replay.
 import { applyEvent, emptyRoomState, messageChannelId } from "../src/events.js";
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -1533,33 +1534,538 @@ export function checkMessagesParity(store, { roomId = null } = {}) {
 // The deferred integrity batch's parity step. checkMessagesParity keeps its
 // throwing contract for direct callers; here, one room's "messages parity
 // failed" verdict is isolated instead: the room is reported through
-// `report`, the sweep advances past it, and the rooms queued behind it are
-// still checked in the same visit (healthy rooms are certified until one
-// passes or every caught-up room has been attempted). Anything that is not
-// a per-room parity verdict — schema, storage — still throws. A failed
-// room keeps its cleared certification, so the verdict is unchanged; only
-// the blast radius shrinks.
-export function runMessagesParityCheck(store, { report = () => {} } = {}) {
+// `report`, the sweep advances past it, and the next room is tried in the
+// same visit. Anything that is not a per-room parity verdict — schema,
+// storage — still throws. A failed room keeps its cleared certification,
+// so the verdict is unchanged; only the blast radius shrinks.
+//
+// #5571 part 2: the step is bounded three ways the old loop was not.
+// (a) The deadline the batch already held is threaded into the per-room
+// certification (below), which works in checkpointed chunks instead of
+// one synchronous transaction over the room's full history — a room
+// whose certification exceeds the budget no longer wedges the job,
+// restarting from byte zero on every tick. (b) The sweep stops after
+// PARITY_MAX_FAILURES failed attempts per visit; the sweep cursor
+// already advances past failed rooms durably, so deferred rooms are
+// picked up on later ticks in rotation. (c) A room that is mid-scan when
+// the budget runs out reports inProgress with its progress banked in
+// integrity_parity_checkpoint, not a verdict.
+export function runMessagesParityCheck(store, { report = () => {}, deadline = Infinity, yieldBetween = null } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
   const failures = [];
   const attempted = new Set();
-  for (;;) {
+  const stats = { checkpointDiscards: 0, checkpointOversize: 0 };
+  const handleOutcome = (roomId, outcome) => {
+    if (outcome.status === "certified") {
+      report({ roomId, error: null });
+      return { ...outcome.result, failures, ...stats };
+    }
+    if (outcome.status === "failed") {
+      failures.push({ roomId, error: outcome.error });
+      report({ roomId, error: outcome.error });
+      rememberSweep(store, roomId);
+      return AGAIN;
+    }
+    if (outcome.status === "progress") {
+      return { ok: failures.length === 0, checked: 0, roomId, inProgress: 1, failures, budgetExceeded: 1, ...stats };
+    }
+    // "deferred": the room's head moved mid-scan or a newer attempt owns
+    // its checkpoint. No verdict either way; the sweep cursor stays put
+    // and the room is retried on a later visit.
+    return { ok: failures.length === 0, checked: 0, roomId, deferred: 1, failures, ...stats };
+  };
+  const step = () => {
+    if (failures.length >= PARITY_MAX_FAILURES) {
+      return { ok: failures.length === 0, checked: 0, roomId: null, failures, ...stats };
+    }
+    // The first room of a visit is always attempted, even on a spent
+    // budget: the engine banks the scan's checkpoint row before its own
+    // deadline checks stop it, so a budget-stopped visit always leaves
+    // resumable state behind instead of nothing.
+    if (attempted.size > 0 && Date.now() > deadline) {
+      return { ok: failures.length === 0, checked: 0, roomId: null, failures, budgetExceeded: 1, ...stats };
+    }
     const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
     const roomId = nextParityRoom(store.db, sweepAfter);
-    if (!roomId || attempted.has(roomId)) break;
+    if (!roomId || attempted.has(roomId)) {
+      return { ok: failures.length === 0, checked: 0, roomId: null, failures, ...stats };
+    }
     attempted.add(roomId);
-    try {
-      const certified = checkMessagesParity(store);
-      report({ roomId, error: null });
-      return { ...certified, failures };
-    } catch (error) {
-      if (!String(error?.message ?? error).startsWith("messages parity failed for ")) throw error;
-      failures.push({ roomId, error });
-      report({ roomId, error });
-      rememberSweep(store, roomId);
+    const outcome = certifyRoomBounded(store, roomId, { deadline, yieldBetween, stats });
+    if (outcome instanceof Promise) {
+      return outcome.then(resolved => {
+        const handled = handleOutcome(roomId, resolved);
+        return handled === AGAIN ? driveSteps(step, yieldBetween) : handled;
+      });
+    }
+    return handleOutcome(roomId, outcome);
+  };
+  return driveSteps(step, yieldBetween);
+}
+
+// Step driver for the bounded parity work: run step() synchronously
+// until it produces an outcome instead of AGAIN. Only when a yield hook
+// was provided does the first AGAIN cross into an async continuation
+// that yields between steps — so callers that never ask for a yield
+// (direct calls, the existing tests) stay fully synchronous, and a
+// small room completes synchronously even for callers that do ask.
+const AGAIN = Symbol("parity-again");
+function driveSteps(step, yieldBetween) {
+  for (;;) {
+    const outcome = step();
+    if (outcome !== AGAIN) return outcome;
+    if (!yieldBetween) continue;
+    return (async () => {
+      for (;;) {
+        await yieldBetween();
+        const next = step();
+        if (next !== AGAIN) return next;
+      }
+    })();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #5571 part 2: bounded, checkpointed parity certification of one room.
+//
+// The phases mirror the stretches the single-transaction certification
+// fused together: counts -> bodies (the body-hash verification split out
+// of hydrateProjection's verifyBodyHashes path) -> hydrate -> events
+// (the POSTED id->sequence map) -> diff (the messages row comparison) ->
+// certify. Between chunks the scan checks its deadline and yields; each
+// chunk commits its cursor advance in its own small write, so a kill
+// loses at most one chunk. Progress lives in integrity_parity_checkpoint;
+// the checkpoint is an optimisation, never an audit input — a corrupt,
+// stale or head-moved checkpoint is discarded and the room restarts,
+// exactly the rule rebuildProjection applies to projection checkpoints.
+// ---------------------------------------------------------------------------
+
+export const INTEGRITY_PARITY_CHECKPOINT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS integrity_parity_checkpoint (
+  room_id TEXT PRIMARY KEY,
+  attempt_seq INTEGER NOT NULL,
+  phase TEXT NOT NULL,
+  head_sequence INTEGER NOT NULL,
+  applied_seq INTEGER NOT NULL,
+  event_cursor INTEGER NOT NULL DEFAULT 0,
+  message_cursor TEXT NOT NULL DEFAULT '',
+  counts_json TEXT,
+  missing_json TEXT NOT NULL DEFAULT '[]',
+  staged_seq_json TEXT,
+  updated_at INTEGER NOT NULL
+)`;
+
+const PARITY_PHASES = ["counts", "bodies", "hydrate", "events", "diff"];
+const PARITY_CHUNK_ROWS = 200;
+const PARITY_CHUNK_BYTES = 256 * 1024;
+const PARITY_EVENT_SUBCHUNKS = 8;
+const PARITY_STAGED_CAP_BYTES = 1024 * 1024;
+const PARITY_MAX_FAILURES = 3;
+const PARITY_CHECKPOINT_FRESH_MS = 24 * 60 * 60 * 1000;
+
+const parityNow = store => (typeof store?.now === "function" ? store.now() : Date.now());
+const sha256Hex = body => createHash("sha256").update(body, "utf8").digest("hex");
+
+function parityHead(db, roomId) {
+  const room = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+  if (!room) return null;
+  const cursor = db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  return { sequence: room.sequence, appliedSeq: cursor?.applied_seq ?? 0 };
+}
+
+function readParityCheckpoint(db, roomId) {
+  return db.prepare("SELECT * FROM integrity_parity_checkpoint WHERE room_id=?").get(roomId) ?? null;
+}
+
+// Returns null for a row that cannot be trusted (unparseable JSON, unknown
+// phase, wrong-typed fields): the caller discards it and restarts.
+function parseParityCheckpoint(row) {
+  if (!row) return null;
+  try {
+    if (!PARITY_PHASES.includes(row.phase)) return null;
+    if (!Number.isSafeInteger(row.attempt_seq) || !Number.isSafeInteger(row.head_sequence)
+      || !Number.isSafeInteger(row.applied_seq) || !Number.isSafeInteger(row.event_cursor)
+      || typeof row.message_cursor !== "string" || !Number.isSafeInteger(row.updated_at)) return null;
+    const counts = row.counts_json === null ? null : JSON.parse(row.counts_json);
+    if (counts !== null && (typeof counts !== "object" || Array.isArray(counts))) return null;
+    const missing = JSON.parse(row.missing_json);
+    if (!Array.isArray(missing) || missing.some(id => typeof id !== "string")) return null;
+    const staged = row.staged_seq_json === null ? null : JSON.parse(row.staged_seq_json);
+    if (staged !== null && (typeof staged !== "object" || Array.isArray(staged))) return null;
+    return {
+      attemptSeq: row.attempt_seq, phase: row.phase,
+      headSequence: row.head_sequence, appliedSeq: row.applied_seq,
+      eventCursor: row.event_cursor, messageCursor: row.message_cursor,
+      counts, missing, staged, updatedAt: row.updated_at
+    };
+  } catch { return null; }
+}
+
+function deleteParityCheckpoint(db, roomId, attemptSeq = null) {
+  if (attemptSeq === null) db.prepare("DELETE FROM integrity_parity_checkpoint WHERE room_id=?").run(roomId);
+  else db.prepare("DELETE FROM integrity_parity_checkpoint WHERE room_id=? AND attempt_seq=?").run(roomId, attemptSeq);
+}
+
+// Start a genuinely new scan: bump the room's attempt generation, clear
+// the room's earlier certification (a failed or abandoned recheck must
+// not leave it usable — the single-transaction path cleared it at scan
+// start too), and write the phase-0 checkpoint, in one transaction.
+function startParityCheckpoint(store, roomId, head, previousAttemptSeq) {
+  const attemptSeq = previousAttemptSeq + 1;
+  store.transaction(() => {
+    store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    store.db.prepare(`INSERT INTO integrity_parity_checkpoint
+      (room_id, attempt_seq, phase, head_sequence, applied_seq, event_cursor, message_cursor, counts_json, missing_json, staged_seq_json, updated_at)
+      VALUES (?, ?, 'counts', ?, ?, 0, '', NULL, '[]', NULL, ?)
+      ON CONFLICT(room_id) DO UPDATE SET
+        attempt_seq=excluded.attempt_seq, phase='counts',
+        head_sequence=excluded.head_sequence, applied_seq=excluded.applied_seq,
+        event_cursor=0, message_cursor='', counts_json=NULL, missing_json='[]',
+        staged_seq_json=NULL, updated_at=excluded.updated_at`)
+      .run(roomId, attemptSeq, head.sequence, head.appliedSeq, parityNow(store));
+  });
+  return attemptSeq;
+}
+
+function certifyRoomBounded(store, roomId, { deadline = Infinity, yieldBetween = null, stats } = {}) {
+  const db = store.db;
+  const head = parityHead(db, roomId);
+  if (!head) return { status: "deferred" };
+  let scan = null;
+  const existing = readParityCheckpoint(db, roomId);
+  const previousAttemptSeq = Number.isSafeInteger(existing?.attempt_seq) ? existing.attempt_seq : 0;
+  if (existing) {
+    const parsed = parseParityCheckpoint(existing);
+    if (!parsed) {
+      stats.checkpointDiscards += 1;
+      deleteParityCheckpoint(db, roomId);
+    } else if (parsed.headSequence !== head.sequence || parsed.appliedSeq !== head.appliedSeq
+      || parityNow(store) - parsed.updatedAt > PARITY_CHECKPOINT_FRESH_MS) {
+      // Head moved or checkpoint stale: no partial certification is ever
+      // issued for a prefix of a moved head.
+      deleteParityCheckpoint(db, roomId);
+    } else if ((parsed.phase === "events" || parsed.phase === "diff") && parsed.staged === null) {
+      // A scan past the events phase must carry its staged map (the
+      // oversize freeze keeps the last fitting map banked, so a NULL
+      // here is foreign or corrupt, not a state this engine writes).
+      deleteParityCheckpoint(db, roomId);
+    } else {
+      scan = {
+        roomId, attemptSeq: parsed.attemptSeq, phase: parsed.phase,
+        headSequence: parsed.headSequence, appliedSeq: parsed.appliedSeq,
+        eventCursor: parsed.eventCursor, messageCursor: parsed.messageCursor,
+        counts: parsed.counts, missing: parsed.missing,
+        staged: parsed.staged === null ? null : new Map(Object.entries(parsed.staged)),
+        stagedBytes: parsed.staged === null ? 0 : JSON.stringify(parsed.staged).length,
+        stagedJson: existing.staged_seq_json ?? null, stagedDirty: false,
+        oversizeCounted: false,
+        bankedSnapshot: { phase: parsed.phase, eventCursor: parsed.eventCursor,
+          messageCursor: parsed.messageCursor, stagedJson: existing.staged_seq_json ?? null },
+        state: null, hydrationMissing: [], diffReady: false
+      };
     }
   }
-  return { ok: failures.length === 0, checked: 0, roomId: null, failures };
+  if (!scan) {
+    const attemptSeq = startParityCheckpoint(store, roomId, head, previousAttemptSeq);
+    scan = {
+      roomId, attemptSeq, phase: "counts",
+      headSequence: head.sequence, appliedSeq: head.appliedSeq,
+      eventCursor: 0, messageCursor: "", counts: null, missing: [],
+      staged: null, stagedBytes: 0, stagedJson: null, stagedDirty: false,
+      oversizeCounted: false, bankedSnapshot: null,
+      state: null, hydrationMissing: [], diffReady: false
+    };
+  }
+  // A visit always banks its first examined-row chunk before the
+  // deadline may stop it: the tick's fixed overheads (the incremental
+  // check, the legacy-shape upgrade) can consume the whole budget
+  // before the engine starts, and a stopped visit that banked nothing
+  // would leave the room exactly as wedged as the unbounded scan did.
+  // The exemption is bounded by one chunk (plus the bodies preamble),
+  // and adopted scans start with work already banked.
+  let bankedWork = scan.eventCursor > 0 || scan.messageCursor !== "";
+  // Oversize freeze: while the staged map fits its cap, every commit
+  // becomes the resume snapshot. Once the map outgrows the cap the
+  // banked row freezes at that last fitting boundary (phase, cursors
+  // and map together, so the snapshot is always self-consistent) and
+  // only its freshness timestamp advances; the scan continues in
+  // memory and can still certify in this call, but a later visit
+  // resumes from the frozen boundary, never from a cursor whose map
+  // was not persisted.
+  const commit = () => {
+    if (scan.stagedDirty) {
+      scan.stagedJson = scan.staged !== null
+        ? JSON.stringify(Object.fromEntries(scan.staged)) : null;
+      scan.stagedDirty = false;
+    }
+    const oversize = scan.stagedJson !== null
+      && scan.stagedJson.length > PARITY_STAGED_CAP_BYTES && scan.bankedSnapshot;
+    if (oversize && !scan.oversizeCounted) {
+      scan.oversizeCounted = true;
+      stats.checkpointOversize = 1;
+    }
+    const view = oversize
+      ? { phase: scan.bankedSnapshot.phase, eventCursor: scan.bankedSnapshot.eventCursor,
+          messageCursor: scan.bankedSnapshot.messageCursor, stagedJson: scan.bankedSnapshot.stagedJson }
+      : { phase: scan.phase, eventCursor: scan.eventCursor,
+          messageCursor: scan.messageCursor, stagedJson: scan.stagedJson };
+    const result = store.db.prepare(`UPDATE integrity_parity_checkpoint SET
+      phase=?, event_cursor=?, message_cursor=?, counts_json=?, missing_json=?, staged_seq_json=?, updated_at=?
+      WHERE room_id=? AND attempt_seq=?`)
+      .run(view.phase, view.eventCursor, view.messageCursor,
+        scan.counts === null ? null : JSON.stringify(scan.counts),
+        JSON.stringify(scan.missing),
+        view.stagedJson,
+        parityNow(store), scan.roomId, scan.attemptSeq);
+    const ok = result.changes === 1;
+    if (ok) {
+      bankedWork = bankedWork || view.eventCursor > 0 || view.messageCursor !== "";
+      if (!oversize) {
+        scan.bankedSnapshot = { phase: view.phase, eventCursor: view.eventCursor,
+          messageCursor: view.messageCursor, stagedJson: view.stagedJson };
+      }
+    }
+    return ok;
+  };
+  const fail = error => {
+    deleteParityCheckpoint(db, roomId, scan.attemptSeq);
+    return { status: "failed", error };
+  };
+  // The hydrated state is per-call working set only: checkpoints carry
+  // counts, missing ids, the staged sequence map and cursors, so a later
+  // visit rehydrates rather than persisting bulky state.
+  // The raw projection is parsed once per call and shared by the bodies
+  // and hydrate phases: at the sizes this tranche exists for, a second
+  // parse of the same bytes is a measurable slice of the tick budget.
+  const ensureRaw = () => {
+    if (!scan.raw) {
+      scan.raw = JSON.parse(db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+    }
+    return scan.raw;
+  };
+  const ensureState = () => {
+    if (scan.state) return scan.state;
+    const hydration = hydrateProjection(db, roomId, ensureRaw(), { verifyBodyHashes: false });
+    scan.state = hydration.state;
+    scan.hydrationMissing = hydration.missing;
+    return scan.state;
+  };
+  const ensureRawMessages = () => {
+    if (scan.rawMessages) return scan.rawMessages;
+    const raw = ensureRaw();
+    scan.rawMessages = Array.isArray(raw?.messages) ? raw.messages : [];
+    return scan.rawMessages;
+  };
+
+  const advance = () => {
+  for (;;) {
+    if (bankedWork && Date.now() > deadline) return { status: "progress", phase: scan.phase };
+
+    if (scan.phase === "counts") {
+      scan.counts = parityNumbers(db, roomId);
+      if (scan.counts.projectionCount !== scan.counts.tableCount
+        || scan.counts.projectionLastSeq !== scan.counts.tableLastSeq) {
+        return fail(new Error(`messages parity failed for ${roomId}: projection count ${scan.counts.projectionCount}, table count ${scan.counts.tableCount}, projection last seq ${scan.counts.projectionLastSeq}, table last seq ${scan.counts.tableLastSeq}`));
+      }
+      scan.phase = "bodies";
+      scan.messageCursor = "";
+      if (!commit()) return { status: "deferred" };
+      continue;
+    }
+
+    if (scan.phase === "bodies") {
+      // The hash verification split out of hydrateProjection: bodyRef
+      // appears only as a top-level string on inline raw-projection
+      // messages (entity and authority messages carry their bodies
+      // inline from the messages table), so scanning the raw projection
+      // verifies exactly the set the fused path verified. The cursor is
+      // the last examined message id, as in the diff phase.
+      const rawMessages = ensureRawMessages();
+      let index = 0;
+      if (scan.messageCursor !== "") {
+        const at = rawMessages.findIndex(message => message?.id === scan.messageCursor);
+        if (at < 0) {
+          stats.checkpointDiscards += 1;
+          deleteParityCheckpoint(db, roomId, scan.attemptSeq);
+          return { status: "deferred" };
+        }
+        index = at + 1;
+      }
+      // One batched fetch per chunk: a point lookup per message pays
+      // the statement overhead 200 times for what one IN query returns.
+      const chunkRefs = [];
+      for (let i = index; i < Math.min(index + PARITY_CHUNK_ROWS, rawMessages.length); i++) {
+        if (typeof rawMessages[i]?.bodyRef === "string") chunkRefs.push(rawMessages[i].bodyRef);
+      }
+      const bodies = new Map();
+      if (chunkRefs.length) {
+        const rows = db.prepare(`SELECT sha, body FROM projection_bodies
+          WHERE room_id=? AND sha IN (SELECT value FROM json_each(?))`)
+          .all(roomId, JSON.stringify(chunkRefs));
+        for (const row of rows) bodies.set(row.sha, row.body);
+      }
+      let bytes = 0;
+      let processed = 0;
+      while (index < rawMessages.length) {
+        if (processed >= PARITY_CHUNK_ROWS || bytes >= PARITY_CHUNK_BYTES) break;
+        // Bank partial progress if the budget runs out mid-chunk: the
+        // preamble (parsing the raw projection) can eat most of a tick,
+        // and a stopped chunk must still advance the banked cursor.
+        if (processed > 0 && processed % 50 === 0 && Date.now() > deadline) break;
+        const message = rawMessages[index];
+        index += 1;
+        processed += 1;
+        if (typeof message?.id === "string") scan.messageCursor = message.id;
+        if (!message || typeof message.bodyRef !== "string") continue;
+        const body = bodies.get(message.bodyRef);
+        if (typeof body !== "string") {
+          if (!scan.missing.includes(message.id)) scan.missing.push(message.id);
+          continue;
+        }
+        bytes += Buffer.byteLength(body);
+        if (sha256Hex(body) !== message.bodyRef && !scan.missing.includes(message.id)) {
+          scan.missing.push(message.id);
+        }
+      }
+      if (!commit()) return { status: "deferred" };
+      if (index < rawMessages.length) return AGAIN;
+      for (const id of scan.hydrationMissing) {
+        if (!scan.missing.includes(id)) scan.missing.push(id);
+      }
+      if (scan.missing.length) {
+        return fail(new Error(`messages parity failed for ${roomId}: stored message body missing`));
+      }
+      scan.phase = "hydrate";
+      if (!commit()) return { status: "deferred" };
+      continue;
+    }
+
+    if (scan.phase === "hydrate") {
+      ensureState();
+      // Hydration's own missing list covers body rows absent outright;
+      // both lists describe the same verdict the fused path threw here.
+      if (scan.hydrationMissing.length) {
+        return fail(new Error(`messages parity failed for ${roomId}: stored message body missing`));
+      }
+      scan.phase = "events";
+      scan.eventCursor = 0;
+      if (scan.staged === null) { scan.staged = new Map(); scan.stagedBytes = 0; scan.stagedDirty = true; }
+      if (!commit()) return { status: "deferred" };
+      continue;
+    }
+
+    if (scan.phase === "events") {
+      if (scan.staged === null) { scan.staged = new Map(); scan.stagedBytes = 0; scan.stagedDirty = true; }
+      // Sub-chunks of PARITY_CHUNK_ROWS under one commit: persisting the
+      // staged map costs a serialisation of the whole map, so committing
+      // every 200 events would make the phase quadratic in the room's
+      // history. One commit per advance bounds a kill's loss to
+      // PARITY_EVENT_SUBCHUNKS chunks while the deadline is still
+      // checked between sub-chunks.
+      let exhausted = false;
+      for (let sub = 0; sub < PARITY_EVENT_SUBCHUNKS && !exhausted; sub++) {
+        if (sub > 0 && Date.now() > deadline) break;
+        const rows = db.prepare(`SELECT sequence, body FROM events
+          WHERE room_id=? AND json_extract(body, '$.type')=? AND sequence>? AND sequence<=?
+          ORDER BY sequence LIMIT ?`)
+          .all(roomId, POSTED, scan.eventCursor, scan.headSequence, PARITY_CHUNK_ROWS);
+        let bytes = 0;
+        let consumed = 0;
+        for (const row of rows) {
+          if (consumed > 0 && bytes >= PARITY_CHUNK_BYTES) break;
+          bytes += Buffer.byteLength(row.body ?? "");
+          for (const id of affectedMessageIds(JSON.parse(row.body))) {
+            if (!scan.staged.has(id)) {
+              scan.staged.set(id, row.sequence);
+              scan.stagedBytes += id.length + 16;
+              scan.stagedDirty = true;
+            }
+          }
+          scan.eventCursor = row.sequence;
+          consumed += 1;
+        }
+        if (rows.length < PARITY_CHUNK_ROWS && consumed === rows.length) exhausted = true;
+        else if (consumed < rows.length) break; // byte bound: bank and yield
+      }
+      if (!commit()) return { status: "deferred" };
+      if (!exhausted) return AGAIN;
+      scan.phase = "diff";
+      scan.messageCursor = "";
+      if (!commit()) return { status: "deferred" };
+      continue;
+    }
+
+    if (scan.phase === "diff") {
+      if (!scan.diffReady) {
+        const state = ensureState();
+        scan.archive = archiveMarker(db, roomId);
+        const archivedRows = scan.archive.throughSeq
+          ? db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+            .all(roomId, scan.archive.throughSeq, scan.archive.retainedJson)
+          : [];
+        if (archivedRows.length !== scan.archive.count) {
+          return fail(new Error(`messages parity failed for ${roomId}: archived rows ${archivedRows.length}, marker count ${scan.archive.count}`));
+        }
+        const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
+        scan.messagesById = messages;
+        scan.pinned = new Set((state.pins ?? []).map(pin => pin.messageId));
+        scan.threadMessages = new Map([
+          ...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]),
+          ...messages
+        ]);
+        scan.diffReady = true;
+      }
+      const rows = db.prepare(`SELECT * FROM messages
+        WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))
+          AND seq<=? AND message_id>?
+        ORDER BY message_id LIMIT ?`)
+        .all(roomId, scan.archive.throughSeq, scan.archive.retainedJson, scan.headSequence, scan.messageCursor, PARITY_CHUNK_ROWS);
+      let bytes = 0;
+      let consumed = 0;
+      for (const row of rows) {
+        if (consumed > 0 && bytes >= PARITY_CHUNK_BYTES) break;
+        bytes += Buffer.byteLength(row.record_json ?? "");
+        const message = scan.messagesById.get(row.message_id);
+        const differences = messageRowParityFields(row, message, {
+          sequence: scan.staged?.get(message?.id), pinned: scan.pinned.has(message?.id), threadMessages: scan.threadMessages
+        });
+        if (differences.length) {
+          return fail(new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs (${differences.join(", ")})`));
+        }
+        scan.messageCursor = row.message_id;
+        consumed += 1;
+      }
+      if (!commit()) return { status: "deferred" };
+      if (consumed < rows.length || rows.length === PARITY_CHUNK_ROWS) return AGAIN;
+      // Certify: the closing writes happen exactly once, in one
+      // transaction fenced by the attempt generation and by the head
+      // bound still being current. If either guard fails the transaction
+      // writes nothing — a stale attempt cannot certify, cannot advance
+      // the sweep, and cannot delete a newer attempt's checkpoint.
+      const counts = scan.counts ?? parityNumbers(db, roomId);
+      const certified = store.transaction(() => {
+        const current = readParityCheckpoint(db, roomId);
+        if (!current || current.attempt_seq !== scan.attemptSeq) return false;
+        const headNow = parityHead(db, roomId);
+        if (!headNow || headNow.sequence !== scan.headSequence || headNow.appliedSeq !== scan.appliedSeq) return false;
+        const updated = db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=? WHERE room_id=? AND applied_seq=?")
+          .run(scan.appliedSeq, roomId, scan.appliedSeq);
+        if (updated.changes !== 1) return false;
+        rememberSweep(store, roomId);
+        deleteParityCheckpoint(db, roomId, scan.attemptSeq);
+        return true;
+      });
+      if (!certified) return { status: "deferred" };
+      return { status: "certified", result: { ok: true, checked: 1, roomId, ...counts } };
+    }
+
+    // Unknown phase (unreachable: admission validates the phase set).
+    stats.checkpointDiscards += 1;
+    deleteParityCheckpoint(db, roomId, scan.attemptSeq);
+    return { status: "deferred" };
+  }
+  };
+  return driveSteps(advance, yieldBetween);
 }
 
 // `target` certifies that one room instead of the sweep's next room (the

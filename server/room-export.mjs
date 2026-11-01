@@ -9,6 +9,7 @@ import { dirname } from "node:path";
 import { bootstrapLegacyWriteProofs } from "./write-integrity.mjs";
 import { STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { RoomStore, INTEGRITY_FAILURES_SCHEMA } from "./store.mjs";
+import { INTEGRITY_PARITY_CHECKPOINT_SCHEMA } from "./messages-store.mjs";
 import { wakeListenerLeaseSchema, wakeRoomActivitySchema } from "./agent-heartbeats.mjs";
 import { PATROL_SCHEMA } from "./patrol.mjs";
 import { PROJECT_MAP_SCHEMA, PROJECT_MAP_TABLES } from "./project-map-store.mjs";
@@ -558,6 +559,7 @@ export function ensureNativeAgentRestoreSchema(db, names) {
   if (["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"].some(table => names.has(table))) db.exec(PATROL_SCHEMA);
   if (PROJECT_MAP_TABLES.some(table => names.has(table))) db.exec(PROJECT_MAP_SCHEMA);
   if (names.has("projection_shape_upgrades")) db.exec(PROJECTION_SHAPE_UPGRADES_SCHEMA);
+  if (names.has("integrity_parity_checkpoint")) db.exec(INTEGRITY_PARITY_CHECKPOINT_SCHEMA);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_provider_") && names.has(table))) ensureOAuthProviderSchema(db);
   if (OAUTH_PROVIDER_TABLES.some(table => table.startsWith("oauth_invite_") && names.has(table))) {
     ensureMcpInviteOAuthSchema(db);

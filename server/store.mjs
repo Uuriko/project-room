@@ -58,7 +58,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp, resyncRoomMessageRows, syncMessageRows } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp, resyncRoomMessageRows, syncMessageRows, INTEGRITY_PARITY_CHECKPOINT_SCHEMA } from "./messages-store.mjs";
 import { hasMessageAuthority, canonicalMessageEditContext, canonicalMessagePostContext } from './message-authority.mjs';
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
@@ -1191,7 +1191,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN, INTEGRITY_ROOM_HASH_COLUMN, INTEGRITY_METADATA_HASH_COLUMN, INTEGRITY_SNAPSHOT_WATERMARK_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, INTEGRITY_PARITY_CHECKPOINT_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -2583,12 +2583,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     else this.clearIntegrityFailure("messages_parity", roomId);
   }
 
-  runIntegrityParityStep() {
+  runIntegrityParityStep({ deadline = Infinity, yieldBetween = null } = {}) {
     // Legacy record shapes would fail parity forever; upgrade them first.
     this.upgradeLegacyMessageShapes();
-    const result = runMessagesParityCheck(this, {
-      report: result => this.reportMessagesParity(result)
+    // #5571 part 2: the parity check runs synchronously until a chunk
+    // boundary actually needs the yield hook, so direct callers keep the
+    // old synchronous behaviour; when it does go async the deferred
+    // batch awaits the returned promise before reading the result.
+    const pending = runMessagesParityCheck(this, {
+      report: result => this.reportMessagesParity(result),
+      deadline,
+      yieldBetween
     });
+    return pending instanceof Promise ? pending.then(result => this.finishIntegrityParityStep(result)) : this.finishIntegrityParityStep(pending);
+  }
+
+  finishIntegrityParityStep(result) {
     // A room deleted since its failure was recorded is never picked by the
     // sweep again; its record is moot. The step-scoped record (record id
     // "") is not a room record — the batch loop clears it, against
@@ -2701,7 +2711,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
       ["messages_backfill", () => this.runIntegrityBackfillStep(deadline)],
-      ["messages_parity", () => this.runIntegrityParityStep()]
+      ["messages_parity", () => this.runIntegrityParityStep({ deadline, yieldBetween })]
     ];
     this.recheckIntegrityFailures();
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
@@ -2720,7 +2730,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       const [name, run] = steps[step];
       try {
-        const result = run();
+        const result = await run();
         // A step-scoped record from an earlier wedge clears only when
         // this visit verifiably covered the step's whole scope (see
         // stepVerifiedScope): incomplete or skipped work preserves it.
@@ -2759,6 +2769,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   ensureIntegrityRoomState() {
     this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
+    this.db.exec(INTEGRITY_PARITY_CHECKPOINT_SCHEMA);
     const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
     if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
     if (!columns.has("deferred_skips")) this.db.exec(INTEGRITY_DEFERRED_SKIPS_COLUMN);
@@ -6084,6 +6095,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
       // A parked room's block described the replaced log; it does not carry.
       this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+      // Same for a parity scan checkpointed against the replaced history
+      // (the table is lazy: it exists only once the parity step has run).
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='integrity_parity_checkpoint'").get()) {
+        this.db.prepare("DELETE FROM integrity_parity_checkpoint WHERE room_id=?").run(roomId);
+      }
       // Same for a patrol park (patrol_blocks is lazy: it exists only once
       // a patrol tick has run against this store).
       if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {

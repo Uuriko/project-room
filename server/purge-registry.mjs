@@ -1126,6 +1126,17 @@ const ROWS = [
     }
   },
   {
+    "table": "integrity_parity_checkpoint",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "owner_delegate_grants",
     "key": "room_id",
     "action": "delete",

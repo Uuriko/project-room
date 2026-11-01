@@ -555,7 +555,11 @@ const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill
 // projection_shape_upgrades (server/legacy-message-shape.mjs): audit rows of
 // the one-time legacy message shape upgrade, created on its first change. A
 // store that never held a legacy record has none; older writers have no path.
-const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures", "projection_shape_upgrades"]);
+// integrity_parity_checkpoint (#5571 part 2): the bounded parity scan's
+// per-room resume row, created lazily by ensureIntegrityRoomState — a
+// store the parity step has never run against has none, so it is allowed
+// by the recovery audit but never required.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures", "projection_shape_upgrades", "integrity_parity_checkpoint"]);
 // patrol_* (ClueBot phase 1, server/patrol.mjs): the resident patrol's own
 // per-room cursor, claim/message shadows and findings journal. Purely
 // additive, created lazily by ensurePatrolSchema on the first patrol tick
