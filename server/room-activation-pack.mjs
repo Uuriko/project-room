@@ -12,7 +12,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
-import { availableClaimsInRoom, memoizeBoardList } from "./available-work.mjs";
+import { availableClaimsInRoom, memoizeBoardList, ownClaimsFromBoard } from "./available-work.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -66,6 +66,19 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       leaseExpiresAt: null,
  *       untrusted: true,       // title is member-authored
  *       claimAction: { method: "POST", endpoint: string, params: object }
+ *     }
+ *   ],
+ *   myClaims: [                // board claims the viewer already holds:
+ *     {                        // the seeded starter lives here, claimed by
+ *       id: string,            // its creator — it is in neither openWork
+ *       title: string,         // nor openClaims (UT26 lane 10 F3)
+ *       source: "board",
+ *       roomId: string,
+ *       state: "claimed"|"in_progress"|"blocked"|"delivered",
+ *       owner: string,         // the viewer
+ *       leaseExpiresAt: string|null,
+ *       untrusted: true,
+ *       updateAction: { method: "POST", endpoint: string }
  *     }
  *   ],
  *   pinnedResources: [         // pinned messages, pin order
@@ -186,6 +199,12 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     members,
     openWork,
     openClaims: availableClaimsInRoom(store, roomSlug, { viewerId, boardList }),
+    // The viewer's own held board claims (UT26 lane 10 F3): the seeded
+    // starter is claimed by its creator, so it is in neither openWork
+    // (work items) nor openClaims (unclaimed rows only). Without this
+    // section the pack told a new room's creator the room had no work
+    // while their starter's lease was already running.
+    myClaims: ownClaimsFromBoard(boardList(roomSlug), roomSlug, viewerId),
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
     // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
     // messageVisibleToViewer predicate also enforces the history floor, and

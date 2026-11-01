@@ -87,6 +87,36 @@ function viewerMayClaim(state, viewerId) {
   return mayWriteWorkClaims({ member: { ...member, id: viewerId }, ownerId: state?.room?.ownerId ?? null });
 }
 
+// Board claims the viewer already holds. These are NOT available work —
+// they are the viewer's in-flight obligations — but orientation surfaces
+// that only union work items with unclaimed board rows render them
+// invisible: the room-creation starter is a board claim in state "claimed",
+// so it appeared in neither the activation pack's openWork nor its
+// openClaims (UT26 lane 10 F3). Held states mirror the claim engine's
+// active + reviewable sets (server/work-claims.mjs); terminal states
+// (done, closed) and invalidated rows are history, not obligations.
+const HELD_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked", "delivered"]);
+
+export function ownClaimsFromBoard(board, roomId, viewerId) {
+  if (!viewerId) return [];
+  const list = Array.isArray(board) ? board : [];
+  return list.filter(item => usableClaim(item) && item.owner === viewerId && HELD_CLAIM_STATES.has(item.state))
+    .map(item => ({
+      id: item.id,
+      title: item.title ?? item.id,
+      source: "board",
+      roomId,
+      state: item.state,
+      owner: viewerId,
+      leaseExpiresAt: item.leaseExpiresAt ?? null,
+      untrusted: true,
+      updateAction: {
+        method: "POST",
+        endpoint: `/api/rooms/${roomId}/work-claims/${item.id}/update`
+      }
+    }));
+}
+
 // Per-request board-list memo (PERF-10X L4, Lane 3 item #3): one decoded
 // board per request, shared by every consumer in that request. The board
 // list is the expensive read (a full SELECT + JSON decode of every claim
