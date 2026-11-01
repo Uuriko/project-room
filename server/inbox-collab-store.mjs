@@ -32,6 +32,7 @@ import { createInternalNotes } from "./inbox-internal-notes.mjs";
 import { createCollisionTracker } from "./inbox-collision.mjs";
 import { createApprovalQueue } from "./inbox-approval.mjs";
 import { createAgentRouter } from "./inbox-agent-routing.mjs";
+import { refuseArchivedWriteDb } from "./archived-guard.mjs";
 
 export const inboxCollabSchema = `
 CREATE TABLE IF NOT EXISTS collab_assignments (
@@ -159,6 +160,13 @@ export class InboxCollabStore {
   // entry, so the next access replays from the rolled-back database instead
   // of serving a journal that ran ahead of it.
   #transact(roomId, entry, journalFn, persistFn) {
+    // G8 (T2-L05c-C1): every collab journal mutation — assignments,
+    // notes, draft locks, approvals, routing — funnels through
+    // #transact, so the archived-room freeze lives here, at the store
+    // layer, once. Replay (#replayRoom) does not pass through #transact
+    // and reads never call it, so a frozen room's collab state still
+    // replays and reads back; only new writes refuse 409 room_archived.
+    refuseArchivedWriteDb(this.db, roomId);
     const logged = loggedMutation(entry, journalFn);
     try {
       return this.store.transaction(() => persistFn(logged));

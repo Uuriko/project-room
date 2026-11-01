@@ -117,12 +117,17 @@ test('a blank title is refused before any claim or event is recorded', async t =
   assert.equal((await claimEvents(owner)).length, 0);
 });
 
-test('an archived room still records a claim and appends no event', async t => {
-  const { owner } = await fixture(t);
+test('an archived room records no claim and appends no event (EA-001)', async t => {
+  const { store, owner } = await fixture(t);
   // Archive with the owner's own key. Issuing a second key would revoke it.
   await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
-  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
-  assert.equal(created.id, 'after-archive');
+  // Before the freeze fix this create returned a claim row that lived
+  // only in the work_claims registry while the room stayed frozen — a
+  // phantom write. The registry now refuses with the commands route's
+  // own 409 room_archived shape, and nothing is recorded anywhere.
+  await assert.rejects(owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' }),
+    error => error.status === 409 && error.code === 'room_archived');
+  assert.equal(store.workClaims.get('commons', 'after-archive'), null);
   assert.equal((await claimEvents(owner)).length, 0);
 });
 
