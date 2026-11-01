@@ -28,8 +28,10 @@ export async function loadJsonl(filePath) {
  * - Deterministic-first: a task passes only when every scorer returns
  *   exactly 1. A fractional score (e.g. 0.5) fails the task; the raw score
  *   is still recorded as-is in result.scores and counts in the summary.
- * - Zero scorers ({} or omitted) is a vacuous pass: with nothing to check,
- *   "every scorer returned 1" is true, so every task passes.
+ * - Zero scorers ({} or omitted) REFUSES to run (T-4 hardening of
+ *   find:evals-harness-001): with nothing to check, "every scorer
+ *   returned 1" is vacuously true and every task would pass having
+ *   been graded by nobody. runEval throws instead of grading.
  * - A missing outcome trajectory defaults to [].
  * - Task ids must be unique: duplicates throw before any task runs, because
  *   results are keyed by task id.
@@ -50,6 +52,14 @@ export async function runEval({ tasks, solver, scorers }) {
     seen.add(task.id);
   }
 
+  const scorerEntries = Object.entries(scorers ?? {});
+  if (scorerEntries.length === 0) {
+    throw new Error('runEval needs at least one scorer — an empty scorers object would pass every task vacuously (find:evals-harness-001)');
+  }
+  for (const [name, scorer] of scorerEntries) {
+    if (typeof scorer !== 'function') throw new Error(`runEval: scorer "${name}" is not a function`);
+  }
+
   const results = [];
   for (const task of tasks) {
     let outcome;
@@ -60,7 +70,7 @@ export async function runEval({ tasks, solver, scorers }) {
       throw new Error(`runEval: solver failed for task "${task.id}": ${reason}`, { cause: err });
     }
     const scores = {};
-    for (const [name, scorer] of Object.entries(scorers ?? {})) {
+    for (const [name, scorer] of scorerEntries) {
       const score = await scorer(task, outcome);
       if (typeof score !== 'number' || Number.isNaN(score)) {
         throw new Error(`scorer "${name}" returned non-numeric score for task ${task.id}`);

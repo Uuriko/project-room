@@ -34,7 +34,13 @@ test("perf-budget network profiles follow the viewport", () => {
 
 test("perf-budget measures /about on a local server", { timeout: 120000 }, async t => {
   if (!chromiumAvailable(chromium)) {
-    t.skip("Chromium is not installed (npx playwright install chromium); the browser measurement is skipped");
+    // LOUD skip (T-4, find:perf-budget-001): the unit-shards CI job never
+    // installs Chromium, so this skip fires on every gated run. It must
+    // not be silent — emit a workflow annotation and a plain banner so
+    // "perf budget verified" is never inferred from this green.
+    console.error("::warning title=perf-budget UNMEASURED::Chromium is not installed, so the /about page-weight measurement DID NOT RUN in this job. No perf budget was verified.");
+    console.error("PERF-BUDGET UNMEASURED: Chromium missing — measurement skipped, budget NOT verified (install with: npx playwright install chromium, or set ROOM_TEST_CHROMIUM_PATH).");
+    t.skip("Chromium is not installed (npx playwright install chromium); the browser measurement is skipped — PERF BUDGET NOT VERIFIED");
     return;
   }
   const local = await startLocalServer();

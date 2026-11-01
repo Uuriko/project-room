@@ -280,14 +280,15 @@ test("an unrecognized provider payload is not scored as a miss, and a leaked key
   assert.equal(broken.report.engines[0].mention_rate, null);
 });
 
-test("missing answer-engine keys exit 0 with a skip line and no mention rate", () => {
+test("missing answer-engine keys exit 1 with MEASURED-NOTHING and no mention rate (vacuous run hardened, find:answer-engine-check-001)", () => {
   const dir = workdir();
   const skipped = spawnSync(process.execPath, [script, "--out-dir", dir], {
     cwd: dir,
     env: { PATH: process.env.PATH },
     encoding: "utf8",
   });
-  assert.equal(skipped.status, 0);
+  assert.equal(skipped.status, 1, "a run that measured nothing must fail, not exit 0");
+  assert.match(skipped.stdout, /MEASURED-NOTHING/);
   for (const name of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "PERPLEXITY_API_KEY", "XAI_API_KEY"]) {
     assert.match(skipped.stdout, new RegExp(`skipped: ${name} not set`));
   }
