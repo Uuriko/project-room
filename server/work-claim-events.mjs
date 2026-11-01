@@ -56,6 +56,9 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
       outcome: action === "pr_merged" ? "merged" : "closed"
     };
   }
+  // Kind is fixed at creation. Stamping it on land/deploy receipts lets a
+  // replay judge closeWhenLive moves after the registry row is deleted.
+  if (item.kind === "land" || item.kind === "deploy") data.kind = item.kind;
   if (reason) data.reason = reason;
   if (ciState) data.ciState = ciState;
   if (verdict) data.verdict = verdict;
