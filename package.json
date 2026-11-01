@@ -23,6 +23,7 @@
     "build:og-atlas": "node scripts/build-og-atlas.mjs",
     "github-app:check": "node scripts/github-app-check.mjs",
     "analytics:backfill": "node scripts/analytics-backfill.mjs",
+    "migrate:pairs-plaintext": "node scripts/migrate-pairs-plaintext.mjs",
     "analytics:bond-shadow": "node scripts/claim-bond-shadow.mjs",
     "analytics:claim-reputation": "node scripts/claim-reputation-sync.mjs",
     "analytics:funnel": "node scripts/an-funnel-1.mjs",
