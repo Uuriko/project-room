@@ -64,6 +64,22 @@ export function perRoomAttention(doc) {
   return lines;
 }
 
+// The room the owner came from goes first; nothing is hidden and the
+// server's order is kept within each group (a stable partition).
+export function currentRoomFirst(items, roomId) {
+  if (!Array.isArray(items) || typeof roomId !== "string" || !roomId) return items;
+  const here = items.filter(item => item?.roomId === roomId);
+  return here.length ? [...here, ...items.filter(item => item?.roomId !== roomId)] : items;
+}
+
+// A copy of the overview with the current room's decisions and exceptions
+// first. Counts and totals are untouched.
+export function withCurrentRoomFirst(doc, roomId) {
+  if (!doc || typeof roomId !== "string" || !roomId) return doc;
+  const order = section => section && Array.isArray(section.items) ? { ...section, items: currentRoomFirst(section.items, roomId) } : section;
+  return { ...doc, decisions: order(doc.decisions), exceptions: order(doc.exceptions) };
+}
+
 export function attentionLinesTruncated(doc) {
   const total = doc?.decisions?.total;
   const shown = Array.isArray(doc?.decisions?.items) ? doc.decisions.items.length : 0;
@@ -193,7 +209,7 @@ export function renderRoster(roster) {
   return uiText("cockpit.rosterHtml", { summary: esc(summaryLine), rows });
 }
 
-export function createOwnerCockpit({ accountClient, section, decide }) {
+export function createOwnerCockpit({ accountClient, section, decide, currentRoomId = () => null }) {
   const summary = section.querySelector("#cockpit-summary");
   const badge = section.querySelector("#cockpit-attention-badge");
   const roomLines = section.querySelector("#cockpit-room-lines");
@@ -336,7 +352,9 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
       return;
     }
     if (mine !== epoch || !doc) return;
-    render(doc);
+    let here = null;
+    try { here = currentRoomId(); } catch { here = null; }
+    render(withCurrentRoomFirst(doc, here));
   }
 
   return Object.freeze({ refresh });

@@ -813,7 +813,7 @@ const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cock
   const session = accountClient.currentSession("deciding an access request", { authenticated: true });
   return accountClient.request(action.path, { method: action.method, data: action.body, session,
     headers: { "X-Project-Room-Auth": "account" } });
-} });
+}, currentRoomId: () => state?.room?.id ?? null });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
 // One attention destination; historical palette names resolve here.
