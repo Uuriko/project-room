@@ -1,4 +1,5 @@
 import { uiText } from './strings.js';
+import { MVP_ONLY } from './room-layout.js';
 // One button plus two preference switches. It asks the browser for
 // notification permission and subscribes this device; the checkboxes choose
 // which event kinds (mentions, direct messages) may wake it. Preferences are
@@ -102,7 +103,7 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
     // Declared outside try so the catch can un-resolve this member on failure.
     let sessionKey = null;
     try {
-      if (!eligible()) { hide(); return; }
+      if (!eligible() || MVP_ONLY) { hide(); return; }
       sessionKey = client.session?.member?.id ?? "";
       if (resolvedFor === sessionKey) return;
       const config = await client.humanPushConfig();

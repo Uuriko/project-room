@@ -1,4 +1,5 @@
 import { terminalWork } from "./workflow.js";
+import { MVP_ONLY } from "./room-layout.js";
 import { reminderTime, formatReminderTime } from "./reminder-time.js";
 
 export function installReminders({ client, getState, onSaved }) {
@@ -96,7 +97,7 @@ export function installReminders({ client, getState, onSaved }) {
       try {
         do {
           current.again = false;
-          const result = await client.reminders();
+          const result = MVP_ONLY ? null : await client.reminders();
           if (!owns(ticket) || request !== serial || !result) return false;
           apply(result);
         } while (current.again);
