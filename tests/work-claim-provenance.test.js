@@ -100,7 +100,7 @@ test("walkProvenance returns direct and transitive downstream with depth", () =>
 test("walkProvenance is cycle-safe and caps runaway graphs", () => {
   // A cycle built through two claimed items (the pure layer refuses only
   // direct self-parenting; longer cycles stay possible through updates).
-  let x = claimWork(createWork({ id: "x", parentClaimId: "y" }, { now: NOW, agentId: "coord" }), "worker", { now: NOW });
+  const x = claimWork(createWork({ id: "x", parentClaimId: "y" }, { now: NOW, agentId: "coord" }), "worker", { now: NOW });
   let y = claimWork(createWork({ id: "y" }, { now: NOW, agentId: "coord" }), "worker", { now: NOW });
   y = updateWork(y, "worker", { parentClaimId: "x", now: NOW });
   const walk = walkProvenance([x, y], "x");

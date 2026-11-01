@@ -552,7 +552,7 @@ test("trigger: collab assignment to an offline agent POSTs assignment.created", 
 
 test("trigger: assignment to an offline agent without push config POSTs nothing", async t => {
   const f = createAcceptanceFixture();
-  let at = Date.now();
+  const at = Date.now();
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("no-push-agent");

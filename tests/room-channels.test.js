@@ -52,7 +52,7 @@ test("legacy rooms without channels backfill the main channel on replay", () => 
 });
 
 test("a member can create a channel; names normalize", () => {
-  let state = applyEvent(baseState(), mkChannel("ch-design", "maya", { name: "Design Team" }));
+  const state = applyEvent(baseState(), mkChannel("ch-design", "maya", { name: "Design Team" }));
   assert.deepEqual(state.channels["ch-design"], {
     id: "ch-design", name: "design-team", createdBy: "maya",
     createdAt: "2026-09-05T10:00:00.000Z", archivedAt: null

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 
 const fresh = (overrides = {}) => {
-  let t = 1_700_000_000_000;
+  const t = 1_700_000_000_000;
   return createAgentApiKeys({
     clock: () => t,
     random: () => "fixed-test-secret-0123456789abcdef",

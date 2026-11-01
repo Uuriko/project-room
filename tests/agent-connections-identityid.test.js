@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function fixture(t) {
-  let now = Date.now();
+  const now = Date.now();
   const store = new RoomStore(":memory:", { now: () => now });
   store.initialize(initialRoom());
   t.after(() => store.close());

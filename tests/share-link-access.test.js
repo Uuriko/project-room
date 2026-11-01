@@ -13,7 +13,7 @@ import { linkPermissions } from "../server/share-links.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-link-access-"));
-  let now = Date.now();
+  const now = Date.now();
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => now }); store.initialize(initialRoom("commons", "owner"));
   const ownerKey = store.issueAccessKey("commons", "owner");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });

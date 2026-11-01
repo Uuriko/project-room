@@ -19,7 +19,7 @@ const JILL = "id:agent/jill";       // poster lane
 const GROK = "id:agent/grokbot";    // worker lane
 const CODEX = "id:agent/codex";     // second worker lane
 
-let nowMs = 1_786_000_000_000;
+const nowMs = 1_786_000_000_000;
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 
 function makeEscrow(db = new DatabaseSync(":memory:")) {

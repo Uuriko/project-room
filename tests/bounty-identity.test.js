@@ -24,7 +24,7 @@ const CODEX = "id:agent/codex";
 const OWNER = "owner";
 const GHOST = "id:agent/ghost"; // never a member
 
-let nowMs = 1_786_000_000_000;
+const nowMs = 1_786_000_000_000;
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 
 function makeMembers() {

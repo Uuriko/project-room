@@ -18,7 +18,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 // A room with one owner and one live share link (25 join slots, the max).
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-invite-abuse-"));
-  let now = Date.now();
+  const now = Date.now();
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => now });
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
