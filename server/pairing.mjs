@@ -1,7 +1,16 @@
 import { assertMessageWrite, recordMessageWrite } from './write-integrity.mjs';
 // Device-code pairing for agents that can fetch a URL, plus reconnect-by-key
-// and owner merge of two agent members. The user code and device secret are
-// stored only as scrypt hashes. Poll errors for a live pair are RFC 8628
+// and owner merge of two agent members. The pairs table stores only scrypt
+// hashes of every credential it handles: the user code, the device secret,
+// the issued room token, the identity secret and a held device secret
+// (T2-L10c-C1; the authoritative credential stores — credentials and
+// agent_identities — are hash-only too). Rows written before that fix may
+// still carry plaintext values and are dual-read: legacy plaintext is
+// served and verified as before, while a stored hash is never itself a
+// usable credential. An approved connection is delivered to the polling
+// device from a process-local buffer held only for the replay window,
+// never from the database; a restart inside that window ends the delivery
+// and the agent re-pairs. Poll errors for a live pair are RFC 8628
 // codes (authorization_pending, slow_down, access_denied, expired_token).
 import { createHash, createPublicKey, randomBytes, randomUUID, scryptSync, timingSafeEqual, verify } from "node:crypto";
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
@@ -30,6 +39,8 @@ export const PAIR_REPLAY_MS = 10 * 60 * 1000;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_SALT = "project-room-pair-code-v1";
 const DEVICE_SALT = "project-room-pair-device-v1";
+const TOKEN_SALT = "project-room-pair-token-v1";
+const IDENTITY_SALT = "project-room-pair-identity-v1";
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 const MAX_PENDING_PER_ROOM = 5;
 const LOCK_AFTER = 5;
@@ -93,6 +104,16 @@ const sameDigest = (value, salt, hex) => {
 
 const canonicalName = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
 
+// Dual-read shapes (T2-L10c-C1): a stored credential value is either a
+// legacy plaintext value written before the hashes-only fix or a 64-hex
+// scrypt digest written after it. The shapes never collide: room tokens
+// are 43-char base64url, identity secrets carry a "pri_" prefix, and user
+// codes are "XXXX-XXXX".
+const HASH_HEX = /^[0-9a-f]{64}$/;
+const CODE_FORMAT = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+const isHashHex = value => typeof value === "string" && HASH_HEX.test(value);
+const legacyCode = value => (typeof value === "string" && CODE_FORMAT.test(value) ? value : null);
+
 export function pairProofBytes(roomId, displayName, publicKey) {
   return Buffer.from(`project-room-pair-v1\n${roomId}\n${String(displayName).trim()}\n${publicKey}`, "utf8");
 }
@@ -134,6 +155,15 @@ export class Pairing {
     this.store = store;
     this.db = store.db;
     this.hits = new Map();
+    // Approved connections awaiting poll delivery, held only in memory
+    // for the replay window (see the header note). Never persisted.
+    this.delivery = new Map();
+  }
+
+  #rememberDelivery(pairId, token, identitySecret, replayUntil) {
+    const now = this.store.now();
+    for (const [id, entry] of this.delivery) if (now > entry.replayUntil) this.delivery.delete(id);
+    this.delivery.set(pairId, { token, identitySecret: identitySecret ?? null, replayUntil });
   }
 
   ensureSchema() {
@@ -335,9 +365,13 @@ export class Pairing {
       const pairId = `pair${randomBytes(8).toString("hex")}`;
       const deviceSecret = randomBytes(32).toString("base64url");
       const now = this.store.now();
+      // The user_code column is kept only so pre-fix rows stay readable;
+      // new rows store the code's scrypt hash there (the same value as
+      // user_code_hash), never the code itself (T2-L10c-C1).
+      const codeHash = digestHex(raw.replace("-", ""), CODE_SALT);
       this.db.prepare(`INSERT INTO pairs(pair_id, room_id, display_name, user_code_hash, user_code, device_secret_hash, status,
         public_key, duplicate_member_id, created_at, expires_at) VALUES(?,?,?,?,?,?, 'pending', ?,?,?,?)`)
-        .run(pairId, roomId, name, digestHex(raw.replace("-", ""), CODE_SALT), raw, digestHex(deviceSecret, DEVICE_SALT),
+        .run(pairId, roomId, name, codeHash, codeHash, digestHex(deviceSecret, DEVICE_SALT),
           publicKey ?? null, duplicateMemberId, now, now + PAIR_TTL_MS);
       this.#append(roomId, this.#pairEvent(roomId, pairId, T.PAIR_REQUESTED, {
         pairId, displayName: name, userCode: raw, status: "pending",
@@ -351,7 +385,10 @@ export class Pairing {
         return { reconnected: Boolean(admitted.connection.reconnected), connection: { ...admitted.connection, ...(origin ? { origin } : {}) } };
       }
       if (holdFor) {
-        this.db.prepare("UPDATE pairs SET hold_secret=?, starter_identity_id=? WHERE pair_id=?").run(deviceSecret, holdFor, pairId);
+        // Hold only the device secret's scrypt digest (the same value as
+        // device_secret_hash): pollHeld authorizes on the starter identity
+        // match, so the raw secret never needs to sit in the row.
+        this.db.prepare("UPDATE pairs SET hold_secret=?, starter_identity_id=? WHERE pair_id=?").run(digestHex(deviceSecret, DEVICE_SALT), holdFor, pairId);
       }
       return {
         pairId, userCode: raw, approveUrl: `/pair/${raw}`, pollUrl: `/api/pair/${pairId}`,
@@ -362,16 +399,29 @@ export class Pairing {
 
   pollHeld(pairId, identityId, options = {}) {
     if (!validId(pairId) || typeof identityId !== "string" || !identityId) fail(404, "not_found", "Pair not found");
-    const row = this.db.prepare("SELECT hold_secret AS secret, starter_identity_id AS starter FROM pairs WHERE pair_id=?").get(pairId);
-    if (!row?.secret || row.starter !== identityId) fail(404, "not_found", "Pair not found");
-    return this.poll(pairId, row.secret, options);
+    const row = this.db.prepare("SELECT * FROM pairs WHERE pair_id=?").get(pairId);
+    if (!row?.hold_secret || row.starter_identity_id !== identityId) fail(404, "not_found", "Pair not found");
+    // Dual-read (T2-L10c-C1): a new row's hold_secret is the device secret's
+    // digest — identical to device_secret_hash — so the starter-identity
+    // match is the whole authorization and the poll proceeds with the
+    // secret already proven. A legacy row holds the raw secret; present it
+    // to poll, which verifies it against the stored digest as before.
+    if (row.hold_secret === row.device_secret_hash) return this.#servePoll(row, options);
+    return this.poll(pairId, row.hold_secret, options);
   }
 
-  poll(pairId, deviceSecret, { origin = null } = {}) {
+  poll(pairId, deviceSecret, options = {}) {
     if (!validId(pairId)) fail(404, "not_found", "Pair not found");
     const row = this.db.prepare("SELECT * FROM pairs WHERE pair_id=?").get(pairId);
     if (!row) fail(404, "not_found", "Pair not found");
     if (!sameDigest(deviceSecret, DEVICE_SALT, row.device_secret_hash)) fail(401, "unauthenticated", "Pair secret required");
+    return this.#servePoll(row, options);
+  }
+
+  // The poll state machine, entered once the caller is authorized (device
+  // secret verified by poll, or starter identity matched by pollHeld).
+  #servePoll(row, { origin = null } = {}) {
+    const pairId = row.pair_id;
     const now = this.store.now();
     if (row.last_poll_at != null && now - row.last_poll_at < PAIR_POLL_INTERVAL_MS) throw new PairPollError("slow_down");
     const replay = row.status === "approved" && row.last_poll_at != null && row.approved_at != null && row.last_poll_at > row.approved_at;
@@ -382,11 +432,34 @@ export class Pairing {
       throw new PairPollError("expired_token");
     }
     if (row.status === "pending") throw new PairPollError("authorization_pending");
-    if (row.status !== "approved" || !row.issued_token || now > row.replay_until) throw new PairPollError("expired_token");
+    if (row.status !== "approved" || !row.issued_token || now > row.replay_until) {
+      this.delivery.delete(pairId);
+      throw new PairPollError("expired_token");
+    }
+    // Dual-read (T2-L10c-C1): a legacy row carries the live token and
+    // identity secret in plaintext and is served from the row, as before.
+    // A new row carries only their hashes; the connection is served from
+    // the process-local delivery buffer filled at approval. A buffer miss
+    // (a restart inside the replay window) ends the delivery — the agent
+    // re-pairs — rather than recovering a credential from the database.
+    let token;
+    let identitySecret;
+    if (isHashHex(row.issued_token)) {
+      const held = this.delivery.get(pairId);
+      if (!held || now > held.replayUntil) {
+        this.delivery.delete(pairId);
+        throw new PairPollError("expired_token");
+      }
+      token = held.token;
+      identitySecret = held.identitySecret;
+    } else {
+      token = row.issued_token;
+      identitySecret = row.identity_secret;
+    }
     const duplicate = replay;
     return {
-      ...this.#connection(row.room_id, row.member_id, row.issued_token, {
-        identityId: row.identity_id, identitySecret: row.identity_secret, duplicate, reconnected: false
+      ...this.#connection(row.room_id, row.member_id, token, {
+        identityId: row.identity_id, identitySecret, duplicate, reconnected: false
       }),
       ...(origin ? { origin } : {})
     };
@@ -401,10 +474,15 @@ export class Pairing {
     };
   }
 
-  #view(row) {
+  #view(row, presentedCode = null) {
     const duplicate = row.duplicate_member_id ? ownMember(this.store.room(row.room_id).state.members, row.duplicate_member_id) : null;
     return {
-      pairId: row.pair_id, roomId: row.room_id, displayName: row.display_name, userCode: row.user_code,
+      pairId: row.pair_id, roomId: row.room_id, displayName: row.display_name,
+      // The code itself is no longer stored (T2-L10c-C1): a legacy row can
+      // still show its stored code, and peek can show the code the caller
+      // just presented (the hash lookup already proved it names this row).
+      // Otherwise the code is not recoverable from the row and reads null.
+      userCode: legacyCode(row.user_code) ?? presentedCode,
       status: row.status, expiresAt: row.expires_at,
       ...(duplicate ? { possibleDuplicate: { memberId: duplicate.id, displayName: duplicate.displayName } } : {})
     };
@@ -414,7 +492,7 @@ export class Pairing {
     const raw = normalizeCode(userCode);
     if (!raw) return null;
     const row = this.db.prepare("SELECT * FROM pairs WHERE user_code_hash=? AND status='pending' AND expires_at>?").get(digestHex(raw, CODE_SALT), this.store.now());
-    return row ? this.#view(row) : null;
+    return row ? this.#view(row, formatCode(raw)) : null;
   }
 
   decide(token, roomId, { pairId = null, userCode = null, decision, reconnect = false, profile = "contribute" } = {}, binding = null) {
@@ -444,7 +522,9 @@ export class Pairing {
       if (decision === "deny") {
         this.db.prepare("UPDATE pairs SET status='denied', decided_by=? WHERE pair_id=?").run(auth.member.id, row.pair_id);
         this.#append(roomId, this.#pairEvent(roomId, auth.member.id, T.PAIR_DENIED, {
-          pairId: row.pair_id, displayName: row.display_name, userCode: row.user_code, status: "denied"
+          pairId: row.pair_id, displayName: row.display_name, status: "denied",
+          // Only a legacy row still carries its code to record (T2-L10c-C1).
+          ...(legacyCode(row.user_code) ? { userCode: row.user_code } : {})
         }));
         this.#clearLock(roomId);
         return { pairId: row.pair_id, status: "denied" };
@@ -520,11 +600,20 @@ export class Pairing {
     }
     const issued = this.#issue(roomId, memberId);
     const now = this.store.now();
+    const replayUntil = now + PAIR_REPLAY_MS;
+    // Store only scrypt hashes of the issued token and the identity secret
+    // (T2-L10c-C1). The live values are delivered synchronously to this
+    // caller and, for the polling device, from the in-memory delivery
+    // buffer — never read back from this row.
     this.db.prepare(`UPDATE pairs SET status='approved', member_id=?, identity_id=?, issued_token=?, identity_secret=?,
       approved_at=?, replay_until=?, decided_by=? WHERE pair_id=?`)
-      .run(memberId, identityId, issued, identitySecret, now, now + PAIR_REPLAY_MS, actorId, pairId);
+      .run(memberId, identityId, digestHex(issued, TOKEN_SALT), identitySecret ? digestHex(identitySecret, IDENTITY_SALT) : null,
+        now, replayUntil, actorId, pairId);
+    this.#rememberDelivery(pairId, issued, identitySecret, replayUntil);
     this.#append(roomId, this.#pairEvent(roomId, actorId, T.PAIR_APPROVED, {
-      pairId, displayName: row.display_name, userCode: row.user_code, status: "approved", memberId
+      pairId, displayName: row.display_name, status: "approved", memberId,
+      // Only a legacy row still carries its code to record (T2-L10c-C1).
+      ...(legacyCode(row.user_code) ? { userCode: row.user_code } : {})
     }));
     this.#clearLock(roomId);
     return {
