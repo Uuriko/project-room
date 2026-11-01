@@ -130,6 +130,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
 
   const roomsOnly = await call(origin, "room_check_access", {}, owner.secret);
   assert.equal(roomsOnly.value.rooms[0].roomId, created.roomId);
+  assert.equal(roomsOnly.value.archivedRooms, 0, "live rooms are listed, archived ones only counted");
 
   const pack = await call(origin, "room_activation_pack", { roomId: created.roomId }, owner.secret);
   assert.equal(pack.value.room.slug, created.roomId);

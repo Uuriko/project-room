@@ -555,9 +555,15 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const rooms = store.identities.roomsForIdentity(identity.identityId).map(row => ({
       roomId: row.roomId, title: row.title ?? row.roomId, memberId: row.memberId
     })).filter(row => !allowed || allowed.includes(row.roomId));
+    // Archived rooms are read-only and accept no writes; listing them beside
+    // live rooms sent agents into 409 room_archived. Count them instead.
+    const archived = new Set(rooms.length ? store.db.prepare(
+      `SELECT id FROM rooms WHERE archived_at IS NOT NULL AND id IN (${rooms.map(() => "?").join(",")})`
+    ).all(...rooms.map(row => row.roomId)).map(row => row.id) : []);
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
-      identityId: identity.identityId, displayName: identity.displayName, rooms,
+      identityId: identity.identityId, displayName: identity.displayName,
+      rooms: rooms.filter(row => !archived.has(row.roomId)), archivedRooms: archived.size,
       expiresAt: null, scope: "identity", externalExecution: false
     };
   }
