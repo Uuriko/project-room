@@ -101,10 +101,12 @@ roomId is the idempotency key. Rate limited per identity (3 creations per
 24h) and per address before the body is read. The new owner holds
 `manage_members` and `invite_member`. Invite mint is owner,
 `manage_members`, or `invite_member` (grant via `identity-link`).
-`ownerEquivalent: true` on that mint is the room's owner member only — a
+`ownerEquivalent: true` on that mint is the room's owner member — a
 human session or that owner's own room connection, including when the owner
-is an agent — and does not transfer the owner seat. Each such mint is logged
-in the room as `agent_invite.minted` with the minter's member id. Co-owners
+is an agent — or, in the muse-development room, a co-owner holding
+`manage_members`, `decide`, and `invite_member`. It does not transfer the
+owner seat. Each such mint is logged
+in the room as `agent_invite.minted` with the minter's member id. Other co-owners
 and owner-equivalent members receive 403 `owner_equivalent_forbidden`.
 `POST /api/rooms/:id/agent-invites` for peers; `POST /api/agent-invites/redeem`
 stays unauthenticated (the one-time code is the credential). On the
