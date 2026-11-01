@@ -6,6 +6,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { readyClaims } from "../server/claim-coordination.mjs";
+import { availableBoardRows } from "../server/available-work.mjs";
+import { flagPremiseInvalid } from "../server/work-claims.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -80,6 +82,69 @@ test("dependencies survive the durable claim registry", async t => {
   });
   assert.equal(out.status, 201);
   assert.deepEqual(store.workClaims.get("commons", "child").dependsOn, ["parent"]);
+});
+
+test("#3713: the ready queue applies the AvailableWork eligibility rule (premise flag, supersession, kind)", () => {
+  const flag = { premiseId: "w-base", reason: "premise invalid", by: "owner", at: "2026-10-15T00:00:00.000Z" };
+  const claim = (id, extra = {}) => ({ id, state: "unclaimed", owner: null, kind: "work", dependsOn: [], ...extra });
+  // One mixed fixture, read by both paths: the two "what can I take?"
+  // surfaces must offer the same set (readyClaims returns id order;
+  // availableBoardRows returns board order, so compare sorted).
+  const items = [
+    claim("free"),
+    claim("flagged", { premiseFlag: flag }),
+    claim("superseded", { supersededBy: "free" }),
+    claim("land", { kind: "land" }),
+    claim("deploy", { kind: "deploy" }),
+    claim("kindless", { kind: undefined }),
+    claim("done-base", { state: "done", owner: "ada" }),
+    claim("dep-ready", { dependsOn: ["done-base"] }),
+    claim("done-flagged", { state: "done", owner: "ada", premiseFlag: flag }),
+    claim("dep-on-flagged-done", { dependsOn: ["done-flagged"] }),
+    claim("held", { state: "claimed", owner: "ada" }),
+  ];
+  const expected = ["dep-ready", "free", "kindless"];
+  assert.deepEqual(readyClaims(items).map(item => item.id), expected,
+    "premise-flagged, superseded, and land/deploy claims are absent; a done-but-flagged dependency does not unlock its dependent");
+  assert.deepEqual(availableBoardRows(items).map(item => item.id).sort(), expected,
+    "both read paths agree on the mixed fixture");
+  // The ready queue keeps its stricter unheld rule on top of the shared
+  // predicate: an unclaimed row still carrying an owner is not ready.
+  assert.deepEqual(readyClaims([claim("owned", { owner: "ada" })]), []);
+});
+
+test("#3713: queue=ready excludes a premise-flagged claim and a land claim on the durable board", async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  t.after(() => store.close());
+  const create = body => handleWorkClaims({
+    req: { method: "POST", body },
+    res: {},
+    url: new URL("https://room.example/api/rooms/commons/work-claims"),
+    store, roomId: "commons",
+    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    workClaimRoute: "create", helpers, registry: store.workClaims,
+  });
+  assert.equal((await create({ id: "free" })).status, 201);
+  assert.equal((await create({ id: "flagme" })).status, 201);
+  // Flag through the real kernel path, the way the premise-invalid route does.
+  store.workClaims.set("commons", flagPremiseInvalid(store.workClaims.get("commons", "flagme"),
+    { premiseId: "free", reason: "the premise was declared invalid", byMemberId: "owner", now: Date.now() }));
+  // A stored land claim, as the land queue writes it.
+  const free = store.workClaims.get("commons", "free");
+  store.workClaims.set("commons", { ...free, id: "landing", kind: "land" });
+  const ready = await handleWorkClaims({
+    req: { method: "GET" },
+    res: {},
+    url: new URL("https://room.example/api/rooms/commons/work-claims?queue=ready"),
+    store, roomId: "commons",
+    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    workClaimRoute: "list", helpers, registry: store.workClaims,
+  });
+  assert.equal(ready.status, 200);
+  assert.deepEqual(ready.value.claims.map(item => item.id), ["free"]);
+  // And the projection agrees over the same stored rows.
+  assert.deepEqual(availableBoardRows(store.workClaims.list("commons")).map(item => item.id), ["free"]);
 });
 
 test("#1527: deleting a claim waives it from dependents' dependsOn so they can return to the ready queue", async t => {
