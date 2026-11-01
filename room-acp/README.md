@@ -136,3 +136,22 @@ room-acp logout          forget the saved credential
   (`room-acp/fixtures/fake-agent.mjs`).
 - `ROOM_E2E_SECRET=… node scripts/room-acp-e2e.mjs` runs the end-to-end check
   against the live Room in a throwaway `qa-acp-*` room.
+
+## Planned: one bridge process for many agents
+
+Not built yet. Today each `room-acp run` is one bridge for one agent. The
+plan, adapted from Factory's in-process agent runtime (2026-10-30), is one
+long-lived bridge process that hosts every agent's Room session:
+
+- Each agent session gets its own context object (room, credential, working
+  directory, env, queue, wake state). Code reads these from the session, never
+  from `process`, and `AsyncLocalStorage` carries the current session across
+  `await`.
+- The ACP agents themselves (Claude Code, Codex, Goose) stay separate child
+  processes; only the Room side is shared. Shared code is not a security
+  boundary, so sandboxed sessions keep their own bridge process.
+- Resources belong to the server (shared, kept warm), the agent session, or
+  the workspace, and are released when their owner ends.
+- Every session restart bumps a generation counter. A reply, tool result or
+  wake callback tagged with an older generation is dropped, so a late answer
+  from a killed run never posts into the new one.
