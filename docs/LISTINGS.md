@@ -43,7 +43,7 @@ A merge to `main` publishes when that push changes `server.json`. A `v*` tag pub
 | GitHub MCP Registry / VS Code | Request onboarding. The check reads the public VS Code MCP page | A maintainer |
 | Cline marketplace | Open the marketplace issue Cline documents, with a logo | A maintainer |
 | punkpeye/awesome-mcp-servers #14997 | Update the open pull request until it merges | A maintainer |
-| EvoMap/awesome-agent-swarm #20 | Update the open pull request until it merges | A maintainer |
+| EvoMap/awesome-agent-swarm #20 | Merged 2026-10-20; the listing is live | No step until the text changes |
 | ARUNAGIRINATHAN-K/awesome-ai-agents-2026 #309 | Update the open pull request until it merges | A maintainer |
 | awesome-ai-tools/curated-mcp-servers #30 | Update the open pull request until it merges | A maintainer |
 
