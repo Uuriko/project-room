@@ -24,6 +24,7 @@
 // leaves the process; only its env var NAME is documented (ops__STATE.md).
 import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
 import { applyPullRequestWebhook, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { isArchivedRoomDb } from "./archived-guard.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
@@ -170,6 +171,11 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
   // webhook path can reach this function with a namespace room today;
   // only the fence's abort has been holding it back — CP-ADVERSARY H-3.)
   if (isPublicClaimNamespace(store, roomId)) return { linked: false, reason: "public_namespace" };
+  // Same fence for an archived room: the registry refuses its writes
+  // with room_archived, and this set runs inside the webhook/discovery
+  // batch transactions — one archived room's claim must refuse cleanly
+  // here instead of throwing there and rolling back the whole batch.
+  if (isArchivedRoomDb(store?.db, roomId)) return { linked: false, reason: "room_archived" };
   const item = store?.workClaims?.get(roomId, claimId);
   if (!item || !LIVE_CLAIM_STATES.has(item.state) || !item.owner || item.supersededBy) {
     return { linked: false, reason: "not_active" };
@@ -242,7 +248,7 @@ function liveClaims(store) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all()
-      .filter(row => !isPublicClaimNamespace(store, row.roomId)).map(row => row.roomId);
+      .filter(row => !isPublicClaimNamespace(store, row.roomId) && !isArchivedRoomDb(store.db, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return out;
     throw error;
@@ -418,24 +424,36 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
       // Deploy revisions are room-board facts; the door's items never
       // carry one and are never stamped with one.
       if (isPublicClaimNamespace(store, roomId)) continue;
-      for (const item of store.workClaims.list(roomId)) {
-        if (item.state !== "done") continue;
-        if (item.revision !== revision) continue;
-        if (item.deploy && item.deploy.revision) continue;
-        const stamped = stampHistory(item, nowMs, "deploy_linked",
-          `Linked deploy revision ${revision}`);
-        const next = Object.freeze({
-          ...item,
-          deploy: Object.freeze({ revision, at: isoOf(nowMs) }),
-          ...stamped,
-          updatedAt: isoOf(nowMs),
-        });
-        store.workClaims.set(roomId, next);
-        emitWorkClaimEvent(store, roomId, {
-          actorId: item.owner ?? "system", item: next, action: "state_changed",
-          atMs: nowMs,
-        });
-        out.linked += 1;
+      // Since the registry freeze, the set below refuses an archived
+      // room with room_archived — uncaught, that one room would roll
+      // back deploy linking for every room in this transaction
+      // (Q03-F1). Skip the room; its items stay unlinked and frozen.
+      if (isArchivedRoomDb(store.db, roomId)) continue;
+      try {
+        for (const item of store.workClaims.list(roomId)) {
+          if (item.state !== "done") continue;
+          if (item.revision !== revision) continue;
+          if (item.deploy && item.deploy.revision) continue;
+          const stamped = stampHistory(item, nowMs, "deploy_linked",
+            `Linked deploy revision ${revision}`);
+          const next = Object.freeze({
+            ...item,
+            deploy: Object.freeze({ revision, at: isoOf(nowMs) }),
+            ...stamped,
+            updatedAt: isoOf(nowMs),
+          });
+          store.workClaims.set(roomId, next);
+          emitWorkClaimEvent(store, roomId, {
+            actorId: item.owner ?? "system", item: next, action: "state_changed",
+            atMs: nowMs,
+          });
+          out.linked += 1;
+        }
+      } catch (error) {
+        // The guard refuses before writing, so swallowing its error
+        // here commits nothing for this room; every other room in the
+        // batch still links.
+        if (error?.code !== "room_archived") throw error;
       }
     }
   });

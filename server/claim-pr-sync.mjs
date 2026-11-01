@@ -31,6 +31,7 @@ import {
   pullVerificationDue, pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest,
   stampVerifiedPullOutcome, usableEtag
 } from "./claim-coordination.mjs";
+import { isArchivedRoomDb } from "./archived-guard.mjs";
 
 // #3464: the durable registry decodes stored rows WITHOUT validation while
 // every state-machine touch re-validates, so one stored row with a malformed
@@ -504,11 +505,22 @@ function holdDue(store, roomId, items, until, nowMs) {
   // lifecycle), and this set is uncaught inside the batch transaction —
   // one refused hold would roll back every settlement in the batch.
   if (isPublicClaimNamespace(store, roomId)) return;
+  // Same defense for an archived room: since the registry freeze the
+  // set below refuses with room_archived, so an archived room's hold
+  // would roll back the batch exactly like a namespace row once did.
+  if (isArchivedRoomDb(store.db, roomId)) return;
   for (const item of items) {
     const current = store.workClaims.get(roomId, item.id);
     if (!current?.pullRequest?.url || current.pullRequest.outcome) continue;
     if (!["claimed", "in_progress", "blocked"].includes(current.state)) continue;
-    store.workClaims.set(roomId, holdForRateLimit(current, nowMs, until));
+    try {
+      store.workClaims.set(roomId, holdForRateLimit(current, nowMs, until));
+    } catch (error) {
+      // The room was archived between candidate selection and this
+      // hold: skip the hold, keep the batch's settlements.
+      if (error?.code === "room_archived") continue;
+      throw error;
+    }
   }
 }
 
@@ -533,10 +545,33 @@ export function publicNamespaceSqlExclusion(store) {
   return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)";
 }
 
+// The archived-room counterpart of the namespace exclusion above, with
+// the same before-the-LIMIT requirement — and, since the archived-room
+// freeze landed, a sharper failure behind it: the registry now refuses
+// an archived room's write with room_archived, so an archived room's
+// due rows inside a batch do not merely waste candidate cap, they throw
+// inside the batch's set loops and roll back every other room's rows
+// with them (Q03-F1). Exclude in SQL when the rooms mirror is readable;
+// a registry whose database has no rooms table (or no archived_at
+// column) keeps the legacy no-exclusion shape, and a room_id with no
+// rooms row at all (a public-work namespace) is never excluded —
+// NOT EXISTS matches only a room row actually stamped archived_at.
+// The per-row isArchivedRoomDb checks in the loaders stay as the
+// mid-run backstop, like the namespace checks beside them.
+export function archivedRoomSqlExclusion(store) {
+  if (!store?.db || typeof store.db.prepare !== "function") return "";
+  try {
+    store.db.prepare("SELECT archived_at FROM rooms LIMIT 1").get();
+  } catch {
+    return "";
+  }
+  return " AND NOT EXISTS(SELECT 1 FROM rooms WHERE rooms.id = work_claims.room_id AND rooms.archived_at IS NOT NULL)";
+}
+
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
-  const exclusion = publicNamespaceSqlExclusion(store);
+  const exclusion = publicNamespaceSqlExclusion(store) + archivedRoomSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -573,6 +608,7 @@ function loadDueClaims(store, nowMs) {
   const due = [];
   for (const row of rows) {
     if (isPublicClaimNamespace(store, row.roomId)) continue;
+    if (isArchivedRoomDb(store.db, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -588,7 +624,7 @@ function loadDueClaims(store, nowMs) {
 // pullVerificationDue both require an unstamped outcome).
 function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
-  const exclusion = publicNamespaceSqlExclusion(store);
+  const exclusion = publicNamespaceSqlExclusion(store) + archivedRoomSqlExclusion(store);
   let rows = [];
   try {
     rows = store.db.prepare(`
@@ -627,6 +663,7 @@ function loadVerificationClaims(store, nowMs, limit) {
   const due = [];
   for (const row of rows) {
     if (isPublicClaimNamespace(store, row.roomId)) continue;
+    if (isArchivedRoomDb(store.db, row.roomId)) continue;
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
@@ -1046,7 +1083,7 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infini
   const leaseText = fieldText("leaseExpiresAt");
   const pairs = claimCandidatePairs(store, `
     SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}
+    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}${archivedRoomSqlExclusion(store)}
       AND typeof(${leaseText}) = 'text'
       AND (${leaseText} NOT GLOB '????-??-??T??:??:??.???Z' OR ${leaseText} <= ?)
     ORDER BY room_id, rowid`, [new Date(nowMs).toISOString()]);
@@ -1182,6 +1219,10 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
     // the board stale sweep never retires their rows, whatever a config
     // row says (a namespace's claim row projects a live public task).
     if (isPublicClaimNamespace(store, roomId)) continue;
+    // An archived room's rows are frozen: the close below would be
+    // refused with room_archived inside this room's transaction, and
+    // the throw would abort the sweep for every later room.
+    if (isArchivedRoomDb(store.db, roomId)) continue;
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
     const items = unclaimedRoomItems(store, roomId, skipped);
     let pairs;

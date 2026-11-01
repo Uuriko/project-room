@@ -595,8 +595,13 @@ export function migrateLandQueueClaims(store) {
     } catch (error) {
       // An at-cap claimant skips this pass instead of breaking the list read;
       // a later list() retries the mirror once the member is under cap.
+      // An archived room skips the same way: since the registry freeze
+      // its mirror write is refused with room_archived, and one archived
+      // room's row must not break the migration — and the list() that
+      // runs it — for every other room. The mirror stays pending and is
+      // retried by a later list() for as long as the room stays archived.
       // Anything else still throws.
-      if (error?.code === "too_many_open_claims") continue;
+      if (error?.code === "too_many_open_claims" || error?.code === "room_archived") continue;
       throw error;
     }
   }
