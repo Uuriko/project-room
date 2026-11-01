@@ -161,6 +161,7 @@ optional.push("server/mcp-discovery.mjs"); // binds the server card to those liv
 optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-result-text.mjs"); // withholds minted credentials from MCP result text blocks (imported by server/mcp-identity-mint.mjs and server/mcp-room-profile.mjs)
+optional.push("server/mcp-anon-session.mjs"); // anonymous MCP session upgrade after an in-session mint (imported by server/mcp-http.mjs)
 optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
 optional.push("cloudflare/mcp-event-transport.mjs"); // Restricted native Events transport imported by the packaged Worker.

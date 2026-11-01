@@ -23,6 +23,12 @@ and MCP 401 resource metadata challenges. The canonical resource is the configur
 HTTPS origin plus `/mcp`; callbacks must use that exact resource during code
 exchange and refresh.
 
+Production registers `project-room-claude` for Claude custom connectors with the
+callback Anthropic publishes for hosted Claude surfaces,
+`https://claude.ai/api/mcp/auth_callback` (claude.com/docs/connectors/building/authentication).
+In Claude, add the connector by URL and enter that client ID with no secret; Claude
+then acts as a public PKCE client. Claude Code loopback redirects are not registered.
+
 Grants persist the account, exact resource, room, agent identity/member and human
 member. A revoked grant, inactive account/member, changed ownership, invalid
 connection authority, expired connection or revoked connection key fails closed.

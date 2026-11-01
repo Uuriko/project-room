@@ -186,7 +186,9 @@ test('legacy initialize advertises Events only for authenticated OAuth with a mo
   assert.deepEqual(initialized.result.capabilities, { tools: {}, events: {} });
   assert.equal(initialized.result.protocolVersion, '2025-11-25');
   assert.equal((await legacy({ jsonrpc: '2.0', id: 2, method: 'events/list', params: {} }, f.tokens.accessToken)).result.events[0].name, 'room.requested');
-  assert.deepEqual((await legacy(initialization)).result.capabilities, { tools: {} });
+  // Anonymous initialize gets a session that can upgrade after a mint, so it
+  // advertises tools.listChanged (tests/mcp-anon-session.test.js); never events.
+  assert.deepEqual((await legacy(initialization)).result.capabilities, { tools: { listChanged: true } });
   const disabled = createHostedRoomMcp(f.store, { inviteOAuthProvider: f.native.provider, oauthResource: resource });
   assert.deepEqual((await disabled(initialization, { authorization: 'Bearer ' + f.tokens.accessToken })).result.capabilities, { tools: {} });
   f.native.provider.revoke(f.tokens.refreshToken);

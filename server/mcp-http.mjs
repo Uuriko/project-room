@@ -16,6 +16,7 @@ import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mc
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
+import { anonMcpSessions } from "./mcp-anon-session.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -179,7 +180,7 @@ export function mcpJoinCorsHeaders() {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name",
-    "Access-Control-Expose-Headers": "MCP-Protocol-Version, Deprecation, Link",
+    "Access-Control-Expose-Headers": "MCP-Protocol-Version, Mcp-Session-Id, Deprecation, Link",
     "MCP-Protocol-Version": MCP_VERSION
   };
 }
@@ -271,7 +272,12 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply, Boolean(modern)), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl } = {}) {
+// Tools an anonymous session may call after minting in that session: public
+// work and the anonymous catalog. Room tools still need a real credential.
+const PUBLIC_SESSION_TOOLS = new Set([...MCP_JOIN_TOOLS.map(tool => tool.name), ...PUBLIC_WORK_MCP_TOOLS, ...IDENTITY_MINT_MCP_TOOLS]);
+const presentedAuthorization = value => typeof value === "string" && !/^(?:bearer)?\s*$/i.test(value);
+
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl, anonSessions = anonMcpSessions } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -312,12 +318,28 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   }
   const modern = modernMcpRequest(message, req.headers);
   if (modern) cors['MCP-Protocol-Version'] = modern.version;
+  // Anonymous session upgrade: no header edit needed after room_identity_mint.
+  const anonymous = !presentedAuthorization(req.headers.authorization) && !modern && typeof roomMcp === "function";
+  const sessionId = anonymous ? req.headers["mcp-session-id"] : undefined;
+  const sessionSecret = anonymous ? anonSessions.resolve(sessionId) : null;
+  let authorization = req.headers.authorization;
+  let sessionHeaders = {};
+  let preReply = null;
+  if (sessionSecret) {
+    sessionHeaders = { "Mcp-Session-Id": sessionId };
+    const tool = message?.method === "tools/call" ? message.params?.name : null;
+    if (tool !== null && !PUBLIC_SESSION_TOOLS.has(tool)) {
+      preReply = mcpCallError(message?.id ?? null, { reason: "auth_required", tool });
+    } else if (!isIdentityMintMcpTool(tool)) {
+      authorization = `Bearer ${sessionSecret}`;
+    }
+  }
   let reply;
   try {
-    reply = await dispatchRoomMcp(message, {
+    reply = preReply ?? await dispatchRoomMcp(message, {
       headers: req.headers,
       mcpUrl: roomMcpUrlForHost(url),
-      authorization: req.headers.authorization,
+      authorization,
       roomMcp,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
@@ -336,9 +358,34 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();
   }
+  let upgraded = false;
+  if (anonymous && !sessionSecret && message?.method === "initialize" && reply.result) {
+    sessionHeaders = { "Mcp-Session-Id": anonSessions.issue() };
+    reply = { ...reply, result: { ...reply.result, capabilities: { ...reply.result.capabilities, tools: { ...reply.result.capabilities?.tools, listChanged: true } } } };
+  }
+  if (sessionSecret && message?.method === "tools/list" && Array.isArray(reply.result?.tools)) {
+    reply = { ...reply, result: { ...reply.result, tools: reply.result.tools.filter(tool => PUBLIC_SESSION_TOOLS.has(tool.name)) } };
+  }
+  if (anonymous && !sessionSecret && message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)
+    && !reply.result?.isError && typeof reply.result?.structuredContent?.secret === "string"
+    && anonSessions.bind(sessionId, reply.result.structuredContent.secret)) {
+    upgraded = true;
+    sessionHeaders = { "Mcp-Session-Id": sessionId };
+    const session = { upgraded: true, scope: "public_work", hint: "This MCP session now acts as the minted identity for public work. Call tools/list again; no config edit is needed. Save the secret to keep the identity after this session ends." };
+    reply = { ...reply, result: { ...reply.result, structuredContent: { ...reply.result.structuredContent, session } } };
+  }
+  const wantsStream = /text\/event-stream/i.test(String(req.headers.accept ?? ""));
+  if (upgraded && wantsStream) {
+    // Streamable HTTP: push tools/list_changed ahead of the result.
+    const notice = JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+    const stream = `event: message\ndata: ${notice}\n\nevent: message\ndata: ${JSON.stringify(reply)}\n\n`;
+    res.writeHead(200, { ...cors, ...sessionHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Robots-Tag": "all" });
+    return res.end(stream);
+  }
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply, Boolean(modern)), {
     ...cors,
+    ...sessionHeaders,
     ...mcpAuthHeaders(reply, oauthMetadataUrl),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
