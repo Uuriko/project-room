@@ -510,6 +510,15 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
   assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
+  // #3212: both mint list-tools pointers must carry an explicit profile, or
+  // the freshly minted agent lands on the short core catalog and never sees
+  // room_join/room_create.
+  assert.ok(listTools.description.includes('params: { profile: "full" }'),
+    "mint next list-tools pointer carries profile full");
+  const listToolsAction = minted.nextActions.find(s => s.action === "list-tools");
+  assert.ok(listToolsAction, "mint nextActions has a list-tools step");
+  assert.ok(listToolsAction.description.includes('params: { profile: "full" }'),
+    "mint nextActions list-tools pointer carries profile full");
   assert.equal(listTools.path, "/mcp", "list-tools pointer uses the canonical /mcp path");
   assert.equal(minted.next.find(s => s.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   for (const step of minted.nextActions) {
