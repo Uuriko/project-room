@@ -453,7 +453,15 @@ function handoffsOf(store, roomId, memberId, after, state) {
   return items.sort((a, b) => a.seq - b.seq).slice(0, MAX_PER_KIND + 1);
 }
 
-function roomDmsOf(store, roomId, memberId, after, state) {
+// DM scan budgets: the same examined-row/byte discipline as the reply
+// scan (DMs need only MAX_PER_KIND + 1 items, so 256 examined rows is
+// the same ~28x headroom). Kept as separate constants so each scan's
+// budget can move independently, as REPLY/MENTION already do.
+export const DM_SCAN_ROW_BUDGET = 256;
+export const DM_SCAN_BYTE_BUDGET = 1_048_576;
+const DM_SCAN_BATCH = 64;
+
+function roomDmsOf(store, roomId, memberId, after, through, state) {
   // The event log holds the body as originally posted; the live projection
   // (state.messages) is the current state. A DM deleted after posting must
   // not surface at all (its logged body is already scrubbed, so it showed
@@ -462,23 +470,43 @@ function roomDmsOf(store, roomId, memberId, after, state) {
   // from the working set are resolved through normalized archived records.
   // Only genuinely absent legacy records fall back to the logged body.
   const currentById = messageRepository(store, roomId, state);
-  const items = [];
-  // Scan in batches: a deleted DM must not consume one of the
-  // MAX_PER_KIND + 1 slots, or the caller's overflow check (kind length >
-  // MAX_PER_KIND lowers the cursor horizon) would advance the cursor past
-  // live DMs that were never returned.
+  const scan = { items: [], scannedRows: 0, scannedBytes: 0, scannedThrough: after, exhausted: false };
+  if (!(through > after)) return scan;
+  const items = scan.items;
+  // Bounded scan: this read used to batch-loop a json_extract-filtered
+  // query until the kind filled or the range ended — the same
+  // LIMIT-after-filter shape the round-2 falsifier refuted for replies
+  // (the VM stepped every event in the range: 9,096 instructions at
+  // 1,008 plain events growing to 90,096 at 10,008, ~9 per event). It
+  // now steps the (after, through] range through the same scalar prefix
+  // admission as the reply and mention scans (round 3): every examined
+  // row is counted in rows and bytes, a budget stop reports
+  // { exhausted: true, scannedThrough } and the callers clamp their
+  // window to scanned ground, and an event larger than the whole byte
+  // budget refuses typed 503 before its payload is fetched. A deleted
+  // DM still must not consume one of the MAX_PER_KIND + 1 slots, or the
+  // caller's overflow check (kind length > MAX_PER_KIND lowers the
+  // cursor horizon) would advance the cursor past live DMs that were
+  // never returned — the selection below decides per examined row, so
+  // deleted rows cost budget, never slots.
   let cursor = after;
   while (items.length <= MAX_PER_KIND) {
-    const rows = store.db.prepare(
-      `SELECT sequence, body FROM events
-       WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
-         AND json_extract(body,'$.data.toMemberId')=?
-       ORDER BY sequence ASC LIMIT ?`
-    ).all(roomId, cursor, memberId, MAX_PER_KIND + 1);
-    if (!rows.length) break;
-    for (const row of rows) {
+    if (scan.scannedRows >= DM_SCAN_ROW_BUDGET || scan.scannedBytes >= DM_SCAN_BYTE_BUDGET) {
+      scan.exhausted = scan.scannedThrough < through;
+      break;
+    }
+    const want = Math.min(DM_SCAN_BATCH, DM_SCAN_ROW_BUDGET - scan.scannedRows);
+    const batch = admittedEvents(store, roomId, cursor, through, want, scan, DM_SCAN_BYTE_BUDGET);
+    if (!batch.rows.length) {
+      if (batch.budgetStop) scan.exhausted = scan.scannedThrough < through;
+      break;
+    }
+    for (const row of batch.rows) {
       cursor = row.sequence;
-      const event = JSON.parse(row.body);
+      scan.scannedThrough = row.sequence;
+      let event = null;
+      try { event = JSON.parse(row.body); } catch { event = null; }
+      if (!event || event.type !== "message.posted" || event.data?.toMemberId !== memberId) continue;
       const messageId = event.data?.messageId ?? event.id;
       const current = currentById.get(messageId);
       if (current?.deletedAt) continue;
@@ -496,9 +524,10 @@ function roomDmsOf(store, roomId, memberId, after, state) {
       });
       if (items.length > MAX_PER_KIND) break;
     }
-    if (rows.length < MAX_PER_KIND + 1) break;
+    if (batch.budgetStop) { scan.exhausted = scan.scannedThrough < through; break; }
+    if (batch.rangeEnd) break;
   }
-  return items;
+  return scan;
 }
 
 function peerDmsOf(store, roomId, identityId, after) {
@@ -747,12 +776,14 @@ export function roomAttentionSlice(store, roomId, memberId, identityId, after) {
   // the same rule the per-kind overflow clamp below applies.
   const replyScan = repliesOf(store, roomId, memberId, messageAfter, through, state);
   if (replyScan.exhausted) through = Math.min(through, replyScan.scannedThrough);
+  const dmScan = roomDmsOf(store, roomId, memberId, messageAfter, through, state);
+  if (dmScan.exhausted) through = Math.min(through, dmScan.scannedThrough);
   const scanThrough = through;
   const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
   const kinds = [
     mentionsOf(store, roomId, memberId, messageAfter, through),
     replyScan.items,
-    roomDmsOf(store, roomId, memberId, messageAfter, state),
+    dmScan.items,
     peerDmsOf(store, roomId, identityId, after),
     bondRequestsOf(store, roomId, pendingBonds, after),
     directAsksOf(store, roomId, memberId, messageAfter, state),
@@ -768,7 +799,7 @@ export function roomAttentionSlice(store, roomId, memberId, identityId, after) {
   // the slice is incomplete exactly then (or when a scan budget
   // stopped it) — never silently (see the header note).
   const attentionThrough = through;
-  const attentionComplete = !horizonScan.exhausted && !replyScan.exhausted && through === scanThrough;
+  const attentionComplete = !horizonScan.exhausted && !replyScan.exhausted && !dmScan.exhausted && through === scanThrough;
   const retired = retiredNeedsMeKeys(store, roomId, memberId);
   const items = candidates
     .filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`))
@@ -1109,7 +1140,8 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   // rows rather than the events the scan actually stepped over.
   const scan = { scannedRows: 0, scannedBytes: 0, exhausted: false,
     replies: { scannedRows: 0, scannedBytes: 0, exhausted: false },
-    mentions: { scannedRows: 0, scannedBytes: 0, exhausted: false } };
+    mentions: { scannedRows: 0, scannedBytes: 0, exhausted: false },
+    dms: { scannedRows: 0, scannedBytes: 0, exhausted: false } };
   for (const link of links.slice(0, MAX_ROOMS)) {
     if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
@@ -1163,10 +1195,18 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
       // `pending` below keeps hasMore true, and the reported cursor
       // cannot advance past the unscanned remainder.
       if (replyScan.exhausted) through = Math.min(through, replyScan.scannedThrough);
+      const dmScan = roomDmsOf(store, link.roomId, link.memberId, messageAfter, through, state);
+      scan.scannedRows += dmScan.scannedRows;
+      scan.scannedBytes += dmScan.scannedBytes;
+      scan.exhausted = scan.exhausted || dmScan.exhausted;
+      scan.dms.scannedRows += dmScan.scannedRows;
+      scan.dms.scannedBytes += dmScan.scannedBytes;
+      scan.dms.exhausted = scan.dms.exhausted || dmScan.exhausted;
+      if (dmScan.exhausted) through = Math.min(through, dmScan.scannedThrough);
       const kinds = [
         mentionsOf(store, link.roomId, link.memberId, messageAfter, through),
         replyScan.items,
-        roomDmsOf(store, link.roomId, link.memberId, messageAfter, state),
+        dmScan.items,
         peerDmsOf(store, link.roomId, identity.identityId, after),
         bondRequestsOf(store, link.roomId, pendingBonds, pendingAfter),
         directAsksOf(store, link.roomId, link.memberId, pendingMessageAfter, state),
@@ -1227,5 +1267,5 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
   return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore,
-    scan: { scannedRows: scan.scannedRows, scannedBytes: scan.scannedBytes, exhausted: scan.exhausted, replies: scan.replies, mentions: scan.mentions, rowBudgets: { replies: REPLY_SCAN_ROW_BUDGET, mentions: MENTION_SCAN_ROW_BUDGET }, byteBudgets: { replies: REPLY_SCAN_BYTE_BUDGET, mentions: MENTION_SCAN_BYTE_BUDGET }, ...(scan.exhausted ? { continuation: "pass the returned cursor back unchanged; the scan resumes at the first unscanned sequence" } : {}) } });
+    scan: { scannedRows: scan.scannedRows, scannedBytes: scan.scannedBytes, exhausted: scan.exhausted, replies: scan.replies, mentions: scan.mentions, dms: scan.dms, rowBudgets: { replies: REPLY_SCAN_ROW_BUDGET, mentions: MENTION_SCAN_ROW_BUDGET, dms: DM_SCAN_ROW_BUDGET }, byteBudgets: { replies: REPLY_SCAN_BYTE_BUDGET, mentions: MENTION_SCAN_BYTE_BUDGET, dms: DM_SCAN_BYTE_BUDGET }, ...(scan.exhausted ? { continuation: "pass the returned cursor back unchanged; the scan resumes at the first unscanned sequence" } : {}) } });
 }

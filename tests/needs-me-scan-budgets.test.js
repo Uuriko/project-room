@@ -31,7 +31,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
-import { collectNeedsMe } from '../server/needs-me.mjs';
+import { collectNeedsMe, DM_SCAN_ROW_BUDGET } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -96,7 +96,9 @@ test('scan budget: a large no-match room costs the budget, not the history size'
       `the reply scan examines exactly its budget, not the ${replyCount}-row history (got ${page.scan.replies.scannedRows})`);
     assert.ok(page.scan.mentions.scannedRows <= MENTION_ROW_BUDGET,
       `the mention scan stays inside its budget (got ${page.scan.mentions.scannedRows})`);
-    assert.ok(page.scan.scannedRows <= REPLY_ROW_BUDGET + MENTION_ROW_BUDGET,
+    // The aggregate sums every attention scan; the DM scan joined it
+    // when roomDmsOf was bounded (stacked cure).
+    assert.ok(page.scan.scannedRows <= REPLY_ROW_BUDGET + MENTION_ROW_BUDGET + DM_SCAN_ROW_BUDGET,
       `the aggregate examined rows stay inside the summed budgets (got ${page.scan.scannedRows})`);
     assert.equal(page.scan.exhausted, true, 'the budget stopped the scan before the range end');
     assert.equal(page.hasMore, true, 'a budget-exhausted read signals continuation, never completeness');

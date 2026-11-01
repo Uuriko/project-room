@@ -24,7 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
-import { collectNeedsMe, REPLY_SCAN_ROW_BUDGET, MENTION_SCAN_ROW_BUDGET, REPLY_SCAN_BYTE_BUDGET } from '../server/needs-me.mjs';
+import { collectNeedsMe, REPLY_SCAN_ROW_BUDGET, MENTION_SCAN_ROW_BUDGET, DM_SCAN_ROW_BUDGET, REPLY_SCAN_BYTE_BUDGET } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -85,7 +85,10 @@ test('examined bounds: a plain room with zero replies costs the reply budget, no
     assert.equal(page.scan.replies.exhausted, true, 'the reply scan stopped at its budget before the range end');
     assert.ok(page.scan.mentions.scannedRows <= MENTION_SCAN_ROW_BUDGET,
       `the mention scan stays inside its budget (got ${page.scan.mentions.scannedRows})`);
-    assert.ok(page.scan.scannedRows <= REPLY_SCAN_ROW_BUDGET + MENTION_SCAN_ROW_BUDGET,
+    // The aggregate sums every attention scan; the DM scan joined it
+    // when roomDmsOf was bounded (stacked cure), so the summed bound
+    // carries all three budgets.
+    assert.ok(page.scan.scannedRows <= REPLY_SCAN_ROW_BUDGET + MENTION_SCAN_ROW_BUDGET + DM_SCAN_ROW_BUDGET,
       `the aggregate examined rows stay inside the summed budgets (got ${page.scan.scannedRows})`);
     assert.equal(page.hasMore, true, 'a budget-exhausted read signals continuation, never completeness');
     if (plainCount === 320) {
@@ -113,7 +116,7 @@ test('examined bounds: sparse mentions among plain posts are delivered by contin
   assert.equal(new Set(mentionIds).size, mentionIds.length, 'no mention is delivered twice');
   assert.equal(pages[0].scan.mentions.scannedRows, MENTION_SCAN_ROW_BUDGET,
     'the first read examines exactly the mention budget, not the whole range');
-  assert.ok(pages.every(p => p.scan.scannedRows <= REPLY_SCAN_ROW_BUDGET + MENTION_SCAN_ROW_BUDGET),
+  assert.ok(pages.every(p => p.scan.scannedRows <= REPLY_SCAN_ROW_BUDGET + MENTION_SCAN_ROW_BUDGET + DM_SCAN_ROW_BUDGET),
     'every page stays inside the summed examined-row budgets');
   const deliveredAt = pages.findIndex(p => p.items.some(item => item.id === 'sparse-m-2'));
   assert.ok(deliveredAt > 0, 'the sparsest mention needed continuation, not one unbounded read');
