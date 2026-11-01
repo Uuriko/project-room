@@ -539,15 +539,18 @@ const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
   if (!basis) return false;
-  // #3684 delivery binding: an approval recorded while a delivery
-  // existed counts only for that delivery's digest — a re-delivery
-  // stales it exactly like a CI head move. An approval recorded before
-  // any delivery (generation 0) attests the work in flight and counts
-  // only for the round's FIRST delivery (generation 1); a replacement
-  // delivery is outside what it attested and stales it too.
+  // #3684 delivery binding, as amended by EA-006 (expiry-at-delivery):
+  // an approval recorded while a delivery existed counts only for that
+  // delivery's digest — a re-delivery stales it exactly like a CI head
+  // move. An approval recorded before any delivery (digest null,
+  // generation 0) attests only the work in flight: it is current while
+  // no delivery exists, and it EXPIRES for gating purposes the moment a
+  // delivery lands — the reviewer never saw that bundle, so it cannot
+  // satisfy the accept gate for it (not even the round's first
+  // delivery); the reviewer must approve the delivery that exists.
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === current.deliveryDigest
-    : (basis.deliveryGeneration ?? 0) === 0 && current.deliveryGeneration <= 1;
+    : current.deliveryDigest === null;
   return deliveryCurrent
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
@@ -899,9 +902,9 @@ export const workOf = value => {
     parentClaimId, evidenceRefs, premiseFlag,
     acceptanceCriteria, delivery, verification,
     // #3684: how many deliveries this claim round has frozen (0 = none
-    // yet). In-flight approvals (basis generation 0) cover only the
-    // round's first delivery; the counter is what makes "first" a fact
-    // the kernel can check rather than a narrative.
+    // yet). In-flight approvals (basis generation 0) expire when the
+    // first delivery lands (EA-006); the counter is what makes the
+    // delivery count a fact the kernel can check rather than a narrative.
     deliveryGeneration: Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration > 0 ? value.deliveryGeneration : 0,
     // B4/H2: the claim-round counter request outcomes are bound to. A
     // fresh claim or fresh assignment advances it; nothing else does, so
@@ -1444,21 +1447,46 @@ export function creatorOf(work) {
   const first = Array.isArray(work?.history) && !work.historyOmitted ? work.history[0] : null;
   return first && first.action === "created" && typeof first.agentId === "string" && first.agentId !== "system" ? first.agentId : null;
 }
-// Record a note from the caller's own authenticated session. A new note
-// supersedes that member's active verdict but cannot approve reviewed completion.
-// Refused on unclaimed work (nothing to review) and on done work (immutable).
+// Record a note from the caller's own authenticated session. A note is
+// not a verdict: it cannot approve reviewed completion, and — EA-007 —
+// it must NOT clear the caller's standing verdict either. A reviewer who
+// approves and then adds a clarifying note keeps their approve (and the
+// attestation bound to it); only a verdict-carrying review replaces a
+// verdict. Refused on unclaimed work (nothing to review) and on done
+// work (immutable).
 export function attestWork(work, agentId, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
   const prior = item.attestations.find(entry => entry.memberId === agent);
   const explicit = item.reviews.some(entry => entry.memberId === agent);
-  if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
+  if (explicit) {
+    // EA-007: the caller holds a standing verdict, so the note is a
+    // clarification on that verdict, never a replacement for it.
+    if (prior) {
+      // The standing attestation stays bound to the verdict it belongs
+      // to: for an approve, canCloseWork requires attestation.at ===
+      // review.at, so the note updates the attestation's text at the
+      // original instant, and the review itself is untouched. The note
+      // still stamps history like any other note.
+      if (prior.note === (note ?? null)) return Object.freeze(item);
+      const replaced = Object.freeze({ ...prior, note: note ?? null });
+      const attestations = Object.freeze(item.attestations.map(entry => (entry.memberId === agent ? replaced : entry)));
+      return withHistory({ ...item, attestations }, atMs, agent, "reviewed", note);
+    }
+    // A non-approve verdict carries no bound attestation (recordReview
+    // records one only for approve): record the note as a fresh
+    // attestation, with the verdict preserved alongside it.
+    const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null, basis: reviewBasisFor(item) });
+    const attestations = Object.freeze([...item.attestations, attestation]);
+    return withHistory({ ...item, attestations }, atMs, agent, "reviewed", note);
+  }
+  if (prior && prior.note === (note ?? null)) return Object.freeze(item);
   const basis = reviewBasisFor(item);
   // SEC-2: one attestation per reviewer per claim round and revision. A
   // repeat note on the same basis replaces the recorded note in place: no
   // history entry, so the route appends no room event for it.
-  if (!explicit && prior && sameBasis(prior.basis, basis)) {
+  if (prior && sameBasis(prior.basis, basis)) {
     const replaced = Object.freeze({ memberId: agent, at: prior.at, note: note ?? null, basis });
     return Object.freeze({ ...item, attestations: Object.freeze(item.attestations.map(entry => (entry.memberId === agent ? replaced : entry))) });
   }
@@ -1467,10 +1495,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
     ...item.attestations.filter(entry => entry.memberId !== agent),
     attestation,
   ]);
-  // A new note supersedes this member's active verdict; it is not an approve.
-  // Immutable event/history records remain available for the prior review.
-  const reviews = Object.freeze(item.reviews.filter(entry => entry.memberId !== agent));
-  return withHistory({ ...item, attestations, reviews }, atMs, agent, "reviewed", note);
+  return withHistory({ ...item, attestations }, atMs, agent, "reviewed", note);
 }
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the

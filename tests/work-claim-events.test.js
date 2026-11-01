@@ -224,9 +224,11 @@ test('at the pilot event cap open claims can still be released, completed, expir
   await owner.claimWorkItem('finish');
   await owner.updateWorkItem('finish', { state: 'in_progress' });
   await peer.reviewWorkItem('finish', { note: 'Checked the result' });
-  await peer.reviewWorkItem('finish', { verdict: 'approve', summary: 'Approved' });
   await owner.workDeliver('finish', { delivery: { artifact: { kind: 'text', ref: 'room://artifacts/finish', sha256: 'e'.repeat(64) },
     checks: [{ name: 'unit', result: 'pass' }], criteria: [] } });
+  // EA-006: the gating approve is recorded against the delivery that
+  // exists — a pre-delivery approve would expire when the delivery lands.
+  await peer.reviewWorkItem('finish', { verdict: 'approve', summary: 'Approved' });
   store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom, 'commons');
   const capped = error => error.status === 409 && error.code === 'pilot_limit';
   // Growth refuses and records nothing.

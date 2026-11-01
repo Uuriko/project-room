@@ -142,16 +142,19 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
       error => error.status === 422 && error.code === 'work_not_delivered');
     assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), negative);
   }
+  // the holder delivers first; the reviewer then approves the delivery that
+  // exists (EA-006: an approval recorded before the delivery no longer
+  // verifies it, so the approval below is recorded against the delivery)
+  const delivered = await owner.workDeliver('reviewed', { delivery: BUNDLE });
+  assert.equal(delivered.state, 'delivered');
+  await assert.rejects(owner.workComplete('reviewed', {}),
+    error => error.status === 403 && error.code === 'work_review_rejected');
   const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
   const approved = await peer.reviewWorkItem('reviewed', approval);
   assert.equal(approved.reviews[0].memberId, 'reviewer');
   for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
   assert.deepEqual(stripTrust((await owner.workClaimGet('reviewed')).reviews), approved.reviews);
-  // the holder delivers; the reviewer verifies from their own session
-  const delivered = await owner.workDeliver('reviewed', { delivery: BUNDLE });
-  assert.equal(delivered.state, 'delivered');
-  await assert.rejects(owner.workComplete('reviewed', {}),
-    error => error.status === 403 && error.code === 'work_review_rejected');
+  // the reviewer verifies from their own session
   const done = await peer.workComplete('reviewed', {});
   assert.equal(done.state, 'done');
   assert.equal(done.reviewedBy, 'reviewer');

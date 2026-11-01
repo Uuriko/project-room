@@ -293,10 +293,12 @@ test("handler: review policies enforced on the done transition", async () => {
   assert.equal(review.value.attestations[0].memberId, "vera");
   const noteOnly = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "vera" }, registry }).catch(error => error);
   assert.equal(noteOnly.code, "work_not_delivered");
-  await runRoute({ route: "review", id: "p1", memberId: "grok", body: { verdict: "approve", summary: "Checked current work" }, registry });
   // the holder delivers with the bundle; the delivery alone is not done
   const { out: delivered } = await runRoute({ route: "update", id: "p1", body: { state: "delivered", delivery: BUNDLE }, registry });
   assert.equal(delivered.value.state, "delivered");
+  // EA-006: the reviewer approves the delivery that exists — an approve
+  // recorded before this delivery would have expired at delivery.
+  await runRoute({ route: "review", id: "p1", memberId: "grok", body: { verdict: "approve", summary: "Checked current work" }, registry });
   // the holder cannot verify their own delivery
   const ownerVerify = await runRoute({ route: "update", id: "p1", body: { state: "done" }, registry }).catch(error => error);
   assert.equal(ownerVerify.code, "work_review_rejected");
