@@ -8,7 +8,8 @@
 // Read-only projection using shared event helpers and orientation selectors.
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
-import { roomOrientation } from "../src/work-selectors.js";
+import { roomOrientation, workInvolvingMe, needsAttention } from "../src/work-selectors.js";
+import { nextWorkStep } from "../src/workflow.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
@@ -55,6 +56,7 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       note?: string          // blocker reason, when one is recorded
  *     }
  *   ],
+ *   yourWork: [],              // current viewer roles; no source bodies or implicit execution
  *   openClaims: [              // AvailableWork projection, board source (#3020):
  *     {                        // claims this viewer may pick up right now
  *       id: string,
@@ -164,7 +166,8 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   // request may pass its own memo in as options.boardList.
   const boardList = options.boardList ?? memoizeBoardList(store);
   if (!state.room) throw new Error("Room projection is missing its room record");
-  const now = new Date(store.now()).toISOString();
+  const nowMs = store.now();
+  const now = new Date(nowMs).toISOString();
   const members = Object.values(state.members ?? {})
     .filter(member => member?.active !== false)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -198,6 +201,19 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
+    // Reuse the ongoing-work selector: a receipt awaiting review is still work,
+    // while superseded or fully approved results are not a fresh assignment.
+    const attention = new Set(needsAttention({ workItems: state.workItems ?? {}, memberId: viewerId,
+      now: nowMs, ownerId: state.room.ownerId }).map(item => item.workItemId));
+    // Triage can address a member outside the three ongoing-work roles.
+    const involved = workInvolvingMe({ workItems: state.workItems ?? {}, memberId: viewerId });
+    pack.yourWork = [...new Set([...attention, ...involved.map(row => row.workItemId)])]
+      .map(id => {
+        const item = state.workItems[id];
+        const next = nextWorkStep(item, nowMs, state.room.ownerId);
+        return { id: item.id, title: item.title, state: item.state, revision: item.revision,
+          step: next.action, addressedToViewer: next.memberId === viewerId, untrusted: true };
+      });
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
   }
   return pack;
@@ -257,15 +273,20 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   listed.sort((a, b) => (a.state === b.state ? (seen(b.lastSeenAt) || 0) - (seen(a.lastSeenAt) || 0) : a.state === "online" ? -1 : 1));
   const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
-  const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
+  const own = you ? (pack.yourWork ?? []) : [];
+  const ownIds = new Set(own.map(item => item.id));
+  const yourWork = own.slice(0, BRIEF_ITEMS).map(item => ({ ...item, title: clip(item.title, 80) }));
+  const claims = pack.openClaims.filter(item => !ownIds.has(item.id)).slice(0, BRIEF_ITEMS).map(claim => ({
     id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
-  const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
+  const unclaimed = pack.openWork.filter(item => !item.claimant && !ownIds.has(item.id)).slice(0, BRIEF_ITEMS - claims.length)
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
   const firstClaim = claims[0]?.claimAction;
-  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
+  const ownNext = own[0] ? { why: "continue your current work", method: "GET",
+    endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(own[0].id)}` } : null;
+  const next = ownNext ?? (firstClaim ? { why: "claim the top open task", ...firstClaim }
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` });
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
@@ -278,6 +299,8 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // The window the around[] "recent" label stands for, stated in the
     // payload itself (REGISTER row 59).
     recentWindowMs: BRIEF_ACTIVE_MS,
+    yourWork,
+    yourWorkTotal: own.length,
     pickUp: [...claims, ...unclaimed],
     openWorkTotal: pack.openWork.length,
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
@@ -296,7 +319,8 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     () => { while (brief.around.length > 3) { brief.around.pop(); brief.aroundMore += 1; } },
     () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
     () => { brief.aroundMore += brief.around.length; brief.around = []; },
-    () => { brief.pickUp = brief.pickUp.slice(0, 1); },
+    () => { brief.yourWork = brief.yourWork.slice(0, 1); },
+    () => { brief.pickUp = brief.pickUp.slice(0, 1); for (const item of brief.yourWork) item.title = clip(item.title, 40); },
     () => { for (const item of brief.pickUp) delete item.claimAction; },
     () => { delete brief.rules; brief.recentDecisions = []; },
   ];
@@ -318,7 +342,9 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     aroundCount: brief.around.length + brief.aroundMore,
     quietMembers: brief.quietMembers,
     openWorkTotal: brief.openWorkTotal,
-    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    yourWork: yourWork.slice(0, 1).map(({ id, state, revision, step, addressedToViewer }) => ({ id, state, revision, step, addressedToViewer })),
+    yourWorkTotal: own.length,
+    next: ownNext ?? { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
     full: brief.full,
     eventCursor: brief.eventCursor
   };
