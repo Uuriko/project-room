@@ -13,6 +13,7 @@
 // The post itself always lands; only the wake is skipped.
 import { museDevelopmentAccess, canInviteCoOwners } from "../src/room-administration.js";
 import { memberOwnerId } from "../src/events.js";
+import { refuseArchivedWriteDb } from "./archived-guard.mjs";
 
 export const TALK_POLICIES = Object.freeze(["owner", "members", "room", "nobody"]);
 export const DEFAULT_NEW_AGENT_POLICY = "owner";
@@ -75,6 +76,9 @@ export function seedNewAgentPolicy(db, roomId, memberId, at, state = null) {
 // explicit development-room administration exception. Ordinary agents cannot
 // widen their own audience.
 export function writeTalkPolicy(db, state, { roomId, actorId, memberId, policy, allowed = [] }, at, fail) {
+  // Archived-room freeze: this write never passes store.command(), so the
+  // store-layer guard is called here, at the write entry.
+  refuseArchivedWriteDb(db, roomId);
   const target = state?.members?.[memberId];
   if (!target || target.active === false) fail(404, "unknown_member", "No such member in this room");
   if (target.kind !== "agent") fail(422, "invalid_talk_policy", "Who-can-talk applies to agents only");

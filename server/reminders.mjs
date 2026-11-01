@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { ServiceError } from "./service-error.mjs";
+import { refuseArchivedWriteDb } from "./archived-guard.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const reminderLimits = Object.freeze({ active: 100, receipts: 5000, horizon: 365 * 86400000 });
@@ -58,6 +59,11 @@ export class Reminders {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different reminder settings");
         return { ...this.current(auth, roomId), receipt: JSON.parse(prior.response), duplicate: true };
       }
+      // Archived-room freeze: mutate writes in its own transaction and never
+      // passes store.command(), so the store-layer guard is called here —
+      // after the idempotent-replay return above, so exact retries of
+      // pre-archive receipts still answer, and before any write below.
+      refuseArchivedWriteDb(this.db, roomId);
       const work = this.store.room(roomId).state.workItems;
       if (!Object.hasOwn(work, request.workItemId)) fail(404, "work_not_found", "Work no longer exists");
       const row = this.db.prepare("SELECT * FROM private_reminders WHERE room_id=? AND member_id=? AND work_item_id=?").get(roomId, auth.member.id, request.workItemId);

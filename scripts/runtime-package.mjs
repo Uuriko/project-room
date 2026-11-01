@@ -241,7 +241,7 @@ optional.push("server/wiki-parse.mjs", "server/wiki-data.mjs"); // W009: pure wi
 optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
-optional.push("server/archived-guard.mjs"); // archived-room freeze guard (imported by server/work-claim-sqlite.mjs, server/bounty-escrow.mjs, server/inbox-collab-store.mjs, server/project-map-store.mjs)
+optional.push("server/archived-guard.mjs"); // archived-room freeze guard (imported by server/work-claim-sqlite.mjs, server/bounty-escrow.mjs, server/inbox-collab-store.mjs, server/project-map-store.mjs, server/agent-talk-policy.mjs, server/moderation.mjs, server/reminders.mjs)
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/agent-collisions.mjs"); // overlap alerts for live claims (imported by server/work-claim-routes.mjs)

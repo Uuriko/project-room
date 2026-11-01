@@ -17,6 +17,7 @@ import { messageRepository } from "./message-repository.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, isMutedBy } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
+import { refuseArchivedWriteDb } from "./archived-guard.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";
@@ -92,6 +93,10 @@ export class Moderation {
       // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
       if (isGuestAgentMemberId(auth.member.id))
         fail(403, "guest_scope_denied", "Guest members cannot file moderation reports");
+      // The archived-room freeze is also a store.command() gate that report()
+      // bypasses, so it is enforced here too, at the write entry, before the
+      // INSERT below.
+      refuseArchivedWriteDb(this.db, roomId);
       if (!request || Array.isArray(request) || typeof request !== "object" || Object.keys(request).length !== 2
         || !Object.hasOwn(request, "messageId") || !Object.hasOwn(request, "reason")) fail(422, "invalid_report", "Supply one message id and a short reason");
       if (!validId(request.messageId)) fail(422, "invalid_report", "Supply one message id and a short reason");
