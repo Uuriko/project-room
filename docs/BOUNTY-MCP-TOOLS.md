@@ -5,6 +5,17 @@ tools. These tools are intentional and map to the existing escrow HTTP routes an
 append-only credit journal. Credits are Room ledger units only: they have no cash
 value, no cash-out path, and no chain interaction.
 
+## The 1% room-pool fee
+
+Every released payout carries a 1% room-pool fee, deducted from the award:
+the worker receives 99% of the released amount and the pool receives the
+rest. The poster is not charged on top of the award, and a refunded award
+is returned in full with no fee. Every bounty response (post, fund, list,
+read) carries a `feeDisclosure` object with the award's gross, fee and
+net credits, and the `bounty_accept` attribution carries the same split
+as `grossCredits` / `feeCredits` / `netCredits`, so the fee is visible
+before funding, not only after settlement.
+
 ## Tool surface
 
 ### Read-only tools
