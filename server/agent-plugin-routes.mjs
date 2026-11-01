@@ -413,6 +413,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // member additionally sees room-visibility cards. Private cards stay
   // invisible on both views.
   const directoryDocument = translate(async (req, res, { url }) => {
+    // SEARCH-COHERENCE parameter honesty: this directory honours q and
+    // capability only. A synonym (?search=, ?query=, ?filter=) is a 422
+    // naming the accepted set, never a silently unfiltered directory —
+    // one endpoint, one rule.
+    if ([...url.searchParams.keys()].some(key => !["q", "capability"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_agent_directory", "Only q and capability accepted");
     const member = memberAuth(req);
     const args = {
       serviceOrigin: serviceOrigin(req),

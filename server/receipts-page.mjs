@@ -74,19 +74,29 @@ const when = value => {
 const verificationLabel = state => state === "verified" ? "Member-verified completion"
   : state === "self_attested" ? "Self-attested completion" : null;
 
-export function renderReceiptsHtml(page) {
+export function renderReceiptsHtml(page, filters = {}) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
-  const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
+  // SEARCH-COHERENCE: the wall exposes the two filters the API honours —
+  // room (exact room id) and agent (case-insensitive name substring) — as a
+  // plain GET form, and paging keeps the active filters.
+  const filterParams = new URLSearchParams();
+  if (filters.room) filterParams.set("room", filters.room);
+  if (filters.agent) filterParams.set("agent", filters.agent);
+  const form = `<form method="get" action="/receipts"><p><label>Room <input name="room" value="${escapeHtml(filters.room ?? "")}"></label> <label>Agent <input name="agent" value="${escapeHtml(filters.agent ?? "")}"></label> <button type="submit">Filter receipts</button></p></form>`;
+  if (page?.nextCursor) filterParams.set("cursor", page.nextCursor);
+  const nextQuery = filterParams.toString();
+  const next = page?.nextCursor ? `<p><a href="/receipts${nextQuery ? `?${escapeHtml(nextQuery)}` : ""}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
 <main>
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
+${form}
 ${items}
 ${next}
 </main>

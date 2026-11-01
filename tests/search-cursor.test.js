@@ -54,13 +54,13 @@ test("search cursor reaches every match, newest page first, with no duplicate or
     assert.equal(status, 200);
     assert.equal(body.total, 205, "total is the full count on every page");
     assert.ok(body.messages.length <= 50);
-    seen.unshift(...body.messages.map(m => m.id));
+    seen.push(...body.messages.map(m => m.id));
     before = body.nextCursor ?? null;
     pages += 1;
     assert.ok(pages < 10, "paging terminates");
   } while (before);
   assert.equal(pages, 5);
-  assert.deepEqual(seen, ids, "every match once, in chronological order");
+  assert.deepEqual(seen, [...ids].reverse(), "every match once, newest first (SEARCH-COHERENCE Option A)");
 });
 
 test("search cursor is bound to query and kind; bad cursors are 422", async t => {
@@ -132,7 +132,7 @@ test("an anchor that leaves the result set makes the cursor stale (deleted, reda
   const ids = [];
   for (let i = 0; i < 6; i += 1) ids.push(post(`echo item ${i}`));
   const first = await page(get, "echo", "messages", 2);
-  assert.deepEqual(first.body.messages.map(m => m.id), ids.slice(4));
+  assert.deepEqual(first.body.messages.map(m => m.id), [ids[5], ids[4]], "newest first; the cursor anchors the page's oldest hit, ids[4]");
   // Delete the real anchor (the oldest id of the page) through the normal command path.
   send("owner", T.MESSAGE_DELETED, { messageId: ids[4], expectedMessageRevision: 0, reason: "test" });
   const stale = await page(get, "echo", "messages", 2, first.body.nextCursor);
@@ -141,7 +141,7 @@ test("an anchor that leaves the result set makes the cursor stale (deleted, reda
   // Restarting the search works and the total drops by one.
   const again = await page(get, "echo", "messages", 2);
   assert.equal(again.body.total, 5);
-  assert.deepEqual(again.body.messages.map(m => m.id), [ids[3], ids[5]]);
+  assert.deepEqual(again.body.messages.map(m => m.id), [ids[5], ids[3]], "newest first");
   // Editing the anchor so it no longer matches also makes the cursor stale.
   send("owner", T.MESSAGE_EDITED, { messageId: ids[3], body: "renamed", expectedMessageRevision: 0 });
   const edited = await page(get, "echo", "messages", 2, again.body.nextCursor);
@@ -163,18 +163,19 @@ test("kind=pinned pages every pinned match with no duplicate or skip; unpinning 
     const res = await page(get, "foxtrot", "pinned", 2, before);
     assert.equal(res.status, 200);
     assert.equal(res.body.total, 6);
-    seen.unshift(...res.body.messages.map(m => m.id));
+    seen.push(...res.body.messages.map(m => m.id));
     before = res.body.nextCursor ?? null;
     if (before) cursors.push(before);
     pages += 1;
   } while (before && pages < 10);
   assert.equal(pages, 3);
-  assert.deepEqual(seen, pinned);
+  assert.deepEqual(seen, [...pinned].reverse(), "every pinned match once, newest first");
   // A pinned cursor does not page kind=messages.
   assert.equal((await page(get, "foxtrot", "messages", 2, cursors[0])).status, 422);
-  // Unpin the first page's anchor: that cursor is now stale.
+  // Unpin the first page's anchor (its oldest hit — the last under
+  // newest-first): that cursor is now stale.
   const firstPage = await page(get, "foxtrot", "pinned", 2);
-  send("owner", T.MESSAGE_UNPINNED, { messageId: firstPage.body.messages[0].id });
+  send("owner", T.MESSAGE_UNPINNED, { messageId: firstPage.body.messages.at(-1).id });
   assert.equal((await page(get, "foxtrot", "pinned", 2, cursors[0])).status, 422);
 });
 
@@ -212,10 +213,10 @@ test("a max-length Unicode query with max-length message ids pages end to end ov
   do {
     const res = await page(get, q, "messages", 1, before);
     assert.equal(res.status, 200, JSON.stringify(res.body).slice(0, 200));
-    seen.unshift(...res.body.messages.map(m => m.id));
+    seen.push(...res.body.messages.map(m => m.id));
     before = res.body.nextCursor ?? null;
   } while (before && seen.length < 10);
-  assert.deepEqual(seen, ids);
+  assert.deepEqual(seen, [...ids].reverse(), "pages walk newest to oldest");
 });
 
 test("a thread reply sent to the channel with a max-length source id is a valid anchor", async t => {
@@ -227,8 +228,8 @@ test("a thread reply sent to the channel with a max-length source id is a valid 
   reply("deploy from the thread", root, sourceId);
   const first = await page(get, "deploy", "messages", 1);
   assert.equal(first.status, 200, JSON.stringify(first.body).slice(0, 200));
-  const anchorId = first.body.messages.at(-1).id;
-  assert.equal(anchorId, `${sourceId}:channel`, "the newest match is the generated channel copy");
+  const anchorId = first.body.messages[0].id;
+  assert.equal(anchorId, `${sourceId}:channel`, "the newest match is the generated channel copy, presented first");
   assert.equal(anchorId.length, 136);
   assert.ok(first.body.nextCursor.length <= SEARCH_CURSOR_MAX_LENGTH);
   const seen = first.body.messages.map(m => m.id);

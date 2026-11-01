@@ -300,9 +300,11 @@ test("search still finds archived messages and keeps archived DMs private", t =>
   archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
   assert.deepEqual(f.store.room("commons").state.messages.map(m => m.id), ["new-pub"]);
   const ids = token => f.store.search(token, "commons", "QUARTZ", "messages").messages.map(m => m.id);
-  assert.deepEqual(ids(f.human), ["old-pub", "old-dm", "new-pub"]);
-  assert.deepEqual(ids(f.agent), ["old-pub", "old-dm", "new-pub"]);
-  assert.deepEqual(ids(f.stranger), ["old-pub", "new-pub"]);
+  // Newest-first (SEARCH-COHERENCE Option A): archived hits are the oldest,
+  // so they now present last instead of first.
+  assert.deepEqual(ids(f.human), ["new-pub", "old-dm", "old-pub"]);
+  assert.deepEqual(ids(f.agent), ["new-pub", "old-dm", "old-pub"]);
+  assert.deepEqual(ids(f.stranger), ["new-pub", "old-pub"]);
   assert.equal(f.store.search(f.stranger, "commons", "quartz", "messages").total, 2);
 });
 
@@ -321,8 +323,8 @@ test("REST search resolves archived hits instead of dropping them, and still hid
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async (path, token) => (await fetch(origin + path, { headers: { Authorization: `Bearer ${token}` } })).json();
   const searchIds = async token => (await get("/api/rooms/commons/search?q=quartz&kind=messages", token)).messages.map(m => m.id);
-  assert.deepEqual(await searchIds(f.human), ["old-pub", "old-dm", "new-pub"]);
-  assert.deepEqual(await searchIds(f.stranger), ["old-pub", "new-pub"]);
+  assert.deepEqual(await searchIds(f.human), ["new-pub", "old-dm", "old-pub"], "newest first");
+  assert.deepEqual(await searchIds(f.stranger), ["new-pub", "old-pub"], "newest first");
 });
 
 test("changing or replying to an archived message is refused with a clear error, a stranger's DM probe is not confirmed", t => {
@@ -908,9 +910,9 @@ test("REST search with since_join history never returns archived messages from b
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async (path, token) => (await fetch(origin + path, { headers: { Authorization: `Bearer ${token}` } })).json();
   const ids = async token => (await get("/api/rooms/commons/search?q=quartz&kind=messages", token)).messages.map(m => m.id);
-  assert.deepEqual(f.store.search(late, "commons", "quartz", "messages").messages.map(m => m.id), ["after-pub", "new-pub"], "store.search applies the history floor to archived hits");
-  assert.deepEqual(await ids(f.human), ["before-pub", "after-pub", "new-pub"], "an earlier member keeps the full history");
-  assert.deepEqual(await ids(late), ["after-pub", "new-pub"], "the late joiner gets archived messages from after their join only");
+  assert.deepEqual(f.store.search(late, "commons", "quartz", "messages").messages.map(m => m.id), ["new-pub", "after-pub"], "store.search applies the history floor to archived hits, newest first");
+  assert.deepEqual(await ids(f.human), ["new-pub", "after-pub", "before-pub"], "an earlier member keeps the full history, newest first");
+  assert.deepEqual(await ids(late), ["new-pub", "after-pub"], "the late joiner gets archived messages from after their join only, newest first");
 });
 
 test("the author and the Room owner can delete an archived message; nobody else can, and a stranger learns nothing", t => {
