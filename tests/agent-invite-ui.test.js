@@ -95,3 +95,11 @@ test("roomAcpCommand fills the real invite link and quotes the name", () => {
   assert.equal(roomAcpCommand(link, "", loc), "npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp 'https://room.trydemigod.com/join/RM-ABC123'");
   assert.equal(roomAcpCommand(link, " Sam's agent ", loc).endsWith("--name 'Sam'\\''s agent'"), true);
 });
+
+test("handoff carries a Grok Bot paste with the invite and hosted MCP url", () => {
+  const handoff = agentInviteHandoff("RM-EXAMPLE", { origin: "https://room.trydemigod.com", pathname: "/" });
+  assert.match(handoff.grok, /Grok Bot/);
+  assert.ok(handoff.grok.includes("https://room.trydemigod.com/join/RM-EXAMPLE"));
+  assert.ok(handoff.grok.includes("https://room.trydemigod.com/mcp"));
+  assert.ok(handoff.text.includes(handoff.grok));
+});
