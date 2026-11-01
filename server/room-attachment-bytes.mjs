@@ -13,11 +13,25 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
-import { validId } from "../src/events.js";
+import { validId, isRoomArchived } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// Freeze residual 16b (G8 cross-cut, T2-L10f-C4): stage/discard/commit
+// authenticate directly and bypass store.command — the one layer that
+// carried the archived-room freeze — so room files landed in archived
+// rooms at every layer. PR #5502 named this family an explicit residual
+// it does not cover (none of its choke points is on this write path).
+// The refusal is refuseArchivedWrite's exact shape (409 room_archived,
+// same message; room-lifecycle.mjs), checked on the room state right
+// after authenticate in each write method below — the same placement
+// this module already uses for its guest gate, which exists for the
+// same bypass. Reads (list/get) and the staged-expiry sweep stay open.
+function refuseArchivedRoom(state) {
+  if (isRoomArchived(state)) fail(409, "room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
+}
 
 const BLOCKED_MEDIA_TYPES = new Set([
   "application/x-msdownload",
@@ -119,6 +133,7 @@ export class RoomAttachmentBytes {
   stage(token, roomId, { id, filename, mediaType, data } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      refuseArchivedRoom(this.store.room(roomId).state); // 16b: no new bytes recorded in an archived room
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
       // Guests may read and chat but may not store room files. stage()
       // authenticates directly and bypasses store.command, so the RoomStore
@@ -247,6 +262,7 @@ export class RoomAttachmentBytes {
   discard(token, roomId, id) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      refuseArchivedRoom(this.store.room(roomId).state); // 16b: discard is a recorded state change; frozen like the work-claim registry's delete in #5502
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
       // Guests may read and chat but may not store room files. discard()
       // authenticates directly and bypasses store.command, so the RoomStore
@@ -299,6 +315,7 @@ export class RoomAttachmentBytes {
   commit(token, roomId, { id, messageId } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      refuseArchivedRoom(this.store.room(roomId).state); // 16b: binding a file to a message is a write; frozen when archived (idempotent re-commit included — a frozen room records nothing)
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
       // Guests may read and chat but may not store room files. commit()
       // authenticates directly and bypasses store.command, so the RoomStore
