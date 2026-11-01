@@ -64,9 +64,19 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // content, so the memo can never serve stale data (this matters because the
 // repair paths rewrite projections without bumping the room sequence).
 // Bounded: one entry per room, oversized projections bypass the memo.
-const PROJECTION_MEMO_MAX_BYTES = 1_000_000;
-const PROJECTION_MEMO_MAX_ROOMS = 500;
-const projectionMemo = new Map(); // roomId -> { hash, projection }
+//
+// RR-D6: the memo now stores the DERIVED per-room snapshot — the room title
+// plus the help-wanted candidate fields the feed actually serves — instead
+// of the parsed projection, and the oversized bypass is gone: a snapshot
+// is small even when the projection behind it is not, so the largest rooms
+// (which bypassed the memo at >1 MB and re-parsed on every request) now
+// derive once per projection-byte change like every other room. The key
+// stays the content hash, so the never-stale property above is unchanged:
+// any byte change, sequence bump or not, re-derives. Expiry is NOT part of
+// the snapshot: helpWantedOpportunity still applies its expiresAt check
+// against the request's `now` on every request.
+const SNAPSHOT_MEMO_MAX_ROOMS = 500;
+const projectionMemo = new Map(); // roomId -> { hash, title, candidates }
 const hashProjection = bytes => createHash("sha256").update(bytes).digest("hex");
 
 export const OPPORTUNITIES_DEFAULT_LIMIT = 50;
@@ -122,31 +132,50 @@ function listedRoomIds(db, roomId) {
       ORDER BY s.room_id ASC`).all().map(r => r.roomId).filter(id => !isUnpublished(db, "room", id));
 }
 
-function roomProjection(db, roomId) {
+// The fields helpWantedOpportunity reads, and nothing else: the snapshot
+// never retains the parsed projection, its members, or its messages.
+function snapshotCandidate(item) {
+  const help = item?.helpWanted;
+  return {
+    id: item.id,
+    title: item.title,
+    definitionOfDone: item.definitionOfDone,
+    state: item.state,
+    mode: item.mode ?? null,
+    labels: item.labels,
+    helpWanted: help && typeof help === "object" ? {
+      status: help.status,
+      scope: help.scope,
+      expiresAt: help.expiresAt,
+      openedAt: help.openedAt,
+    } : help ?? null,
+  };
+}
+
+function roomSnapshot(db, roomId) {
   const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
   if (!row?.projection) { projectionMemo.delete(roomId); return null; }
   const bytes = row.projection;
-  // Oversized projections bypass the memo: re-parsing a huge room on a rare
-  // request is cheaper than pinning its object graph in memory.
-  if (bytes.length > PROJECTION_MEMO_MAX_BYTES) {
-    try {
-      const projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
-      return projection && typeof projection === "object" ? projection : null;
-    } catch { return null; }
-  }
   const hash = hashProjection(bytes);
   const cached = projectionMemo.get(roomId);
-  if (cached && cached.hash === hash) return cached.projection;
+  if (cached && cached.hash === hash) return cached;
   let projection = null;
   try {
     projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
     if (!projection || typeof projection !== "object") projection = null;
   } catch { projection = null; }
-  if (!projectionMemo.has(roomId) && projectionMemo.size >= PROJECTION_MEMO_MAX_ROOMS) {
+  if (!projection) { projectionMemo.delete(roomId); return null; }
+  const workItems = projection.workItems && typeof projection.workItems === "object" ? Object.values(projection.workItems) : [];
+  const snap = {
+    hash,
+    title: cleanText(projection?.room?.title, 200),
+    candidates: workItems.filter(item => item && typeof item === "object" && typeof item.id === "string").map(snapshotCandidate),
+  };
+  if (!projectionMemo.has(roomId) && projectionMemo.size >= SNAPSHOT_MEMO_MAX_ROOMS) {
     projectionMemo.delete(projectionMemo.keys().next().value); // FIFO: evict oldest room
   }
-  projectionMemo.set(roomId, { hash, projection });
-  return projection;
+  projectionMemo.set(roomId, snap);
+  return snap;
 }
 
 const roomPath = roomId => `/?room=${encodeURIComponent(roomId)}`;
@@ -209,15 +238,12 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
   const titles = new Map();
 
   for (const id of roomIds) {
-    const projection = roomProjection(db, id);
-    if (!projection) continue; // silently skip unusable rooms, like the directory listing
-    const roomTitle = cleanText(projection?.room?.title, 200);
-    if (!roomTitle) continue;
-    titles.set(id, roomTitle);
-    const workItems = projection.workItems && typeof projection.workItems === "object" ? Object.values(projection.workItems) : [];
-    for (const item of workItems) {
-      if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
-      const opp = helpWantedOpportunity(item, id, roomTitle, now);
+    const snap = roomSnapshot(db, id);
+    if (!snap) continue; // silently skip unusable rooms, like the directory listing
+    if (!snap.title) continue;
+    titles.set(id, snap.title);
+    for (const item of snap.candidates) {
+      const opp = helpWantedOpportunity(item, id, snap.title, now);
       if (opp) opportunities.push(opp);
     }
   }
