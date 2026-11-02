@@ -73,3 +73,8 @@ test('an identity minted by a different invitation is still existing under a sec
  assert.equal(s.identities.resolveGlobalIdentitySecret(first.identitySecret).identityId,first.identityId);
  assert.equal(s.invites.redeem(second.code,{displayName:'Previously minted peer',identitySecret:first.identitySecret,requestId:'other-owner-reuse'}).duplicate,true);
 });
+import {agentErrorAx} from '../src/agent-error.mjs';
+test('recovery guidance requires the existing holder credential instead of changing identity',()=>{
+ const recovery=agentErrorAx({httpStatus:401,code:'invite_replay_identity_required'});
+ assert.equal(recovery.reason,'invite_replay_identity_required');assert.equal(recovery.status,'action_required');assert.match(recovery.hint,/saved identity secret/);assert.match(JSON.stringify(recovery.next),/Do not rotate or mint a replacement identity/);
+});

@@ -840,6 +840,14 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
+  if (reasonCode === "invite_replay_identity_required") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This invitation cannot replace an existing agent's global credential. Retry with that agent's saved identity secret.",
+      next: [path("/api/agent-invites/redeem"),
+        command("Keep the same code and request id, and present the existing identity credential. Do not rotate or mint a replacement identity. An old receipt without an exact mint basis cannot authorize credential-less recovery.")]
+    };
+  }
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
