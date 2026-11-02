@@ -9,7 +9,8 @@ import { replayPre749Sessions } from './legacy-session-replay.mjs';
 import { ServiceError } from './service-error.mjs';
 import { appendOperatorAction } from './operator-actions.mjs';
 import { hydrateProjection } from './projection-at-rest.mjs';
-import { projectionDigest, projectionContentHash, servingProofDrift, messageProofMatches, messageProofHash, assertMessageWrite, MESSAGE_PROOF_SELECT, MESSAGE_PROOF_FIELDS } from './write-integrity.mjs';
+import { projectionDigest, servingProofDrift, messageProofMatches, messageProofHash, assertMessageWrite, MESSAGE_PROOF_SELECT, MESSAGE_PROOF_FIELDS } from './write-integrity.mjs';
+import { legacyContentHashDrift } from './legacy-content-hash.mjs';
 import { messageRowParityFields, affectedMessageIds, reconcileLegacySessionBackfill, messageRowForWrite } from './messages-store.mjs';
 const PROOF_MODE = HISTORICAL_PROOF_MODE;
 const KIND = HISTORICAL_REPAIR_KIND, ACTION = HISTORICAL_REPAIR_ACTION, LIMIT = 64, BYTES = 256 * 1024;
@@ -163,7 +164,14 @@ function inventory(store, input, target) {
   if (!proof.projection_hash) projectionUnavailable('content_proof_missing');
   if (proof.sequence !== room.sequence) projectionUnavailable('proof_head_mismatch');
   if (proof.metadata_hash !== projectionDigest(room.projection)) projectionUnavailable('metadata_hash_mismatch');
-  if (proof.projection_hash !== projectionContentHash(db, roomId, room.sequence, room.projection)) projectionUnavailable('content_hash_mismatch');
+  // Definition-aware content comparison (P1 B5): the stored baseline is
+  // untagged and may have been computed under the v2 definition, so it
+  // is judged under its own definition — accepted iff it matches the
+  // live projection under v2 or v3. A direct comparison against the
+  // current v3 composition alone would report content_hash_mismatch on
+  // every clean untransitioned v2 room; a stored hash that matches
+  // neither definition (garbage, or genuine drift) still mismatches.
+  if (legacyContentHashDrift(db, roomId, room.sequence, room.projection, proof.projection_hash)) projectionUnavailable('content_hash_mismatch');
   if (servingProofDrift(db, roomId, room.projection)) projectionUnavailable('serving_proof_drift');
   const missingProofs = [];
   for (const row of data.messages) if (!messageProofMatches(row)) {

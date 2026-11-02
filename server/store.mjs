@@ -469,6 +469,30 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 5 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
+// P1 B5 recheck fix: true when the room's content hash folds in canonical
+// payload bytes that live OUTSIDE the projection — authority-migrated
+// message rows (the projection carries the messageAuthority marker, not
+// the payloads) and canonical work-entity rows (the projection carries a
+// _workEntity reference, not the body). For such a room the scan bound
+// (room sequence + projection metadata digest) does NOT determine the
+// content hash: an in-place payload rewrite at an unchanged sequence and
+// an unchanged projection moves the true hash and moves neither bound
+// input. Banked state banked at that bound therefore cannot certify the
+// CURRENT payload bytes, and every verdict surface below declines it for
+// these rooms and takes the fresh scan instead. Unparseable projections
+// and invalid authority markers decline too (the scan itself refuses
+// them); rooms whose hash is fully determined by the projection keep
+// every banked optimisation.
+function projectionCarriesCanonicalPayloads(projection) {
+  let state;
+  try { state = JSON.parse(projection); } catch { return true; }
+  if (!state || typeof state !== "object") return true;
+  try { if (hasMessageAuthority(state)) return true; } catch { return true; }
+  const workItems = state.workItems;
+  if (workItems && typeof workItems === "object"
+    && Object.values(workItems).some(record => record?._workEntity === 1)) return true;
+  return false;
+}
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
 // RC-2026-09-18-012: presented agent API-key credentials ("rak_"+secret).
@@ -2908,12 +2932,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rememberIntegrityRoomState() {
     this.ensureIntegrityRoomState();
     this.transaction(() => {
+      // B5: capture the remembered rows BEFORE the bulk insert below
+      // rewrites every sequence — a room whose remembered hash is
+      // already current (same sequence, same projection metadata
+      // digest, current hash definition) keeps its hash instead of
+      // paying a fresh whole-projection scan. The kept hash is the
+      // adoption-gated state itself, never a raw checkpoint row;
+      // every other room is scanned as before, and this method's
+      // synchronous contract is unchanged.
+      const prior = new Map(this.db.prepare("SELECT room_id AS id, sequence, projection_hash AS hash, metadata_hash FROM integrity_room_state").all().map(row => [row.id, row]));
+      const currentDefinition = parseIntegritySnapshot(this.readIntegritySnapshot())?.format !== "v2";
       this.db.prepare(`INSERT INTO integrity_room_state(room_id, sequence, projection_bytes)
         SELECT id, sequence, LENGTH(projection) FROM rooms WHERE 1
         ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection_bytes=excluded.projection_bytes`).run();
       const update = this.db.prepare("UPDATE integrity_room_state SET projection_hash=? WHERE room_id=?");
       for (const row of this.db.prepare("SELECT id, sequence, projection FROM rooms").all()) {
-        update.run(projectionContentHash(this.db, row.id, row.sequence, row.projection), row.id);
+        const remembered = prior.get(row.id);
+        // Recheck fix: the keep is a currency test on (sequence,
+        // metadata digest) alone, so it inherits the bound's blind
+        // spot — for a room carrying canonical payloads that test
+        // cannot see a payload-only rewrite, and keeping the hash
+        // would re-bank a stale proof as the fresh baseline. Those
+        // rooms are rescanned here, as every unkept room already is.
+        const keep = currentDefinition && remembered?.hash && remembered.sequence === row.sequence
+          && remembered.metadata_hash === projectionDigest(row.projection)
+          && !projectionCarriesCanonicalPayloads(row.projection) ? remembered.hash : null;
+        update.run(keep ?? projectionContentHash(this.db, row.id, row.sequence, row.projection), row.id);
       }
       this.db.prepare("DELETE FROM integrity_room_state WHERE room_id NOT IN (SELECT id FROM rooms)").run();
       // A deleted room's content-scan checkpoint is moot exactly like
@@ -2945,10 +2989,80 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.db.prepare("SELECT * FROM integrity_content_scan_checkpoint WHERE room_id=?").get(roomId) ?? null;
   }
 
+  // P1 §3.1/§3.2 (lane B5): the store-internal reader for a room's banked
+  // content proof — the completed durable scan recorded in
+  // integrity_content_scan_checkpoint. A checkpoint is evidence of a
+  // scan only at its exact bound: same room sequence AND same
+  // projection metadata digest (a digest-only projection move does not
+  // bump the sequence, so the digest half of the bound is load-bearing:
+  // a proof banked before such a move is stale even at an unchanged
+  // sequence). Incomplete, corrupt and stale-bound rows are not scan
+  // evidence. Store-internal only; it reuses
+  // parseContentScanCheckpoint's full row validation. No ensure: it is
+  // called from read transactions, and a missing table simply means
+  // nothing is banked yet.
+  bankedContentScan(roomId, sequence, projection) {
+    let row = null;
+    try {
+      row = this.db.prepare("SELECT * FROM integrity_content_scan_checkpoint WHERE room_id=?").get(roomId) ?? null;
+    } catch { return null; }
+    if (!row) return null;
+    const parsed = parseContentScanCheckpoint(row);
+    if (!parsed || parsed.phase !== "done" || !parsed.resultHash) return null;
+    if (parsed.boundSeq !== sequence || parsed.boundDigest !== projectionDigest(projection)) return null;
+    return parsed;
+  }
+
+  // The SOURCEABLE banked hash for the checksum composition (§3.1):
+  // adoption-gated, never the raw checkpoint row. The hash is read from
+  // integrity_room_state — written only by verified completion paths
+  // (the certifying transaction's remember, the CAS adoption, the
+  // reconstruction proof) — and it is current only when the remembered
+  // row still describes this room exactly: same sequence and same
+  // projection metadata digest. A completed checkpoint at the same
+  // bound must AGREE with the remembered hash; a forged or stale
+  // checkpoint that disagrees refuses sourcing outright (the room is
+  // scanned fresh), so a planted result_hash is never composed. In an
+  // untransitioned v2 window the remembered hashes are v2-definition
+  // and are never sourced into the v3 composition. Anything else —
+  // missing, hashless, stale, wrong definition — sources nothing.
+  //
+  // Recheck fix: the completed-scan agreement is REQUIRED, not a
+  // cross-check that only fires when a scan row happens to stand. The
+  // remembered row alone is not a completed durable scan: the tick's
+  // own banking (rememberIntegrityRoomState) writes it for every room
+  // without any durable scan standing at the bound, and for a room
+  // carrying canonical payloads (projectionCarriesCanonicalPayloads)
+  // the (sequence, digest) bound does not cover the payload bytes the
+  // hash was computed over — a payload-only rewrite at an unchanged
+  // bound left the remembered hash "current" and the composed checksum
+  // invariant while the true hash moved (the reconciliation pins that
+  // pass at B4). With no completed scan at the bound the room is
+  // scanned fresh here, exactly as a disagreeing scan already forced.
+  bankedContentHash(roomId, sequence, projection) {
+    if (parseIntegritySnapshot(this.readIntegritySnapshot())?.format === "v2") return null;
+    const digest = projectionDigest(projection);
+    let state = null;
+    try {
+      state = this.db.prepare("SELECT sequence, projection_hash AS hash, metadata_hash FROM integrity_room_state WHERE room_id=?")
+        .get(roomId) ?? null;
+    } catch { return null; }
+    if (!state?.hash || state.sequence !== sequence || state.metadata_hash !== digest) return null;
+    const banked = this.bankedContentScan(roomId, sequence, projection);
+    if (!banked || banked.resultHash !== state.hash) return null;
+    return state.hash;
+  }
+
   discardContentScanCheckpoint(roomId, boundSeq, boundDigest) {
     // Discard + restart in place: the fresh attempt carries the next
-    // generation, so a stale writer's CAS can never match it.
-    this.db.prepare(`UPDATE integrity_content_scan_checkpoint SET attempt_seq=attempt_seq+1, phase='messages',
+    // generation, so a stale writer's CAS can never match it. The next
+    // generation is MAX(attempt_seq, 0)+1, not a blind increment: a
+    // corrupt row carrying attempt_seq < 0 (parse-rejected state) must
+    // still land on a VALID generation — incrementing -3 yields -2,
+    // the re-parse returns null, and the drive dereferenced it (the
+    // inherited B4 defect B5 cures here; repro: the adversarial lane's
+    // repro-attempt-negative.log, probe 5).
+    this.db.prepare(`UPDATE integrity_content_scan_checkpoint SET attempt_seq=MAX(attempt_seq, 0)+1, phase='messages',
       bound_seq=?, bound_digest=?, range_cursor='', range_digests_json='[]', drift=0, scanned_count=0,
       visible_count=0, result_hash=NULL, scan_discards=scan_discards+1, updated_at=? WHERE room_id=?`)
       .run(boundSeq, boundDigest, this.now(), roomId);
@@ -2970,7 +3084,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       parsed = this.discardContentScanCheckpoint(roomId, boundSeq, boundDigest);
       discarded = 1;
     }
-    if (!row) {
+    if (row && !parsed) {
+      // Defensive re-discard: a reset row that still does not parse is
+      // deleted and re-created fresh below, never dereferenced.
+      this.db.prepare("DELETE FROM integrity_content_scan_checkpoint WHERE room_id=?").run(roomId);
+    }
+    if (!row || !parsed) {
       this.db.prepare(`INSERT INTO integrity_content_scan_checkpoint
         (room_id, attempt_seq, phase, bound_seq, bound_digest, updated_at) VALUES(?, 1, 'messages', ?, ?, ?)`)
         .run(roomId, boundSeq, boundDigest, this.now());
@@ -2979,7 +3098,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (attemptSeq !== null && parsed.attemptSeq !== attemptSeq) {
       return { casRejected: 1, reason: "stale_attempt", roomId, attemptSeq: parsed.attemptSeq, scanDiscards: parsed.scanDiscards };
     }
-    if (parsed.phase === "done") {
+    // Recheck fix: a COMPLETED banked verdict is a sourcing act, and
+    // for a room carrying canonical payloads its bound (sequence +
+    // projection metadata digest) does not cover the payload bytes the
+    // verdict was computed over — a payload-only rewrite, or a payload
+    // repair, at an unchanged bound leaves the banked verdict standing
+    // while the true verdict moves (a banked drift verdict poisoned
+    // every later drive of a repaired room; a banked clean verdict
+    // would certify a tampered one). Such a room is rescanned fresh:
+    // the completed row is not resumed and its verdict is not issued;
+    // the fresh scan's commits overwrite the row under the same
+    // attempt CAS. Partial rows are scan mechanics, not verdicts, and
+    // resume exactly as before for every room.
+    const staleBankedVerdict = parsed.phase === "done"
+      && projectionCarriesCanonicalPayloads(room.projection);
+    if (parsed.phase === "done" && !staleBankedVerdict) {
       // A completed scan's verdict, banked durably: issued from the
       // COMPLETE scan the row records, never from a partial one.
       return { done: 1, roomId, drift: Boolean(parsed.drift), hash: parsed.resultHash,
@@ -2989,7 +3122,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const scanner = createServingContentScanner(this.db, roomId, boundSeq, room.projection, {
       verify: true, hashContent: true,
       ...(chunkRows !== undefined ? { chunkRows } : {}), ...(chunkBytes !== undefined ? { chunkBytes } : {}),
-      resume: { phase: parsed.phase, range_cursor: parsed.rangeCursor, rangeDigests: parsed.rangeDigests,
+      resume: staleBankedVerdict ? null : { phase: parsed.phase, range_cursor: parsed.rangeCursor, rangeDigests: parsed.rangeDigests,
         scanned_count: parsed.scannedCount, visible_count: parsed.visibleCount, drift: parsed.drift },
     });
     await scanner.drive({ deadline, yieldBetween });
@@ -3129,8 +3262,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const current = this.db.prepare("SELECT sequence, projection FROM rooms WHERE id=?").get(row.recordId);
       if (!current) { this.clearIntegrityFailure("projection_content", row.recordId); continue; }
       const stored = this.db.prepare("SELECT sequence, projection_hash AS hash,metadata_hash FROM integrity_room_state WHERE room_id=?").get(row.recordId);
+      // B5: a completed durable scan banked at exactly this bound (under
+      // the current hash definition — a v2 baseline is always recomputed
+      // under its own definition) answers the baseline comparison
+      // without a fresh scan; anything else recomputes as before.
+      // Recheck fix: for a room carrying canonical payloads the bound
+      // does not cover the payload bytes, so the banked comparison is
+      // declined and the baseline is recomputed fresh, as at B4.
+      const snapshotFormat = parseIntegritySnapshot(this.readIntegritySnapshot())?.format;
+      const banked = snapshotFormat === "v2" || stored?.metadata_hash !== projectionDigest(current.projection)
+        || projectionCarriesCanonicalPayloads(current.projection)
+        ? null : this.bankedContentScan(row.recordId, current.sequence, current.projection);
       const sameBaseline=stored?.hash && stored.sequence===current.sequence
-        && baselineContentHash(this.db, parseIntegritySnapshot(this.readIntegritySnapshot())?.format, row.recordId, current.sequence, current.projection)===stored.hash;
+        && (banked ? banked.resultHash===stored.hash
+          : baselineContentHash(this.db, snapshotFormat, row.recordId, current.sequence, current.projection)===stored.hash);
       // A valid edit elsewhere may have advanced the head after corruption.
       // Canonical metadata binds membership; every payload still needs its
       // independent proof. Never retire a lost/empty baseline or an unproved
@@ -3158,8 +3303,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const snapshotFormat = parseIntegritySnapshot(this.readIntegritySnapshot())?.format;
       const stored = new Map(this.db.prepare("SELECT room_id AS id, sequence, projection_hash AS hash FROM integrity_room_state").all().map(row => [row.id, row]));
       return this.db.prepare("SELECT id, sequence, projection FROM rooms").all()
-        .filter(row => servingProofDrift(this.db,row.id,row.projection) || stored.get(row.id)?.hash && stored.get(row.id).sequence === row.sequence
-          && baselineContentHash(this.db, snapshotFormat, row.id, row.sequence, row.projection) !== stored.get(row.id).hash)
+        .filter(row => {
+          // B5: a completed durable scan banked at exactly this bound
+          // answers both legs (its verify leg is the drift verdict; its
+          // result hash is the current-definition baseline hash) without
+          // a fresh scan. Under a v2 baseline the banked v3 hash must
+          // never substitute for the v2 definition, so the banked row is
+          // consulted only when the baseline definition is current.
+          // Recheck fix: for a room carrying canonical payloads the
+          // bound does not cover the payload bytes, so the banked
+          // verdict is declined and both legs recompute fresh, as at B4.
+          const banked = snapshotFormat === "v2" || projectionCarriesCanonicalPayloads(row.projection)
+            ? null : this.bankedContentScan(row.id, row.sequence, row.projection);
+          if (banked) return banked.drift
+            || Boolean(stored.get(row.id)?.hash && stored.get(row.id).sequence === row.sequence
+              && banked.resultHash !== stored.get(row.id).hash);
+          return servingProofDrift(this.db,row.id,row.projection) || stored.get(row.id)?.hash && stored.get(row.id).sequence === row.sequence
+            && baselineContentHash(this.db, snapshotFormat, row.id, row.sequence, row.projection) !== stored.get(row.id).hash;
+        })
         .map(row => row.id);
     });
   }
@@ -3171,9 +3332,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // caller fails verification instead of adopting them. A state table
   // that does not cover every room, or a snapshot with no content digest,
   // falls through to the full check.
-  incrementalIntegrityCheck() {
+  // B5 (§3.2 call-site conversion): the changed-room and sweep legs now
+  // drive B4's durable content scanner (driveRoomContentScan) under the
+  // tick's deadline/yield context, instead of paying one synchronous
+  // servingContentProof per room inside a single transaction. The scan
+  // banks checkpoint progress as it goes; a leg whose scan cannot
+  // complete inside the budget reports not-ok with the progress named
+  // (contentScanProgress) and NO verdict — the snapshot and the
+  // remembered baselines advance only in the closing transaction below,
+  // which runs only when every leg's scan has completed at its bound.
+  // Callers without a tick context (deadline/yieldBetween omitted) drive
+  // every scan to completion in this one call, as the synchronous proof
+  // did. The changed set is still served whole (every sequence-changed
+  // room, in one call) and the sweep still visits exactly one room per
+  // call — the cadence is unchanged; only the proof's bounding changed.
+  async incrementalIntegrityCheck({ deadline = Infinity, yieldBetween = null } = {}) {
     this.ensureIntegrityRoomState();
-    return this.transaction(() => {
+    // Phase A: the coverage gates and the leg selection, read in one
+    // transaction so the changed set and the sweep pick describe the
+    // same instant. Every early return here is the original gate's.
+    const gate = this.readTransaction(() => {
       const snapshotText = this.readIntegritySnapshot();
       const snapshot = parseIntegritySnapshot(snapshotText);
       const roomCount = this.db.prepare("SELECT COUNT(*) AS n FROM rooms").get().n;
@@ -3184,19 +3362,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // snapshot's room count must match the current one too, and a
       // room the snapshot does not cover belongs to the full check.
       if (!snapshot || snapshot.format !== "v3" || stateCount !== roomCount || snapshot.counts[0] !== roomCount) return { ok: false };
-      const parts = snapshot.counts;
       const sweepAfter = this.db.prepare("SELECT sweep_after FROM integrity_job_cursor WHERE singleton=1").get()?.sweep_after ?? "";
       const sweepSql = "SELECT id, sequence, LENGTH(projection) AS bytes, projection FROM rooms";
       const sweep = this.db.prepare(`${sweepSql} WHERE id>? ORDER BY id LIMIT 1`).get(sweepAfter)
         ?? this.db.prepare(`${sweepSql} ORDER BY id LIMIT 1`).get();
       const changed = this.db.prepare(`SELECT r.id, r.sequence, LENGTH(r.projection) AS bytes, r.projection AS projection, s.sequence AS oldSequence, s.projection_bytes AS oldBytes
         FROM rooms r JOIN integrity_room_state s ON s.room_id=r.id WHERE r.sequence!=s.sequence`).all();
-      const checkedContent=new Map();
-      for (const row of changed) {
-        const content=servingContentProof(this.db,row.id,row.sequence,row.projection);
-        if(content.drift)return {ok:false,contentDrift:row.id};
-        checkedContent.set(row.id,content);
+      return { ok: true, snapshotText, snapshot, sweep, changed };
+    });
+    if (!gate.ok) return { ok: false };
+    const { snapshotText, snapshot, sweep, changed } = gate;
+    const parts = snapshot.counts;
+    // Phase B: drive the durable scan for every changed room, then for
+    // the sweep room (reusing the changed leg's scan when they coincide,
+    // as the synchronous proof's checkedContent map did).
+    const checkedContent=new Map();
+    for (const row of changed) {
+      const driven = await this.driveRoomContentScan(row.id, { deadline, yieldBetween });
+      if (driven.moot || driven.casRejected || driven.checkpointOversize) return { ok: false };
+      if (!driven.done) return { ok: false, contentScanProgress: row.id };
+      if (driven.drift) return { ok: false, contentDrift: row.id };
+      checkedContent.set(row.id, { drift: false, hash: driven.hash, rangeDigests: driven.rangeDigests });
+    }
+    let sweepContent = null;
+    if (sweep) {
+      if (checkedContent.has(sweep.id)) sweepContent = checkedContent.get(sweep.id);
+      else {
+        const driven = await this.driveRoomContentScan(sweep.id, { deadline, yieldBetween });
+        if (driven.moot) return { ok: false };
+        if (driven.casRejected || driven.checkpointOversize) return { ok: false };
+        if (!driven.done) return { ok: false, contentScanProgress: sweep.id, swept: 1 };
+        sweepContent = { drift: Boolean(driven.drift), hash: driven.hash, rangeDigests: driven.rangeDigests };
       }
+    }
+    // Phase C: the original closing transaction, unchanged in its
+    // checks and ordering, now consuming the completed scans' verdicts.
+    return this.transaction(() => {
       const uncovered = this.db.prepare(`SELECT 1 FROM rooms r LEFT JOIN integrity_room_state s ON s.room_id=r.id WHERE s.room_id IS NULL
         UNION SELECT 1 FROM integrity_room_state s LEFT JOIN rooms r ON r.id=s.room_id WHERE r.id IS NULL LIMIT 1`).get();
       if (uncovered) return { ok: false };
@@ -3216,7 +3417,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (sweep) {
         const stored = this.db.prepare("SELECT sequence, projection_bytes AS bytes, projection_hash AS hash FROM integrity_room_state WHERE room_id=?").get(sweep.id);
         if (!stored) return { ok: false };
-        const content=checkedContent.get(sweep.id) ?? servingContentProof(this.db,sweep.id,sweep.sequence,sweep.projection);
+        const content=sweepContent;
         if(content.drift)return {ok:false,contentDrift:sweep.id,swept:1};
         if (stored.sequence === sweep.sequence) {
           if (stored.bytes !== sweep.bytes) return { ok: false, contentDrift: sweep.id, swept: 1 };
@@ -3257,7 +3458,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare(`INSERT INTO integrity_job_cursor(singleton, step, sweep_after) VALUES(1, 0, ?)
           ON CONFLICT(singleton) DO UPDATE SET sweep_after=excluded.sweep_after`).run(sweep.id);
       }
-      return { ok: true, invitations, checked: changed.length, swept: sweep ? 1 : 0 };
+      // The baselines this transaction just rewrote are the completed
+      // scans' hashes: consume those checkpoints under their CAS (the
+      // B4 adoption re-point), so a sourced proof is banked exactly
+      // once. Partial rows at a still-current bound stand for resume.
+      const checkpointScanDiscards = this.consumeContentScanCheckpointsForAdoption().scanDiscards;
+      return { ok: true, invitations, checked: changed.length, swept: sweep ? 1 : 0,
+        ...(checkpointScanDiscards ? { scanDiscards: checkpointScanDiscards } : {}) };
     });
   }
 
@@ -3270,7 +3477,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const rooms = this.db.prepare("SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS sequences, COALESCE(SUM(LENGTH(projection)), 0) AS projectionBytes FROM rooms").get();
       const projections = this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all();
-      const contentHash = integrityContentDigest(projections.map(row => ({ id: row.id, hash: projectionContentHash(this.db, row.id, row.sequence, row.projection) })));
+      // B5 (§3.1 checksum sourcing): a room whose banked content proof
+      // is current — a completed durable scan at exactly this room's
+      // bound (sequence + projection metadata digest) — contributes its
+      // banked hash to the composition instead of a fresh
+      // whole-projection scan. Rooms without a current banked proof are
+      // scanned fresh here, exactly as before; a stale, incomplete or
+      // corrupt banked row sources nothing (bankedContentHash), so a
+      // stale hash is never composed into the checksum. This method's
+      // synchronous contract is unchanged; the tick-level deferral for
+      // a checksum that cannot start inside the budget is the driver's
+      // gate in verifyRoomIntegrity (B1), not a redesign here.
+      const contentHash = integrityContentDigest(projections.map(row => ({ id: row.id, hash: this.bankedContentHash(row.id, row.sequence, row.projection) ?? projectionContentHash(this.db, row.id, row.sequence, row.projection) })));
       const invitations = this.db.prepare("SELECT COUNT(*) AS invitations FROM membership_invitations").get();
       const journal = this.db.prepare("SELECT COUNT(*) AS entries, COALESCE(SUM(sequence), 0) AS sequences FROM membership_invitation_journal").get();
       const text = ["v3", rooms.rooms, rooms.sequences, rooms.projectionBytes, invitations.invitations, journal.entries, journal.sequences, contentHash].join(":");
@@ -3345,7 +3563,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     let incremental;
     try {
-      incremental = this.incrementalIntegrityCheck();
+      // B5: the incremental legs now drive B4's durable content scan, so
+      // the tick's deadline and yield hook thread into them; a scan that
+      // cannot complete inside the budget banks its checkpoint progress
+      // and reports not-ok, and the gates below defer the stretches
+      // behind it whole instead of paying them past the deadline.
+      incremental = await this.incrementalIntegrityCheck({ deadline, yieldBetween });
     } catch (error) {
       throw tagIntegritySubcheck(error, "incremental");
     }

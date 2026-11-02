@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { repairLegacyMessages } from '../server/operator-legacy-message-repair.mjs';
-import { projectionDigest, projectionContentHash } from '../server/write-integrity.mjs';
+import { projectionDigest, projectionContentHash, projectionContentHashV2 } from '../server/write-integrity.mjs';
+import { legacyContentHashDrift } from '../server/legacy-content-hash.mjs';
 import { seedLegacyFixture } from './helpers/legacy-session-fixture.mjs';
 
 const roomId = 'legacy-room';
@@ -103,4 +104,45 @@ test('operator HTTP exposes only fixed enum after token authorization', async t 
     else { assert.equal(response.status, 409); assert.equal(body.error.code, 'repair_projection_unavailable'); assert.equal(body.repairCheck, 'metadata_proof_missing'); assert.match(body.operationId, /^op_/); }
     assert.ok(!JSON.stringify(body).includes('synthetic private sentinel')); assert.ok(!JSON.stringify(body).includes(roomId));
   }
+});
+
+// P1 B5: the content-hash comparison in the repair inventory is
+// definition-aware. A stored baseline computed under the v2 definition
+// (an untransitioned room) must not report content_hash_mismatch; a
+// stored hash matching neither definition, or a genuine drift under
+// the baseline's own definition, still must.
+test('v2 baseline: a clean untransitioned v2 stored hash plans without content_hash_mismatch', t => {
+  const f = fixture(t);
+  const row = f.s.db.prepare('SELECT sequence,projection FROM rooms WHERE id=?').get(roomId);
+  f.s.db.prepare('UPDATE integrity_room_state SET projection_hash=? WHERE room_id=?')
+    .run(projectionContentHashV2(f.s.db, roomId, row.sequence, row.projection), roomId);
+  const plan = repairLegacyMessages(f.s, f.request);
+  assert.equal(plan.rooms[0].head, row.sequence, 'the plan proceeds past the content-hash check');
+});
+test('v2 baseline: genuine drift under the v2 definition still refuses content_hash_mismatch', t => {
+  const f = fixture(t);
+  const before = f.s.db.prepare('SELECT projection FROM rooms WHERE id=?').get(roomId).projection;
+  const staleV2 = projectionContentHashV2(f.s.db, roomId,
+    f.s.db.prepare('SELECT sequence FROM rooms WHERE id=?').get(roomId).sequence, before);
+  projection(f, state => { state.messages[0].body = 'Synthetic drifted body'; });
+  // Keep the metadata witness current (projection() rewrote it with v3
+  // hashes) but restore the baseline to the pre-drift v2 hash: the
+  // bytes drifted under the baseline's own definition.
+  f.s.db.prepare('UPDATE integrity_room_state SET projection_hash=? WHERE room_id=?').run(staleV2, roomId);
+  assert.throws(() => repairLegacyMessages(f.s, f.request), error => {
+    assert.equal(error.detail?.repairCheck, 'content_hash_mismatch'); return true;
+  });
+});
+test('definition-aware seam: legacyContentHashDrift accepts either definition and refuses garbage', t => {
+  const f = fixture(t);
+  const row = f.s.db.prepare('SELECT sequence,projection FROM rooms WHERE id=?').get(roomId);
+  const v3 = projectionContentHash(f.s.db, roomId, row.sequence, row.projection);
+  const v2 = projectionContentHashV2(f.s.db, roomId, row.sequence, row.projection);
+  assert.notEqual(v2, v3, 'the two definitions disagree on the same bytes (the fixture discriminates)');
+  assert.equal(legacyContentHashDrift(f.s.db, roomId, row.sequence, row.projection, v3), false);
+  assert.equal(legacyContentHashDrift(f.s.db, roomId, row.sequence, row.projection, v2), false);
+  assert.equal(legacyContentHashDrift(f.s.db, roomId, row.sequence, row.projection, '0'.repeat(64)), true,
+    'a hash that is no definition\'s output is drift');
+  assert.equal(legacyContentHashDrift(f.s.db, roomId, row.sequence, row.projection, null), false,
+    'a missing stored hash is the missing-proof outcome, never a mismatch');
 });
