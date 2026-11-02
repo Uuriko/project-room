@@ -265,6 +265,10 @@ async function runNodeRetention(store, ctx) {
   return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
 }
 
+export function scheduledPatrolEnabled(env = {}) {
+  return env.ROOM_PATROL_ENABLED !== "0";
+}
+
 function defineJob(job) {
   return Object.freeze({
     budgetMs: JOB_BUDGET_MS,
@@ -865,8 +869,8 @@ export const JOBS = Object.freeze([
     // ClueBot phase 1: enabled only while some room has events the patrol
     // has not tailed, so an idle room never wakes for it (the registry's
     // standing rule). Read-only: the patrol files findings, it never acts.
-    enabled: (_env, store) => (store ? patrolPending(store) : true),
-    disabledReason: () => "No unpatrolled events are waiting",
+    enabled: (env, store) => scheduledPatrolEnabled(env) && (store ? patrolPending(store) : true),
+    disabledReason: env => scheduledPatrolEnabled(env) ? "No unpatrolled events are waiting" : "Scheduled patrol disabled by ROOM_PATROL_ENABLED=0",
     healthPendingSince: (store, now) => patrolPendingSince(store, now),
     // Due at the caller's `now`, never a live Date.now(): a fresh clock
     // read lands a hair past the arming computation, slips past the
@@ -874,6 +878,7 @@ export const JOBS = Object.freeze([
     // immediately — an idle room would wake at once (jobs-alarm proof).
     nextDueAt: (store, now) => (patrolPending(store) ? now : null),
     async run(store, ctx) {
+      if (!scheduledPatrolEnabled(ctx.env)) return { skipped: 1, disabled: 1 };
       if (ctx.room?.patrolTick) return ctx.room.patrolTick();
       return runPatrolTick(store, { deadline: ctx.deadline });
     }

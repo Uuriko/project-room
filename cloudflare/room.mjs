@@ -37,7 +37,7 @@ import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyAttempts, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, jobRetryCadence, lastRanFrom } from '../server/jobs.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, jobRetryCadence, lastRanFrom, scheduledPatrolEnabled } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -592,6 +592,7 @@ export class ProjectRoom extends DurableObject {
   // ClueBot phase 1: tail new events and file invariant findings. The
   // patrol is read-only (patrol_* tables only); a paused room skips.
   async patrolTick() {
+    if (!scheduledPatrolEnabled(this.env)) return { skipped: 1, disabled: 1 };
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return runPatrolTick(this.store, { deadline: cronDeadline() });
