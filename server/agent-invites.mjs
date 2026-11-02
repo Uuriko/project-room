@@ -246,7 +246,7 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   if (!credentialPresented) {
     if (!mintedByThisRedemption(invites, receipt)) {
       fail(401, 'invite_replay_identity_required',
-        'Retry with the existing identity credential. This invitation cannot recover an existing or unproven global identity; ask the inviter for a fresh invitation if needed.');
+        'Retry with the existing identity credential. This invitation cannot recover an existing or unproven global identity. Keep the saved connection and obtain the current credential from its identity owner.');
     }
     // #3883 window gate, on the rotation path only: a receipt whose
     // created_at is unusable fails closed here; credential-presenting
