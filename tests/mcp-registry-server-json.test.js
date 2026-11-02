@@ -48,7 +48,7 @@ test("server.json declares the public remote MCP surface", () => {
 
 test("server.json points the registry remote at the canonical origin", () => {
   assert.equal(manifest.websiteUrl, "https://room.trydemigod.com");
-  assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.version, "1.1.1");
   assert.ok(manifest.remotes.length > 0);
   for (const remote of manifest.remotes) {
     assert.equal(new URL(remote.url).origin, "https://room.trydemigod.com");
