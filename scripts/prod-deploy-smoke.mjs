@@ -18,7 +18,8 @@
 //
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
-// then validates health liveness and its job summary, /api/ready status "ready", and HTTP
+// then waits within the SAME deadline for valid stale jobs to converge,
+// while serving readiness stays good, and validates health liveness and its job summary, /api/ready status "ready", and HTTP
 // 200 for /terms, /privacy and / on both doors. Prints one JSON report;
 // exits 1 on any failure.
 // Without --sha it skips the revision wait (used after a rollback, where the
@@ -84,10 +85,10 @@ if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
 
 // Cloudflare's bot rules treat a bare client differently from a browser.
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 project-room-deploy-smoke";
-const get = async (url, accept = "application/json") => {
+const get = async (url, accept = "application/json", deadline = null) => {
   const started = Date.now();
   try {
-    const res = await fetch(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+    const res = await fetch(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(deadline === null ? 15000 : Math.max(1, Math.min(15000, deadline - Date.now()))) });
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
@@ -138,12 +139,32 @@ export function deploymentHealth(health, jobResponse, now = Date.now()) {
       || !Number.isSafeInteger(job.consecutiveFailures) || job.consecutiveFailures < 0) return fail("invalid_jobs");
     seen.add(job.name);
   }
+  const safeNumber = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  result.degradedJobs = view.jobs.filter(job => job.status === "stale" || job.stale || job.status === "failing" || job.consecutiveFailures > 0).map(job => ({
+    name: names.has(job.name) ? job.name : "job", status: job.status,
+    reason: job.consecutiveFailures > 0 || job.status === "failing" ? "job_failing" : "job_stale",
+    ageSeconds: safeNumber(job.secondsSinceSuccess) ? job.secondsSinceSuccess : null,
+    staleAfterSeconds: safeNumber(job.staleAfterSeconds) ? job.staleAfterSeconds : null,
+  }));
   const backup = view.jobs.find(job => job.name === "room-backup");
   if (!backup || backup.required !== true) return fail("required_backup_missing");
   if (view.jobs.some(job => job.required && job.status !== "ok")) return fail("required_job_unhealthy");
   const active = view.jobs.filter(job => job.status !== "disabled");
   if (active.some(job => job.status === "failing" || job.consecutiveFailures > 0)) return fail("job_failing");
-  if (active.some(job => job.status === "stale" || job.stale)) return fail("job_stale");
+  if (active.some(job => job.status === "stale" || job.stale)) {
+    const staleJobs = active.filter(job => job.status === "stale" || job.stale);
+    const coherent = active.every(job => (job.status === "stale") === job.stale
+      && (job.status !== "degraded" || job.degraded === "github_rate_limited" && job.lastSummary?.rateLimited === true)
+      && (job.status !== "ok" || job.degraded == null && job.lastSummary?.rateLimited !== true)
+      && (job.status !== "stale" || job.degraded == null)
+      && job.lastErrorCurrent !== true)
+      && staleJobs.every(job => (job.secondsSinceSuccess === null || safeNumber(job.secondsSinceSuccess))
+        && safeNumber(job.staleAfterSeconds) && job.staleAfterSeconds > 0
+        && (job.secondsSinceSuccess === null || job.secondsSinceSuccess > job.staleAfterSeconds))
+      && view.status === "stale" && jobResponse.status === 503
+      && body.liveness === "ok" && body.status === "degraded" && body.jobs?.status === "stale";
+    return { ...fail("job_stale"), retryableStale: coherent };
+  }
   const degraded = active.filter(job => job.status === "degraded");
   if (degraded.some(job => job.required || job.degraded !== "github_rate_limited" || job.lastSummary?.rateLimited !== true)) return fail("unsupported_degradation");
   if (active.some(job => job.status === "ok" && (job.degraded != null || job.lastSummary?.rateLimited === true))) return fail("inconsistent_jobs");
@@ -168,6 +189,35 @@ export async function readDeploymentHealth(readHealth, readJobs, now = () => Dat
       && ["ok", "degraded"].includes(summary.status) && summary.jobs?.status === summary.status
       && ["ok", "degraded"].includes(jobs.json?.status) && summary.status !== jobs.json.status;
     if (!transition || attempt === 3) return { ...result, attempts: attempt };
+  }
+}
+
+// Both doors share the original source-convergence deadline. Only a valid
+// optional stale-job observation may wait; every round rechecks serving readiness
+// and the complete health pair. No stale view is accepted as healthy.
+export async function convergeDeploymentHealth({ doors, readHealth, readJobs, readReady,
+  deadline, now = () => Date.now(), sleepFn = sleep, pollMs = 10000 }) {
+  let rounds = 0;
+  for (;;) {
+    const observations = await Promise.all(doors.map(async door => ({
+      door,
+      health: await readDeploymentHealth(() => readHealth(door, rounds ? deadline : null),
+        () => readJobs(door, rounds ? deadline : null), now),
+      ready: await readReady(door, rounds ? deadline : null),
+    })));
+    rounds++;
+    if (rounds > 1 && now() > deadline) {
+      return { observations: observations.map(row => ({ ...row, health: { ...row.health, pass: false, reason: "convergence_deadline" } })), rounds };
+    }
+    const ready = observations.every(row => row.ready.status === 200 && row.ready.json?.status === "ready"
+      && row.ready.json?.emailVerification === "enforced" && row.ready.json?.emailVerificationScope === "durable-object");
+    const pending = observations.some(row => !row.health.pass);
+    const retryable = observations.every(row => row.health.pass || row.health.retryableStale === true);
+    if (!ready || !pending || !retryable || now() >= deadline) return { observations, rounds };
+    await sleepFn(Math.min(pollMs, Math.max(0, deadline - now())));
+    // Do not start another request at the deadline, or spend a fresh budget
+    // after version propagation consumed the deployment window.
+    if (now() >= deadline) return { observations, rounds };
   }
 }
 
@@ -316,24 +366,27 @@ async function main() {
     if (!pass) report.ok = false;
   };
 
+  const deadline = Date.now() + Math.max(0, Number.isFinite(waitMs) ? waitMs : 0);
   if (sha) {
     const doors = [`${origin}/api/version`, `${origin}/api/version/worker`, `${entry}/api/version`, `${entry}/api/version/worker`];
-    const deadline = Date.now() + waitMs;
     const last = {};
     const statuses = {};
     for (;;) {
-      const results = await Promise.all(doors.map(get));
+      const results = await Promise.all(doors.map(url => get(url)));
       results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; statuses[doors[i]] = r.status; });
-      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() > deadline) break;
-      await sleep(10000);
+      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() >= deadline) break;
+      await sleep(Math.min(10000, Math.max(0, deadline - Date.now())));
     }
     for (const d of doors) record(`version ${d}`, statuses[d] === 200 && last[d] === sha, { got: last[d], status: statuses[d] });
   }
 
-  for (const door of [origin, entry]) {
-    const healthCheck = await readDeploymentHealth(() => get(`${door}/api/health`), () => get(`${door}/api/health/jobs`));
-    record(`health ${door}/api/health`, healthCheck.pass, healthCheck);
-    const ready = await get(`${door}/api/ready`);
+  const healthConvergence = await convergeDeploymentHealth({ doors: [origin, entry], deadline,
+    readHealth: (door, until) => get(`${door}/api/health`, "application/json", until),
+    readJobs: (door, until) => get(`${door}/api/health/jobs`, "application/json", until),
+    readReady: (door, until) => get(`${door}/api/ready`, "application/json", until),
+  });
+  for (const { door, health: healthCheck, ready } of healthConvergence.observations) {
+    record(`health ${door}/api/health`, healthCheck.pass, { ...healthCheck, convergenceRounds: healthConvergence.rounds });
     record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", readinessDetail(ready));
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");

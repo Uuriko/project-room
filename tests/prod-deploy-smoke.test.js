@@ -71,9 +71,11 @@ async function door(t, prefix, failure) {
       res.writeHead(404).end("Unexpected request");
       return;
     }
-    const json = typeof response.body !== "string";
-    res.writeHead(response.status, { "content-type": json ? "application/json" : "text/html" });
-    res.end(json ? JSON.stringify(response.body) : response.body);
+    const payload = typeof response.body === "function" ? response.body() : response.body;
+    const json = typeof payload !== "string";
+    const status = typeof response.body === "function" && payload.schema === "room.job-health/1" && payload.status === "stale" ? 503 : response.status;
+    res.writeHead(status, { "content-type": json ? "application/json" : "text/html" });
+    res.end(json ? JSON.stringify(payload) : payload);
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve, reject) => {
@@ -96,7 +98,7 @@ function runReport(command, args, options = {}) {
   });
 }
 
-function runSmoke(origin, entry, withSha) {
+function runSmoke(origin, entry, withSha, convergenceWaitMs = 0) {
   const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`,
     "--agent-card-public-key", cardKeyPair.publicKey,
     "--agent-card-key-id", cardKeyId,
@@ -104,7 +106,7 @@ function runSmoke(origin, entry, withSha) {
     // One fetch per door: the production default (10 fetches x 1.5s gaps x 2
     // doors ~ 27s) cannot fit inside the CLI timeout this suite enforces.
     "--agent-card-fetches", "1"];
-  if (withSha) args.push("--sha", revision, "--wait-ms", "0");
+  if (withSha) args.push("--sha", revision, "--wait-ms", String(convergenceWaitMs));
   return runReport(process.execPath, args);
 }
 
@@ -345,4 +347,29 @@ test("real HTTP smoke admits an honest optional rate-limit wait and retains its 
   const result = await runSmoke(origin, entry, true);
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(result.report.checks.find(c => c.name === `health ${origin.url}/api/health`).degradedJobs, [{ name: "claim-prs", reason: "github_rate_limited" }]);
+});
+
+// Actual CLI/HTTP regression: source is already converged, but a valid stale
+// optional job needs one later observation. The original CLI exits immediately.
+test("stale jobs converge inside the existing source deadline over actual HTTP", async t => {
+  async function convergingDoor(prefix) {
+    let reads = 0;
+    return door(t, prefix, [
+      { path: "/api/health", status: 200, body: () => {
+        const stale = reads === 0;
+        return { status: stale ? "degraded" : "ok", liveness: "ok", jobs: { status: stale ? "stale" : "ok" } };
+      } },
+      { path: "/api/health/jobs", status: 200, body: () => {
+        const stale = reads++ === 0;
+        return { schema: "room.job-health/1", status: stale ? "stale" : "ok", generatedAt: new Date().toISOString(), jobs: [
+          { name: "room-backup", required: true, status: "ok", stale: false, consecutiveFailures: 0 },
+          { name: "integrity", required: false, status: stale ? "stale" : "ok", stale, consecutiveFailures: 0, secondsSinceSuccess: 900, staleAfterSeconds: 600 },
+        ] };
+      } },
+    ]);
+  }
+  const a = await convergingDoor("/canonical"), b = await convergingDoor("/room");
+  const result = await runSmoke(a, b, true, 20000);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.ok(result.report.checks.filter(c => c.name.startsWith("health ")).every(c => c.convergenceRounds === 2));
 });
