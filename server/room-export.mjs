@@ -23,23 +23,71 @@ const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
 // L08-C5: TOKEN_SOURCE alone left every other common secret shape in an
 // export verbatim — GitHub/vendor tokens, AWS key ids, Bearer/Basic
 // credentials, JWTs, PEM blocks, credential assignments
-// (password=… / "token": "…") and Cookie/Set-Cookie header values all
+// (password=<redacted> / "token": "…") and Cookie/Set-Cookie header values all
 // passed through. The patterns below close those shapes; every match is
 // replaced by the sha256 hex of the secret part, the same treatment
 // TOKEN_SOURCE matches have always had, so a scrubbed export stays
 // correlatable without carrying the credential.
-const VENDOR_TOKEN_SOURCE = "(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[baprs]-|sk-(?:proj|svcacct)-|(?:sk|rk)_(?:live|test)_)[A-Za-z0-9_-]{8,}";
+const VENDOR_TOKEN_SOURCE = "(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[baprs]-|sk-(?:proj|svcacct)-|sk-ant-|(?:sk|rk)_(?:live|test)_)[A-Za-z0-9_-]{8,}";
+// F1-Q1 cure (stacked on L08-C5): the shapes a non-author recheck still
+// found verbatim at the L08-C5 head — legacy OpenAI keys (sk- + a long
+// alphanumeric run; the hyphenated sk-live-… non-shape stays untouched
+// because the run stops at the first hyphen), SendGrid, npm, Vault and
+// Telegram bot tokens, and the bare AWS secret access key (exactly 40
+// base64-alphabet chars with mixed case and a digit — a 40-char hex
+// digest has no uppercase and is not matched).
+const OPENAI_LEGACY_SOURCE = "sk-[A-Za-z0-9]{20,}";
+const SENDGRID_SOURCE = "SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}";
+const NPM_SOURCE = "npm_[A-Za-z0-9]{30,}";
+const VAULT_SOURCE = "hvs\\.[A-Za-z0-9_-]{8,}";
+const TELEGRAM_SOURCE = "\\b\\d{5,}:[A-Za-z0-9_-]{30,}";
+// Anchored at run starts (previous char is not in the class) so the
+// mixed-case check in the replacer runs once per 40-char run, not once
+// per character — an unbounded lookahead version was quadratic on
+// long base64-ish prose.
+const AWS_SECRET_RE = /(^|[^A-Za-z0-9/+=])([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/g;
 const AWS_KEY_SOURCE = "(?:AKIA|ASIA)[0-9A-Z]{16}";
-const JWT_SOURCE = "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}";
+// A JWT's signature segment is optional in the wild (alg=none and
+// truncated copies still expose the payload), so the third segment is
+// optional and segments may be as short as 4 chars.
+const JWT_SOURCE = "eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}(?:\\.[A-Za-z0-9_-]{4,})?";
 const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
-const COOKIE_HEADER_RE = /\b(Set-Cookie|Cookie)(\s*:\s*)([^\r\n]+)/gi;
+// The capture also stops at a double quote (F1-Q6 D9): in the
+// whole-store NDJSON path the "string" is a whole JSON document on one
+// line, and an unbounded capture swallowed every field after a Cookie:
+// string, producing truncated, unrestorable rows. Trade-off: a cookie
+// value containing a literal quote in a flat prose cell is now hashed
+// only up to that quote — accepted, because in NDJSON text the quote is
+// structural and quoted cookie values in prose are the rarer case.
+const COOKIE_HEADER_RE = /\b(Set-Cookie|Cookie)(\s*:\s*)([^\r\n"]+)/gi;
 const AUTH_SCHEME_RE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
-const ASSIGNMENT_RE = /\b(password|passwd|pwd|api[_-]?key|apikey|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?id|sessionid|session|secret|token|cookie|sid)(["']?\s*[:=]\s*["']?)([^\s"',;}\]<&]{4,})/gi;
+// Slack webhook URLs carry their secret as the last path segment; only
+// that segment is hashed, so the hook's team/channel ids stay readable.
+const SLACK_WEBHOOK_RE = /(https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/)([A-Za-z0-9_-]{8,})/g;
+// URL userinfo (https://user:pass@host, postgres://user:pass@host, any
+// scheme://user:pass@host connection string): the password between the
+// first ":" and the "@" is hashed; scheme, user and host stay readable.
+// The scheme is length-bounded: unbounded, the scheme character class
+// backtracked across every long alphanumeric run in a cell (quadratic
+// on the multi-hundred-KB strings exports routinely carry).
+const URL_USERINFO_RE = /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s/:@]{1,256}:)([^\s/@]{4,})(@)/g;
+// Credential assignments. Two value forms:
+// - quoted ("password=\"p@ss,word;x\"", "\"password\": \"correct horse\""):
+//   everything up to the matching quote is the value, spaces and , ;
+//   delimiters included — the L08-C5 class stopped at the first space or
+//   delimiter and leaked the tail of exactly the most realistic
+//   passwords.
+// - unquoted (password=correct horse battery staple): space-separated
+//   chunks, where a chunk may itself contain , or ; when flanked by
+//   non-space characters; the value ends at a , ; " ' } ] < & or
+//   newline that is not inside a chunk.
+// Key names gain passphrase, dbPass and the AWS secret-access-key name.
+const ASSIGNMENT_RE = /\b(passphrase|db[_-]?pass|password|passwd|pwd|api[_-]?key|apikey|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?id|sessionid|session|secret|token|cookie|sid)(?:(\s*[:=]\s*|["']\s*[:=]\s*)(["'])((?:(?!\3)[\s\S]){4,}?)\3|(["']?\s*[:=]\s*["']?)((?:[^\s"',;}\]<&]+(?:[,;][^\s"',;}\]<&]+)*)(?: (?:[^\s"',;}\]<&]+(?:[,;][^\s"',;}\]<&]+)*))*))/gi;
 // Key names whose string values are credentials by position, however the
 // value is shaped (a bare password or session id matches no pattern
 // above). Matched on name parts, so "author" is not a credential key
 // while "accessToken" and "session_id" are.
-const SECRET_KEY_PARTS = new Set(["password", "passwd", "pwd", "secret", "token", "credential", "credentials", "authorization", "cookie", "session", "sessionid", "apikey"]);
+const SECRET_KEY_PARTS = new Set(["password", "passwd", "pwd", "passphrase", "pass", "dbpass", "private", "privatekey", "secret", "token", "credential", "credentials", "authorization", "cookie", "session", "sessionid", "sid", "apikey"]);
 
 function isSecretKey(key) {
   const parts = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -90,13 +138,31 @@ export function isExportSecretColumn(table, column) {
 // and are "legacy" to every restore (see createSanitizedCellTracker).
 export const BACKUP_SANITIZE_POLICY = 2;
 
+// A token split by zero-width characters (a common paste artefact) is
+// not byte-valid as pasted, but its suffix still identifies the
+// credential. Match the known token prefixes tolerating zero-width
+// chars inside the run and hash the rejoined value, so the hash equals
+// the unsplit token's hash.
+const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\uFEFF]/g;
+const ZERO_WIDTH_ANY = /[\u200B\u200C\u200D\uFEFF]/;
+const zwspTolerant = source => source.replaceAll("[A-Za-z0-9_-]", "[A-Za-z0-9_\\-\\u200B\\u200C\\u200D\\uFEFF]");
+const SPLIT_TOKEN_RE = new RegExp(`(?:${zwspTolerant(TOKEN_SOURCE)}|${zwspTolerant(VENDOR_TOKEN_SOURCE)})`, "g");
+
 function scrubTokens(value) {
   let out = value.replace(PEM_RE, match => sha256Hex(match));
+  out = out.replace(SPLIT_TOKEN_RE, match => ZERO_WIDTH_ANY.test(match) ? sha256Hex(match.replace(ZERO_WIDTH_CHARS, "")) : match);
   out = out.replace(COOKIE_HEADER_RE, (_match, name, separator, headerValue) => `${name}${separator}${sha256Hex(headerValue.trim())}`);
   out = out.replace(AUTH_SCHEME_RE, (_match, scheme, separator, token) => `${scheme}${separator}${sha256Hex(token)}`);
-  out = out.replace(ASSIGNMENT_RE, (_match, name, separator, secret) => `${name}${separator}${sha256Hex(secret)}`);
+  out = out.replace(SLACK_WEBHOOK_RE, (_match, prefix, secret) => `${prefix}${sha256Hex(secret)}`);
+  out = out.replace(URL_USERINFO_RE, (_match, prefix, secret, at) => `${prefix}${sha256Hex(secret)}${at}`);
+  out = out.replace(ASSIGNMENT_RE, (match, name, quotedSeparator, quote, quotedSecret, plainSeparator, plainSecret) => {
+    if (quotedSecret !== undefined) return `${name}${quotedSeparator}${quote}${sha256Hex(quotedSecret)}${quote}`;
+    if (plainSecret !== undefined && plainSecret.length >= 4) return `${name}${plainSeparator}${sha256Hex(plainSecret)}`;
+    return match;
+  });
   out = out.replace(new RegExp(JWT_SOURCE, "g"), match => sha256Hex(match));
-  out = out.replace(new RegExp(`(?:${TOKEN_SOURCE}|${VENDOR_TOKEN_SOURCE}|${AWS_KEY_SOURCE})`, "g"), match => sha256Hex(match));
+  out = out.replace(new RegExp(`(?:${TOKEN_SOURCE}|${VENDOR_TOKEN_SOURCE}|${AWS_KEY_SOURCE}|${OPENAI_LEGACY_SOURCE}|${SENDGRID_SOURCE}|${NPM_SOURCE}|${VAULT_SOURCE}|${TELEGRAM_SOURCE})`, "g"), match => sha256Hex(match));
+  out = out.replace(AWS_SECRET_RE, (match, prefix, token) => /[a-z]/.test(token) && /[A-Z]/.test(token) && /[0-9]/.test(token) ? `${prefix}${sha256Hex(token)}` : match);
   return out;
 }
 
@@ -134,6 +200,149 @@ export function scrubEventTokens(value) {
   return value;
 }
 
+// F1-Q6 cell-path parity: a string cell usually carries a whole JSON
+// document as text, where the flat scrubTokens has no key context — a
+// bare value, an array, or a nested object under a credential-named key
+// matched no pattern and left verbatim (D1–D7), while the event path
+// whole-hashes it. This scanner restores the key context at text level:
+// it finds "<key>" : spans, unescapes the key (JSON.parse of the quoted
+// token) and tests it with the same isSecretKey as the event path; on a
+// hit it consumes the complete following JSON value (escape-aware
+// string, balanced array/object) and replaces it with
+// scrubSecretValue of its parsed form — hashes computed over the
+// unescaped string, exactly as the event path computes them, so the
+// same secret hashes identically in both exports. Numbers, booleans
+// and null under a secret key are left as-is in both paths (a shared
+// residual, named in the PR body; not a parity gap). The scanner runs
+// BEFORE scrubTokens so ASSIGNMENT_RE never fragment-hashes a quoted
+// value the whole-value rule owns, and all text outside consumed spans
+// keeps the exact flat-pattern behaviour. Malformed values are left to
+// scrubTokens rather than throwing. Consequence imported from the
+// event path by design (D13): innocuous strings sitting under a
+// credential-named container are whole-hashed in the cell path too —
+// position is treated as credential, as scrubSecretValue already does.
+function scanJsonStringEnd(text, start) {
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === "\\") i++;
+    else if (text[i] === '"') return i + 1;
+  }
+  return -1;
+}
+
+function scanJsonValueEnd(text, start) {
+  if (text[start] === '"') return scanJsonStringEnd(text, start);
+  if (text[start] === "{" || text[start] === "[") {
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        const end = scanJsonStringEnd(text, i);
+        if (end === -1) return -1;
+        i = end - 1;
+      } else if (ch === "{" || ch === "[") depth++;
+      else if (ch === "}" || ch === "]") {
+        depth--;
+        if (depth === 0) return i + 1;
+      }
+    }
+    return -1;
+  }
+  const primitive = /^[^\s,}\]]+/.exec(text.slice(start));
+  return primitive ? start + primitive[0].length : -1;
+}
+
+const ASSIGNMENT_TAIL_RE = /\b(passphrase|db[_-]?pass|password|passwd|pwd|api[_-]?key|apikey|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?id|sessionid|session|secret|token|cookie|sid)\s*[:=]\s*$/i;
+
+function bestEffortUnescape(content) {
+  try { return JSON.parse(`"${content}"`); } catch { /* fall through */ }
+  return content.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_m, esc) => esc.startsWith("u")
+    ? String.fromCharCode(parseInt(esc.slice(1), 16))
+    : ({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f" })[esc] ?? esc);
+}
+
+function hashMalformedSecretValue(span) {
+  if (span.startsWith('"')) return `"${sha256Hex(bestEffortUnescape(span.slice(1)))}"`;
+  return span
+    .replace(/"((?:\\.|[^"\\])*)"/g, (_m, inner) => `"${sha256Hex(bestEffortUnescape(inner))}"`)
+    .replace(/"([^"]*)$/, (_m, inner) => `"${sha256Hex(bestEffortUnescape(inner))}"`);
+}
+
+function scrubCellText(text) {
+  if (!text.includes('"')) return scrubTokens(text);
+  const chunks = [];
+  let plainFrom = 0;
+  let i = 0;
+  const flushPlain = upto => { if (upto > plainFrom) chunks.push(scrubTokens(text.slice(plainFrom, upto))); };
+  while (i < text.length) {
+    const quote = text.indexOf('"', i);
+    if (quote === -1) break;
+    const keyEnd = scanJsonStringEnd(text, quote);
+    if (keyEnd === -1) break;
+    let colon = keyEnd;
+    while (colon < text.length && /\s/.test(text[colon])) colon++;
+    if (text[colon] !== ":") {
+      // A value string, not a key: scrub its UNESCAPED content, so the
+      // flat patterns see real quotes and newlines instead of \" and
+      // \n (in raw JSON text an escaped quote truncates the assignment
+      // capture at the backslash and an escaped newline defeats the
+      // word boundary before a following credential name — both leaked).
+      // Re-escaped with JSON.stringify only when the scrub changed it;
+      // an unchanged string keeps its original bytes.
+      let content = null;
+      try { content = JSON.parse(text.slice(quote, keyEnd)); } catch { content = null; }
+      if (typeof content === "string") {
+        flushPlain(quote);
+        // Flat-prose guard: if the plain text just flushed ends with a
+        // credential assignment awaiting its quoted value
+        // (password="…"), this string IS that value — hash it whole
+        // instead of pattern-scrubbing its content standalone, which
+        // would sever name from value and leak it.
+        if (ASSIGNMENT_TAIL_RE.test(text.slice(Math.max(plainFrom, quote - 80), quote))) {
+          chunks.push(`"${sha256Hex(content)}"`);
+        } else {
+          const scrubbed = scrubTokens(content);
+          chunks.push(scrubbed === content ? text.slice(quote, keyEnd) : JSON.stringify(scrubbed));
+        }
+        plainFrom = keyEnd;
+      }
+      i = keyEnd;
+      continue;
+    }
+    let key = null;
+    try { key = JSON.parse(text.slice(quote, keyEnd)); } catch { key = null; }
+    if (typeof key !== "string" || !isSecretKey(key)) { i = colon + 1; continue; }
+    let valueStart = colon + 1;
+    while (valueStart < text.length && /\s/.test(text[valueStart])) valueStart++;
+    const valueEnd = scanJsonValueEnd(text, valueStart);
+    if (valueEnd === -1) {
+      // Malformed cell (unterminated string / unbalanced brackets)
+      // under a credential key: fail closed — hash the value content
+      // to end-of-cell instead of letting it pass to the flat patterns,
+      // which cannot bound an unterminated value.
+      flushPlain(valueStart);
+      chunks.push(hashMalformedSecretValue(text.slice(valueStart)));
+      plainFrom = text.length;
+      i = text.length;
+      break;
+    }
+    const span = text.slice(valueStart, valueEnd);
+    let replacement = span;
+    if (span.startsWith('"') || span.startsWith("[") || span.startsWith("{")) {
+      try { replacement = JSON.stringify(scrubSecretValue(JSON.parse(span))); } catch { replacement = span; }
+    }
+    // The key, colon and spacing stay in the plain stream; the consumed
+    // value span is emitted as the scanner's replacement and is NOT
+    // re-run through scrubTokens (which would hash the hash and break
+    // correlation with the event path's whole-value hash).
+    flushPlain(valueStart);
+    chunks.push(replacement);
+    i = valueEnd;
+    plainFrom = valueEnd;
+  }
+  flushPlain(text.length);
+  return chunks.join("");
+}
+
 export function sanitizeCell(table, column, value) {
   if (value === null || value === undefined) return null;
   if (isExportSecretColumn(table, column)) return sha256Hex(typeof value === "string" ? value : String(value));
@@ -145,16 +354,17 @@ export function sanitizeCell(table, column, value) {
   // bytes left production backups as an empty object until this was handled.
   if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
   if (value instanceof ArrayBuffer) return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
-  // A bare SharedArrayBuffer is neither an ArrayBuffer nor a view, but
-  // JSON.stringify turns it into {} just the same. Encode it like one.
-  // (Views over shared memory are already caught by the isView branch.)
   if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
     return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
   if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
+  // D8: a caller handing sanitizeCell a parsed object/array gets the
+  // event path's scrub, not a silent passthrough. (Current SQL callers
+  // only pass string/number/null/BLOB cells; JSON arrives as a string
+  // and is handled below.)
+  if (value && typeof value === "object") return scrubEventTokens(value);
   if (typeof value !== "string") return value;
-  return scrubTokens(value);
+  return scrubCellText(value);
 }
-
 function sanitizeRow(table, row) {
   const out = {};
   for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(table, column, value);

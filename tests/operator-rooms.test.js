@@ -16,7 +16,7 @@ import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { scrubEventTokens } from "../server/room-export.mjs";
+import { scrubEventTokens, sanitizeCell } from "../server/room-export.mjs";
 import { listOperatorRooms, operatorRoomExport } from "../server/operator-rooms.mjs";
 
 const TOKEN = "operator-rooms-token-0123456789abcdef";
@@ -255,6 +255,87 @@ test("scrubEventTokens scrubs the L08-C5 credential shapes, not only the product
   const prose = "the bearer of this message discussed password policy and session length";
   assert.equal(scrubEventTokens(prose), prose);
   assert.equal(scrubEventTokens({ author: "Jane Doe" }).author, "Jane Doe");
+});
+
+test("scrubEventTokens and sanitizeCell scrub the F1-Q1 cure shapes (recheck of #5524)", () => {
+  // All specimens are obviously synthetic / public documentation examples.
+  const specimens = {
+    spacedPassword: "correct horse battery staple synthetic",
+    delimiterPassword: "p@ss,word;synthetic2026",
+    urlPassword: "Sup3rSecretPw99",
+    dbPassword: "DbPassw0rdSynthetic",
+    legacySk: "sk-SyntheticLegacyKey0123456789abcdefghijklmnop",
+    anthropicSk: "sk-ant-api03-SyntheticValue0123456789abcdefghij",
+    webhookSecret: "xYz9AbC8dEf7GhI3jKl5MnOp",
+    sendgrid: "SG.SyntheticSegment1Value.SyntheticSegment2Value0123456789",
+    npm: "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+    vault: "hvs.CAESIJsyntheticvalue0123456789abcdef",
+    telegram: "123456789:AAESyntheticBotTokenValue0123456789ab",
+    awsSecret: "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+    passphrase: "correct-horse-synthetic-9",
+    dbPass: "DbSyntheticPass98765",
+    privateKeyBody: "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCsynthetic",
+    jwtPayload: "eyJzdWIiOiIxMjM0NTY3ODkwIn0"
+  };
+  const prose = [
+    `password: ${specimens.spacedPassword}`,
+    `password="${specimens.delimiterPassword}"`,
+    `clone https://deploy:${specimens.urlPassword}@api.example.invalid/repo.git now`,
+    `db postgres://roomuser:${specimens.dbPassword}@db.example.invalid:5432/room end`,
+    `openai key ${specimens.legacySk} here`,
+    `key ${specimens.anthropicSk} here`,
+    `deploy hook https://hooks.slack.com/services/T0SYNTHETIC/B0SYNTHETIC/${specimens.webhookSecret} end`,
+    `sg ${specimens.sendgrid} here`,
+    `npm ${specimens.npm} here`,
+    `vault ${specimens.vault} end`,
+    `bot ${specimens.telegram} here`,
+    `aws_secret_access_key = ${specimens.awsSecret}`,
+    `jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${specimens.jwtPayload} end`
+  ].join("\n");
+  const keyed = {
+    passphrase: specimens.passphrase,
+    dbPass: specimens.dbPass,
+    privateKey: specimens.privateKeyBody,
+    aws_secret_access_key: specimens.awsSecret
+  };
+  for (const [path, out] of [
+    ["event", JSON.stringify(scrubEventTokens({ prose, keyed }))],
+    ["cell", sanitizeCell("events", "body", JSON.stringify({ prose, keyed }))],
+    ["cell-flat", sanitizeCell("events", "body", prose)]
+  ]) {
+    for (const [name, specimen] of Object.entries(specimens))
+      assert.ok(!out.includes(specimen), `${path}: ${name} specimen must not survive scrubbing verbatim`);
+  }
+  // Correlatability: a spaced password hashes whole, identically in prose.
+  assert.ok(scrubEventTokens(`password: ${specimens.spacedPassword}`).includes(sha256(specimens.spacedPassword)));
+});
+
+test("sanitizeCell applies the event path's key-name whole-hashing to JSON text (F1-Q6 parity)", () => {
+  const cell = value => sanitizeCell("events", "body", JSON.stringify(value));
+  // D1/D2: bare values under credential keys, incl. compound key names.
+  assert.ok(!cell({ authorization: "BareSyntheticCredential0123456789" }).includes("BareSyntheticCredential0123456789"));
+  assert.ok(!cell({ tokenValue: "bare-synthetic-value-0123456789" }).includes("bare-synthetic-value-0123456789"));
+  // D3/D4: arrays and nested objects under a credential key.
+  assert.ok(!cell({ token: ["alpha-synthetic-value", "beta-synthetic-value"] }).includes("alpha-synthetic-value"));
+  assert.ok(!cell({ token: { nested: "bare-synthetic-value-0123456789" } }).includes("bare-synthetic-value-0123456789"));
+  // D5/D7: the emitted hash is the event path's whole-value hash of the
+  // unescaped string, for delimiter and spaced values alike.
+  for (const value of ["p@ss,word;synthetic2026", "correct horse battery staple"])
+    assert.ok(cell({ token: value }).includes(sha256(value)), `cell hash must equal whole-value hash for ${value}`);
+  assert.ok(sanitizeCell("events", "body", '{"pass\\u0077ord": "bare-synthetic-value-0123456789"}').includes(sha256("bare-synthetic-value-0123456789")));
+  // D6: short values under a credential key are hashed; "" stays "".
+  assert.ok(!cell({ token: "abc" }).includes('"abc"'));
+  assert.ok(cell({ token: "" }).includes('""'));
+  // D8: an object handed to sanitizeCell gets the event scrub, not passthrough.
+  assert.ok(!JSON.stringify(sanitizeCell("events", "payload", { token: "bare-synthetic-value-0123456789" })).includes("bare-synthetic-value-0123456789"));
+  // D9: a Cookie: string inside a JSON cell no longer swallows later fields.
+  const cookieRow = cell({ note: "Cookie: abcdefghijklmnop", after: "AFTERFIELDVALUE" });
+  assert.ok(cookieRow.includes("AFTERFIELDVALUE") && !cookieRow.includes("abcdefghijklmnop"));
+  // D11: sid is a credential key in the event path too.
+  assert.ok(!JSON.stringify(scrubEventTokens({ sid: "bare-synthetic-value-0123456789" })).includes("bare-synthetic-value-0123456789"));
+  // Preservation controls.
+  assert.ok(cell({ author: "Jane Doe" }).includes("Jane Doe"));
+  assert.equal(sanitizeCell("events", "body", "plain prose, no secrets"), "plain prose, no secrets");
 });
 
 test("operatorRoomExport materialises a synthetic room whose projection is padded to the cap", { timeout: 180_000 }, async t => {
