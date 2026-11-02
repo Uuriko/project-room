@@ -37,5 +37,6 @@
     "current-read-horizon-focused-final.log.gz": "54d25b13194016f826eaf0023ecb55cd6e17d6d23bd265dc938082088faf957b",
     "current-read-horizon-lint.log.gz": "f3ec633ed58c71a82107cd9fca6f0669fd21090c0eb2ad699cb9f0bef3443a4f",
     "current-read-horizon-causal-before.log.gz": "0ffc56758272205bc28e40758f3da11604df2d1ff097950a24f926c98f6c9301"
-  }
+  },
+  "baseContext": "4ab9 is the local offline blob composition branch, NOT authoritative GitHub main. Root confirmed main2c07b568df49b7b9ad42376627b36cd2defb7c7b; clean main composition/retest is root-owned and not covered by these logs."
 }
