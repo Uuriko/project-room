@@ -282,8 +282,8 @@ function defineJob(job) {
 // no production-runtime job watched its aggregate size approach the
 // store's limits (growth-watch tracks product-growth events off a
 // process-local collector and is node-only for that reason). The gauges
-// are one aggregate read over the rooms table plus the SQLite page
-// count — cheap at any room count. The limits are the lines where an
+// use one aggregate over rooms plus native database bytes (Node uses
+// SQLite page counts). The limits are the lines where an
 // operator must act, not the hard caps: the largest room projection is
 // escalated at 3.5 MB against the 4 MiB application cap, and the
 // database at 8 GB against the 10 GB Durable Object SQLite limit.
@@ -300,11 +300,18 @@ export function measureStoreGrowth(store) {
     COALESCE(MAX(LENGTH(CAST(projection AS BLOB))), 0) AS maxProjectionBytes FROM rooms`).get();
   let dbBytes = 0;
   try {
-    const pages = store.db.prepare("PRAGMA page_count").get();
-    const size = store.db.prepare("PRAGMA page_size").get();
-    const count = Number(pages?.page_count);
-    const bytes = Number(size?.page_size);
-    if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+    // Workers exposes the complete SQLite size directly. Page PRAGMAs are
+    // unsupported there and previously made a nonempty store report zero.
+    // https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#databasesize
+    const nativeBytes = store.db.storage?.sql?.databaseSize;
+    if (Number.isSafeInteger(nativeBytes) && nativeBytes >= 0) dbBytes = nativeBytes;
+    else {
+      const pages = store.db.prepare("PRAGMA page_count").get();
+      const size = store.db.prepare("PRAGMA page_size").get();
+      const count = Number(pages?.page_count);
+      const bytes = Number(size?.page_size);
+      if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+    }
   } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
   return {
     rooms: Number(row?.rooms) || 0,
