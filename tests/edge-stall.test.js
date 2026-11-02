@@ -41,6 +41,29 @@ test("edge asset reads are cached in the isolate and carry Server-Timing later f
   assert.equal(fetches, 1);
 });
 
+test("edge discovery packets describe the serving deployment origin, not production (#3655)", async () => {
+  const env = { ROOM_ORIGIN: "https://room.example.test" };
+  const url = new URL("https://room.example.test/llms.txt");
+  const response = await edgePublicResponse(new Request(url), env, url);
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.ok(body.includes("[Full agent packet](https://room.example.test/llms-full.txt)"));
+  assert.ok(body.includes("[Hosted MCP](https://room.example.test/mcp)"));
+  assert.equal(body.includes("https://room.trydemigod.com"), false);
+  // The /room alias serves the same bytes as /llms.txt on the same origin.
+  const aliasUrl = new URL("https://room.example.test/room/llms.txt");
+  const alias = await edgePublicResponse(new Request(aliasUrl), env, aliasUrl);
+  assert.equal(alias.status, 200);
+  assert.equal(await alias.text(), body);
+  // The canonical deployment keeps the canonical packet, byte for byte:
+  // its configured origin is the canonical origin, so no rebase happens.
+  const canonicalEnv = { ROOM_ORIGIN: "https://room.trydemigod.com" };
+  const canonicalUrl = new URL("https://room.trydemigod.com/llms.txt");
+  const canonical = await edgePublicResponse(new Request(canonicalUrl), canonicalEnv, canonicalUrl);
+  assert.equal(canonical.status, 200);
+  assert.ok((await canonical.text()).includes("[Hosted MCP](https://room.trydemigod.com/mcp)"));
+});
+
 test("stall probe p99 fails above 3s and the argument parser keeps the URL", () => {
   assert.equal(percentile([10, 20, 30, 40], 99), 40);
   assert.equal(percentile([5], 99), 5);
