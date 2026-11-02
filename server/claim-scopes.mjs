@@ -7,6 +7,35 @@ export class ClaimScopeError extends Error {
   constructor(message) { super(message); this.status = 422; this.code = 'invalid_claim_scope'; }
 }
 
+// Live admission only. The reducer still accepts an older event whose lease
+// or ** was valid when it was recorded.
+export const CLAIM_MAX_LEASE_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+export function claimMaxLeaseMs(env = globalThis.process?.env ?? {}) {
+  const raw = env.CLAIM_MAX_LEASE_MS;
+  if (raw == null || raw === "") return CLAIM_MAX_LEASE_MS_DEFAULT;
+  if (!/^[1-9]\d*$/.test(String(raw))) return CLAIM_MAX_LEASE_MS_DEFAULT;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : CLAIM_MAX_LEASE_MS_DEFAULT;
+}
+
+export function claimLeaseRefusal(incoming, maxLeaseMs = claimMaxLeaseMs()) {
+  if (incoming.type !== "claim.acquired" && incoming.type !== "claim.renewed") return null;
+  const expiresAt = Date.parse(incoming.data?.expiresAt);
+  const at = Date.parse(incoming.at);
+  if (!(Number.isFinite(expiresAt) && Number.isFinite(at) && expiresAt - at > maxLeaseMs)) return null;
+  const hours = maxLeaseMs / 3_600_000;
+  const window = Number.isInteger(hours) && hours >= 1 ? `${hours} hour${hours === 1 ? "" : "s"}` : `${Math.ceil(maxLeaseMs / 60_000)} minutes`;
+  return `Claim expiry must be within ${window}. Renew the claim to extend it.`;
+}
+
+export function wholeRepoClaimRefusal(incoming, canDecide) {
+  if (incoming.type !== "claim.acquired") return null;
+  if (!Array.isArray(incoming.data?.paths) || !incoming.data.paths.some(path => path === "**")) return null;
+  if (canDecide) return null;
+  return "A claim covering a whole repository with ** needs the decide permission.";
+}
+
 function pathScope(value) {
   if (typeof value !== 'string' || !value || value !== value.trim() || /[\x00-\x1f\x7f\\]/.test(value)) {
     throw new ClaimScopeError('Use explicit relative paths or a folder followed by /**.');
