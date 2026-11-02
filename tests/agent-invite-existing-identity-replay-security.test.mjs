@@ -78,3 +78,13 @@ test('recovery guidance requires the existing holder credential instead of chang
  const recovery=agentErrorAx({httpStatus:401,code:'invite_replay_identity_required'});
  assert.equal(recovery.reason,'invite_replay_identity_required');assert.equal(recovery.status,'action_required');assert.match(recovery.hint,/saved identity secret/);assert.match(JSON.stringify(recovery.next),/Do not rotate or mint a replacement identity/);
 });
+import {createRoomServer} from '../server/http.mjs';
+test('actual HTTP redemption preserves existing-agent bearer retry and rejects credential-less replay',async t=>{
+ const{s,peer,invite}=setup(t),issued=invite(),server=createRoomServer({store:s});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ const origin=`http://127.0.0.1:${server.address().port}`,body={code:issued.code,displayName:'Friend existing agent',requestId:'http-existing-friend'};
+ const post=credential=>fetch(origin+'/api/agent-invites/redeem',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,...(credential?{Authorization:'Bearer '+credential}:{})},body:JSON.stringify(body)});
+ const joined=await post(peer.secret);assert.equal(joined.status,201);assert.equal((await joined.json()).identityId,peer.identityId);
+ const before=counts(s),denied=await post();assert.equal(denied.status,401);assert.equal((await denied.json()).error.code,'invite_replay_identity_required');assert.deepEqual(counts(s),before);
+ const replay=await post(peer.secret);assert.equal(replay.status,201);assert.equal((await replay.json()).duplicate,true);assert.deepEqual(counts(s),before);assert.equal(s.authenticate(peer.secret,'friend-home').member.id,peer.identityId);
+});
