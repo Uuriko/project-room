@@ -8168,17 +8168,20 @@ async function restoreAtStartup(roomId = null) {
 }
 const ready = (async () => {
   const initialResult = await initialSignin;
-  // Returning members land on ?room=... after OAuth. Their pending native
-  // consent owns this navigation before any Room session/snapshot restoration.
+  // Returning members land on ?room=... after OAuth. Any pending validated
+  // consent owns this navigation before Room session/snapshot restoration.
   // Keep account and terms checks; an uncertain read leaves the target for retry.
-  let nativeReturn = null;
-  try { nativeReturn = sessionStorage.getItem(oauthReturnKey); } catch { /* Ordinary navigation remains available. */ }
-  if (new URLSearchParams(location.search).get("oauth") !== "login" && validatedDesktopConsent(nativeReturn)) {
+  let consentReturn = null;
+  try { consentReturn = validatedOAuthReturn(sessionStorage.getItem(oauthReturnKey)); } catch { /* Ordinary navigation remains available. */ }
+  const returnParams = new URLSearchParams(location.search);
+  const providerReturned = returnParams.get("google") === "signed-in" || returnParams.get("github") === "signed-in";
+  if (returnParams.get("oauth") !== "login" && consentReturn
+    && (validatedDesktopConsent(consentReturn) || providerReturned)) {
     const account = await ensureAccountSession();
     if (account?.authenticated) {
       if (resumeOAuthConsent()) return;
-      showAccountWorkspace(); // Terms must be accepted before native consent.
-    } else location.assign(nativeReturn); // The consent endpoint requires sign-in.
+      showAccountWorkspace(); // Terms must be accepted before connector consent.
+    } else location.assign(consentReturn); // The consent endpoint requires sign-in.
     return;
   }
   if (await resumeEmailVerification()) return;

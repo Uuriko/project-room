@@ -198,6 +198,31 @@ const samePermissionSet = (left, right) =>
 // a replay landing exactly 30 days after redemption still rotates.
 const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
+// A code/request receipt proves one room admission, not control of an
+// existing global identity. Only an immutable record that THIS redemption
+// minted the identity admits credential-less lost-response recovery.
+const identityBasisValue = (receipt, minted) => ({
+  version: 1, requestId: receipt.request_id, codeHash: receipt.code_hash,
+  identityId: receipt.identity_id, roomId: receipt.room_id, memberId: receipt.member_id,
+  identityMinted: minted,
+});
+const identityBasisId = receipt => 'oa_air_' + hash(JSON.stringify([
+  receipt.request_id, receipt.code_hash, receipt.identity_id, receipt.room_id, receipt.member_id,
+]));
+const recordIdentityBasis = (invites, receipt, minted) => {
+  invites.db.prepare(`INSERT INTO operator_actions
+    (id,at,action,target_kind,target_id,counts_json,result,request_id)
+    VALUES(?,?,?,?,?,?,?,?)`).run(identityBasisId(receipt), receipt.created_at,
+    'agent_invite_redemption_identity', 'identity', receipt.identity_id,
+    JSON.stringify(identityBasisValue(receipt, minted)), minted ? 'minted' : 'reused', receipt.request_id);
+};
+const mintedByThisRedemption = (invites, receipt) => {
+  const row = invites.db.prepare('SELECT action,target_kind,target_id,counts_json,result,request_id FROM operator_actions WHERE id=?').get(identityBasisId(receipt));
+  return row?.action === 'agent_invite_redemption_identity' && row.target_kind === 'identity'
+    && row.target_id === receipt.identity_id && row.request_id === receipt.request_id && row.result === 'minted'
+    && row.counts_json === JSON.stringify(identityBasisValue(receipt, true));
+};
+
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
 // no second burn — the same membership, duplicate:true, and no new
@@ -211,14 +236,18 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
     .get(receipt.room_id, receipt.identity_id);
   const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
-  // R305-1: a credential-less replay is the client that lost the 201 — the
-  // original identity secret died in that lost response, so retiring it
-  // strands nobody. Rotate a fresh identity secret and show it in this
-  // response, authorized by the one-time code + requestId receipt. The room
-  // onboarding token is not reissued here. POST token/rotate with that
+  // R305-1 applies only when this exact redemption minted the identity.
+  // An existing identity may already serve another owner/room, so the room
+  // invitation must never replace its global holder credential. A proven
+  // new mint can rotate and show a fresh secret for the lost-response retry.
+  // The room onboarding token is not reissued here. POST token/rotate with that
   // identity secret replaces it.
   let rotation = null;
   if (!credentialPresented) {
+    if (!mintedByThisRedemption(invites, receipt)) {
+      fail(401, 'invite_replay_identity_required',
+        'Retry with the existing identity credential. This invitation cannot recover an existing or unproven global identity. Keep the saved connection and obtain the current credential from its identity owner.');
+    }
     // #3883 window gate, on the rotation path only: a receipt whose
     // created_at is unusable fails closed here; credential-presenting
     // replays never reach this gate and stay byte-identical.
@@ -298,6 +327,8 @@ const reactivateLinkedMember = (invites, row, member, identityId, { requestId, r
       (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
       VALUES (?,?,?,?,?,?,?,?)`)
       .run(requestId, row.code_hash, identityId, row.room_id, member.id, requestedName, JSON.stringify(permissions), now);
+    recordIdentityBasis(invites, { request_id: requestId, code_hash: row.code_hash,
+      identity_id: identityId, room_id: row.room_id, member_id: member.id, created_at: now }, false);
   }
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId, roomId: row.room_id, label: member.displayName
@@ -621,6 +652,8 @@ export class AgentInvites {
           (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
           VALUES (?,?,?,?,?,?,?,?)`)
           .run(requestId, row.code_hash, identity.identityId, row.room_id, memberId, name, JSON.stringify(permissions), now);
+        recordIdentityBasis(this, { request_id: requestId, code_hash: row.code_hash,
+          identity_id: identity.identityId, room_id: row.room_id, member_id: memberId, created_at: now }, existingIdentity === null);
       }
       // Referral attribution, same transaction, after the winning burn: the
       // minter is the referrer. Exactly-once per referee via the referrals
