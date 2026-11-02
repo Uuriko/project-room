@@ -3,7 +3,8 @@ const snapshot=s=>Object.fromEntries(['rooms','events','messages','commands','cu
 test('previous native-work-5 warm/cold readers and prepared writers refuse the derived native lease format',async t=>{
  const {mkdtempSync,mkdirSync,rmSync,symlinkSync,realpathSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{execFileSync}=await import('node:child_process'),{pathToFileURL}=await import('node:url');
  const {CURRENT_ROOM_GUARDS}=await import('../server/current-room-repository.mjs'),root=mkdtempSync(join(tmpdir(),'current-claims-old5-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const archive=join(root,'old');mkdirSync(archive);
- execFileSync('tar',['-x','-C',archive],{input:execFileSync('git',['archive','74d252de9','server','src','client','strings','package.json'],{maxBuffer:64*1024*1024})});symlinkSync(realpathSync('node_modules'),join(archive,'node_modules'));
+ // Published main ancestor: genuine native-work-5 runtime, available in clean CI clones.
+ execFileSync('tar',['-x','-C',archive],{input:execFileSync('git',['archive','29beafbdb53309d0cc0c3e11f7d6e42b7cb181ed','server','src','client','strings','package.json'],{maxBuffer:64*1024*1024})});symlinkSync(realpathSync('node_modules'),join(archive,'node_modules'));
  const {RoomStore:OldStore}=await import(pathToFileURL(join(archive,'server/store.mjs'))),oldRepo=await import(pathToFileURL(join(archive,'server/current-room-repository.mjs'))),oldAdmission=await import(pathToFileURL(join(archive,'server/restore-admission.mjs'))),path=join(root,'room.sqlite'),old=new OldStore(path);t.after(()=>old.close());
  const prepared=old.db.prepare("UPDATE events SET body='{}' WHERE room_id='commons'");
  // This is a deliberate upgrade fixture for a verified EMPTY target only,
