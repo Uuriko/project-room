@@ -97,10 +97,11 @@ jobs:
         shell: bash
         env:
           ROOM_SMOKE_ORIGIN: https://project-room-stage.getdasha.workers.dev
+          ROOM_SMOKE_ISOLATED: "1"
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs --browser | tee staging-smoke.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.gate.outputs.ready == 'true'
+        if: always() && steps.gate.outputs.ready == 'true'
         with:
           name: staging-probe-${{ github.run_id }}
           path: |

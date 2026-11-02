@@ -117,9 +117,12 @@ async function deployLag({ liveRevision, githubApi = GITHUB_API, repo = REPO, to
     mainRevision: head.sha, aheadBy: diff.ahead_by ?? null, behindBy: diff.behind_by ?? null, lagHours };
 }
 
-export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000 } = {}) {
+export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000, isolated = false } = {}) {
   const { findings, add } = makeRecorder();
   const hosts = [...SAME_HOSTS, new URL(origin).hostname];
+  const targetOrigin = new URL(origin).origin;
+  if (isolated && SAME_HOSTS.includes(new URL(origin).hostname)) throw new Error("Isolated smoke requires a separate environment origin");
+  const advertisedChecks = [];
   const timings = [];
   const get = async (path, init = {}) => {
     try { const r = await timed(new URL(path, origin).href, init); timings.push({ path, ms: r.ms }); return r; }
@@ -156,9 +159,29 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
     }
   }
   for (const url of [...advertised].sort()) {
+    // Signed canonical discovery remains byte-for-byte unchanged. An isolated
+    // rehearsal tests the equivalent service path, never canonical availability.
+    const advertised = new URL(url);
+    let probe = url;
+    if (isolated && advertised.origin !== targetOrigin) {
+      let path = null;
+      if (advertised.origin === LIVE_ORIGIN) path = advertised.pathname;
+      else if (["https://getdasha.com", "https://www.getdasha.com"].includes(advertised.origin)
+        && (advertised.pathname === "/room" || advertised.pathname.startsWith("/room/"))) path = advertised.pathname.slice(5) || "/";
+      if (path === null || advertised.username || advertised.password) {
+        advertisedChecks.push({ advertisedUrl: url, testedUrl: null, scope: "outside-isolated-service" });
+        continue;
+      }
+      const target = new URL(targetOrigin);
+      target.pathname = path;
+      target.search = advertised.search;
+      probe = target.href;
+    }
     try {
-      const r = await timed(url, { method: "GET", headers: { accept: "*/*" } });
-      if (brokenStatus(r.res.status)) add("advertised_url", `${url} -> ${r.res.status}`);
+      const r = await timed(probe, { method: "GET", headers: { accept: "*/*" } });
+      if (isolated) advertisedChecks.push({ advertisedUrl: url, testedUrl: probe, scope: "environment-endpoint", status: r.res.status });
+      if (brokenStatus(r.res.status) || isolated && r.res.status >= 300 && r.res.status < 400)
+        add("advertised_url", `${url} -> ${r.res.status}${isolated ? " (tested " + probe + "; isolated environment only)" : ""}`);
     } catch (error) { add("advertised_url", `${url} -> ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -189,7 +212,7 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
   const sorted = timings.map(t => t.ms).sort((a, b) => a - b);
   const p95 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] : null;
 
-  return { ok: !findings.some(f => f.severity === "fail"), origin, liveRevision, deploy: lag, p95Ms: p95, findings };
+  return { ok: !findings.some(f => f.severity === "fail"), origin, liveRevision, deploy: lag, p95Ms: p95, findings, ...(isolated ? { discoveryScope: "isolated-environment-endpoints; canonical availability not tested", advertisedChecks } : {}) };
 }
 
 // Optional browser pass. browserFactory returns a Playwright Browser; axe is
@@ -236,7 +259,7 @@ function summaryMarkdown(report) {
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const args = new Set(process.argv.slice(2));
   const origin = process.env.ROOM_SMOKE_ORIGIN || LIVE_ORIGIN;
-  const report = await liveSmoke({ origin, githubApi: process.env.ROOM_SMOKE_GITHUB_API || GITHUB_API,
+  const report = await liveSmoke({ origin, isolated: process.env.ROOM_SMOKE_ISOLATED === "1", githubApi: process.env.ROOM_SMOKE_GITHUB_API || GITHUB_API,
     githubToken: process.env.GITHUB_TOKEN || null, maxLagHours: Number(process.env.ROOM_SMOKE_MAX_LAG_HOURS || 24) });
   if (args.has("--browser")) {
     const { chromium } = await import("playwright");

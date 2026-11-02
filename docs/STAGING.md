@@ -17,6 +17,20 @@ pnpm exec wrangler deploy --env staging --keep-vars
 
 GitHub Actions does the same on every push to `main`, then runs the cold-start probe, `scripts/live-smoke.mjs --browser`, and uploads both results. The workflow is `.github/workflows/staging.yml`. It also runs from the Actions tab.
 
+Staging sets `ROOM_SMOKE_ISOLATED=1` for smoke. Discovery documents deliberately
+retain their signed canonical service URLs; this mode leaves those documents
+unchanged and tests equivalent Room paths on the staging origin. The report
+labels the advertised URL and the endpoint actually tested. Canonical
+production availability is **not** qualified by an isolated staging pass.
+Only the canonical Room origin and the `/room` paths on its two known entry
+hosts map to staging; external provider URLs are never rewritten or probed as
+Room endpoints. Redirects fail isolated endpoint checks instead of crossing
+into production. Production smoke keeps its existing advertised-URL checks.
+
+Probe artifacts upload even when a later deploy/probe step fails, provided the
+secret gate passed. A missing-secret gate still fails without claiming a deploy
+or uploading probe results that were never produced.
+
 The workflow needs the Actions secrets `CLOUDFLARE_API_TOKEN` (Workers script edit on this account) and `ROOM_AGENT_CARD_SIGNING_KEY` (the build signs the agent card). If the token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When either secret is absent the workflow fails with `missing <NAME>` and deploys nothing. It is not a required check, so it does not block merges, and it never deploys production. Production ships through the shared lane in [DEPLOY-LANE.md](DEPLOY-LANE.md).
 
 `env.staging.vars.ROOM_ORIGIN` is `https://project-room-stage.getdasha.workers.dev` because the account subdomain is `getdasha`. If a deploy prints a different `workers.dev` host, change `ROOM_ORIGIN` to that host before treating smoke as meaningful. The host check rejects every other origin.
