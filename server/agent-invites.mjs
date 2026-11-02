@@ -238,9 +238,9 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
   // R305-1 applies only when this exact redemption minted the identity.
   // An existing identity may already serve another owner/room, so the room
-  // invitation must never replace its global holder credential. Rotate a fresh identity secret and show it in this
-  // response, authorized by the one-time code + requestId receipt. The room
-  // onboarding token is not reissued here. POST token/rotate with that
+  // invitation must never replace its global holder credential. A proven
+  // new mint can rotate and show a fresh secret for the lost-response retry.
+  // The room onboarding token is not reissued here. POST token/rotate with that
   // identity secret replaces it.
   let rotation = null;
   if (!credentialPresented) {
