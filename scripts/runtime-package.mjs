@@ -435,6 +435,21 @@ optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-r
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage
 optional.push("server/room-shard-copy.mjs"); // operator copy of one room's room-tables and the digest compare; not called from the command path
+// Historical per-kind journals (SIMPLIFY G-05): the seven modules below were
+// deleted from the current tree — their exports live in server/journal.mjs —
+// but genuine historical packages legitimately import them (e.g.
+// server/invitation-evidence.mjs imports ./invitation-journal.mjs, and
+// server/inbox.mjs imports ./graph-reply-journal.mjs), and createRuntimePackage
+// verifies those packages against this current allowlist. Their registrations
+// therefore stay as historical entries only, following the deploy/ entries
+// above: registration alone never ships a file, and they are optional, not
+// required, so current-tree packages that no longer contain them still verify.
+// They are registered once here rather than restored to their former
+// required/scattered positions for exactly that reason.
+optional.push("server/channel-journal.mjs", "server/graph-reply-journal.mjs",
+  "server/invitation-journal.mjs", "server/jev-shadow-journal.mjs",
+  "server/membership-delegation-journal.mjs", "server/sla-breach-journal.mjs",
+  "server/spam-quarantine-journal.mjs"); // historical only; deleted from the current tree
 // Retired UI files remain recognized only when an historical commit contains them.
 // They are not advertised or required by the current runtime.
 const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board"].map(name => `src/${name}.js`);
