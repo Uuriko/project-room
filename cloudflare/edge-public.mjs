@@ -1,3 +1,4 @@
+import { configuredMcpOAuthResource, mcpOAuthResourceMetadata, oauthAuthorizationServerMetadata } from "../server/oauth-metadata.mjs";
 // Static assets and discovery documents answered by the Worker isolate.
 // They must not enter the invite-only-pilot Durable Object: that object is
 // single-threaded, and a cold wake or a synchronous stretch closes its input
@@ -144,6 +145,7 @@ function securityTxtResponse(request, url, contact) {
 }
 
 export function classifyEdgePath(pathname) {
+  if (['/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'].includes(pathname.replace(/\/+$/, ''))) return 'oauth-metadata';
   if (pathname === '/.well-known/security.txt' || pathname === '/room/.well-known/security.txt') return 'security-txt';
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
@@ -312,11 +314,39 @@ async function assetResponse(request, env, url) {
   return new Response(request.method === 'HEAD' ? null : bodyBytes, { status: 200, headers });
 }
 
+// Preserve GET-only routing and the existing malformed-configuration failure
+// path. Metadata needs no account, registration lookup, token or room state.
+function oauthMetadataResponse(request, env, url) {
+  if (request.method !== 'GET') return null;
+  let resource;
+  try {
+    const clients = env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [];
+    resource = configuredMcpOAuthResource(env.ROOM_ORIGIN, clients);
+  } catch { return null; }
+  const headers = baseHeaders(url);
+  const pathname = url.pathname.replace(/\/+$/, '');
+  if (pathname !== '/.well-known/oauth-authorization-server' && !resource) {
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    const body = JSON.stringify({ error: 'not_found' });
+    headers.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
+    return new Response(body, { status: 404, headers });
+  }
+  headers.set('Access-Control-Allow-Origin', '*');
+  const metadata = pathname === '/.well-known/oauth-authorization-server'
+    ? oauthAuthorizationServerMetadata(env.ROOM_ORIGIN, resource)
+    : mcpOAuthResourceMetadata(resource, env.ROOM_ORIGIN);
+  const body = JSON.stringify(metadata);
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
+  return new Response(body, { status: 200, headers });
+}
+
 // Response for a path that must not enter the Durable Object, or null when
 // the request still belongs to the object (health, API, skills members).
 export async function edgePublicResponse(request, env, url) {
   const kind = classifyEdgePath(url.pathname);
   if (!kind) return null;
+  if (kind === 'oauth-metadata') return oauthMetadataResponse(request, env, url);
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);

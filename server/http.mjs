@@ -1,3 +1,4 @@
+import { oauthAuthorizationServerMetadata } from "./oauth-metadata.mjs";
 import { renderInviteOAuthPage } from "./routes/mcp-invite-oauth.mjs";
 import { createMcpInviteOAuth, MCP_INVITE_RECOVERY } from "./mcp-invite-oauth.mjs";
 import { createMcpEventsRuntime } from "./mcp-events-runtime.mjs";
@@ -124,7 +125,7 @@ import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: ope
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
-import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
+import { createOAuthProvider } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
@@ -1736,19 +1737,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
         const issuer = expectedOrigin();
         res.setHeader("Access-Control-Allow-Origin", "*");
-        return json(res, 200, {
-          issuer,
-          authorization_endpoint: issuer + "/oauth/authorize",
-          authorization_response_iss_parameter_supported: true,
-          token_endpoint: issuer + "/oauth/token",
-          revocation_endpoint: issuer + "/oauth/revoke",
-          ...(oauthResource ? {registration_endpoint: issuer + "/oauth/register"} : {}),
-          response_types_supported: ["code"],
-          grant_types_supported: ["authorization_code", "refresh_token"],
-          code_challenge_methods_supported: ["S256"],
-          scopes_supported: [...OAUTH_SCOPES],
-          token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
-        });
+        return json(res, 200, oauthAuthorizationServerMetadata(issuer, oauthResource));
       }
       // GET /.well-known/feedback — /feedback standard discovery metadata.
       // Mirrors docs/feedback-endpoint.md §7: version, intake URL template,

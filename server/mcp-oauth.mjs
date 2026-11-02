@@ -9,15 +9,7 @@ import { PILOT_LIMITS } from './store.mjs';
 import { hasMessageAuthority } from './message-authority.mjs';
 import { assertProjectionWrite } from './write-integrity.mjs';
 
-export function mcpOAuthResourceMetadata(resource, issuer) {
-  for (const value of [resource, issuer]) {
-    const url = new URL(value);
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || (url.href !== value && url.origin !== value))
-      throw new TypeError('Exact HTTPS resource and issuer required');
-  }
-  return Object.freeze({ resource, authorization_servers: [issuer],
-    bearer_methods_supported: ['header'], scopes_supported: [...OAUTH_SCOPES] });
-}
+export { mcpOAuthResourceMetadata } from "./oauth-metadata.mjs";
 
 export function mcpOAuthChallenge(metadataUrl) {
   const url = new URL(metadataUrl);
