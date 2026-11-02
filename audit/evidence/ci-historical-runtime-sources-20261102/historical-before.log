@@ -17,7 +17,7 @@ test at tests/current-claims-old5-fence.test.mjs:3:1
 ✖ previous native-work-5 warm/cold readers and prepared writers refuse the derived native lease format (12.246791ms)
   Error: Command failed: git archive 74d252de9 server src client strings package.json
   fatal: not a valid object name: 74d252de9
-  
+
       at genericNodeError (node:internal/errors:986:15)
       at wrappedFn (node:internal/errors:540:14)
       at checkExecSyncError (node:child_process:943:11)
@@ -37,7 +37,7 @@ test at tests/recovery-report-protocol.test.mjs:4:1
 ✖ genuine18 warm/prepared/cold operator refuses19 before suspension or progress (8.361083ms)
   Error: Command failed: git archive --format=tar a82574def server src client strings cloudflare/room-backup.mjs package.json
   fatal: not a valid object name: a82574def
-  
+
       at genericNodeError (node:internal/errors:986:15)
       at wrappedFn (node:internal/errors:540:14)
       at checkExecSyncError (node:child_process:943:11)

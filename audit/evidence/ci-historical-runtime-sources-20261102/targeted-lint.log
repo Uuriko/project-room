@@ -3,4 +3,3 @@
   7:400  warning  'current' is never reassigned. Use 'const' instead  prefer-const
 
 ✖ 1 problem (0 errors, 1 warning)
-
