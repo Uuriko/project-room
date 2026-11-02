@@ -796,26 +796,42 @@ const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 
 // The agent needle is folded with JS `toLowerCase()` (full Unicode)
 // in queryPublicReceipts below, and the documented semantics are a
-// case-insensitive substring of an agent name; SQLite `lower()` folds
-// ASCII only, so SQL alone must never decide this filter or receipts
-// whose match depends on non-ASCII folding (Ä, İ, É, Σ, Œ, ...)
-// silently drop out of the public agent search. The SQL predicate
-// below is a proven superset of the JS predicate
-// `agents_json.toLowerCase().includes(needle)`: a pure-ASCII
-// agents_json can only JS-match through characters `lower()` and
-// `toLowerCase()` fold identically, so the `instr` leg covers it (a
-// non-ASCII needle cannot be a substring of an ASCII folded string);
-// every other JS match requires a non-ASCII character in agents_json,
+// case-insensitive substring of a single agent name; SQLite `lower()`
+// folds ASCII only, so SQL alone must never decide this filter or
+// receipts whose match depends on non-ASCII folding (Ä, İ, É, Σ, Œ,
+// ...) silently drop out of the public agent search. The exact JS
+// predicate is per-name: parse agents_json and test whether any one
+// name, folded, contains the folded needle. Matching the needle
+// against the whole agents_json serialization instead would also
+// serve needles that occur only between or around names (`","`,
+// `[`, `"]`, or a span crossing two names), which are in no name.
+// The SQL predicate below is a proven superset of the per-name JS
+// predicate: a per-name match with no JSON-escaped character appears
+// verbatim inside the serialization, so for a pure-ASCII agents_json
+// the `instr` leg covers it (a non-ASCII needle cannot be a substring
+// of an ASCII folded name); every other such match requires a
+// non-ASCII character in the matching name, hence in agents_json,
 // which the byte-length leg covers (a non-ASCII character always
-// encodes to more UTF-8 bytes than characters). The exact JS fold
-// then decides each candidate — in the page scan, before pagination,
-// and in the cursor lookup — so the served list is exactly the JS
-// predicate's matches.
+// encodes to more UTF-8 bytes than characters). A needle containing
+// a character JSON.stringify escapes (`"`, `\`, or a control
+// character) may appear in a name but not verbatim in the
+// serialization, so such needles scan every row and let the JS
+// predicate decide. The exact JS fold then decides each candidate —
+// in the page scan, before pagination, and in the cursor lookup —
+// so the served list is exactly the per-name predicate's matches.
+const agentNameMatches = (agentsJson, needle) => {
+  const agents = parseJson(agentsJson, []);
+  return Array.isArray(agents) && agents.some(name => typeof name === "string" && name.toLowerCase().includes(needle));
+};
+
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
   if (room) { clauses.push("room_id=?"); params.push(room); }
-  if (needle) { clauses.push("(instr(lower(agents_json), ?) > 0 OR length(agents_json) <> length(CAST(agents_json AS BLOB)))"); params.push(needle); }
+  if (needle) {
+    if (/["\\\u0000-\u001f]/.test(needle)) clauses.push("1=1");
+    else { clauses.push("(instr(lower(agents_json), ?) > 0 OR length(agents_json) <> length(CAST(agents_json AS BLOB)))"); params.push(needle); }
+  }
   return { clauses, params };
 };
 
@@ -858,7 +874,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // JS fold decides whether the cursor receipt is in this list. A
     // superset candidate that is not a JS match is not a receipt this
     // list could serve — same 422 as a never-existent id.
-    if (!current || (needle && !current.agents_json.toLowerCase().includes(needle))) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+    if (!current || (needle && !agentNameMatches(current.agents_json, needle))) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
@@ -889,7 +905,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
       .all(...filter.params, ...scanAfterParams, RECEIPT_AGENT_SCAN_BATCH);
     if (!batch.length) break;
     for (const row of batch) {
-      if (row.agents_json.toLowerCase().includes(needle)) matches.push(row);
+      if (agentNameMatches(row.agents_json, needle)) matches.push(row);
     }
     if (batch.length < RECEIPT_AGENT_SCAN_BATCH) break;
     const last = batch.at(-1);
