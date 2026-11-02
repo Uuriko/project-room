@@ -51,5 +51,13 @@
       "bytes": 53,
       "sha256": "af3a2f05a90a29c0c536492a68dcce733459cb4d1fd7a1a53a55ee09f7474f80"
     }
+  },
+  "rootComposition": {
+    "main": "7cd50911398ea67b18ad580e4a31bfcab5054ac8",
+    "sourceHeadBeforeDocs": "35d20747a",
+    "affectedPlusManifestTestsPassed": 27,
+    "independentReview": "No actionable acceptance or wait-budget regression found; final health predicate unchanged.",
+    "runtimeSchemaWorkflowChanges": false,
+    "candidateManifest": "regenerated; no drift or byte change"
   }
 }

@@ -44,6 +44,14 @@ Older rollback targets with neither new field may use their legacy `status: ok`
 response, but must pass the same independent job checks. Readiness, email policy,
 source versions, pages, and signed-card checks remain required.
 
+An initially valid stale view for optional jobs may converge before that final
+assessment. Both doors must remain ready, the required backup must be healthy,
+and each round must contain fresh, internally consistent health/job snapshots.
+These rounds share the existing source-convergence waiting deadline; they do not
+start another waiting budget. Failed, malformed or unavailable views stop the
+wait. Persistent stale jobs still fail, with safe job names, status and age in
+the receipt. The normal single-pass request and signed-card timeouts remain.
+
 Product-health observations are optional follow-up checks, not deployment-receipt
 gates. The public work board may legitimately be empty, and a gallery may have no
 recent receipts. Inspect `GET /api/public-work/tasks?limit=1` or
