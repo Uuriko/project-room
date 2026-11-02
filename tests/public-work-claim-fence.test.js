@@ -20,7 +20,7 @@ function fixture(t) {
     terms: { repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'project', title: 'Fence proof',
       summary: 'Disposable public task', acceptanceCriteria: ['Return an artifact'], reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
   store.projectOffers.transition('commons', 'owner', offerId, 'publish', { requestId: 'publish', expectedRevision: 1 });
-  const registry = createDurableWorkClaimRegistry(store.db);
+  const registry = createDurableWorkClaimRegistry(store.db, { transaction: fn => store.transaction(fn) });
   const task = store.publicWorkClaims.enable('commons', 'owner', offerId, {
     requestId: 'enable', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['src/public-proof.js'] });
   return { store, file, registry, task };

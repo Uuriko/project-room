@@ -228,7 +228,7 @@ for (const exit of reviewerExits) {
     await landReviewerExit(r, id, request, exit);
     // Exercise the persisted row codec plus the pure normalizer, rather than
     // retaining the route's returned JavaScript object as a fake reload.
-    r.store.workClaims = createDurableWorkClaimRegistry(r.store.db);
+    r.store.workClaims = createDurableWorkClaimRegistry(r.store.db, { transaction: fn => r.store.transaction(fn) });
     const loaded = r.get(id);
     r.store.workClaims.set("commons", workOf(loaded));
     const before = effects(r, id);

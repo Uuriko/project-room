@@ -188,12 +188,12 @@ test("readingAcks survive a durable registry rebuild on the same database", asyn
   try {
     const db = new DatabaseSync(join(dir, "claims.db"));
     db.exec(workClaimSchema);
-    const first = createDurableWorkClaimRegistry(db, {});
+    const first = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
     await call(first, "quill", "create", null, { id: "w5", title: "t" });
     await call(first, "quill", "claim", "w5", {});
     await call(first, "quill", "update", "w5", { readingAck: { docs: ["docs/AGENT-START-HERE.md"] } });
 
-    const second = createDurableWorkClaimRegistry(db, {});
+    const second = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
     const item = second.get("room1", "w5");
     assert.deepEqual(item.readingAcks.quill.docs, ["docs/AGENT-START-HERE.md"]);
     assert.ok(typeof item.readingAcks.quill.at === "string");

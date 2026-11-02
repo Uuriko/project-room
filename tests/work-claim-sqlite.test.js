@@ -38,14 +38,14 @@ const database = t => {
 test("a claim survives a restart on the durable registry and is lost on the in-memory one", async t => {
   const open = database(t);
   const first = open();
-  const durable = createDurableWorkClaimRegistry(first);
+  const durable = createDurableWorkClaimRegistry(first, { transaction: fn => fn() });
   await call(durable, "jill", "create", null, { id: "rc-1", title: "Board v2" });
   const claimed = await call(durable, "jill", "claim", "rc-1", { leaseHours: 6 });
   first.close();
 
   const second = open();
   t.after(() => second.close());
-  const restarted = createDurableWorkClaimRegistry(second);
+  const restarted = createDurableWorkClaimRegistry(second, { transaction: fn => fn() });
   const read = await call(restarted, "jill", "read", "rc-1");
   assert.equal(read.value.owner, "jill");
   assert.equal(read.value.state, "claimed");
@@ -59,12 +59,30 @@ test("a claim survives a restart on the durable registry and is lost on the in-m
   await assert.rejects(call(memory, "jill", "read", "rc-1"), error => error.status === 404);
 });
 
+test("constructing a durable registry without a transaction runner fails loudly", t => {
+  const open = database(t);
+  const db = open();
+  t.after(() => db.close());
+  // S-03: `transaction` is required. A bare construction used to default to
+  // a silent no-op (fn => fn()), so a "durable" registry built without a
+  // runner lost atomicity without any signal. That state is now
+  // unrepresentable: omission, an empty options object, and a non-function
+  // value all throw at construction, not at the first contested write.
+  assert.throws(() => createDurableWorkClaimRegistry(db), /transaction/);
+  assert.throws(() => createDurableWorkClaimRegistry(db, {}), /transaction/);
+  assert.throws(() => createDurableWorkClaimRegistry(db, { transaction: "run it" }), /transaction/);
+  // An explicit runner — even an explicit pass-through, as single-threaded
+  // test fixtures choose — constructs fine.
+  const registry = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
+  assert.equal(typeof registry.transaction, "function");
+});
+
 test("room work-claim config persists across restarts", t => {
   const open = database(t);
   const first = open();
-  createDurableWorkClaimRegistry(first).configure("room1", { defaultLeaseHours: 12 });
+  createDurableWorkClaimRegistry(first, { transaction: fn => fn() }).configure("room1", { defaultLeaseHours: 12 });
   first.close();
   const second = open();
   t.after(() => second.close());
-  assert.equal(createDurableWorkClaimRegistry(second).configFor("room1").defaultLeaseHours, 12);
+  assert.equal(createDurableWorkClaimRegistry(second, { transaction: fn => fn() }).configFor("room1").defaultLeaseHours, 12);
 });
