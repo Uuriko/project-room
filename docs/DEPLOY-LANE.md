@@ -87,9 +87,11 @@ storage outage or that the product is healthy.
 
 Restore scheduled patrol explicitly after its existing work-bound changes and
 bounded history catch-up/head agreement qualify against large rooms. Update both
-configuration and command pins, qualify the exact source, and use the ordinary
+configuration and command pins to `ROOM_PATROL_ENABLED=1`, qualify the exact source, and use the ordinary
 serialized deploy/readback/smoke path. Readiness and required job checks remain
 release gates throughout; do not change the smoke to accept a failed service.
+Rolling back to older code also removes this isolation: that code ignores the
+variable. Verify the actual running source, not only a retained variable value.
 
 ### Optional auto-deploy
 

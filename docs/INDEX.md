@@ -223,3 +223,5 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 - [Shipped Gmail sanitizer security repair](research/2026-11-01-sanitizer-security-repair.md): advisory scope and executable qualification.
 
 - [Native launch failure status](research/2026-11-01-native-launch-failure-status.md): safe local failure codes, terminal status and qualification limits.
+
+[November 1 storage-timeout investigation](research/storage-timeout-20261101/findings.md) records native size measurement, patrol isolation and production evidence limits.
