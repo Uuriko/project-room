@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 
 // The checked-in Worker config is the staging isolation contract. A deploy
 // of env.staging must not attach the public routes or the production
@@ -38,4 +39,18 @@ test("isolated staging owns its Durable Object and does not take production rout
   assert.equal(staging.vars.ROOM_GMAIL_ENABLED, "0");
   assert.equal(staging.vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
   assert.equal(release.env.production.vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
+});
+
+// A persistent staging database can be ahead of main. An unrelated main push
+// must not replace its explicit candidate with an older schema/runtime.
+test("persistent staging deploys only an explicitly dispatched candidate", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/staging.yml", import.meta.url), "utf8"));
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.equal(workflow.concurrency.group, "staging-deploy");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const steps = workflow.jobs.deploy.steps;
+  const checkout = steps.find(step => step.uses?.startsWith("actions/checkout@"));
+  assert.equal(checkout.with?.ref, undefined, "checkout must retain the explicitly selected workflow ref");
+  assert.match(steps.find(step => step.name === "Deploy isolated staging").run, /wrangler deploy --env staging --keep-vars/);
+  assert.match(steps.find(step => step.name === "Smoke and browser checks").run, /live-smoke\.mjs --browser/);
 });

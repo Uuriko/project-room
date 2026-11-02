@@ -1,14 +1,14 @@
 name: staging
 
-# Deploy main to the isolated staging Worker (env.staging, script
-# project-room-stage) and check it. This never deploys production.
+# Deploy an explicitly selected candidate to the persistent staging Worker
+# (env.staging, project-room-stage). Main may use an older schema than an
+# active rehearsal, so a main push must never overwrite it automatically.
+# This never deploys production.
 # A missing CLOUDFLARE_API_TOKEN or ROOM_AGENT_CARD_SIGNING_KEY Actions
 # secret fails this workflow with "missing <NAME>" instead of going green
 # without deploying. This workflow is not a required check, so it never
 # blocks merges to main.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
