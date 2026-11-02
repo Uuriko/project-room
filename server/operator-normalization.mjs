@@ -28,21 +28,29 @@ function inspect(store,selection){
 export function operatorNormalization(store,selection,execute=false){
  const request=input(selection,execute);if(store.readOnly)fail('read_only','This store is read-only');
  if(!execute)return store.readTransaction(()=>inspect(store,request));
- return store.transaction(()=>{
+ let stage='receipt_lookup';
+ try{return store.transaction(()=>{
   const id='oa_normalize_'+hash(request.roomId+'\0'+request.requestId),fingerprint=hash(JSON.stringify(request));
   const prior=store.db.prepare("SELECT counts_json FROM operator_actions WHERE id=? AND action='operator_normalization_adopt'").get(id);
   if(prior){const saved=JSON.parse(prior.counts_json);if(saved.fingerprint!==fingerprint)fail('idempotency_conflict','Keep the exact original adoption request');return {...saved.result,duplicate:true};}
-  const plan=inspect(store,request);if(plan.planHash!==request.planHash)fail('plan_changed','Room head/proof or assignment census changed; review a fresh plan');
+  stage='plan_validation';const plan=inspect(store,request);if(plan.planHash!==request.planHash)fail('plan_changed','Room head/proof or assignment census changed; review a fresh plan');
   assertProjectionWrite(store.db,request.roomId);
-  const current=store.room(request.roomId); // Deliberate ONE-TIME whole-state load.
+  stage='current_state_read';const current=store.room(request.roomId); // Deliberate ONE-TIME whole-state load.
   if(current.sequence!==plan.sequence)fail('plan_changed','Room changed during adoption');
-  if(request.discardLegacyAssignments)for(const table of ['work_claim_history','work_claims','collab_assignments'])store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(request.roomId);
-  initializeCurrentRoom(store,current.state,[],{adoptExisting:{sequence:plan.sequence,eventId:plan.eventId}});
+  stage='legacy_assignment_cleanup';if(request.discardLegacyAssignments)for(const table of ['work_claim_history','work_claims','collab_assignments'])store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(request.roomId);
+  stage='entity_materialization';initializeCurrentRoom(store,current.state,[],{adoptExisting:{sequence:plan.sequence,eventId:plan.eventId}});
   const bytes=store.db.prepare('SELECT octet_length(projection) bytes FROM rooms WHERE id=?').get(request.roomId).bytes;
   const result={roomId:request.roomId,sequence:plan.sequence,representation:'normalized-current-v1',writerFormat:CURRENT_WRITER_FORMAT,
    previousProjectionBytes:plan.projectionBytes,projectionBytes:bytes,legacyDiscarded:request.discardLegacyAssignments?plan.legacy:{},accountsAndConnectionsPreserved:true,historyProvenance:'unknown',certified:false,duplicate:false};
-  store.db.prepare('INSERT INTO operator_actions(id,at,action,target_kind,target_id,reason,plan_hash,counts_json,result,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
+  stage='receipt_save';store.db.prepare('INSERT INTO operator_actions(id,at,action,target_kind,target_id,reason,plan_hash,counts_json,result,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
    .run(id,store.now(),'operator_normalization_adopt','room',request.roomId,request.reason,request.planHash,JSON.stringify({fingerprint,result}),'committed',request.requestId);
   return result;
- });
+ });}catch(error){
+  if(error instanceof ServiceError)throw error;
+  // This function is reached only through the authenticated operator route.
+  // Report bounded conversion diagnostics after transaction rollback; ordinary
+  // Room callers retain the central opaque error envelope.
+  const message=String(error?.message??'Unknown conversion failure').slice(0,280);
+  throw new ServiceError(500,'normalization_failed',`Normalization failed during ${stage}: ${message}`);
+ }
 }
