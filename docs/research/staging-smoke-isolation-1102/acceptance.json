@@ -1,0 +1,67 @@
+{
+  "sourceCommit": "bd76c2e1c69c3066d46f3bba4546387e96b0508e",
+  "base": "b6917a237004f994f60731d3d0ab9f4130e4e27a",
+  "trigger": {
+    "run": "41381849448",
+    "localLog": "/tmp/project-room-staging-41381849448.log",
+    "observed": "stagingdeploy/coldstart succeeded; smoke followed canonicalproduction/a2a and failed503; artifact upload skipped afterfailure",
+    "inference": "Source explicitly stamps discovery once for canonical serviceorigin; staging smoke coupling is wrong, not evidence signer/key is wrong."
+  },
+  "changes": [
+    "Explicit staging smoke mode leaves signed discovery bytes/buildsigner unchanged.",
+    "Allowlisted canonicalRoom paths and knownentry /room paths tested on explicit environmentorigin. URLcomponent assignment preserves // aspath, preventingnetwork-path escape.",
+    "Report labels advertisedUrl/testedUrl/scope and says canonicalavailability nottested. Externalproviders neverrebased/probed asRoom; outsideRoomentrymarketing paths listedoutsideisolatedscope.",
+    "Everyisolatedendpointredirect fails withoutfollowing; stage503stillfails. Productiondefault probesadvertisedcanonicalURLs unchanged.",
+    "Artifacts use always() and successfulsecretgate; failure remainsfailure."
+  ],
+  "qualification": {
+    "baseline": {
+      "tests": 6,
+      "pass": 1,
+      "fail": 5,
+      "scope": "Unchangedb691smoke+workflow withnewmocked controls; no productionnetwork"
+    },
+    "final": {
+      "pass": 41,
+      "fail": 0,
+      "includes": [
+        "newisolation6",
+        "existingliveSmokeCLI",
+        "stagingconfig",
+        "agentcardsigning",
+        "signAgentCardbuild"
+      ]
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "secretScan": "clean",
+    "network": "Allnew controls interceptfetch includingproductionoutage andinvalidisolatedorigin; existingCLI tests use localHTTPstandin. No actual staging or production calls."
+  },
+  "limits": [
+    "Isolatedsuccess doesnotqualify canonicalproductionavailability.",
+    "Signedcard/signingbuilder/keyandclaimsunchanged; no provider/client/grantchanges.",
+    "Workflow artifactcondition verified through YAMLcontract; actualActionsrerun notperformed inthislane.",
+    "No browserrun duplicated; originalbrowserlane unchanged.",
+    "No push/merge/deploy."
+  ],
+  "logs": {
+    "red": {
+      "path": "red.log.gz",
+      "sha256": "87d263c8a6ba75c6e094a270d1a6c04113011c99fb1f04ad59c8518d5e3a2865"
+    },
+    "final": {
+      "path": "final.log.gz",
+      "sha256": "68d0fb7197179473ab3d796707027610242a52905a187aacae09ca8fd29f4ff6"
+    },
+    "lint": {
+      "path": "lint.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret": {
+      "path": "secret.log.gz",
+      "sha256": "c5cff32c8ce29a2d1e85a69e8bd46aefcf6c5e7164a49fecaa51573d98fac2f6"
+    }
+  }
+}
