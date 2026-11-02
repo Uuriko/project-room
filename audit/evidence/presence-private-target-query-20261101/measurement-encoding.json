@@ -13,5 +13,10 @@
     "decodedSha256": "6816eeb62cb3c1892464a298e96409e12b3472946c6c7acdee32f4d9eeccefa5",
     "decodedBytes": 442777,
     "gzipBytes": 4644
+  },
+  "readiness-results.json": {
+    "decodedSha256": "6380549c1213831307543e5e3af1f4578a738d500cad72c9d8ce561c6c1c46cf",
+    "decodedBytes": 129811,
+    "gzipBytes": 2724
   }
 }
