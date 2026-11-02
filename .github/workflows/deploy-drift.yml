@@ -5,7 +5,7 @@ name: deploy-drift
 # request check and does not block main.
 on:
   schedule:
-    - cron: "23 * * * *"
+    - cron: "23 */6 * * *" # CI-DIET C4: was hourly — drift is informational and deploy is dispatch-gated; 6-hourly is plenty.
   workflow_dispatch:
     inputs:
       max_prs:
