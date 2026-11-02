@@ -107,7 +107,7 @@ export async function probeProd(base) {
     } else if (["version", "health"].includes(label) && r.ok) {
       let value;
       try { value = JSON.parse(r.body); } catch {}
-      r.ok = value?.status === "ok";
+      r.ok = value?.status === "ok" || label === "health" && value?.status === "degraded" && value.liveness === "ok" && ["degraded", "stale", "failing", "timeout", "error"].includes(value.jobs?.status);
       if (label === "version") {
         sourceRevision = r.ok && typeof value.sourceRevision === "string" && /^[a-f0-9]{40}$/i.test(value.sourceRevision)
           ? value.sourceRevision.toLowerCase() : null;

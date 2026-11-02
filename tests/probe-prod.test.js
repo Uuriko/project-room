@@ -172,3 +172,10 @@ test('root resource discovery alias failure is caught independently',async t=>{
  const base=await withServer(t,path=>path==='/.well-known/oauth-protected-resource'?{status:503,body:'unavailable'}:healthy(path));
  const result=await probeProd(base);assert.equal(result.verdict,'partial');assert.equal(result.endpoints.find(r=>r.label==='oauth-resource-root').ok,false);
 });
+
+test('documented degraded liveness remains available while failed jobs stay explicit',async t=>{
+ let valid=true;
+ const base=await withServer(t,path=>path==='/api/health'?{status:200,body:{status:'degraded',...(valid?{liveness:'ok'}:{}),jobs:{status:'failing'}}}:path==='/api/health/jobs'?{status:503,body:{schema:'room.job-health/1',status:'failing',jobs:[{name:'room-backup',status:'failing'}]}}:healthy(path));
+ const report=await probeProd(base);assert.equal(report.verdict,'healthy');assert.deepEqual(report.jobsHealth,{status:'failing',failing:['room-backup']});
+ valid=false;assert.equal((await probeProd(base)).verdict,'unverified');
+});
