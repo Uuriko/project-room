@@ -5823,21 +5823,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // stamp equals the hidden event's exact timestamp and any member
     // can time the private act. The member's last room-visible act
     // (or their enrollment, via addedAt below) is what remains.
+    // Materialize private originals once. Correlated history lookups made each
+    // follow-up scan the room again, including on a warm projection-cache hit.
+    // Keep id and JSON messageId membership separate to preserve SQLite affinity;
+    // NULL membership means no matching original, exactly as the prior EXISTS.
     const lastCommandAt = new Map(this.db.prepare(
-      `SELECT json_extract(e.body,'$.actorId') AS actor, max(json_extract(e.body,'$.at')) AS at
+      `WITH private_posts AS MATERIALIZED (
+         SELECT id,json_extract(body,'$.data.messageId') AS messageId
+         FROM events WHERE room_id=?
+           AND json_extract(body,'$.type')='message.posted'
+           AND COALESCE(json_extract(body,'$.data.toMemberId'),'')<>''
+       )
+       SELECT json_extract(e.body,'$.actorId') AS actor, max(json_extract(e.body,'$.at')) AS at
        FROM events e WHERE e.room_id=?
          AND NOT (
            (json_extract(e.body,'$.type')='message.posted'
              AND COALESCE(json_extract(e.body,'$.data.toMemberId'),'')<>'')
            OR (json_extract(e.body,'$.type') IN ('message.edited','message.deleted','message.redacted','poll.voted','message.pinned','message.unpinned')
-             AND EXISTS (SELECT 1 FROM events p WHERE p.room_id=e.room_id
-               AND json_extract(p.body,'$.type')='message.posted'
-               AND COALESCE(json_extract(p.body,'$.data.toMemberId'),'')<>''
-               AND (json_extract(p.body,'$.data.messageId')=json_extract(e.body,'$.data.messageId')
-                 OR p.id=json_extract(e.body,'$.data.messageId'))))
+             AND COALESCE((json_extract(e.body,'$.data.messageId') IN (SELECT messageId FROM private_posts)
+               OR json_extract(e.body,'$.data.messageId') IN (SELECT id FROM private_posts)),0))
          )
        GROUP BY actor`
-    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+    ).all(roomId,roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
     const addedAt = new Map(this.db.prepare(
       `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
        FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
