@@ -152,5 +152,35 @@
       "path": "secrets.gz",
       "sha256": "08fcda4cab3e741233927de428740e46597e9db806486c9b682371b936644908"
     }
+  },
+  "rootComposition": {
+    "testedHead": "7c377abaa",
+    "mainIncluded": "4fe04027cf537cb01143d64612f2861794acdb20",
+    "includes": [
+      "presence query fix5657",
+      "identity recovery ownership5653",
+      "Claude Google consent return5654"
+    ],
+    "nodeAndSyntheticBrowserPassed": 82,
+    "actualWorkerPassed": 5,
+    "ciModeDriftPassed": 15,
+    "fullNodeSuite": "explicitly skipped in CI-mode publication check",
+    "manifestTestsPassed": 8,
+    "baselineUnchanged": true,
+    "logs": {
+      "composed-node-browser": {
+        "decodedSha256": "fa281017c4d8a12ee60acd3db0867b015cb60c21f5e39454efaa981de3a9d886",
+        "bytes": 35136
+      },
+      "composed-native": {
+        "decodedSha256": "3f2a55e515b0a22d8f089b11a492b82cf55c4ee4de70371b2a2e71d0b6425b79",
+        "bytes": 34086
+      },
+      "composed-publication": {
+        "decodedSha256": "753312158b4be7a63193eb99ec2a4e1027bad529bb85bb121021c5e59087d8eb",
+        "bytes": 67206
+      }
+    },
+    "productionDeployment": "not performed for this metadata patch"
   }
 }
