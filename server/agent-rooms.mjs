@@ -263,20 +263,20 @@ export class AgentRooms {
     if (!request || typeof request !== "object" || Array.isArray(request)) {
       fail(422, "invalid_room_request", "title is required. kind must be one of: personal, organization");
     }
+    const problems = [];
     const unexpected = Object.keys(request).filter(field => !CREATE_FIELDS.includes(field));
-    if (unexpected.length) fail(422, "invalid_room_request", `Unexpected field ${unexpected[0]}. Accepted fields: ${CREATE_FIELDS.join(", ")}`);
-    if (Object.hasOwn(request, "starter") && typeof request.starter !== "boolean") {
-      fail(422, "invalid_room_request", "starter must be true or false");
-    }
-    const wantStarter = request.starter !== false;
-    if (!Object.hasOwn(request, "title")) fail(422, "invalid_room_request", "Missing title");
-    if (!text(request.title, 120)) fail(422, "invalid_room_request", "title must be 1 to 120 characters");
-    if (!Object.hasOwn(request, "purpose")) fail(422, "invalid_room_request", "Missing purpose");
-    if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "purpose must be 1 to 1000 characters");
+    if (unexpected.length) problems.push(`Unexpected field ${unexpected.join(", ")}. Accepted fields: ${CREATE_FIELDS.join(", ")}`);
+    if (Object.hasOwn(request, "starter") && typeof request.starter !== "boolean") problems.push("starter must be true or false");
+    if (!Object.hasOwn(request, "title")) problems.push("Missing title");
+    else if (!text(request.title, 120)) problems.push("title must be 1 to 120 characters");
+    if (!Object.hasOwn(request, "purpose")) problems.push("Missing purpose");
+    else if (!text(request.purpose, 1000, true)) problems.push("purpose must be 1 to 1000 characters");
     const kind = Object.hasOwn(request, "kind") ? request.kind : "personal";
     // RC-2026-09-18-021: the message is derived from ROOM_KINDS so the taught
     // vocabulary can never drift from the enforced one.
-    if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
+    if (!ROOM_KINDS.includes(kind)) problems.push(`kind must be one of: ${ROOM_KINDS.join(", ")}`);
+    if (problems.length) fail(422, "invalid_room_request", problems.join(". "));
+    const wantStarter = request.starter !== false;
     const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
     if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
     // requestId is the client-generated idempotency key for creates that let
