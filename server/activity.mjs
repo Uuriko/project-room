@@ -1,4 +1,4 @@
-import { isCurrentRoom, currentThreadParticipants } from './current-room-repository.mjs';
+import { isCurrentRoom, currentThreadParticipants, readCurrentMessage, withCurrentReadContext } from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // Personal attention surfaces: activity feed, read horizons, saved messages,
 // thread mutes. Write-time fan-out for mention/reply/thread_reply
@@ -439,22 +439,24 @@ function inPrivateConversation(message, viewerId, peerMemberId) {
 }
 
 export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
-  const { threadId, peerMemberId, key } = horizonScope(params);
-  return store.readTransaction(() => {
+  return store.readTransaction(() => withCurrentReadContext(store.db, roomId, () => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
+    const { threadId, peerMemberId, key } = horizonScope(params);
     const row = store.db.prepare(
       "SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
       .get(roomId, member.id, key);
     let lastReadMessageId = row?.last_read_message_id ?? null;
     if (lastReadMessageId !== null) {
-      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      const message = isCurrentRoom(store.db, roomId)
+        ? readCurrentMessage(store.db, roomId, lastReadMessageId)?.value
+        : messageOrArchived(store, roomId, lastReadMessageId);
       if (!message || !dmVisible(message, member.id)
         || peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)
         || !messageInHistory(message, store.historyFloor(roomId, member.id))) lastReadMessageId = null;
     }
     return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
-  });
+  }));
 }
 
 export function setReadHorizon(store, token, roomId, data, expectedSessionBinding = null) {
@@ -468,11 +470,13 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
   if (lastReadMessageId !== null && (typeof lastReadMessageId !== "string" || !lastReadMessageId.trim() || lastReadMessageId.length > 384)) {
     fail(422, "invalid_horizon", "lastReadMessageId must be a message id or null");
   }
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
-  return store.transaction(() => {
+  return store.transaction(() => withCurrentReadContext(store.db, roomId, () => {
+    const auth = authed(store, token, roomId, expectedSessionBinding);
+    const member = auth.member;
     if (lastReadMessageId !== null) {
-      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      const message = isCurrentRoom(store.db, roomId)
+        ? readCurrentMessage(store.db, roomId, lastReadMessageId)?.value
+        : messageOrArchived(store, roomId, lastReadMessageId);
       // Same answer for a DM the reader is not party to, and for a message
       // from before a since_join reactivation, as for an unknown id.
       if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
@@ -488,7 +492,7 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
        ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at`)
       .run(roomId, member.id, key, lastReadMessageId, now);
     return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId };
-  });
+  }));
 }
 
 // --- saved messages -----------------------------------------------------------
