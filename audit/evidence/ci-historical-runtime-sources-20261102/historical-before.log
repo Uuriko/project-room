@@ -1,0 +1,56 @@
+fatal: not a valid object name: 74d252de9
+✖ previous native-work-5 warm/cold readers and prepared writers refuse the derived native lease format (12.246791ms)
+fatal: not a valid object name: a82574def
+✖ genuine18 warm/prepared/cold operator refuses19 before suspension or progress (8.361083ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 119.699291
+
+✖ failing tests:
+
+test at tests/current-claims-old5-fence.test.mjs:3:1
+✖ previous native-work-5 warm/cold readers and prepared writers refuse the derived native lease format (12.246791ms)
+  Error: Command failed: git archive 74d252de9 server src client strings package.json
+  fatal: not a valid object name: 74d252de9
+  
+      at genericNodeError (node:internal/errors:986:15)
+      at wrappedFn (node:internal/errors:540:14)
+      at checkExecSyncError (node:child_process:943:11)
+      at execFileSync (node:child_process:979:15)
+      at TestContext.<anonymous> (file:///private/tmp/room-ci-remote-fm1rGz/tests/current-claims-old5-fence.test.mjs:6:48)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    status: 128,
+    signal: null,
+    output: [ null, <Buffer >, <Buffer 66 61 74 61 6c 3a 20 6e 6f 74 20 61 20 76 61 6c 69 64 20 6f 62 6a 65 63 74 20 6e 61 6d 65 3a 20 37 34 64 32 35 32 64 65 39 0a> ],
+    pid: 19579,
+    stdout: <Buffer >,
+    stderr: <Buffer 66 61 74 61 6c 3a 20 6e 6f 74 20 61 20 76 61 6c 69 64 20 6f 62 6a 65 63 74 20 6e 61 6d 65 3a 20 37 34 64 32 35 32 64 65 39 0a>
+  }
+
+test at tests/recovery-report-protocol.test.mjs:4:1
+✖ genuine18 warm/prepared/cold operator refuses19 before suspension or progress (8.361083ms)
+  Error: Command failed: git archive --format=tar a82574def server src client strings cloudflare/room-backup.mjs package.json
+  fatal: not a valid object name: a82574def
+  
+      at genericNodeError (node:internal/errors:986:15)
+      at wrappedFn (node:internal/errors:540:14)
+      at checkExecSyncError (node:child_process:943:11)
+      at execFileSync (node:child_process:979:15)
+      at TestContext.<anonymous> (file:///private/tmp/room-ci-remote-fm1rGz/tests/recovery-report-protocol.test.mjs:5:177)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    status: 128,
+    signal: null,
+    output: [ null, <Buffer >, <Buffer 66 61 74 61 6c 3a 20 6e 6f 74 20 61 20 76 61 6c 69 64 20 6f 62 6a 65 63 74 20 6e 61 6d 65 3a 20 61 38 32 35 37 34 64 65 66 0a> ],
+    pid: 19583,
+    stdout: <Buffer >,
+    stderr: <Buffer 66 61 74 61 6c 3a 20 6e 6f 74 20 61 20 76 61 6c 69 64 20 6f 62 6a 65 63 74 20 6e 61 6d 65 3a 20 61 38 32 35 37 34 64 65 66 0a>
+  }
