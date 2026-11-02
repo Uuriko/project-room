@@ -122,6 +122,15 @@ export const MESSAGES_BACKFILL_BATCH = 200;
 const BACKFILL_COMMIT = 25;
 const SWEEP_ID = "";
 const POSTED = "message.posted";
+const postedMessageId = posted => posted?.data?.messageId || posted?.id;
+// The reducer's one deterministic public copy shares its parent's posting
+// sequence. DMs, work proposals and non-replies never create this record.
+const createsChannelCopy = (posted, id) => posted?.type === POSTED
+  && Boolean(posted.data?.alsoSendToChannel) && Boolean(posted.data?.replyToId)
+  && !posted.data?.toMemberId && !posted.data?.workItemId
+  && `${postedMessageId(posted)}:channel` === id;
+const postingCreatesMessage = (posted, id) => posted?.type === POSTED
+  && (postedMessageId(posted) === id || createsChannelCopy(posted, id));
 
 // Same party rule as eventsAfter for message.posted: a row with to_member_id
 // is visible to its author and the addressed member. Everyone else sees only
@@ -1749,8 +1758,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
         let posted = null;
         try { posted = JSON.parse(eventAt.get(roomId, row.seq)?.body); } catch { /* fails below */ }
         // An also-send-to-channel copy is posted by its thread reply's event as `<id>:channel`.
-        const postedId = posted?.data?.messageId || posted?.id;
-        ok = posted?.type === POSTED && (postedId === message.id || (Boolean(posted.data?.alsoSendToChannel) && `${postedId}:channel` === message.id));
+        ok = postingCreatesMessage(posted, message.id);
       }
       if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
     }
@@ -1902,7 +1910,7 @@ export function archivedMessageCommandContext(store, roomId, room, messageId, { 
 // only missing/stale retained rows through the existing code-owned writer.
 export function materializeCurrentMessageRows(db,roomId,state) {
   const rows=db.prepare('SELECT * FROM messages WHERE room_id=?').all(roomId),existing=new Map(rows.map(row=>[row.message_id,row]));
-  const byId=new Map([...rows.map(row=>[row.message_id,{id:row.message_id,replyToId:row.reply_to_id}]),...state.messages.map(message=>[message.id,message])]);
+  const byId=new Map([...rows.map(row=>[row.message_id,{id:row.message_id,replyToId:row.reply_to_id,channelId:row.channel_id}]),...state.messages.map(message=>[message.id,message])]);
   const pinned=new Set((state.pins??[]).map(pin=>pin.messageId)),sequences=new Map();
   for(const message of state.messages){
     const row=existing.get(message.id);
@@ -1914,6 +1922,15 @@ export function materializeCurrentMessageRows(db,roomId,state) {
     let sequence=row?.seq;
     if(sequence===undefined){
       sequence=db.prepare(`SELECT sequence FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? AND json_extract(body,'$.type')='message.posted' ORDER BY sequence LIMIT 1`).get(roomId,message.id)?.sequence;
+    }
+    if(sequence===undefined && message.id.endsWith(':channel')){
+      const parentId=message.id.slice(0,-':channel'.length);
+      const origin=db.prepare(`SELECT sequence,body FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? AND json_extract(body,'$.type')='message.posted' ORDER BY sequence LIMIT 1`).get(roomId,parentId);
+      const posted=origin?JSON.parse(origin.body):null,parent=byId.get(parentId);
+      if(!createsChannelCopy(posted,message.id)||!parent||message.authorId!==posted.actorId||message.createdAt!==posted.at
+        ||messageChannelId(message)!==messageChannelId(parent)||message.replyToId||message.toMemberId||message.workItemId
+        ||!message.editedAt&&!message.deletedAt&&!isDeepStrictEqual(message.body,posted.data.body))throw Error('Invalid derived channel copy posting binding');
+      sequence=origin.sequence;
     }
     if(!Number.isSafeInteger(sequence)||sequence<1)throw Error('Missing original message posting sequence');
     sequences.set(message.id,sequence);
