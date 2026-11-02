@@ -1,5 +1,5 @@
 // Shared probe logic for probe-prod.mjs (CLI) and watch-deploy-drift.mjs.
-// The existing deploy-drift workflow runs hourly, not as an immediate alert.
+// The existing deploy-drift workflow runs every five minutes; scheduler delays mean it is not an immediate alert.
 // OAuth discovery checks prove public protocol availability, not consent/token durability.
 // Matrix and classification are built from the 2026-09-25 1101 incident
 // evidence, not from path-shape guesses:
@@ -18,6 +18,7 @@ export const MATRIX = [
   ["health", "/api/health", "do"],
   ["join-page", "/join", "do"],
   ["jobs-canary", "/api/health/jobs", "canary"],
+  ["oauth-resource-root", "/.well-known/oauth-protected-resource", "oauth"],
   ["oauth-resource", "/.well-known/oauth-protected-resource/mcp", "oauth"],
   ["oauth-issuer", "/.well-known/oauth-authorization-server", "oauth"],
   ["mcp-initialize", "/mcp", "oauth"]
@@ -117,7 +118,7 @@ export async function probeProd(base) {
       let value;try{value=JSON.parse(r.body);}catch{}
       const origin=new URL(base).origin;
       if(label==='mcp-initialize')r.ok=r.status===401&&r.challenge===`Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`;
-      if(label==='oauth-resource')r.ok=r.status===200&&value?.resource===origin+'/mcp'&&Array.isArray(value.authorization_servers)&&value.authorization_servers.length===1&&value.authorization_servers[0]===origin&&Array.isArray(value.bearer_methods_supported)&&value.bearer_methods_supported.includes('header');
+      if(label==='oauth-resource'||label==='oauth-resource-root')r.ok=r.status===200&&value?.resource===origin+'/mcp'&&Array.isArray(value.authorization_servers)&&value.authorization_servers.length===1&&value.authorization_servers[0]===origin&&Array.isArray(value.bearer_methods_supported)&&value.bearer_methods_supported.includes('header');
       if(label==='oauth-issuer')r.ok=r.status===200&&value?.issuer===origin&&value.authorization_endpoint===origin+'/oauth/authorize'&&value.token_endpoint===origin+'/oauth/token'&&value.registration_endpoint===origin+'/oauth/register'&&Array.isArray(value.response_types_supported)&&value.response_types_supported.includes('code')&&Array.isArray(value.grant_types_supported)&&value.grant_types_supported.includes('authorization_code')&&Array.isArray(value.grant_types_supported)&&value.grant_types_supported.includes('refresh_token')&&Array.isArray(value.code_challenge_methods_supported)&&value.code_challenge_methods_supported.includes('S256');
     }
     results.push({ label, path, expect, ...r, sourceRevision });

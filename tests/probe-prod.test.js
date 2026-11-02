@@ -8,7 +8,7 @@ import { probeProd } from '../scripts/probe-prod-lib.mjs';
 const run = promisify(execFile);
 const { stdout } = await run('git', ['rev-parse', 'HEAD']);
 const revision = stdout.trim();
-const healthy = path => path === '/mcp' ? {status:401,headers:base=>({'WWW-Authenticate':`Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`}),body:{error:'unauthorized'}} : path === '/.well-known/oauth-protected-resource/mcp' ? {status:200,body:base=>({resource:base+'/mcp',authorization_servers:[base],bearer_methods_supported:['header']})} : path === '/.well-known/oauth-authorization-server' ? {status:200,body:base=>({issuer:base,authorization_endpoint:base+'/oauth/authorize',token_endpoint:base+'/oauth/token',registration_endpoint:base+'/oauth/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],code_challenge_methods_supported:['S256']})} : ({ status: 200, body: path === '/api/version'
+const healthy = path => path === '/mcp' ? {status:401,headers:base=>({'WWW-Authenticate':`Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`}),body:{error:'unauthorized'}} : ['/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/mcp'].includes(path) ? {status:200,body:base=>({resource:base+'/mcp',authorization_servers:[base],bearer_methods_supported:['header']})} : path === '/.well-known/oauth-authorization-server' ? {status:200,body:base=>({issuer:base,authorization_endpoint:base+'/oauth/authorize',token_endpoint:base+'/oauth/token',registration_endpoint:base+'/oauth/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],code_challenge_methods_supported:['S256']})} : ({ status: 200, body: path === '/api/version'
   ? { status: 'ok', sourceRevision: revision }
   : path === '/api/health' ? { status: 'ok' }
     : path === '/api/health/jobs' ? { schema: 'room.job-health/1', status: 'ok', jobs: [] } : '<html>Room</html>' });
@@ -167,3 +167,8 @@ for(const [name,path,body] of [
  ['oversized response','/.well-known/oauth-protected-resource/mcp',' '.repeat(65537)+'{}'],
 ])test(`OAuth probe rejects ${name}`,async t=>{const base=await withServer(t,p=>p===path?{status:200,body}:healthy(p));assert.equal((await probeProd(base)).verdict,'unverified');});
 test('MCP503 remains a partial outage rather than a healthy challenge',async t=>{const base=await withServer(t,p=>p==='/mcp'?{status:503,body:'Unavailable'}:healthy(p));assert.equal((await probeProd(base)).verdict,'partial');});
+
+test('root resource discovery alias failure is caught independently',async t=>{
+ const base=await withServer(t,path=>path==='/.well-known/oauth-protected-resource'?{status:503,body:'unavailable'}:healthy(path));
+ const result=await probeProd(base);assert.equal(result.verdict,'partial');assert.equal(result.endpoints.find(r=>r.label==='oauth-resource-root').ok,false);
+});
