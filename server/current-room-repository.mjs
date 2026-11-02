@@ -1,3 +1,4 @@
+import {verifyRoomAssistantIndexes} from './room-assistant-schema.mjs';
 import {prepareClaimOverlap,matchClaimOverlap} from '../src/claim-overlap.js';
 import {conflictingClaim} from './claim-scopes.mjs';
 import {boardStateForWorkItem} from './work-item-state.mjs';
@@ -595,8 +596,12 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
   if(!state.room||state.room.id!==roomId)corrupt('missing room singleton');
   if(state.room.publicPage?.enabled||state.room.publicReceipts?.enabled||state.room.starterSeeded)
     refuse('Published/starter room dependencies require qualification');
-  const assistant=db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
-  if(assistant&&JSON.parse(assistant.value)?.coordinatorMemberId)refuse('Assistant coordination dependencies require qualification');
+  const assistantScalar=db.prepare('SELECT length(CAST(value AS BLOB)) bytes FROM room_assistant_config WHERE room_id=?').get(roomId);
+  if(assistantScalar&&(!Number.isSafeInteger(assistantScalar.bytes)||assistantScalar.bytes<2||assistantScalar.bytes>4096))refuse('Assistant configuration exceeds bounded context');
+  if(assistantScalar)charge(b,assistantScalar.bytes+128);
+  if(assistantScalar)verifyRoomAssistantIndexes(db);
+  const assistant=assistantScalar?JSON.parse(db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId).value):null;
+  if(assistant?.coordinatorMemberId!==null&&assistant?.coordinatorMemberId!==undefined&&!validId(assistant.coordinatorMemberId))corrupt('assistant coordinator identity differs');
   if(store.humanPush?.vapid)refuse('Human push visibility dependencies require qualification');
   const messages=new Map(),workRefs=new Map();
   const loadMessage=id=>{
@@ -662,7 +667,7 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
     const channel=readCurrentRecord(db,roomId,'channels',id,b);if(channel!==undefined)state.channels[id]=channel;
   }
   if(!fullRoster) {
-    const ids=new Set([actorId,state.room.ownerId,command.data.memberId,command.data.toMemberId,
+    const ids=new Set([actorId,state.room.ownerId,assistant?.coordinatorMemberId,command.data.memberId,command.data.toMemberId,
       command.data.accountableMemberId,command.data.verifierMemberId,command.data.humanDecisionMakerId,command.data.producerId]);
     for(const source of messages.values()){ids.add(source.value.authorId);ids.add(source.value.toMemberId);}
     for(const request of Object.values(state.replyRequests??{})){ids.add(request.requesterId);ids.add(request.recipientId);}

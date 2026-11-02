@@ -440,7 +440,7 @@ optional.push("project-room-mark.svg", "src/login-polish.css");
 
 optional.push(...operatorConsoleAssets);
 // DX-1a end
-optional.push("src/room-administration.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "server/room-assistant.mjs", "server/routes/room-assistant.mjs", "client/assistant-tools.mjs");
+optional.push("src/room-administration.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "server/room-assistant.mjs", "server/room-assistant-schema.mjs", "server/routes/room-assistant.mjs", "client/assistant-tools.mjs");
 
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
