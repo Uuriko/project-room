@@ -40,3 +40,5 @@ Exact executable fixture and runner are gzip files here. Decompress to a tempora
 The Graphify result is advisory only: graph ffc20d378 predates this source and identifies presenceMembers; current source and executable calls above establish the path.
 
 Offline normalized45 source at root aa4a88c211cf65c956e0ae926966842de6b8a157 already has `presence → currentPresenceMembers`: protected roster plus bounded host-window observations, explicit execution/held-work/queued-wake not-evaluated coverage. It does not traverse event history or hydrate the legacy room/board on that branch. This is a source comparison, not qualification or deployment of that offline format. The legacy query repair does not activate it.
+
+Large measurement JSON files are stored as deterministic `.json.gz` files. Use `gzip -dc <file.json.gz>` to inspect the original JSON. `measurement-encoding.json` pins decoded hashes and sizes; compression round trips were checked byte for byte. Runtime and measurements are unchanged.
