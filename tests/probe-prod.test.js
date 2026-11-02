@@ -8,15 +8,16 @@ import { probeProd } from '../scripts/probe-prod-lib.mjs';
 const run = promisify(execFile);
 const { stdout } = await run('git', ['rev-parse', 'HEAD']);
 const revision = stdout.trim();
-const healthy = path => ({ status: 200, body: path === '/api/version'
+const healthy = path => path === '/mcp' ? {status:401,headers:base=>({'WWW-Authenticate':`Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`}),body:{error:'unauthorized'}} : path === '/.well-known/oauth-protected-resource/mcp' ? {status:200,body:base=>({resource:base+'/mcp',authorization_servers:[base],bearer_methods_supported:['header']})} : path === '/.well-known/oauth-authorization-server' ? {status:200,body:base=>({issuer:base,authorization_endpoint:base+'/oauth/authorize',token_endpoint:base+'/oauth/token',registration_endpoint:base+'/oauth/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],code_challenge_methods_supported:['S256']})} : ({ status: 200, body: path === '/api/version'
   ? { status: 'ok', sourceRevision: revision }
   : path === '/api/health' ? { status: 'ok' }
     : path === '/api/health/jobs' ? { schema: 'room.job-health/1', status: 'ok', jobs: [] } : '<html>Room</html>' });
 
 async function withServer(t, responseFor) {
-  const server = createServer((req, res) => {
-    const { status, body } = responseFor(req.url);
-    res.writeHead(status);
+  const server = createServer(async (req, res) => {
+    if(req.method==='POST'){const chunks=[];for await(const chunk of req)chunks.push(chunk);req.bodyText=Buffer.concat(chunks).toString('utf8');}
+    const base=`http://${req.headers.host}`;const value=responseFor(req.url,req),body=typeof value.body==='function'?value.body(base):value.body;
+    res.writeHead(value.status,typeof value.headers==='function'?value.headers(base):value.headers);
     res.end(typeof body === 'string' ? body : JSON.stringify(body));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -145,3 +146,24 @@ test('real 503 canary signature retains outage classification; generic proxy fai
   caught = false;
   assert.equal((await probeProd(base)).verdict, 'unclassified-outage');
 });
+
+for(const [name,replace] of [
+ ['missing challenge',()=>({status:401,body:{error:'unauthorized'}})],
+ ['wrong challenge',()=>({status:401,headers:{'WWW-Authenticate':'Bearer resource_metadata="https://wrong.test/metadata"'},body:{}})],
+ ['unexpected MCP success',()=>({status:200,body:{jsonrpc:'2.0',result:{}}})],
+ ['MCP denied',()=>({status:403,body:{}})],
+])test(`OAuth probe refuses ${name}`,async t=>{const base=await withServer(t,path=>path==='/mcp'?replace():healthy(path));assert.equal((await probeProd(base)).verdict,'unverified');});
+for(const path of ['/.well-known/oauth-protected-resource/mcp','/.well-known/oauth-authorization-server']) {
+ test(`OAuth probe refuses malformed metadata at ${path}`,async t=>{const base=await withServer(t,p=>p===path?{status:200,body:{}}:healthy(p));assert.equal((await probeProd(base)).verdict,'unverified');});
+ test(`OAuth probe reports discovery outage at ${path}`,async t=>{const base=await withServer(t,p=>p===path?{status:503,body:'Unavailable'}:healthy(p));assert.equal((await probeProd(base)).verdict,'partial');});
+}
+test('OAuth health sends a bounded anonymous canonical initialize and accepts only its valid challenge',async t=>{let seen=false;const base=await withServer(t,(path,req)=>{if(path==='/mcp'){seen=true;assert.equal(req.method,'POST');assert.equal(req.headers.authorization,undefined);assert.match(req.headers['content-type'],/application\/json/);const message=JSON.parse(req.bodyText);assert.equal(message.method,'initialize');assert.equal(message.params.protocolVersion,'2025-03-26');assert.equal(message.jsonrpc,'2.0');assert.deepEqual(message.params.capabilities,{});}return healthy(path);});const result=await probeProd(base);assert.equal(seen,true);assert.equal(result.verdict,'healthy');assert.equal(result.endpoints.find(e=>e.label==='mcp-initialize').ok,true);});
+
+for(const [name,path,body] of [
+ ['wrong resource','/.well-known/oauth-protected-resource/mcp',base=>({resource:'https://wrong.test/mcp',authorization_servers:[base],bearer_methods_supported:['header']})],
+ ['wrong issuer','/.well-known/oauth-authorization-server',base=>({...healthy('/.well-known/oauth-authorization-server').body(base),issuer:'https://wrong.test'})],
+ ['wrong token endpoint','/.well-known/oauth-authorization-server',base=>({...healthy('/.well-known/oauth-authorization-server').body(base),token_endpoint:'https://wrong.test/token'})],
+ ['invalid array shape','/.well-known/oauth-authorization-server',base=>({...healthy('/.well-known/oauth-authorization-server').body(base),grant_types_supported:{}})],
+ ['oversized response','/.well-known/oauth-protected-resource/mcp',' '.repeat(65537)+'{}'],
+])test(`OAuth probe rejects ${name}`,async t=>{const base=await withServer(t,p=>p===path?{status:200,body}:healthy(p));assert.equal((await probeProd(base)).verdict,'unverified');});
+test('MCP503 remains a partial outage rather than a healthy challenge',async t=>{const base=await withServer(t,p=>p==='/mcp'?{status:503,body:'Unavailable'}:healthy(p));assert.equal((await probeProd(base)).verdict,'partial');});

@@ -1,4 +1,6 @@
 // Shared probe logic for probe-prod.mjs (CLI) and watch-deploy-drift.mjs.
+// The existing deploy-drift workflow runs hourly, not as an immediate alert.
+// OAuth discovery checks prove public protocol availability, not consent/token durability.
 // Matrix and classification are built from the 2026-09-25 1101 incident
 // evidence, not from path-shape guesses:
 //   - "/" is DO-BACKED: it served an 1101 during the outage. It is not an
@@ -15,13 +17,17 @@ export const MATRIX = [
   ["version", "/api/version", "do"],
   ["health", "/api/health", "do"],
   ["join-page", "/join", "do"],
-  ["jobs-canary", "/api/health/jobs", "canary"]
+  ["jobs-canary", "/api/health/jobs", "canary"],
+  ["oauth-resource", "/.well-known/oauth-protected-resource/mcp", "oauth"],
+  ["oauth-issuer", "/.well-known/oauth-authorization-server", "oauth"],
+  ["mcp-initialize", "/mcp", "oauth"]
 ];
 
 async function probe(base, path) {
   const started = performance.now();
   try {
-    const response = await fetch(base + path, { redirect: "manual", signal: AbortSignal.timeout(15000) });
+    const response = await fetch(base + path, { redirect: "manual", signal: AbortSignal.timeout(15000),
+      ...(path === '/mcp' ? {method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:'public-oauth-health',method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'room-public-health',version:'1'}}})} : {}) });
     const latencyMs = Math.round(performance.now() - started);
     let body = "";
     try {
@@ -33,7 +39,7 @@ async function probe(base, path) {
       }
       if (bytes <= 64 * 1024) body = Buffer.concat(chunks).toString("utf8");
     } catch {}
-    return { status: response.status, latencyMs, ok: response.status === 200, body };
+    return { status: response.status, latencyMs, ok: response.status === 200, body, challenge: response.headers.get("www-authenticate") };
   } catch (error) {
     return { status: 0, latencyMs: Math.round(performance.now() - started), ok: false, body: String(error?.cause?.code ?? error.message) };
   }
@@ -42,7 +48,7 @@ async function probe(base, path) {
 function classify(results) {
   // These routes are public. A login challenge, redirect or malformed public
   // response cannot prove health or identify a failing infrastructure layer.
-  if (results.some(r => (r.status > 0 && r.status < 500 && r.status !== 200)
+  if (results.some(r => (r.status > 0 && r.status < 500 && r.status !== 200 && !r.ok)
       || (r.status === 200 && !r.ok))) {
     return { domain: "unverified", note: "Public observations were denied, redirected or invalid; application health is unverified, not evidence of a DO outage" };
   }
@@ -106,6 +112,13 @@ export async function probeProd(base) {
           ? value.sourceRevision.toLowerCase() : null;
         r.ok = Boolean(sourceRevision);
       }
+    }
+    if(expect==='oauth') {
+      let value;try{value=JSON.parse(r.body);}catch{}
+      const origin=new URL(base).origin;
+      if(label==='mcp-initialize')r.ok=r.status===401&&r.challenge===`Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`;
+      if(label==='oauth-resource')r.ok=r.status===200&&value?.resource===origin+'/mcp'&&Array.isArray(value.authorization_servers)&&value.authorization_servers.length===1&&value.authorization_servers[0]===origin&&Array.isArray(value.bearer_methods_supported)&&value.bearer_methods_supported.includes('header');
+      if(label==='oauth-issuer')r.ok=r.status===200&&value?.issuer===origin&&value.authorization_endpoint===origin+'/oauth/authorize'&&value.token_endpoint===origin+'/oauth/token'&&value.registration_endpoint===origin+'/oauth/register'&&Array.isArray(value.response_types_supported)&&value.response_types_supported.includes('code')&&Array.isArray(value.grant_types_supported)&&value.grant_types_supported.includes('authorization_code')&&Array.isArray(value.grant_types_supported)&&value.grant_types_supported.includes('refresh_token')&&Array.isArray(value.code_challenge_methods_supported)&&value.code_challenge_methods_supported.includes('S256');
     }
     results.push({ label, path, expect, ...r, sourceRevision });
   }
