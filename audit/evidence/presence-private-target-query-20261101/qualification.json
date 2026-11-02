@@ -85,6 +85,38 @@
     "run-proxy-fixed.log": {
       "sha256": "0c4074d5244685e7b0e9678b5fc41369acad82a6fbbbad111d60b79806085e3d",
       "bytes": 5369
+    },
+    "readiness.template.mjs": {
+      "sha256": "5b6a46a68208654e9e37bf48167849169bd57098a01ca5cc0fbd716e5861bace",
+      "bytes": 3740
+    },
+    "run-readiness.mjs": {
+      "sha256": "83c3ece15056d260f4798d8fbd65d1743f8935237c15e4ff76386ea0b410ef2d",
+      "bytes": 2376
+    },
+    "run-readiness.log": {
+      "sha256": "d5d569ad849f06e995c2cc698196d31df4b3e1a5ce483ce0e9468c0e7512904d",
+      "bytes": 10227
+    },
+    "readiness-results.json": {
+      "sha256": "6380549c1213831307543e5e3af1f4578a738d500cad72c9d8ce561c6c1c46cf",
+      "bytes": 129811
     }
+  },
+  "readinessSupplement": {
+    "sourceHead": "42e0ca1c108212a4348a9243fea6f7a1a95d5b52",
+    "exitCode": 0,
+    "bothHTTP200": true,
+    "before": {
+      "controllerReadyMs": 4909.780792,
+      "workerProbeWaitMs": 2445,
+      "probeBudgetMs": 2500
+    },
+    "after": {
+      "controllerReadyMs": 22.126958,
+      "workerProbeWaitMs": 9
+    },
+    "timeoutReproduced": false,
+    "description": "Two HTTP presence service calls alongside actual outer Worker /api/ready forwarding RPC to same synthetic DO; namespace name remapped only in fixture. Underlying SELECT1 elapsed0 is IO-bound, not CPU. Local scheduler/arrival ordering and constructor exclusion limit production inference."
   }
 }
