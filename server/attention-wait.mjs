@@ -31,12 +31,11 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
   }
   // Superseding only rejects the old request; never run its protected probe in
   // the replacement request's OAuth context. Each slot has its own generation.
-  previous?.supersede();
+  previous?.supersede?.();
   const generation = {};
-  active.set(key, generation);
   const started = Date.now();
   return new Promise((resolve, reject) => {
-    let done = false, wakeResolve, wakePending = false, probes = 0, cursor = after;
+    let done = false, wakeResolve, wakePending = false, probes = 0, cursor = after, timer, unsubscribe;
     const clean = () => {
       clearTimeout(timer);
       unsubscribe?.();
@@ -46,6 +45,7 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     };
     const fail = error => { if (!done) { done = true; clean(); reject(error); } };
     generation.supersede = () => fail(new ServiceError(409, 'attention_wait_superseded', 'A newer wait for this room member replaced this request; use the newer request result'));
+    active.set(key, generation); // Supersede is initialized before this slot is visible.
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.
@@ -90,14 +90,16 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
       }
     };
     // Subscribe before the first probe so an append cannot fall into a gap.
-    const unsubscribe = store.onEventAppended(changedRoom => {
+    try {
+    unsubscribe = store.onEventAppended(changedRoom => {
       if (done || changedRoom !== roomId) return;
       wakePending = true;
       wakeResolve?.();
     });
     signal?.addEventListener('abort', cancelled, {once: true});
-    const timer = setTimeout(() => { try { if (!done) finish('timeout'); } catch (error) { fail(error); } }, timeoutSec * 1000);
+    timer = setTimeout(() => { try { if (!done) finish('timeout'); } catch (error) { fail(error); } }, timeoutSec * 1000);
     void pump();
-    probe();
+    if (signal?.aborted) cancelled(); else probe();
+    } catch (error) { fail(error); }
   });
 }

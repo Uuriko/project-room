@@ -180,3 +180,11 @@ test('superseding immediately before the old deadline preserves the new timeout'
   f.post('new-generation',{toMemberId:'worker'});
   assert.equal((await replacement).status,'ready');
 });
+
+test('subscription setup failure releases its generation and permits an immediate retry', async t => {
+  const f=fixture(t),subscribe=f.store.onEventAppended.bind(f.store);
+  f.store.onEventAppended=()=>{throw Error('Injected subscription setup failure');};
+  await assert.rejects(waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:1}),/Injected subscription setup failure/);
+  f.store.onEventAppended=subscribe;
+  assert.equal((await waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:0})).status,'timeout');
+});
