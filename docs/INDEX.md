@@ -30,6 +30,7 @@ Incident follow-through: [November 1 storage outage](incidents/outage-2026-11-01
 Development tooling: [failure intake, laptop reproduction and evidence linkage](DEVELOPMENT-LOOP.md).
 
 Release compatibility: [exact reply-contract rollback guard and qualification](research/2026-11-03-reply-contract-rollback-guard.md).
+[Bounded attention waiting and retry recovery](research/2026-11-03-bounded-attention-wait.md) records the wake, generation and host-timeout qualification.
 
 Ecosystem cleanup: [reconciliation procedure](ROOM-PROCEDURES.md#reconcile-the-ecosystem-without-creating-another-handbook) connects repository guidance, GitHub work, local artifacts and preservation records. Private inventory paths stay in the maintainer catalog; incomplete coverage remains explicit.
 

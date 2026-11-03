@@ -40,7 +40,6 @@ test('wait returns addressed mentions, replies, DMs and formal pointers without 
 test('private messages to others never wake as attention and cancellation releases the pending slot', async t => {
   const f = fixture(t), cancel = new AbortController();
   const promise = waitForAttention(f.store, f.worker, 'commons', {after: f.after, timeoutSec: 1, signal: cancel.signal});
-  assert.throws(() => waitForAttention(f.store, f.worker, 'commons', {after: f.after}), e => e.status === 429);
   f.post('hidden', {toMemberId: 'other', body: 'PRIVATE-SECRET'});
   await Promise.resolve();
   cancel.abort();
@@ -95,17 +94,22 @@ test('pending resources are capped across members and released after cancellatio
   const events = initialRoom();
   for (let i = 0; i < 33; i++) events.push(event({roomId: 'commons', actorId: 'owner', type: 'member.added', data: {memberId: 'w' + i, displayName: 'Worker ' + i, kind: 'agent', permissions: []}}));
   store.initialize(events, {representation: 'normalized-current-v1'});
-  const after = store.headSequence('commons'), controllers = [], results = [];
+  const after = store.headSequence('commons'), controllers = [], results = [], keys = [];
   try {
     for (let i = 0; i < 32; i++) {
       const controller = new AbortController();
       controllers.push(controller);
-      results.push(assert.rejects(waitForAttention(store, store.issueAccessKey('commons', 'w' + i), 'commons', {after, timeoutSec: 10, signal: controller.signal}), e => e.name === 'AbortError'));
+      keys.push(store.issueAccessKey('commons', 'w' + i));
+      results.push(assert.rejects(waitForAttention(store, keys[i], 'commons', {after, timeoutSec: 10, signal: controller.signal}), e => e.name === 'AbortError' || e.code === 'attention_wait_superseded'));
     }
     const extra = store.issueAccessKey('commons', 'w32');
     assert.throws(() => waitForAttention(store, extra, 'commons', {after}), e => e.status === 429);
-    controllers[0].abort();
+    const replacementCancel=new AbortController();
+    const replacement=assert.rejects(waitForAttention(store,keys[0],'commons',{after,timeoutSec:10,signal:replacementCancel.signal}),e=>e.name==='AbortError');
     await results[0];
+    controllers[0].abort(); // The old controller cannot release the new generation's quota.
+    assert.throws(() => waitForAttention(store, extra, 'commons', {after}), e => e.status === 429);
+    replacementCancel.abort();await replacement;
     assert.equal((await waitForAttention(store, extra, 'commons', {after, timeoutSec: 0})).status, 'timeout');
   } finally { for (const controller of controllers) controller.abort(); await Promise.all(results); }
 });
@@ -145,4 +149,34 @@ test('pending wait refuses a legitimate holder-proof relink to another member an
   const original = await waitForAttention(store, identity.secret, 'commons', {after: store.headSequence('commons'), timeoutSec: 0});
   assert.equal(original.memberId, 'before-seat');
   assert.equal(original.status, 'timeout');
+});
+
+test('same-member retry supersedes its generation and stale callbacks cannot affect the replacement', async t => {
+  const f = fixture(t), cancel = new AbortController(), callbacks=[];
+  const subscribe=f.store.onEventAppended.bind(f.store);
+  f.store.onEventAppended=callback=>{callbacks.push(callback);return subscribe(callback);};
+  const old=waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:1,signal:cancel.signal});
+  const superseded=assert.rejects(old,e=>e.status===409&&e.code==='attention_wait_superseded');
+  const replacement=waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:2});
+  await superseded;
+  callbacks[0]('commons'); // A writer captured this old listener before it was removed.
+  cancel.abort();
+  f.post('replacement-question',{toMemberId:'worker',body:'Please answer this question'});
+  const result=await replacement;
+  assert.equal(result.status,'ready');
+  assert.deepEqual(result.items.map(item=>item.messageId),['replacement-question']);
+  assert.equal(result.memberId,'worker');
+});
+
+test('superseding immediately before the old deadline preserves the new timeout', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(t);
+  const old=waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:1});
+  const superseded=assert.rejects(old,e=>e.code==='attention_wait_superseded');
+  t.mock.timers.tick(999);
+  const replacement=waitForAttention(f.store,f.worker,'commons',{after:f.after,timeoutSec:2});
+  await superseded;
+  t.mock.timers.tick(1);await Promise.resolve();
+  f.post('new-generation',{toMemberId:'worker'});
+  assert.equal((await replacement).status,'ready');
 });

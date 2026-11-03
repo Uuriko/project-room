@@ -57,7 +57,6 @@ test('HTTP cancellation releases the slot, and a connected timeout returns norma
   await delay(60);
   waiting.cancel();
   await cancelled;
-  await delay(40);
   assert.equal(accepted(await f.call({timeoutSec: 0}).result).status, 'timeout');
   assert.equal(accepted(await f.call({timeoutSec: 1}).result).status, 'timeout');
 });
@@ -80,4 +79,17 @@ test('wait argument validation and OAuth consent stay fail closed', async t => {
   }
   const response = await f.call({roomId: 'foreign', timeoutSec: 0}).result;
   assert.ok(response.value.error || response.value.result?.isError, JSON.stringify(response));
+});
+
+test('real OAuth host timeout retry replaces the prior wait without reusing its auth context', async t => {
+  const f=await fixture(t),old=f.call({timeoutSec:120});
+  await delay(60);
+  const replacement=f.call({timeoutSec:2});
+  const previous=await old.result;
+  assert.match(JSON.stringify(previous.value),/attention_wait_superseded/);
+  f.post('replacement-only',{toMemberId:f.saved.identityId});
+  const result=accepted(await replacement.result);
+  assert.equal(result.status,'ready');
+  assert.deepEqual(result.items.map(item=>item.messageId),['replacement-only']);
+  assert.equal(result.acknowledges,false);
 });

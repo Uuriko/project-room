@@ -23,12 +23,17 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
   }
   if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
   let active = pending.get(store);
-  if (!active) pending.set(store, active = new Set());
+  if (!active) pending.set(store, active = new Map());
   const key = JSON.stringify([roomId, memberId]);
-  if (active.has(key) || active.size >= MAX_PENDING) {
-    throw new ServiceError(429, 'attention_wait_busy', 'At most one pending wait per member and room, and 32 per server, is allowed');
+  const previous = active.get(key);
+  if (!previous && active.size >= MAX_PENDING) {
+    throw new ServiceError(429, 'attention_wait_busy', 'At most 32 pending waits per server are allowed');
   }
-  active.add(key);
+  // Superseding only rejects the old request; never run its protected probe in
+  // the replacement request's OAuth context. Each slot has its own generation.
+  previous?.supersede();
+  const generation = {};
+  active.set(key, generation);
   const started = Date.now();
   return new Promise((resolve, reject) => {
     let done = false, wakeResolve, wakePending = false, probes = 0, cursor = after;
@@ -36,10 +41,11 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
       clearTimeout(timer);
       unsubscribe?.();
       signal?.removeEventListener('abort', cancelled);
-      active.delete(key);
+      if (active.get(key) === generation) active.delete(key);
       wakeResolve?.();
     };
     const fail = error => { if (!done) { done = true; clean(); reject(error); } };
+    generation.supersede = () => fail(new ServiceError(409, 'attention_wait_superseded', 'A newer wait for this room member replaced this request; use the newer request result'));
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.

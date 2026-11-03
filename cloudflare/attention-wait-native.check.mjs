@@ -29,17 +29,12 @@ test('production Native MCP waits across another request and cold cursor reuse',
     await delay(60);
     cancel.abort();
     await cancelled;
-    await delay(60);
-    // This Miniflare/workerd hop does not propagate the disconnect to the DO
-    // Request.signal. Preserve that observed limitation instead of claiming
-    // immediate native cancellation: the finite timer must reclaim the slot.
-    const held = await invoke(saved, 0, ready.after);
-    assert.equal(held.body.result?.structuredContent?.code, 'attention_wait_busy');
-    await delay(2100);
+    // The client disconnect still may not propagate through the Native hop.
+    // Immediate authenticated retry supersedes that retained generation.
     assert.equal(accepted(await invoke(saved, 0, ready.after)).status, 'timeout');
     await mf.dispose();
     mf = create();
     assert.equal(accepted(await invoke(saved, 0, ready.after)).status, 'timeout');
-    t.diagnostic('Actual Native commit-notified wake, timeout and cold cursor reuse passed. Miniflare client abort did NOT release the DO slot immediately; bounded expiry reclaimed it. Immediate native disconnect cancellation and 120-second host acceptance remain unqualified.');
+    t.diagnostic('Actual Native commit-notified wake, timeout and cold cursor reuse passed. Native retry immediately reclaimed the disconnected wait through generation replacement. Immediate native disconnect propagation and 120-second host acceptance remain unqualified.');
   } finally { await mf.dispose(); await rm(directory, {recursive: true, force: true}); }
 });

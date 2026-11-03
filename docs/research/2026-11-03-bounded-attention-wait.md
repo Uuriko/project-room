@@ -52,7 +52,7 @@ signal through the custom MCP dispatcher.
   Miniflare/workerd client-abort hop **does not immediately cancel the DO wait**,
   even with the production signal compatibility flags; the bounded timer
   reclaims its slot. That is retained as an explicit qualification limit, with
-  an executable expiry check. Immediate deployed Native cancellation is not
+  an executable expiry check on the original source. The retry repair below now proves immediate generation replacement in Native; immediate disconnect propagation is still not
   claimed. An earlier fixture without the production flags is not deployment
   evidence.
 - No assertion that a specific cloud MCP host accepts 120 seconds. Existing
@@ -75,3 +75,7 @@ on `c3f6de2e2` (missing rejection), then passed after member pinning. The focuse
 helper/HTTP/catalog set passes 23 controls, actual Native passes 1, and manifest
 passes 8 with zero drift. This does not change the Native cancellation limit.
 Repair logs: `/tmp/room-attention-binding-{before,after,native,manifest}-1103.log`.
+
+## Same-member retry recovery
+
+A new authenticated wait for the same room and member replaces the older pending wait with `409 attention_wait_superseded`. It does not probe or return data from the old request under the replacement OAuth context. Each slot has its own generation; cleanup removes only that exact generation. Replacing an occupied slot works even at the unchanged 32-wait server quota. Request/member rechecks, four-probe cap and no-ACK semantics remain unchanged. Native transport disconnect may retain the old request until replacement or deadline, but an immediate retry can recover without waiting for the old timeout.
