@@ -24,10 +24,10 @@ const origin = 'https://room.example';
 const resource = origin + '/mcp';
 const verifier = 'v'.repeat(43);
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock} = {}) {
+async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false} = {}) {
   let store = new RoomStore(database);
   if(clock)store.now=clock;
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(), normalized ? {representation: 'normalized-current-v1'} : {});
   const ownerKey = store.issueAccessKey('commons', 'owner');
   const ownerSession = store.createSession(ownerKey);
   const accountId = store.db.prepare("SELECT account_id FROM member_accounts WHERE member_id='owner'").get().account_id;
@@ -202,7 +202,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 25, 'audit every advertised native tool, including acquire/release/renew');
+  assert.equal(tools.length, 26, 'audit every advertised native tool, including acquire/release/renew and bounded attention wait');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {
@@ -483,4 +483,63 @@ test('Claude consent POST refuses another valid owned seat and never issues a co
  assert.equal(redirect.searchParams.has('code'),false);
  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_provider_codes').get().n,before);
  const allowed=await f.consent();assert.ok(new URL(allowed.headers.get('location')).searchParams.get('code'));
+});
+
+
+test('OAuth inbox reply actions use the connected MCP tool and preserve private recipients', async t => {
+  const f = await setup(t,{normalized:true});
+  f.store.command(f.ownerKey,'commons',{id:'add-outsider',type:'member.added',data:{memberId:'guest',displayName:'Outsider',kind:'agent',permissions:[]}});
+  const say = (id,body,toMemberId) => f.store.command(f.ownerKey,'commons',{id,type:'message.posted',data:{messageId:id,body,...(toMemberId?{toMemberId}:{})}});
+  f.store.dmConsents.request('commons','owner','friend-dot','test');
+  f.store.dmConsents.decide('commons','friend-dot','owner','approve');
+  say('oauth-public-mention','<@friend-dot> public question');
+  say('oauth-private-mention','<@friend-dot> private question','friend-dot');
+  const read = await f.rpc('tools/call',{name:'room_read_inbox',arguments:{roomId:'commons',limit:100}});
+  assert.notEqual(read.body.result?.isError,true,JSON.stringify(read.body));
+  const inbox=read.body.result.structuredContent, mention=inbox.next.find(step=>step.action==='reply-mention');
+  assert.equal(mention.tool,'room_reply');
+  assert.equal(mention.arguments.replyToId,'oauth-private-mention');
+  assert.equal(mention.arguments.toMemberId,'owner');
+  assert.doesNotMatch(mention.description,/send your identity secret/i);
+  assert.match(mention.description,/existing authenticated MCP connection/);
+  const dm=inbox.next.find(step=>step.action==='reply-dm');
+  assert.equal(dm.tool,'room_reply');assert.equal(dm.arguments.replyToId,'oauth-private-mention');
+  assert.equal(dm.arguments.toMemberId,'owner');
+  const reply=await f.rpc('tools/call',{name:mention.tool,arguments:{...mention.arguments,requestId:'oauth-private-answer',body:'Private answer through existing OAuth'}});
+  assert.notEqual(reply.body.result?.isError,true,JSON.stringify(reply.body));assert.equal(reply.body.error,undefined);
+  const saved=f.store.db.prepare("SELECT body,to_member_id FROM messages WHERE room_id='commons' AND message_id=?").get(reply.body.result.structuredContent.messageId);
+  assert.equal(saved.to_member_id,'owner');assert.equal(saved.body,'Private answer through existing OAuth');
+  const guest=f.store.issueAccessKey('commons','guest');
+  assert.equal(JSON.stringify(f.store.eventsAfter(guest,'commons',0,100)).includes('Private answer through existing OAuth'),false);
+  const next=await f.rpc('tools/call',{name:'room_read_inbox',arguments:{roomId:'commons',limit:100}});
+  const publicAction=next.body.result.structuredContent.next.find(step=>step.action==='reply-mention');
+  assert.equal(publicAction.arguments.replyToId,'oauth-public-mention');assert.equal(publicAction.arguments.toMemberId,undefined);
+});
+
+test('OAuth help_wanted gives a truthful supported pointer without scanning or implying an empty queue', async t => {
+  const f=await setup(t,{normalized:true});
+  for(let i=0;i<32;i++)f.store.command(f.ownerKey,'commons',{id:'noise-'+i,type:'work.proposed',data:{workItemId:'noise-'+i,title:'Other work '+i,definitionOfDone:'Useful answer',mode:'read',accountableMemberId:'owner'}});
+  f.store.command(f.ownerKey,'commons',{id:'addressed-work',type:'work.proposed',data:{workItemId:'addressed-work',title:'Your useful next step',definitionOfDone:'Useful answer',mode:'read',accountableMemberId:'friend-dot'}});
+  f.store.command(f.ownerKey,'commons',{id:'addressed-request',type:'message.posted',data:{messageId:'addressed-request',toMemberId:'friend-dot',requestKind:'reply',body:'Please inspect your next step'}});
+  f.store.room=()=>{throw Error('whole-room hydration');};f.store.snapshot=()=>{throw Error('whole snapshot');};
+  const before=f.store.db.prepare('SELECT count(*) n FROM events').get().n;
+  const read=await f.rpc('tools/call',{name:'room_list_work',arguments:{roomId:'commons',focus:'help_wanted',limit:100}});
+  assert.notEqual(read.body.result?.isError,true,JSON.stringify(read.body));assert.equal(read.body.error,undefined);
+  const value=read.body.result.structuredContent;
+  assert.equal(value.status,'selection_unavailable');assert.equal(value.selection.available,false);
+  assert.equal(value.selection.requestedFocus,'help_wanted');assert.equal(value.selection.reason,'current_help_index_unavailable');
+  assert.match(value.selection.guidance,/does not mean no invitations exist/);
+  for(const key of ['work','page','nextCursor','totalWork'])assert.equal(Object.hasOwn(value,key),false,key+' must not imply an empty queue');
+  assert.equal(value.viewerId,'friend-dot');assert.equal(value.scope.externalExecution,false);
+  assert.deepEqual(value.nextRead,{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}});
+  const next=await f.rpc('tools/call',{name:value.nextRead.tool,arguments:value.nextRead.arguments});
+  assert.notEqual(next.body.result?.isError,true,JSON.stringify(next.body));
+  assert.deepEqual(next.body.result.structuredContent.work.map(item=>item.id),['addressed-work']);
+  assert.deepEqual(next.body.result.structuredContent.replyRequests.map(item=>item.id),['addressed-request']);
+  assert.equal(next.body.result.structuredContent.page.hasMore,false);
+  const selected=await f.rpc('tools/call',{name:'room_read_work',arguments:{workItemId:'addressed-work'}});
+  assert.notEqual(selected.body.result?.isError,true,JSON.stringify(selected.body));
+  const all=await f.rpc('tools/call',{name:value.alternatives[0].tool,arguments:value.alternatives[0].arguments});
+  assert.notEqual(all.body.result?.isError,true,JSON.stringify(all.body));
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM events').get().n,before,'discovery and selected reads write no events');
 });

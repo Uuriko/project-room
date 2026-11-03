@@ -1,3 +1,4 @@
+import { ownMember, validId } from "../src/events.js";
 import { assertListenerFence, LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 // HTTP routes for the Lane D agent plug-in surface (server/agent-plugin-store.mjs).
 //
@@ -970,7 +971,21 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const pollWakes = translate(async (req, res, { url }) => {
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-wake-poll:${auth.identityId}`, 30);
-    const roomId = auth.roomId ?? null;
+    const boundRoomId = auth.roomId ?? null, selectedRoom = url.searchParams.get("roomId");
+    if (selectedRoom !== null && (!validId(selectedRoom) || selectedRoom.length > 64 || url.searchParams.getAll("roomId").length !== 1))
+      reject(422, "invalid_wake_poll", "roomId must name one valid room");
+    if (boundRoomId !== null && selectedRoom !== null && selectedRoom !== boundRoomId)
+      reject(403, "room_mismatch", "A room-scoped credential polls only its bound room");
+    const roomId = selectedRoom ?? boundRoomId;
+    const selectedMember = current => {
+      if (roomId === null) return null; // Existing identity-wide callers retain their contract.
+      const link = store.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, current.identityId);
+      const member = link ? ownMember(store.roomAuthority(roomId, { memberId: link.memberId }).members, link.memberId) : null;
+      if (!member || member.active === false || member.kind !== "agent" || member.identityId !== current.identityId)
+        reject(403, "room_mismatch", "The identity is not an active member of the selected poll room");
+      return member.id;
+    };
+    const initialMemberId = selectedMember(auth);
     // hostId keys the per-host waiter slot below. A supplied hostId is
     // validated exactly as before. An OMITTED hostId is derived when the
     // identity has exactly one registered host — the cold-start shape:
@@ -1064,7 +1079,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         // BUILD-HEARTBEAT-CADENCE: it also carries the server-assigned
         // cadenceSeconds — the poll is the contract door for pull-only
         // seats that may never read a heartbeat response.
-        return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+        return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
           cadenceSeconds: immediate.cadenceSeconds,
           more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
@@ -1082,11 +1097,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (clientGone) return undefined; // socket dead: nothing left to write
       // A held read cannot outlive its credential or room/identity binding.
       const current = heartbeatActor(req, requiredScope("heartbeats:read"));
-      if (current.identityId !== auth.identityId || (current.roomId ?? null) !== roomId)
-        reject(403, "identity_changed", "Credential binding changed during wake wait");
+      if (current.identityId !== auth.identityId || (current.roomId ?? null) !== boundRoomId
+          || selectedMember(current) !== initialMemberId)
+        reject(403, "identity_changed", "Credential or selected room binding changed during wake wait");
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor });
       const timedOut = !woken && fresh.pendingWakes.length === 0 && fresh.more !== true;
-      return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+      return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
         cadenceSeconds: fresh.cadenceSeconds,
         more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });

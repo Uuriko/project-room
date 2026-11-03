@@ -130,6 +130,7 @@ pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anyw
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .agent-paste-prompt{box-sizing:border-box;width:100%;max-width:100%;padding:12px 16px;background:#191a20;color:var(--text);border:1px solid var(--line);border-radius:.45rem;font:inherit;resize:vertical}
 .agent-paste-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+label[for^="agent-paste-prompt-"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .copy-prompt{margin:8px 0;padding:8px 14px;border:1px solid var(--line);border-radius:.45rem;background:#393b45;color:var(--text);font:inherit;cursor:pointer}
 .copy-prompt:not([hidden]){display:block}
 .copy-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

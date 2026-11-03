@@ -85,5 +85,5 @@ export function createMcpEventsRuntime({ store, accountProvider, inviteProvider,
   };
   const timer = externalScheduler ? null : setInterval(() => { drain().catch(() => {}); }, 1000);
   timer?.unref?.();
-  return { handler, emit, drain, stop() { stopped = true; clearInterval(timer); } };
+  return { handler, emit, drain, status: manager.status, stop() { stopped = true; clearInterval(timer); } };
 }

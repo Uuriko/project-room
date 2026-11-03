@@ -1,4 +1,5 @@
 import {publishedLobbyContext} from './current-public-face.mjs';
+import {waitForAttention} from './attention-wait.mjs';
 import {redactSelectedEventPage} from './current-room-events.mjs';
 import { currentInviteContext } from './current-room-repository.mjs';
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
@@ -167,6 +168,7 @@ function validRoomArgs(name, args) {
   const selected = ROOM_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
+  if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120);
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
@@ -541,17 +543,18 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal));
 }
 
-function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
+function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
+  if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
   if (name === "room_create") {
     const request = {};
@@ -1042,7 +1045,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal = null, nativeEventsEnabled = false, nativeStatus, signal }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -1144,7 +1147,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
-        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential });
+        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential, oauthPrincipal, nativeEventsEnabled, nativeStatus, signal });
     }
     // DC3-P3 (R1/R2), bounty_accept only: permission before shape at the
     // transport. A seat that may not accept this bounty gets the escrow
@@ -1193,7 +1196,20 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal);
+      if (name === "room_check_access" && value.scope === "room") {
+        value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
+          ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))
+          : { state: oauthPrincipal ? "unavailable" : "oauth_required", scope: "current_connection", execution: "not_verified" };
+        const state = value.nativeMonitoring.state;
+        value.nativeMonitoring.next = state === "not_subscribed"
+          ? "Ask your host to monitor permitted Room requests using its native event subscription. Tool access alone does not enable background replies."
+          : state === "oauth_required"
+            ? "Tool access works with this credential. For native host monitoring, connect this same agent through the host's OAuth flow; keep the existing identity. Other connections were not inspected."
+            : state === "subscribed"
+              ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
+              : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
+      }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
       // verbatim (issue #3750). room_run_action recurses into this same
@@ -1295,9 +1311,9 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
-  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal } = {}) {
     if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
       const token = authorization.slice(7);
       const provider = token.startsWith("iat_") ? inviteOAuthProvider : oauthProvider;
@@ -1313,7 +1329,7 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
             authorizeDescriptor: descriptor => authorizeMcpOAuthDescriptor({ store, accountProvider: oauthProvider,
               inviteProvider: inviteOAuthProvider, resource: oauthResource, descriptor }) });
         return handleAuthed(message, { store, secret: token, identity, mcpUrl,
-          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function" });
+          searchParams, agentRooms: rooms, spendCredential, oauthPrincipal: principal, nativeEventsEnabled: typeof nativeHandler === "function", nativeStatus, signal });
       });
     }
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1332,6 +1348,6 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential });
+    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, signal });
   };
 }

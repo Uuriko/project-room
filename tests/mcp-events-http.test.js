@@ -269,3 +269,65 @@ test('native Board review wakes deduplicate and reject changed revision and miss
       permissions: member.permissions.filter(permission => permission !== 'verify') } });
   await f.server.drainMcpEvents(); assert.equal(f.deliveries.length, 1);
 });
+
+
+test('access check distinguishes native subscription from authenticated access and execution', async t => {
+  const f = await fixture(t);
+  const check = async () => (await f.rpc('tools/call', { name: 'room_check_access' })).result.structuredContent;
+  const before = await check();
+  assert.equal(before.memberId, f.grant.member_id);
+  assert.equal(before.nativeMonitoring.state, 'not_subscribed');
+  assert.equal(before.nativeMonitoring.scope, 'current_oauth_grant');
+  assert.equal(before.nativeMonitoring.execution, 'not_verified');
+  const sub = await f.subscribe();
+  const during = await check();
+  assert.equal(during.nativeMonitoring.state, 'subscribed');
+  assert.equal(during.nativeMonitoring.activeSubscriptions, 1);
+  assert.equal(during.nativeMonitoring.latestSubscriptionExpiresAt, sub.result.refreshBefore);
+  assert.equal(during.nativeMonitoring.execution, 'not_verified');
+  const raw = JSON.stringify(during.nativeMonitoring);
+  for (const forbidden of ['callback.example', 'whsec_', f.tokens.accessToken, f.tokens.refreshToken, sub.result.id])
+    assert.ok(!raw.includes(forbidden), forbidden);
+  await f.rpc('events/unsubscribe', { id: sub.result.id });
+  assert.equal((await check()).nativeMonitoring.state, 'not_subscribed');
+});
+
+test('native access diagnosis does not borrow a different OAuth grant subscription', async t => {
+  const f = await fixture(t); await f.subscribe();
+  // Different grant family for the same member must not inherit this callback.
+  const row = f.store.db.prepare('SELECT principal FROM mcp_event_subscriptions').get();
+  const other = { ...JSON.parse(row.principal), familyId: 'another-grant-family' };
+  f.store.db.prepare('UPDATE mcp_event_subscriptions SET principal=?').run(JSON.stringify(other));
+  const result = await f.rpc('tools/call', { name: 'room_check_access' });
+  assert.equal(result.result.structuredContent.nativeMonitoring.state, 'not_subscribed');
+});
+
+
+test('access diagnosis expires with the subscription without erasing usable tool access', async t => {
+  const f = await fixture(t);
+  const at = f.store.now();
+  await f.subscribe({ ttlMs: 1000 });
+  f.store.now = () => at + 2000;
+  const result = await f.rpc('tools/call', { name: 'room_check_access' });
+  assert.equal(result.result.structuredContent.status, 'credential_accepted');
+  assert.equal(result.result.structuredContent.nativeMonitoring.state, 'not_subscribed');
+  assert.equal(result.result.structuredContent.nativeMonitoring.activeSubscriptions, 0);
+  assert.equal(result.result.structuredContent.nativeMonitoring.latestSubscriptionExpiresAt, null);
+  assert.equal(result.result.structuredContent.nativeMonitoring.execution, 'not_verified');
+});
+
+test('bearer tool access does not imply OAuth monitoring or inspect other connections', async t => {
+  const f = await fixture(t);
+  const identity = f.store.identities.create('Interactive agent');
+  const invite = f.store.invites.create(f.owner, 'commons', { profile: 'member' });
+  const joined = await f.rpc('tools/call', { name: 'room_join', arguments: { inviteCode: invite.code } }, identity.secret);
+  assert.notEqual(joined.result.isError, true);
+  const result = await f.rpc('tools/call', { name: 'room_check_access', arguments: { roomId: 'commons' } }, identity.secret);
+  const access = result.result.structuredContent;
+  assert.equal(access.identityId, identity.identityId);
+  assert.equal(access.status, 'credential_accepted');
+  assert.equal(access.nativeMonitoring.state, 'oauth_required');
+  assert.equal(access.nativeMonitoring.scope, 'current_connection');
+  assert.equal(access.nativeMonitoring.execution, 'not_verified');
+  assert.equal(Object.hasOwn(access.nativeMonitoring, 'activeSubscriptions'), false);
+});

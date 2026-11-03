@@ -53,7 +53,7 @@ test('work continuation binds credential, selection, head, and requested limit',
 });
 test('unsupported global selections refuse instead of silently searching one page',t=>{
   const {store,keys}=fixture(t);
-  for(const args of [{query:'Title'},{sort:'curiosity'},{focus:'help_wanted'}])assert.throws(()=>store.currentWorkListing(keys.worker,'commons',args),e=>e.code==='current_work_selection_unavailable');
+  for(const args of [{query:'Title'},{sort:'curiosity'}])assert.throws(()=>store.currentWorkListing(keys.worker,'commons',args),e=>e.code==='current_work_selection_unavailable');
 });
 test('work source pages retain private title boundaries for an unrelated viewer',t=>{
   const {store,keys}=fixture(t);
@@ -118,3 +118,44 @@ test('an actual credential holder cannot decrypt work or addressed-request conti
 
 import {mkdtempSync,rmSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
 test('work cursor rejects exact cold restart and a different credential for the same member',t=>{const directory=mkdtempSync(join(tmpdir(),'work-cursor-cold-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));const filename=join(directory,'room.sqlite'),{store,keys}=fixture(t,filename),first=store.currentWorkListing(keys.worker,'commons',{focus:'all'}),otherIdentity=store.identities.create('Same worker credential');store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',otherIdentity.identityId,'worker',new Date(store.now()).toISOString());const secondKey=otherIdentity.secret;assert.equal(store.authenticate(secondKey,'commons').member.id,'worker');assert.throws(()=>store.currentWorkListing(secondKey,'commons',first.page.nextRead.arguments),e=>e.code==='invalid_work_cursor');store.close();const cold=new RoomStore(filename);t.after(()=>cold.close());assert.throws(()=>cold.currentWorkListing(keys.worker,'commons',first.page.nextRead.arguments),e=>e.code==='invalid_work_cursor'&&/restart/i.test(e.message));assert.equal(cold.currentWorkListing(keys.worker,'commons',{focus:'needs_me'}).workScope,'bounded_source_window');});
+
+
+test('SDK preserves the authenticated unavailable-help pointer without work scans or automatic fallback',async t=>{
+ const {store,keys}=fixture(t),server=createRoomServer({store});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ const prepare=store.db.prepare.bind(store.db);let workReads=0,sent=0;
+ store.db.prepare=sql=>{
+  if(/(?:FROM|JOIN)\s+work_entities\b|domain\s*=\s*'workSummary'/i.test(sql))workReads++;
+  const statement=prepare(sql);
+  return new Proxy(statement,{get(target,key){const value=Reflect.get(target,key,target);return typeof value==='function'?function(...args){if(args.includes('workSummary')||args.includes('workItems'))workReads++;return value.apply(target,args);}:value;}});
+ };
+ const client=new RoomAgentClient({origin:'http://127.0.0.1:'+server.address().port,roomId:'commons',memberId:'worker',token:keys.worker,fetchImpl:(...args)=>{if(new URL(args[0]).pathname.endsWith('/work-list'))sent++;return fetch(...args);}});
+ const fallback=await client.orient({paginate:true,focus:'help_wanted'});
+ assert.equal(sent,1,'no automatic retry or substituted selection');assert.equal(workReads,0);
+ assert.equal(fallback.status,'selection_unavailable');assert.equal(fallback.selection.available,false);
+ assert.equal(Object.hasOwn(fallback,'work'),false);assert.equal(Object.hasOwn(fallback,'page'),false);
+ const next=await client.orient({paginate:true,...fallback.nextRead.arguments});
+ assert.deepEqual(next.work.map(item=>item.id),['task-18']);assert.deepEqual(next.replyRequests.map(item=>item.id),['request-12']);
+ assert.equal(next.page.hasMore,false);assert.equal(sent,2,'one explicit supported read finds addressed work and requests');
+});
+
+
+test('SDK refuses malformed unavailable-help pointers and never follows them automatically',async t=>{
+ const {store,keys}=fixture(t),server=createRoomServer({store});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ let mutate=value=>value;
+ const client=new RoomAgentClient({origin:'http://127.0.0.1:'+server.address().port,roomId:'commons',memberId:'worker',token:keys.worker,fetchImpl:async(...args)=>{
+  const response=await fetch(...args);if(!new URL(args[0]).pathname.endsWith('/work-list'))return response;
+  return new Response(JSON.stringify(mutate(await response.json())),{status:response.status,headers:response.headers});
+ }});
+ for(const corrupt of [
+  value=>{value.replyRequests=[];},value=>{value.replyRequests=[{id:'invented-request'}];},value=>{value.work=[];},value=>{value.totalWork=0;},value=>{value.nextRead.arguments.roomId='other-room';},
+  value=>{value.nextRead.arguments.query='changed selection';},value=>{value.alternatives[0].arguments.roomId='other-room';},
+  value=>{value.scope.externalExecution=true;},value=>{value.viewerId='other';}
+ ]){
+  mutate=value=>{corrupt(value);return value;};
+  await assert.rejects(()=>client.orient({paginate:true,focus:'help_wanted'}),error=>error.code==='invalid_response');
+ }
+});

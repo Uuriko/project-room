@@ -1506,8 +1506,22 @@ export class RoomAgentClient {
         throw error;
       }
       if(listing?.roomId!==this.#roomId||listing.member?.id!==this.#memberId||listing.viewerId!==this.#memberId
-        ||listing.viewerAccountId!==null||listing.viewerAuthEpoch!==null||listing.viewerSessionBinding!==null||listing.viewerSessionRevision!==null||!Array.isArray(listing.work)
-        ||!listing.page||typeof listing.page.hasMore!=='boolean'||listing.page.hasMore!==Boolean(listing.page.nextRead)
+        ||listing.viewerAccountId!==null||listing.viewerAuthEpoch!==null||listing.viewerSessionBinding!==null||listing.viewerSessionRevision!==null)
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
+      if(listing.status==='selection_unavailable') {
+        const next=listing.nextRead,selection=listing.selection;
+        const validPointer=(pointer,selectedFocus)=>pointer?.tool==='room_list_work'&&pointer.arguments?.roomId===this.#roomId
+          &&pointer.arguments?.focus===selectedFocus&&Object.keys(pointer.arguments).every(key=>['roomId','focus'].includes(key));
+        if(focus!=='help_wanted'||listing.contractVersion!==1||selection?.available!==false||selection.requestedFocus!==focus
+          ||selection.reason!=='current_help_index_unavailable'||typeof selection.guidance!=='string'||!selection.guidance.trim()
+          ||['work','replyRequests','page','nextCursor','totalWork','totalReplyRequests'].some(key=>Object.hasOwn(listing,key))
+          ||listing.scope?.kind!=='room'||listing.scope?.externalExecution!==false||!validPointer(next,'needs_me')
+          ||!Array.isArray(listing.alternatives)||listing.alternatives.length!==1||!validPointer(listing.alternatives[0],'all'))
+          throw new RoomClientError(200,'invalid_response','Room returned an invalid unavailable-selection pointer');
+        return listing;
+      }
+      if(!Array.isArray(listing.work)||!listing.page||typeof listing.page.hasMore!=='boolean'
+        ||listing.page.hasMore!==Boolean(listing.page.nextRead)
         ||(listing.page.nextRead&&listing.page.nextRead.arguments?.roomId!==this.#roomId))
         throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
       return listing;

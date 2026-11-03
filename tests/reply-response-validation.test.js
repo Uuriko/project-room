@@ -5,6 +5,10 @@ import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createHostedRoomMcp } from '../server/mcp-room-profile.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
+const syntheticAnswerEnding = '\n\nVerification: the answer is saved exactly; no tools or model calls are repeated.';
+const syntheticAnswer4141 = Array.from({length:20}, (_, index) => `Step ${index + 1}: I recommend preserving the original request identity and checking current recipient authority before delivery. Save the exact response command before its first network send, then reuse that command after an uncertain acknowledgement. Verify the selected response and its context binding before marking local delivery complete.`).join('\n\n')
+  .slice(0, 4141 - syntheticAnswerEnding.length) + syntheticAnswerEnding;
+
 function fixture(t) {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
@@ -54,4 +58,16 @@ test('complete response and non-message cancel stay supported; unexpected comman
   const second = await open(f, 'cancel-body');
   const cancelled = await f.call(f.owner.secret, 'room_cancel_request', { requestId: 'cancel-request', requestMessageId: second.requested.requestMessageId, expectedRequestRevision: 0, reason: 'No longer needed' });
   assert.equal(cancelled.status, 'recorded', JSON.stringify(cancelled));
+});
+
+for (const [label,body] of [['reported4141',syntheticAnswer4141],['escaped8192','\u0001'.repeat(8192)],['unicode8192','😀'.repeat(4096)]])
+test(`hosted MCP formal ${label} answers and retries the exact receipt`,async t=>{
+  const f=fixture(t),{requested,args}=await open(f,'long-'+label);
+  const input={...args,requestId:'answer-'+label,body};
+  const answer=await f.call(f.peer.secret,'room_respond_to_request',input);
+  assert.equal(answer.status,'recorded',JSON.stringify(answer));
+  const retry=await f.call(f.peer.secret,'room_respond_to_request',input);
+  assert.equal(retry.eventId,answer.eventId);
+  const context=await f.call(f.peer.secret,'room_read_request',{requestMessageId:requested.requestMessageId});
+  assert.equal(context.request.status,'answered');assert.equal(context.page.items.find(row=>row.kind==='answered').message.body,body);
 });

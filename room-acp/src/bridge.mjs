@@ -1,7 +1,8 @@
 // The bridge loop: lease the room's wake queue, long-poll for mentions,
 // run each thread's turn on the local ACP agent, post the reply in the
-// thread, then ack the wakes. Wakes are acked only after the reply posts,
-// so a crash before posting means the Room re-delivers them.
+// thread, then ack the wakes. Wakes are acked after the reply posts or a
+// successful ordinary empty turn has a persisted silent disposition.
+// Incomplete execution stays available for explicit recovery.
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, linkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -40,6 +41,7 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
 export const MAX_CLAIM_NOTE = 1500;
+export const ORDINARY_REPLY_WINDOW_MS = 60000;
 // The person who put the claim on the Board is who asked for the work.
 export const claimRequester = claim => (claim?.history ?? []).find(entry => entry?.action === "created")?.agentId ?? null;
 
@@ -98,12 +100,33 @@ class TurnReceipts {
   }
 }
 
+// Only a completed, activity-free ordinary turn may elect silence. Formal
+// requests use their separate obligatory answered/declined/pending contract.
+function ordinaryTurn(recorder, stopReason) {
+  let value;
+  try { value = JSON.parse(recorder.text); } catch { /* Plaintext hosts remain supported. */ }
+  const structured = value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 2 && Object.hasOwn(value, 'outcome') && Object.hasOwn(value, 'body');
+  const noReply = structured && value.outcome === 'no_reply' && value.body === '';
+  const activityFree = recorder.tools instanceof Map && recorder.tools.size === 0
+    && (recorder.plan === undefined || Array.isArray(recorder.plan) && recorder.plan.length === 0);
+  const silent = stopReason === 'end_turn' && activityFree
+    && (noReply || typeof recorder.text === 'string' && !recorder.text.trim());
+  if (silent) return {silent:true};
+  if (structured && value.outcome === 'answered' && typeof value.body === 'string' && value.body.trim())
+    return {silent:false, recorder:{...recorder, text:value.body}};
+  if (noReply) return {silent:false, recorder:{...recorder,
+    text:'No-reply was not accepted because this turn contained activity or did not finish successfully. Inspect the local turn before treating it as complete.'}};
+  return {silent:false, recorder};
+}
+
 export class Bridge {
   constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
+    this.replyWindows = new TurnReceipts(connection, env, persistSessions, "chat-reply-windows");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionApproverId = permissionApproverId;
@@ -203,7 +226,7 @@ export class Bridge {
             ownerId:authority.ownerId,respondTo:this.respondTo}) ? 'allowed' : 'denied']));
   }
 
-  async authorized({ messageIds, claimId } = {}) {
+  async authorized({ messageIds, claimId, requireRunnable = false } = {}) {
     if (this.controller.signal.aborted) throw new Error("bridge stopped");
     if (!claimId) {
       // Old receipts lack original source IDs; they cannot authorize disclosure.
@@ -221,7 +244,8 @@ export class Bridge {
     if (claimRequester(claim) !== requester || authority.unresolved.has(requester))
       throw new RoomError(409, 'authority_member_unresolved', 'Claim requester changed or is unresolved; retry with fresh authority');
     return Boolean(authority.members[this.connection.memberId] && authority.me.active !== false
-      && claim?.owner === authority.me.id && mayTalk({authorId:requester,members:authority.members,
+      && claim?.owner === authority.me.id && (!requireRunnable || !TERMINAL_CLAIM_STATES.includes(claim.state))
+      && mayTalk({authorId:requester,members:authority.members,
         me:authority.me,ownerId:authority.ownerId,respondTo:this.respondTo}));
   }
 
@@ -245,6 +269,11 @@ export class Bridge {
   }
 
   stopForContextLimit(error) {
+    if (error instanceof RoomError && error.status === 409 && error.code === "wake_scope_unavailable") {
+      this.stopReason = "context_unavailable";
+      this.log("Room did not confirm the selected wake scope. Upgrade the server and check the saved room before restarting; foreign wakes remain unacknowledged.");
+      this.stop(); return true;
+    }
     if (!(error instanceof RoomError) || !(error.status === 413 && ['current_thread_too_large','formal_context_too_large'].includes(error.code)
       || error.status === 409 && ['selected_message_context_unavailable','selected_authority_unavailable'].includes(error.code))) return false;
     if (this.stopReason !== "context_unavailable") {
@@ -290,7 +319,23 @@ export class Bridge {
   // claim note so it lands in that claim's thread.
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
-    const claim = await this.room.claim(signal.workClaim);
+    let claim;
+    try { claim = await this.room.claim(signal.workClaim); }
+    catch (error) {
+      if (!(error instanceof RoomError) || error.status !== 404 || error.code !== 'work_claim_not_found') throw error;
+      // A definitive absent claim must not strand unrelated current wakes.
+      // Recheck room access and the listener before retiring this old signal.
+      const authority = await this.refreshRoom();
+      await this.assertListener();
+      if (signal.roomId !== this.connection.roomId || !authority.members[this.connection.memberId] || authority.me.active === false)
+        throw new RoomError(403, 'access_denied', 'Missing claim wake is not bound to this active room member');
+      const {receipt} = this.claimReceipts.begin(signal.signalId, {phase:'discarded', disposition:'claim_missing'});
+      if (!['posted', 'discarded'].includes(receipt.phase)) {
+        this.log(`claim ${signal.workClaim} is missing; retained ${receipt.phase} execution for inspection without acknowledgement`);
+        return;
+      }
+      await this.ack([signal.signalId]); this.stats.skipped++; return;
+    }
     if (TERMINAL_CLAIM_STATES.includes(claim?.state)) {
       this.log(`ignored claim ${signal.workClaim} (${signal.reason}): claim is ${claim.state} (terminal)`);
       await this.ack([signal.signalId]); this.stats.skipped++; return;
@@ -326,11 +371,18 @@ export class Bridge {
           await this.agentReady();
           if (this.controller.signal.aborted) return;
           const { sessionId } = await this.host.session(threadKey);
-          if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); return; }
+          // Queueing and session startup can outlive the assignment. Check
+          // runnable state here without blocking results already in progress.
+          if (!(await this.authorized({ claimId, requireRunnable: true }))) {
+            receipt = { phase: "discarded", requestId: receipt.requestId };
+            this.claimReceipts.save(key, receipt);
+            await this.ack(signalIds); return;
+          }
           const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
         } catch (error) {
+          if (receipt.phase === "discarded") throw error; // Retry ACK without creating a result.
           this.log(`claim turn failed: ${error.message}`);
           if (this.controller.signal.aborted) return;
           body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
@@ -450,13 +502,21 @@ export class Bridge {
     await this.agentReady();
     if (this.controller.signal.aborted) return;
     const selected = await this.readThread(receipt.threadKey, {selected:true});
-    const formal = selected.replyRequest?.recipientId === this.connection.memberId
+    let formal = selected.replyRequest?.recipientId === this.connection.memberId
       ? await readCompleteRequest(this.room, receipt.threadKey) : null;
     if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
     const thread = formal ? selected.thread : (await this.readThread(receipt.threadKey)).thread;
     const {sessionId, created} = await this.host.session(receipt.threadKey);
+    if (formal) {
+      // Session startup may wait while the requester cancels or adds context.
+      // Only the fresh complete request can authorize and prepare this turn.
+      formal = await readCompleteRequest(this.room, receipt.threadKey);
+      if (formal.request.status !== 'open' || formal.current?.actions?.answer !== true) {
+        this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
+      }
+    }
     if (!(await this.authorized({messageIds:receipt.messageIds}))) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
@@ -465,7 +525,7 @@ export class Bridge {
       : buildPrompt({roomTitle:this.title, thread, wakes, firstTurn:created});
     const started = {...receipt, phase:'started', ...(formal ? {formalContext:formal} : {})};
     this.chatReceipts.save(key, started);
-    let body, formalDelivery;
+    let body, formalDelivery, formalPending, formalDraft, silent = false;
     try {
       const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId});
       this.stats.turns++;
@@ -473,7 +533,12 @@ export class Bridge {
         const delivery = prepareFormalDelivery(formal, recorder.text, stopReason);
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
-      } else body = renderTurn(recorder, {stopReason});
+        else { formalPending = delivery.pendingReason; formalDraft = delivery.draft; }
+      } else {
+        const outcome = ordinaryTurn(recorder, stopReason);
+        silent = outcome.silent;
+        if (!silent) body = renderTurn(outcome.recorder, {stopReason});
+      }
     } catch (error) {
       this.log(`turn failed: ${error.message}`);
       if (this.controller.signal.aborted) return;
@@ -484,7 +549,41 @@ export class Bridge {
     // Drop the input copy after execution, retaining it only for an interrupted
     // started receipt that may need local inspection.
     const {formalContext:_context, wakes:_wakes, ...result} = started;
-    this.chatReceipts.save(key, {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {})});
+    // Reuse the terminal ACK-only phase so an older reader cannot replay a
+    // silent turn as new work. The explicit disposition records why no post exists.
+    this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
+      : {...result, phase:'result', body, ordinaryChat:!formal, ...(formalDelivery ? {formalDelivery} : {}),
+        ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {})});
+  }
+
+  // One addressed local reservation per existing seat/thread. This is not a
+  // server-wide chat limit. Listener fencing supplies the single active bridge.
+  reserveOrdinaryReply(receipt, now = Date.now()) {
+    const valid = window => window && window.version === 1 && window.threadKey === receipt.threadKey
+      && typeof window.operationId === 'string' && window.operationId.length > 0
+      && Number.isSafeInteger(window.reservedAt) && window.reservedAt >= 0;
+    if (receipt.ordinaryReplyWindow !== undefined) {
+      if (!valid(receipt.ordinaryReplyWindow) || receipt.ordinaryReplyWindow.operationId !== receipt.requestId)
+        throw Error('Invalid ordinary reply reservation; manual recovery required');
+      // An uncertain send always retries its exact operation, even after a later
+      // window has been reserved. The Room command id deduplicates that retry.
+      return {allowed:true, window:receipt.ordinaryReplyWindow};
+    }
+    if (!Number.isSafeInteger(now) || now < 0) throw Error('Invalid ordinary reply clock');
+    const proposed = {version:1, threadKey:receipt.threadKey, operationId:receipt.requestId, reservedAt:now};
+    const saved = this.replyWindows.begin(receipt.threadKey, {...proposed, phase:'started'});
+    if (!valid(saved.receipt)) throw Error('Invalid ordinary reply window; manual recovery required');
+    let window = saved.receipt;
+    if (window.operationId !== receipt.requestId) {
+      if (now < window.reservedAt + ORDINARY_REPLY_WINDOW_MS)
+        return {allowed:false, nextEligibleAt:window.reservedAt + ORDINARY_REPLY_WINDOW_MS};
+      window = {...window, ...proposed};
+      this.replyWindows.save(saved.key, window);
+    }
+    // The first reservation is durable before the operation's authorization is
+    // saved. A crash between those saves recovers through the matching op id.
+    return {allowed:true, window:{version:1, threadKey:window.threadKey,
+      operationId:window.operationId, reservedAt:window.reservedAt}};
   }
 
   async deliverChatReceipt(key) {
@@ -506,6 +605,18 @@ export class Bridge {
         const { body: _body, formalDelivery:_delivery, ...discarded } = receipt;
         receipt = { ...discarded, phase: "discarded" };
         this.chatReceipts.save(key, receipt);
+      }
+      if (receipt.phase === 'result' && receipt.ordinaryChat === true) {
+        const reservation = this.reserveOrdinaryReply(receipt);
+        if (!reservation.allowed) {
+          receipt = {...receipt, phase:'discarded', disposition:'reply_window_limited',
+            replyWindowLimitedUntil:reservation.nextEligibleAt};
+          this.chatReceipts.save(key, receipt); // Retain the result locally; no hidden model/tool rerun.
+          this.log('Automatic ordinary reply limited to one per thread per 60 seconds; result retained locally and wake acknowledged.');
+        } else if (receipt.ordinaryReplyWindow === undefined) {
+          receipt = {...receipt, ordinaryReplyWindow:reservation.window};
+          this.chatReceipts.save(key, receipt); // Before POST; exact ambiguous retries remain authorized.
+        }
       }
       if (receipt.phase === "result") {
         if (receipt.formalDelivery && !receipt.formalReview) {

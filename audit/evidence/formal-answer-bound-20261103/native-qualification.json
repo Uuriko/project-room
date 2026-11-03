@@ -1,0 +1,28 @@
+{
+  "sourceRevision": "5ad303a1a",
+  "node": "24.22.1",
+  "actualNative": {
+    "pass": 1,
+    "fail": 0,
+    "bodyCharacters": 8192,
+    "body": "synthetic literal controls; worst JSON escaping",
+    "coldReopen": true,
+    "sameCommandRetry": true,
+    "exactContentAndParticipants": true
+  },
+  "independentHttp": {
+    "pass": 36,
+    "fail": 0
+  },
+  "limits": "Synthetic actual workerd SQLite; not production or runtime rollout. Initial attempts lacked isolated Cloudflare dependencies; dependencies then reused from unchanged lockfile. No functional source failure hidden.",
+  "logs": {
+    "native-boundary": {
+      "sha256": "b6337642e718d5ad42083d44deda6ae6358bea49738e12233bfe1c1566297cfd",
+      "file": "native-boundary.log.gz"
+    },
+    "independent-http": {
+      "sha256": "b9a9fdbaa887c820107c27f4071d2f1c5cd1f90e675ab3175fb956c4c7ce6647",
+      "file": "independent-http.log.gz"
+    }
+  }
+}

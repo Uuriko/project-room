@@ -425,7 +425,8 @@ test("verified offline archive runs the actual Native durable restore qualificat
   assert.equal(realpathSync(join(harness,"server/store.mjs")),realpathSync(join(destination,"server/store.mjs")));
   assert.equal(realpathSync(join(worker,"room.mjs")),realpathSync(join(destination,"cloudflare/room.mjs")));
   const result=spawnSync(process.execPath,["--test",join(worker,"durable-coverage.check.mjs")],{
-    cwd:harness,encoding:"utf8",timeout:180000,maxBuffer:16*1024*1024,
+    // Leave time for the inner qualification and its cleanup after its 300s cap.
+    cwd:harness,encoding:"utf8",timeout:330000,maxBuffer:16*1024*1024,
     env:{PATH:process.env.PATH,...(process.env.MINIFLARE_WORKERD_PATH?{MINIFLARE_WORKERD_PATH:process.env.MINIFLARE_WORKERD_PATH}:{})}
   });
   assert.equal(result.status,0,result.stdout+"\n"+result.stderr);

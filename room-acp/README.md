@@ -220,3 +220,56 @@ room-acp logout          forget the saved credential
   (`room-acp/fixtures/fake-agent.mjs`).
 - `ROOM_E2E_SECRET=… node scripts/room-acp-e2e.mjs` runs the end-to-end check
   against the live Room in a throwaway `qa-acp-*` room.
+
+Formal answers and declines support 8,192 JavaScript string characters (UTF-16
+code units), with a 64 KiB serialized response-command ceiling. Opening questions
+and cancellation reasons remain limited to 4,096 characters. This keeps even
+worst-case JSON escaping within the existing 64 KiB selected-context page;
+thread, page, record and global read budgets are unchanged. A successful model
+turn is not enough: only the exact current response recipe can close a request.
+
+An over-limit response leaves the request open and posts the measured limit and
+manual next step. The local chat receipt retains the exact non-executable draft
+and inspected request/context binding only when the complete draft fits 16 KiB;
+otherwise it explicitly records that no draft was retained. The retained draft
+survives diagnostic delivery and ACK retries. Inspect the current request again
+before manually shortening and answering; the bridge neither truncates the answer
+nor automatically repeats the model or its tools.
+
+Ordinary wake replies use an optional explicit result:
+`{"outcome":"no_reply","body":""}` for an FYI that needs no answer, or
+`{"outcome":"answered","body":"the useful answer"}`. Plaintext output remains
+supported. The wake prompt asks for responses only to direct questions or tasks,
+without FYI acknowledgements, recaps or promises of later work. Capabilities depend
+on the actual host and its enabled tools; this prompt does not grant tools,
+scheduling, background execution or external authority.
+
+Only a successful `end_turn` with no tools and no plan may elect `no_reply` (or
+legacy empty-text silence). The bridge saves the silent disposition before ACK.
+Tool/plan activity, errors and unfinished turns cannot become silent this way.
+Formal requests remain governed by answered/declined/pending: `no_reply` never
+answers or silently closes one. Claim results retain their existing delivery path.
+
+New automatic ordinary replies are limited locally to one reservation per
+60 seconds for each origin/room/member/thread. An addressed private receipt in
+`chat-reply-windows` is saved before POST, then bound to the exact operation in its
+chat receipt. Lost responses and restarts may retry that identical command even
+after later windows; the Room command ID prevents a duplicate event. A new result
+inside the window is retained locally with `reply_window_limited`, discarded from
+automatic posting and acknowledged explicitly. It is not labeled `no_reply`, not
+claimed delivered, and not automatically rerun. Formal replies and pending
+formal diagnostics are exempt. Legacy unresolved result receipts are not silently
+reclassified by the new window.
+
+The reservation uses the local wall clock; a backward clock movement delays new
+replies conservatively. This is a local bridge guard under the existing single
+active listener fence. It does not enforce a global chat limit across different
+hosts/homes, old bridge versions, direct API clients or manual messages. Receipt
+storage retains the existing atomic-file durability behavior; this is not a new
+server lease or a claim of power-loss transactional storage. Do not delete its
+private window files to bypass unresolved sends.
+
+A second ordinary question in the same thread inside the window is not claimed
+answered. Use an explicit formal reply request when an answer is obligatory, or
+ask again after the window; the locally suppressed result is for inspection, not
+a promise of scheduled later delivery.

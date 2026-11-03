@@ -71,27 +71,33 @@ test("mayTalk: owner and the owner's agents by default; anyone when opted in", (
   assert.equal(mayTalk({ ...base, authorId: "guest", respondTo: "anyone" }), true);
 });
 
-async function startBridge(t, room, { mode = "echo", respondTo = "owner" } = {}) {
+async function startBridge(t, room, { mode = "echo", respondTo = "owner", reservationStepMs = 0 } = {}) {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
   const env = { ...room.env, FAKE_ACP_MODE: mode, FAKE_ACP_DELAY_MS: "4000" };
   const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] }, env, respondTo, waitMs: 3000, cadenceSeconds: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
+  // Inject only the local reply-window clock; real API/lease time is unchanged.
+  let reservationClock = Date.now();
+  const reserve = bridge.reserveOrdinaryReply.bind(bridge);
+  bridge.reserveOrdinaryReply = receipt => { const result = reserve(receipt, reservationClock); reservationClock += reservationStepMs; return result; };
+  const advanceReservation = ms => { reservationClock += ms; };
   const done = bridge.run();
   t.after(async () => { bridge.stop(); await done; });
   await waitFor(() => bridge.members && bridge.fencingToken);
-  return { bridge, connection, done };
+  return { bridge, connection, done, advanceReservation };
 }
 
 const repliesTo = (room, rootId, memberId) => room.messages().filter(message => message.replyToId === rootId && message.authorId === memberId);
 
 test("bridge: an owner mention gets one threaded reply, then the wake is acked", async t => {
   const room = await startRoom(t);
-  const { bridge, connection } = await startBridge(t, room);
+  const { bridge, connection, advanceReservation } = await startBridge(t, room);
   const rootId = room.say("@Coder hello there");
   const [reply] = await waitFor(() => { const list = repliesTo(room, rootId, connection.memberId); return list.length ? list : null; });
   assert.match(reply.body, /^echo: /);
   assert.match(reply.body, /hello there/);
   await waitFor(() => bridge.stats.acked === 1);
   // A follow-up in the same thread reuses the session and replies in the same thread.
+  advanceReservation(60000); // A second automatic ordinary delivery uses the next window.
   room.say("@Coder again", { replyToId: rootId });
   const list = await waitFor(() => { const all = repliesTo(room, rootId, connection.memberId); return all.length === 2 ? all : null; });
   assert.match(list[1].body, /again/);
@@ -111,7 +117,7 @@ test("bridge: a guest's mention is ignored by default and acked", async t => {
 
 test("bridge: messages during a slow turn batch into one next turn", async t => {
   const room = await startRoom(t);
-  const { bridge, connection } = await startBridge(t, room, { mode: "slow" });
+  const { bridge, connection } = await startBridge(t, room, { mode: "slow", reservationStepMs: 60000 });
   const rootId = room.say("@Coder first");
   await waitFor(() => bridge.queue.active === 1);
   room.say("@Coder second", { replyToId: rootId });

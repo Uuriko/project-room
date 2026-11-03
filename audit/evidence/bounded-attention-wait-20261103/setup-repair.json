@@ -1,0 +1,36 @@
+{
+  "review": "Claude supplied-excerpt review Room1662; not a full-source review",
+  "defect": "Subscription setup failure left a registered generation and uninitialized cleanup timer",
+  "before": {
+    "tests": 1,
+    "fail": 1,
+    "error": "ReferenceError timer before initialization"
+  },
+  "after": {
+    "tests": 39,
+    "pass": 38,
+    "skip": 1,
+    "fail": 0
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "fail": 0
+  },
+  "repair": "Install supersede before exposing generation; initialize cleanup handles; catch setup failures and release exact generation",
+  "logs": {
+    "before": {
+      "sha256": "31d80b6dc462e78d6acfe1c685ad7e40010fc3ffcd1f9d6851ff9ffbcd466def",
+      "bytes": 1688
+    },
+    "after": {
+      "sha256": "d6ebb59bd78ab7b84421b72ea4b123435c405008bdb28372b781cf96538a14d7",
+      "bytes": 21579
+    },
+    "native": {
+      "sha256": "9d0ba9635d41881c6a2023a3aab2d8d713da1b677a028cf2c2518e9474b636af",
+      "bytes": 4109
+    }
+  },
+  "deployment": false
+}

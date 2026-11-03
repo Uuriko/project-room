@@ -204,7 +204,7 @@ import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
-import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
+import { REPLY_FIELDS, REPLY_POLICY_VERSION, MAX_REPLY_RESPONSE_COMMAND_BYTES, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
@@ -873,8 +873,11 @@ export function validateCommand(command) {
   }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
-  // Message commands carry a long body. Every other command stays at 16 KiB.
-  if (Buffer.byteLength(JSON.stringify(command)) > (messageBodyCommand ? MAX_MESSAGE_COMMAND_BYTES : 16384)) fail(413, "too_large", "Command is too large");
+  // Formal answers fit a single bounded context page; ordinary messages retain
+  // their existing ceiling and every other command stays at 16 KiB.
+  const commandLimit = command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, "responseToRequestId")
+    ? MAX_REPLY_RESPONSE_COMMAND_BYTES : messageBodyCommand ? MAX_MESSAGE_COMMAND_BYTES : 16384;
+  if (Buffer.byteLength(JSON.stringify(command)) > commandLimit) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
     try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
   }

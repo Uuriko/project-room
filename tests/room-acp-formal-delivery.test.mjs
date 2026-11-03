@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {auditRecovery} from '../server/recovery.mjs';
+import {buildReplyCommand,validateReplyRead} from '../client/reply-actions.mjs';
 import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {seedScopedInbox} from './helpers/scoped-inbox-source.mjs';
@@ -12,16 +14,23 @@ import {readCompleteRequest, prepareFormalDelivery} from '../room-acp/src/formal
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 
+const syntheticAnswerEnding = '\n\nVerification: the answer is saved exactly; no tools or model calls are repeated.';
+const syntheticAnswer4141 = Array.from({length:20}, (_, index) => `Step ${index + 1}: I recommend preserving the original request identity and checking current recipient authority before delivery. Save the exact response command before its first network send, then reuse that command after an uncertain acknowledgement. Verify the selected response and its context binding before marking local delivery complete.`).join('\n\n')
+  .slice(0, 4141 - syntheticAnswerEnding.length) + syntheticAnswerEnding;
+
 async function fixture(t, options = {}) {
-  const store = new RoomStore(':memory:'), seeded = seedScopedInbox(store);
+  const home = mkdtempSync(join(tmpdir(), 'formal-bridge-'));
+  const database = options.persist ? join(home,'room.sqlite') : ':memory:';
+  const store = new RoomStore(database), seeded = seedScopedInbox(store);
   const server = createRoomServer({store});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const home = mkdtempSync(join(tmpdir(), 'formal-bridge-'));
-  t.after(async () => {
+  let closed = false;
+  const close = async () => {
+    if (closed) return; closed = true;
     server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); store.close();
-    rmSync(home, {recursive:true, force:true});
-  });
+  };
+  t.after(async () => {await close(); rmSync(home, {recursive:true, force:true});});
   const apiBase = `http://127.0.0.1:${server.address().port}`;
   const counts = {prompts:0, sent:[]}, logs = [];
   const connection = {apiBase, roomId:'commons', memberId:'worker', identityId:seeded.identityId,
@@ -38,7 +47,7 @@ async function fixture(t, options = {}) {
   const ready = async bridge => {await bridge.refreshRoom(); await bridge.lease();};
   const read = async (bridge, id = 'dm') => bridge.room.request(`/api/rooms/commons/reply-context?requestMessageId=${id}`);
   const wake = {signalId:'synthetic-formal-wake', messageId:'dm', author:'owner', body:'Please answer'};
-  return {store, seeded, home, connection, make, ready, read, wake, counts, logs};
+  return {store, seeded, home, database, close, connection, make, ready, read, wake, counts, logs};
 }
 
 test('ACP answer completes a real normalized reply request, rather than posting ordinary chat', async t => {
@@ -51,7 +60,7 @@ test('ACP answer completes a real normalized reply request, rather than posting 
 });
 
 test('lost committed formal response retries the frozen recipe after restart without a second execution or event', async t => {
-  const f = await fixture(t); let lose = true;
+  const f = await fixture(t,{text:JSON.stringify({outcome:'answered',body:syntheticAnswer4141})}); let lose = true;
   const first = f.make(async (url, options) => {
     const response = await fetch(url, options);
     if (options?.body) {
@@ -290,7 +299,90 @@ for (const terminalLimit of [false,true]) test(`actual wake redelivery survives 
     assert.equal(bridge.stopReason,'context_unavailable');assert.equal(bridge.controller.signal.aborted,true);
     assert.equal(f.counts.prompts,0);assert.ok((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId));
   }else{
-    assert.equal(preparations,3);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
+    // Two failures, successful preparation, then the fresh post-session check.
+    assert.equal(preparations,4);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
     assert.equal((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId),false);
   }
+});
+
+for (const [label, body] of [['reported4141',syntheticAnswer4141], ['boundary8192','b'.repeat(8192)], ['escaped8192','\u0001'.repeat(8192)], ['unicode8192','😀'.repeat(4096)]])
+test(`formal answer ${label} delivers exact text through actual HTTP and selected context`, async t => {
+  const f = await fixture(t, {text:JSON.stringify({outcome:'answered',body})}), bridge=f.make(); await f.ready(bridge);
+  await bridge.turn('dm',[f.wake]);
+  const current=await f.read(bridge);
+  assert.equal(current.request.status,'answered',f.logs.join(' | '));
+  assert.equal(current.page.items.find(item=>item.kind==='answered').message.body,body);
+  assert.equal(f.counts.prompts,1);
+  validateReplyRead(current,{name:'room_read_request',args:{requestMessageId:'dm'},roomId:'commons'});
+  assert.ok(auditRecovery(f.store).dataSha256);
+});
+
+test('oversize formal answer retains an exact bounded draft before post and across lost ACK restart', async t => {
+  const body='a'.repeat(8193), f=await fixture(t,{text:JSON.stringify({outcome:'answered',body})});
+  const first=f.make(); await f.ready(first);
+  first.room.ack=async()=>{throw Error('synthetic lost ACK');};
+  await first.turn('dm',[f.wake]);
+  const key=first.chatReceipts.key(f.wake.signalId), saved=first.chatReceipts.read(key);
+  assert.equal(saved.phase,'posted');assert.equal(saved.formalDraft.body,body);
+  assert.equal(saved.formalDraft.requestMessageId,'dm');assert.equal(saved.formalDraft.viewerId,'worker');
+  assert.equal(saved.formalPending.code,'formal_body_too_long');assert.equal(saved.formalPending.actual,8193);
+  assert.equal(saved.formalPending.maximum,8192);assert.equal(saved.formalPending.draftRetained,true);
+  assert.equal(saved.body,undefined);assert.equal(saved.formalDelivery,undefined);
+  const current=await f.read(first);assert.equal(current.request.status,'open');
+  assert.ok(current.page.items.some(item=>item.message?.body.includes('(8193 / 8192)')));
+  const second=f.make();await f.ready(second);await second.turn('dm',[f.wake]);
+  assert.equal(f.counts.prompts,1);assert.deepEqual(second.chatReceipts.read(key).formalDraft,saved.formalDraft);
+});
+test('over-budget local draft is never partially retained or answered', async t=>{
+  const f=await fixture(t,{text:JSON.stringify({outcome:'answered',body:'😀'.repeat(10000)})}),bridge=f.make();await f.ready(bridge);
+  await bridge.turn('dm',[f.wake]);const saved=bridge.chatReceipts.read(bridge.chatReceipts.key(f.wake.signalId));
+  assert.equal(saved.phase,'posted');assert.equal(saved.formalDraft,undefined);assert.equal(saved.formalPending.draftRetained,false);
+  assert.equal((await f.read(bridge)).request.status,'open');
+});
+test('formal command byte overflow retains a non-executable draft and precise reason',async t=>{
+  const f=await fixture(t),bridge=f.make();await f.ready(bridge);const context=await readCompleteRequest(bridge.room,'dm');
+  context.responseHttpActions[0].command.id='a'.repeat(65536);
+  const delivery=prepareFormalDelivery(context,JSON.stringify({outcome:'answered',body:'Do not lose this draft'}),'end_turn');
+  assert.equal(delivery.kind,'pending');assert.equal(delivery.pendingReason.code,'formal_command_too_large');
+  assert.equal(delivery.draft.body,'Do not lose this draft');assert.equal(delivery.recipe,undefined);
+});
+test('formal MCP response accepts 8192 while opening questions and cancel reasons retain 4096',async t=>{
+  const f=await fixture(t),bridge=f.make();await f.ready(bridge);const context=await readCompleteRequest(bridge.room,'dm');
+  const action=context.responseActions.find(action=>action.arguments.responseOutcome==='answered');
+  const command=buildReplyCommand({roomId:'commons',memberId:'worker'},action.tool,{...action.arguments,requestId:'long-mcp-answer',body:'x'.repeat(8192)});
+  const result=await bridge.room.request('/api/rooms/commons/commands',{body:command});
+  assert.equal(result.event.data.body.length,8192);
+  for(const [type,data] of [['message.posted',{messageId:'oversize-opening',toMemberId:'worker',requestKind:'reply',body:'x'.repeat(4097)}],['reply_request.cancelled',{requestMessageId:'dm',expectedRequestRevision:0,reason:'x'.repeat(4097)}]]){
+    assert.throws(()=>f.store.command(f.seeded.owner,'commons',{id:'too-long-'+type,type,data}),{status:422});
+  }
+});
+
+test('8192 escaped answer survives a real SQLite cold reopen and literal recovery audit',async t=>{
+  const body='\u0001'.repeat(8192),f=await fixture(t,{persist:true,text:JSON.stringify({outcome:'answered',body})});
+  const bridge=f.make();await f.ready(bridge);await bridge.turn('dm',[f.wake]);
+  const before=auditRecovery(f.store);await f.close();
+  const store=new RoomStore(f.database),server=createRoomServer({store});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();});
+  const room=new RoomClient({...f.connection,apiBase:`http://127.0.0.1:${server.address().port}`});
+  const current=await room.request('/api/rooms/commons/reply-context?requestMessageId=dm');
+  assert.equal(current.request.status,'answered');assert.equal(current.page.items.find(row=>row.kind==='answered').message.body,body);
+  assert.equal(auditRecovery(store).dataSha256,before.dataSha256);
+});
+
+test('follow-up preparation accepts the larger exact answer in previous exchanges',async t=>{
+  const body='A useful response. '.repeat(455).slice(0,8192);
+  const f=await fixture(t,{text:JSON.stringify({outcome:'answered',body})}),bridge=f.make();
+  await f.ready(bridge);await bridge.turn('dm',[f.wake]);
+  const answered=await f.read(bridge);
+  assert.equal(answered.request.status,'answered');
+  f.store.command(f.seeded.owner,'commons',{id:'follow-long-answer',type:'message.posted',data:{
+    messageId:'follow-long-answer',body:'Please clarify that answer.',requestKind:'reply',
+    toMemberId:'worker',replyToId:answered.request.responseMessageId
+  }});
+  const follow=await bridge.room.requestContext('follow-long-answer');
+  assert.equal(follow.preparation.previousExchanges.length,1);
+  assert.equal(follow.preparation.previousExchanges[0].messages.find(m=>m.id===answered.request.responseMessageId).body,body);
+  validateReplyRead(follow,{name:'room_read_request',args:{requestMessageId:'follow-long-answer'},roomId:'commons'});
+  assert.equal(follow.request.status,'open');
 });

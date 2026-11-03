@@ -3,6 +3,10 @@ import { currentRecordReplyCount,currentRecordReplyOwner } from './current-recor
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
+// Keep a worst-case escaped answer plus its envelope inside one 64 KiB
+// selected-context page. Questions and cancellation reasons retain 4,096.
+export const MAX_REPLY_RESPONSE_CHARS = 8192;
+export const MAX_REPLY_RESPONSE_COMMAND_BYTES = 65536;
 // Which credential route closed a request, stamped by the server on a response
 // (never taken from the caller). "account_session": the response arrived on a
 // human member's signed-in account session. That attests the route the server
@@ -15,7 +19,7 @@ export const REPLY_FIELDS = Object.freeze(["requestKind", "responseToRequestId",
 const own = (value, key) => Object.hasOwn(value, key);
 const id = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
-const text = value => typeof value === "string" && value.length <= 4096 && value.trim().length > 0;
+const text = (value, maximum = 4096) => typeof value === "string" && value.length <= maximum && value.trim().length > 0;
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const requireValid = (valid, message) => { if (!valid) throw new Error(message); };
 
@@ -115,7 +119,7 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 export function replyPostMode(data) {
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
-  const bodyKept = text(data.body) || (data.redacted === true && data.body == null);
+  const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
   requireValid(id(data.messageId) && bodyKept, "Reply requests require an explicit message and text");
   requireValid(!["packetId", "basisRevision", "allowOlderBasis"].some(key => own(data, key)), "Reply requests cannot include proposal fields");
   if (own(data, "requestKind")) {

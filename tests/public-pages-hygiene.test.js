@@ -61,8 +61,11 @@ test("sitemap lists compare pages and those pages return 200", async t => {
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /\/compare\/project-room-vs-slack/);
   assert.equal(xml.includes("/compare</loc>"), false);
-  const missing = await fetch(`${origin}/compare`);
-  assert.equal(missing.status, 404);
+  // No hub page and no sitemap entry; a bare /compare 301s to a real
+  // comparison instead of a 404 (tests/compare-index-redirect.test.js).
+  const bare = await fetch(`${origin}/compare`, { redirect: "manual" });
+  assert.equal(bare.status, 301);
+  assert.equal(bare.headers.get("location"), "/compare/project-room-vs-slack");
   const page = await fetch(`${origin}/compare/project-room-vs-slack`);
   assert.equal(page.status, 200);
   const html = await page.text();

@@ -16,7 +16,7 @@ import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.
 import { recordedReceiptsOptOut } from "./public-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
+import { acceptPrefersHtml, compareIndexRedirect, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation, readMessageContext } from "./conversation-sync.mjs";
 import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { readRoomAuthorityView } from "./room-authority-view.mjs";
@@ -779,6 +779,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
     nativeHandler: nativeEvents?.handler,
+    nativeStatus: nativeEvents?.status,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });
@@ -1349,7 +1350,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, oauthMetadataUrl });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, oauthMetadataUrl, signal: resolveRequestSignal() });
         }
         return writeRoomMcpNode(req, res, url);
       }
@@ -2621,6 +2622,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
+      const compareTarget = ["GET", "HEAD"].includes(req.method) ? compareIndexRedirect(url.pathname) : null;
+      if (compareTarget) {
+        res.writeHead(301, { Location: compareTarget });
+        return res.end();
+      }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         let data = null;

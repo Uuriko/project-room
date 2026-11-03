@@ -78,9 +78,22 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
     if(!validWorkPage(args))fail('invalid_work_page','Use limit 1–100 and a returned cursor.');
     const focus=args.focus??'all';
     if(!['all','needs_me','results','help_wanted'].includes(focus))fail('invalid_focus','Choose a supported work focus.');
-    if(args.query!==undefined||args.sort!==undefined||focus==='help_wanted')
+    if(args.query!==undefined||args.sort!==undefined)
       fail('current_work_selection_unavailable','This bounded listing supports all, needs_me, and results. Global search, ranking, and help eligibility require a qualified reader.',409);
+    if(focus==='help_wanted')return {
+      contractVersion:1,status:'selection_unavailable',roomId,viewerId:auth.member.id,
+      viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
+      viewerSessionBinding:auth.sessionBinding??null,viewerSessionRevision:auth.sessionRevision??null,
+      evaluatedAt:new Date(store.now()).toISOString(),clockSource:'service',
+      member:{id:auth.member.id,kind:auth.member.kind,permissions:[...auth.member.permissions]},
+      scope:{kind:'room',permissions:[...auth.member.permissions],externalExecution:false},
+      selection:{available:false,requestedFocus:'help_wanted',reason:'current_help_index_unavailable',
+        guidance:'Help invitations are unavailable on this storage representation until the invitation writer and index are qualified. This does not mean no invitations exist. Read work addressed to you, or list all work and follow its selected-work pointers. Neither read grants permission to offer, claim or execute.'},
+      nextRead:{tool:'room_list_work',arguments:{roomId,focus:'needs_me'}},
+      alternatives:[{tool:'room_list_work',arguments:{roomId,focus:'all'}}]
+    };
     return withCurrentReadContext(store.db,roomId,b=>{
+
       const head=readCurrentHead(store.db,roomId),limit=Math.min(args.limit??4,4);
       const initial={v:2,roomId,viewerId:auth.member.id,head:head.head_sha256,focus,limit,at:store.now(),workAfter:'',requestAfter:'',workDone:false,requestsDone:focus!=='needs_me'};
       const saved=args.cursor===undefined?initial:decode(args.cursor,store,secret);
