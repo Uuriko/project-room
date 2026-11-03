@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
+import { callHostedStdioTool, catchUpHint } from "../server/mcp-full-profile.mjs";
 
 function fixture(t) {
   const store = new RoomStore(":memory:");
@@ -51,7 +51,7 @@ test("saved marker: cold read points at it; one follow-up read returns only unha
   const after = await f.read({ latest: true, limit: 1 });
   assert.equal(after.messages[0].replyToId, "new-reply");
   // Reading did not move the marker.
-  assert.equal(f.store.catchUpCursor("commons", "worker1"), handled);
+  assert.equal(f.store.db.prepare("SELECT sequence FROM cursors WHERE room_id='commons' AND member_id='worker1'").get().sequence, handled);
 });
 
 test("latest:true and explicit after:0 carry no hint", async t => {
@@ -61,4 +61,21 @@ test("latest:true and explicit after:0 carry no hint", async t => {
   f.post("owner", "b");
   assert.equal((await f.read({ latest: true })).catchUp, undefined);
   assert.equal((await f.read({ after: 0 })).catchUp, undefined);
+});
+
+test("own-authored long suffix: hint is a bounded point lookup, never an event scan", async t => {
+  const f = fixture(t);
+  f.post("owner", "seed");
+  const handled = f.store.room("commons").sequence;
+  f.store.markCaughtUp(f.keys.worker1, "commons", handled);
+  for (let i = 0; i < 20; i++) f.post("worker1", `own-${i}`);
+  const db = f.store.db, seen = [];
+  const prepare = db.prepare.bind(db);
+  db.prepare = sql => { seen.push(sql); return prepare(sql); };
+  let hint; try { hint = catchUpHint(f.store, "commons", "worker1"); } finally { db.prepare = prepare; }
+  assert.equal(hint.after, handled, "saved marker, not advanced past own writes");
+  assert.equal(hint.acknowledges, false);
+  assert.equal(seen.some(sql => /\bFROM\s+events\b/i.test(sql)), false, `no event-table read: ${seen.join(" | ")}`);
+  // A member of another room's marker never leaks in: binding is room+member.
+  assert.equal(catchUpHint(f.store, "commons", "owner"), null);
 });
