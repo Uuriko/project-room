@@ -78,3 +78,72 @@ test("account-key sessions never outlive their parent credential, including gues
   advance(8 * 3600000);
   assert.throws(() => store.authenticateAccountSession(slot.token), /expired|revoked|ended/);
 });
+
+test('research: verified rotating login renews old default slot, and signout revokes it', t => {
+  const { store, owner, advance } = fixture(t), accountId=store.authenticate(owner).account.id;
+  const slot=store.createAccountSessionSlot();advance(29*86400000);
+  const result=store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true});
+  assert.equal(result.session.expiresAt,store.now()+30*86400000);
+  assert.throws(()=>store.authenticateAccountSession(slot.token),/expired|revoked|ended/);
+  advance(2*86400000);assert.equal(store.authenticateAccountSession(result.token).account.id,accountId);
+  store.logoutAccountSession(result.token,result.session.sessionRevision);
+  assert.throws(()=>store.authenticateAccountSession(result.token),/expired|revoked|ended/);
+});
+
+test('research: custom short slot and nonrotated slot retain their expiry', t => {
+  const { store, owner } = fixture(t), accountId=store.authenticate(owner).account.id;
+  const short=store.createAccountSessionSlot(60000);
+  const rotated=store.loginAccountSessionWithMethod(short.token,accountId,0,{method:{kind:'password'},rotateSlot:true});
+  assert.equal(rotated.session.expiresAt,short.session.expiresAt);
+  const slot=store.createAccountSessionSlot();
+  const unrotated=store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'}});
+  assert.equal(unrotated.expiresAt,slot.session.expiresAt);
+});
+
+test('research: explicit browser renewal handles prior short-lived rotated slots, without changing other callers', t => {
+  const { store, owner }=fixture(t),accountId=store.authenticate(owner).account.id;
+  const old=store.createAccountSessionSlot(20*86400000);
+  const renewed=store.loginAccountSessionWithMethod(old.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true});
+  assert.equal(renewed.session.expiresAt,store.now()+30*86400000);
+  const short=store.createAccountSessionSlot(60000);
+  assert.throws(()=>store.loginAccountSessionWithMethod(short.token,accountId,0,{method:{kind:'password'},renewBrowserSession:true}),/rotation/);
+  assert.equal(store.accountSessionSlot(short.token).expiresAt,short.session.expiresAt);
+});
+
+test('research: failed rotation rolls back the renewed slot and login', t => {
+  const {store,owner,advance}=fixture(t),accountId=store.authenticate(owner).account.id;
+  const slot=store.createAccountSessionSlot();advance(29*86400000);
+  const original=store.rotateAccountSessionSlot.bind(store);store.rotateAccountSessionSlot=()=>{throw Error('injected rotation fault')};
+  try{assert.throws(()=>store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true}),/injected/);}finally{store.rotateAccountSessionSlot=original;}
+  const after=store.accountSessionSlot(slot.token);assert.equal(after.expiresAt,slot.session.expiresAt);assert.equal(after.sessionRevision,0);
+  assert.throws(()=>store.authenticateAccountSession(slot.token),/expired|revoked|ended/);
+});
+
+test('research: competing login cannot extend or replace a rotated session', t => {
+  const {store,owner,advance}=fixture(t), accountId=store.authenticate(owner).account.id;
+  const slot=store.createAccountSessionSlot(); advance(29*86400000);
+  const first=store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true});
+  assert.throws(()=>store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true}),/expired|revoked|ended/);
+  assert.throws(()=>store.loginAccountSessionWithMethod(first.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true}),/revision|changed/);
+  const current=store.authenticateAccountSession(first.token);
+  assert.equal(current.sessionRevision,1);
+  assert.equal(current.expiresAt,first.session.expiresAt);
+});
+
+test('research: renewed account-key session never outlives its parent key', t => {
+ const {store,owner,advance}=fixture(t),accountId=store.authenticate(owner).account.id;
+ const slot=store.createAccountSessionSlot();advance(29*86400000);
+ const key=store.insertAccountCredential(accountId,store.now()+8*3600000);
+ const result=store.loginAccountSession(slot.token,key,0,{rotateSlot:true,renewBrowserSession:true});
+ assert.equal(result.session.expiresAt,store.now()+8*3600000);
+ advance(8*3600000);assert.throws(()=>store.authenticateAccountSession(result.token),/expired|revoked|ended/);
+});
+
+test('research: renewed key login fails atomically on wrong key or failed rotation', t => {
+ const {store,owner,advance}=fixture(t),accountId=store.authenticate(owner).account.id;
+ const slot=store.createAccountSessionSlot();advance(29*86400000);
+ assert.throws(()=>store.loginAccountSession(slot.token,'A'.repeat(43),0,{rotateSlot:true,renewBrowserSession:true}),/expired|revoked|ended/);
+ const key=store.insertAccountCredential(accountId,store.now()+86400000),original=store.rotateAccountSessionSlot.bind(store);store.rotateAccountSessionSlot=()=>{throw Error('injected')};
+ try{assert.throws(()=>store.loginAccountSession(slot.token,key,0,{rotateSlot:true,renewBrowserSession:true}),/injected/);}finally{store.rotateAccountSessionSlot=original;}
+ const after=store.accountSessionSlot(slot.token);assert.equal(after.expiresAt,slot.session.expiresAt);assert.equal(after.sessionRevision,0);
+});
