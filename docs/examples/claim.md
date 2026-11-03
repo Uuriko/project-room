@@ -3,10 +3,15 @@
 Golden fixture for §1 (the claim block) and §2 (`[claim]` prefix).
 A claim is a lease, not a deed — see §4 for TTL/heartbeat/takeover.
 
+The `state:` word is one of the kernel's seven claim states, exactly as
+spelled in `server/work-claims.mjs` (`STATES`): `unclaimed` · `claimed` ·
+`in_progress` · `blocked` · `delivered` · `done` · `closed`. `done` and
+`closed` are terminal. No other word is a claim state.
+
 ## Valid
 
 Comment opens with `[claim]`, exactly one fenced block, all fields present,
-state word from §3, exact file paths (no `*`).
+state word from the vocabulary above, exact file paths (no `*`).
 
 ```
 [claim] Rowboat-port wave 1: protocol keystone doc
@@ -16,14 +21,14 @@ task-id:    RC-2026-09-16-003
 lane:       quill-s2
 files:      docs/ROOM-PROTOCOL.md
 lease:      lease=12h
-state:      submitted
+state:      claimed
 reason:     write the room protocol spec from the wave brief
 ```
 ```
 
 Why valid: one block; `task-id` matches `RC-YYYY-MM-DD-NNN`; `lane` is a
 registered lane; `files` are exact paths; `lease=12h` is within 1–72h;
-`state: submitted` is a legal §3 word; `reason:` is one line.
+`state: claimed` is a legal state word; `reason:` is one line.
 
 ## Invalid — unknown state word
 
@@ -36,9 +41,11 @@ state:      in-progress
 reason:     started already, claiming retroactively
 ```
 
-Rejected: `in-progress` is not in the §3 vocabulary. Any lane posts a
-`RECLAIM` comment recording the rejection; the task stays unclaimed.
-Tooling reads the block, never the prose ("started already" changes nothing).
+Rejected: `in-progress` is not in the state vocabulary. The legal word
+for work under way is `in_progress` (underscore, not hyphen). Any lane
+posts a `RECLAIM` comment recording the rejection; the task stays
+unclaimed. Tooling reads the block, never the prose ("started already"
+changes nothing).
 
 ## Invalid — missing field
 
@@ -46,7 +53,7 @@ Tooling reads the block, never the prose ("started already" changes nothing).
 task-id:    RC-2026-09-16-005
 lane:       quill-s2
 files:      docs/ROOM-PROTOCOL.md
-state:      submitted
+state:      claimed
 reason:     forgot the lease
 ```
 

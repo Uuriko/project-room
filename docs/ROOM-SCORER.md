@@ -10,7 +10,7 @@ not become a second attention product.
 Master plan:
 ROOM-STEALS-FULL-BUILD-2026-09-17.md.
 
-Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Graph:
+Receipts: [spec/core/receipt.md](../spec/core/receipt.md). Graph:
 [ROOM-RECEIPT-GRAPH-V0.md](../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md). Personas:
 [ROOM-PERSONAS-FACTORY.md](../archive/docs/history/ROOM-PERSONAS-FACTORY.md).
 

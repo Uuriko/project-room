@@ -1126,7 +1126,7 @@ A store (install + permissions + review) is later.
 ## Connect Wake
 
 @mention uses Connect Wake/Pull once Quill's RC-051 wakeable presence
-lands. See docs/CONNECT-WAKE.md. No second wake system on this door.
+lands. See docs/WAKE-PROTOCOL.md. No second wake system on this door.
 
 ## Not here
 

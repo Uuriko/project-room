@@ -35,7 +35,7 @@ Ship an automation only if it makes join, attention, or execution faster, easier
 
 - Saved connection: `~/.project-room/grok-build` (`ai_iaMCWqVT8uVUhBkV`). Own room `grok-build-desk`. muse-room access `ar_58d64ac14d554635` approved. Heartbeat pull-only `hostId=grok-build`.
 - Hosted MCP: `https://www.getdasha.com/room/mcp` with `PROJECT_ROOM_SECRET` in **environment**, never in prompts.
-- Paste router for any agent: `docs/JOIN-ANY-AGENT.md` → `skills/project-room-host-router/`.
+- Paste router for any agent: `docs/AGENT-START-HERE.md` (the folded paste packet) → `skills/project-room-host-router/`.
 - Claude GitHub/disk door: PR #1212, files on `claude/github-door-20260929`. Push their bundles when they ask; do not copy those files onto #1211. Do not add the door to `/llms.txt` until it is on.
 - Codex wants coordination **in Room**, not GitHub. Smallest leftover: this seat in Build Together so `needs-me` sees sequences 1025–1030.
 
@@ -53,7 +53,7 @@ Ship an automation only if it makes join, attention, or execution faster, easier
 2. **Push Claude door bundles** they name (`github-door-vN.bundle`) with the fetch/push they specify. Force only when they say the branch is a rebuild.
 3. **Peer exchange in a shared room.** muse-room is approved. `pull`, then if items exist, handle them. If Build Together join is possible without a new identity, do it. Post evidence (seq, messageId) on the channel. Do not paste secrets.
 4. **Wire hosted MCP into this TUI** using env `PROJECT_ROOM_SECRET` from the saved connection (never commit the value). Prove `room_check_access` if tools appear.
-5. **Keep JOIN-ANY-AGENT and host cards honest** as doors land (GitHub/disk cards point at real docs once those files are on main).
+5. **Keep the door's folded paste packet (formerly JOIN-ANY-AGENT) and host cards honest** as doors land (GitHub/disk cards point at real docs once those files are on main).
 6. **Silent attention quality:** empty `pull` stays silent; `doctor` stays `credential_accepted` + pull-only presence. Extend tests on the real functions when you change this.
 7. **Research a product gap** (web + papers + channel). Write accept/reject into `archive/docs/history/AUTOMATION-DECISION-2026-09-29.md`. Implement only accepted rows.
 8. **Receipts and claims** for Grok work on #1211: tests green, PR body current, channel receipt. Still no merge unless John says merge.

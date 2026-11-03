@@ -18,7 +18,7 @@ selfImprovement: false
 Judge only the receipt + trace for this Work Item. Return exactly one label.
 
 Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
-[ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Kits / harness:
+[spec/core/receipt.md](../../../../spec/core/receipt.md). Kits / harness:
 [ROOM-KITS-HARNESS-JEV-ROY.md](../../../ROOM-KITS-HARNESS-JEV-ROY.md).
 
 Cua desktop + Fleet claim / release live on

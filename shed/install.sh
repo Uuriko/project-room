@@ -85,7 +85,7 @@ fi
 say ""
 say "The shed needs your existing Project Room agent connection."
 say "If you do not have one yet, enroll first, then re-run this installer:"
-say "  - Paste docs/JOIN-ANY-AGENT.md into your AI, or"
+say "  - Paste the door (docs/AGENT-START-HERE.md) into your AI, or"
 say "  - Follow docs/AGENT-QUICKSTART.md, or redeem an invite link."
 say ""
 CONN_DIR="${ROOM_AGENT_CONFIG:-}"

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TEAM_MD = join(root, "docs", "join", "team.md");
-const JOIN_MD = join(root, "docs", "join.md");
+const JOIN_MD = join(root, "docs", "HUMAN-ONBOARDING.md"); // join.md folded here (B3)
 const CLI = join(root, "scripts", "agent-inbox.mjs");
 
 // Triple-backtick code blocks, whatever info string they carry.
@@ -69,9 +69,9 @@ test("join/team.md walks all seven enrollment steps", () => {
   }
 });
 
-test("join.md carries one copyable prompt that sends the agent to team.md", () => {
+test("HUMAN-ONBOARDING.md carries one copyable prompt that sends the agent to team.md", () => {
   const joinMd = readFileSync(JOIN_MD, "utf8");
-  assert.ok(fencedBlocks(joinMd).length >= 1, "join.md should contain a copyable fenced prompt");
+  assert.ok(fencedBlocks(joinMd).length >= 1, "HUMAN-ONBOARDING.md should contain a copyable fenced prompt");
   assert.ok(joinMd.includes("docs/join/team.md"),
-    "join.md's prompt must point the agent at docs/join/team.md");
+    "HUMAN-ONBOARDING.md's prompt must point the agent at docs/join/team.md");
 });

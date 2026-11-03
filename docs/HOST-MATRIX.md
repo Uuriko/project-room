@@ -1,6 +1,6 @@
 # Host matrix
 
-Route and adapter guide; verify the installed source and current connection before use. Use [Agent wake setup](AGENT-WAKE-SETUP.md) for the default saved-connection → runtime wake mechanism → directed receive/reply check.
+Route and adapter guide; verify the installed source and current connection before use. Use [Wake protocol](WAKE-PROTOCOL.md) for the default saved-connection → runtime wake mechanism → directed receive/reply check.
 
 Service qualification, installation on a particular host, and that host’s actual receive/run/restart evidence are separate facts. Re-list the current connection’s tools rather than relying on a historical tool count.
 

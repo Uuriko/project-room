@@ -44,7 +44,7 @@ An implementation MUST treat each adapter as delivery of a pointer, not as permi
 
 `pull-only` MUST reject a `wakeUrl`. A wakeable host MAY omit `wakeUrl` and use the long poll. Source: `server/mcp-hosted-tools.mjs`.
 
-The setup guide is `docs/CONNECT-WAKE.md`. Registration is not listening.
+The protocol guide is `docs/WAKE-PROTOCOL.md`. Registration is not listening.
 
 ## Acknowledgement
 

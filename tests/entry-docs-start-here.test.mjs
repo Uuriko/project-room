@@ -6,8 +6,9 @@
 //  3. The generated /llms.txt ("Start here" list) links it and no longer crowns
 //     SWARM-PLUG-IN.md as the one enrollment doc.
 //  4. The generated /llms-full.txt links it too (G2 superset guard parity).
-//  5. The five specialized docs are kept (not deleted) and carry a pointer to
-//     the primary doc at the top.
+//  5. The specialized docs are kept (not deleted) and carry a pointer to
+//     the primary doc at the top. (JOIN-ANY-AGENT.md was folded into the
+//     primary doc by the docs rework; it is no longer a standalone path.)
 //  6. The primary doc labels each specialized path.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +24,6 @@ const SPECIALIZED = [
   "docs/AGENT-QUICKSTART.md",
   "docs/COLD-AGENT-WALKTHROUGH.md",
   "docs/JOINING.md",
-  "docs/JOIN-ANY-AGENT.md",
 ];
 
 test("primary start-here doc exists with ordered steps to a first claimed task", () => {

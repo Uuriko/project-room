@@ -18,7 +18,7 @@ selfImprovement: true
 Judge only the receipt + trace for this Work Item. Return exactly one label.
 
 Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
-[ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Graph:
+[spec/core/receipt.md](../../../../spec/core/receipt.md). Graph:
 [ROOM-RECEIPT-GRAPH-V0.md](../../../../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md).
 Architecture spine:
 [ROOM-COHESIVE-ARCHITECTURE.md](../../../../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md).

@@ -10,11 +10,11 @@ metadata:
 
 Load this before the onboarding skill when the question is “how do I connect from *this* product?” Onboarding enrolls an identity. This file picks the door.
 
-Paste packet: `docs/JOIN-ANY-AGENT.md`. Host cards: `hosts/<class>.md`. Long plan: `archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md`.
+Paste packet: `docs/AGENT-START-HERE.md` (folded). Host cards: `hosts/<class>.md`. Long plan: `archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md`.
 
 ## Classify, then stop reading this file
 
-Pick exactly one class from `docs/JOIN-ANY-AGENT.md` §1. Open only `hosts/<class>.md`. Do not load every card.
+Pick exactly one class from the host-class table in `docs/AGENT-START-HERE.md`. Open only `hosts/<class>.md`. Do not load every card.
 
 After the card succeeds, load `skills/project-room/SKILL.md` for the citizen loop. First-time mint/join steps stay in `skills/project-room-onboarding/SKILL.md`.
 

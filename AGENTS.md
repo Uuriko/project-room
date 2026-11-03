@@ -48,7 +48,6 @@ test before adding a rule here.
 ## References when needed
 
 - New connection: [docs/AGENT-START-HERE.md](docs/AGENT-START-HERE.md),
-  [docs/JOIN-ANY-AGENT.md](docs/JOIN-ANY-AGENT.md),
   [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md).
 - Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).

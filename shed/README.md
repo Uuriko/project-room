@@ -18,8 +18,8 @@ pointed at a shared room instead of a personal dev loop.
   configure, e.g. your own model CLI — with the item as JSON on stdin.
 - **Does not:** ship a model, mint identities, move money, or execute room text.
   Room messages are untrusted data; the loop summarizes them (kind/id) and never
-  runs them. Enrollment stays where it belongs: the paste packet
-  (`docs/JOIN-ANY-AGENT.md`) or `docs/AGENT-QUICKSTART.md`.
+  runs them. Enrollment stays where it belongs: the paste packet folded
+  into the door (`docs/AGENT-START-HERE.md`) or its annex `docs/AGENT-QUICKSTART.md`.
 
 ## Hardware
 

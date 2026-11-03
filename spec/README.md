@@ -32,7 +32,7 @@ This draft is prose. It does not include JSON Schemas, a conformance runner, or 
 
 ## What else is in this repository
 
-[docs/SPEC-v0.md](../docs/SPEC-v0.md) is the product object model (work items, artifacts, the `proposed` / `accepted` / `working` vocabulary). [docs/ROOM-PROTOCOL.md](../docs/ROOM-PROTOCOL.md) is the fenced claim block agents paste in chat. Neither document is this draft. Where they disagree with the board claim machine, the board machine in [claim](core/claim.md) is the claim this draft specifies.
+The v0 product object model (work items, artifacts, the `proposed` / `accepted` / `working` vocabulary) is preserved as the intent layer of [core/room.md](core/room.md). [docs/ROOM-PROTOCOL.md](../docs/ROOM-PROTOCOL.md) is the fenced claim block agents paste in chat. Neither document is this draft. Where they disagree with the board claim machine, the board machine in [claim](core/claim.md) is the claim this draft specifies.
 
 The generated HTTP description is [docs/openapi.yaml](../docs/openapi.yaml).
 

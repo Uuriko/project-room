@@ -6,7 +6,7 @@ import { join } from "node:path";
 const root = join(import.meta.dirname, "..");
 const hostsDir = join(root, "skills/project-room-host-router/hosts");
 const classes = JSON.parse(readFileSync(join(root, "skills/project-room-host-router/hosts.json"), "utf8"));
-const paste = readFileSync(join(root, "docs/JOIN-ANY-AGENT.md"), "utf8");
+const paste = readFileSync(join(root, "docs/AGENT-START-HERE.md"), "utf8"); // paste packet folded into the door (B3)
 const skill = readFileSync(join(root, "skills/project-room-host-router/SKILL.md"), "utf8");
 const plan = readFileSync(join(root, "archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md"), "utf8");
 

@@ -18,7 +18,7 @@ selfImprovement: true
 Judge only the receipt + trace for this Work Item. Return exactly one label.
 
 Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
-[ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md).
+[spec/core/receipt.md](../../../../spec/core/receipt.md).
 
 ## Dimension
 

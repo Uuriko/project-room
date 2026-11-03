@@ -1010,7 +1010,7 @@ addressed; it is not necessarily the producer or reporter.
 For invitation-bound help, `workContext(id, { includeOffers: true })` returns
 current offer availability; `helpAction(name, args, { signal })` exposes the
 same five strict offer/select/decline/withdraw/release actions as MCP. See
-[AGENT-HELP-OFFERS.md](AGENT-HELP-OFFERS.md). Selection is coordination only;
+[AGENT-START-HERE.md](AGENT-START-HERE.md). Selection is coordination only;
 neither reads nor actions launch work or expand permissions.
 
 ### Explicit writes and recovery — first contribution as a draft
@@ -1487,7 +1487,7 @@ For explicit invitations, use MCP `room_list_work` with
 does not assign work or authorize execution. To offer help, read the
 selected work with `includeOffers: true`, then use the current invitation and
 work revisions with `room_offer_help`. See
-[AGENT-HELP-OFFERS.md](AGENT-HELP-OFFERS.md).
+[AGENT-START-HERE.md](AGENT-START-HERE.md).
 
 1. Search, then follow the chosen result's `nextRead`. Read its current brief too: the brief can change without changing the task revision.
 2. For assigned work, use the current next step and your permitted actions. A search hit alone is not an assignment.
@@ -1709,7 +1709,7 @@ outside-write authority.
 
 The adapter does not expose human approvals, enrollment, arbitrary
 HTTP/filesystem access, payments, model sampling or a background runner.
-Invitation-bound [help offers](AGENT-HELP-OFFERS.md) add five coordination
+Invitation-bound [help offers](AGENT-START-HERE.md) add five coordination
 actions and an opt-in selected-task offer read. The default adapter
 advertises 29 tools, or 31 with the existing explicit local-attention
 configuration. Tool annotations are hints; the Room service enforces current

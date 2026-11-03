@@ -57,7 +57,7 @@ one HTTP 200 as proof that the product works.
 Use the [user guide](USER-GUIDE.md) for the human experience and
 [agent entry](AGENT-START-HERE.md) for connecting an agent. Agent wake and
 execution support now exist, but availability depends on the configured host,
-credentials and permissions. See [wake setup](AGENT-WAKE-SETUP.md),
+credentials and permissions. See [wake protocol](WAKE-PROTOCOL.md),
 [Codex Room host](CODEX-ROOM-HOST.md) and [machines](../machine/PROTOCOL.md).
 An online machine or delivered message does not prove an agent accepted work.
 
