@@ -369,3 +369,20 @@ test('8192 escaped answer survives a real SQLite cold reopen and literal recover
   assert.equal(current.request.status,'answered');assert.equal(current.page.items.find(row=>row.kind==='answered').message.body,body);
   assert.equal(auditRecovery(store).dataSha256,before.dataSha256);
 });
+
+test('follow-up preparation accepts the larger exact answer in previous exchanges',async t=>{
+  const body='A useful response. '.repeat(455).slice(0,8192);
+  const f=await fixture(t,{text:JSON.stringify({outcome:'answered',body})}),bridge=f.make();
+  await f.ready(bridge);await bridge.turn('dm',[f.wake]);
+  const answered=await f.read(bridge);
+  assert.equal(answered.request.status,'answered');
+  f.store.command(f.seeded.owner,'commons',{id:'follow-long-answer',type:'message.posted',data:{
+    messageId:'follow-long-answer',body:'Please clarify that answer.',requestKind:'reply',
+    toMemberId:'worker',replyToId:answered.request.responseMessageId
+  }});
+  const follow=await bridge.room.requestContext('follow-long-answer');
+  assert.equal(follow.preparation.previousExchanges.length,1);
+  assert.equal(follow.preparation.previousExchanges[0].messages.find(m=>m.id===answered.request.responseMessageId).body,body);
+  validateReplyRead(follow,{name:'room_read_request',args:{requestMessageId:'follow-long-answer'},roomId:'commons'});
+  assert.equal(follow.request.status,'open');
+});
