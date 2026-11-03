@@ -292,7 +292,23 @@ export class Bridge {
   // claim note so it lands in that claim's thread.
   async acceptClaim(signal) {
     if (!CLAIM_WAKE_REASONS.includes(signal.reason)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
-    const claim = await this.room.claim(signal.workClaim);
+    let claim;
+    try { claim = await this.room.claim(signal.workClaim); }
+    catch (error) {
+      if (!(error instanceof RoomError) || error.status !== 404 || error.code !== 'work_claim_not_found') throw error;
+      // A definitive absent claim must not strand unrelated current wakes.
+      // Recheck room access and the listener before retiring this old signal.
+      const authority = await this.refreshRoom();
+      await this.assertListener();
+      if (signal.roomId !== this.connection.roomId || !authority.members[this.connection.memberId] || authority.me.active === false)
+        throw new RoomError(403, 'access_denied', 'Missing claim wake is not bound to this active room member');
+      const {receipt} = this.claimReceipts.begin(signal.signalId, {phase:'discarded', disposition:'claim_missing'});
+      if (!['posted', 'discarded'].includes(receipt.phase)) {
+        this.log(`claim ${signal.workClaim} is missing; retained ${receipt.phase} execution for inspection without acknowledgement`);
+        return;
+      }
+      await this.ack([signal.signalId]); this.stats.skipped++; return;
+    }
     if (TERMINAL_CLAIM_STATES.includes(claim?.state)) {
       this.log(`ignored claim ${signal.workClaim} (${signal.reason}): claim is ${claim.state} (terminal)`);
       await this.ack([signal.signalId]); this.stats.skipped++; return;
@@ -459,13 +475,21 @@ export class Bridge {
     await this.agentReady();
     if (this.controller.signal.aborted) return;
     const selected = await this.readThread(receipt.threadKey, {selected:true});
-    const formal = selected.replyRequest?.recipientId === this.connection.memberId
+    let formal = selected.replyRequest?.recipientId === this.connection.memberId
       ? await readCompleteRequest(this.room, receipt.threadKey) : null;
     if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
     const thread = formal ? selected.thread : (await this.readThread(receipt.threadKey)).thread;
     const {sessionId, created} = await this.host.session(receipt.threadKey);
+    if (formal) {
+      // Session startup may wait while the requester cancels or adds context.
+      // Only the fresh complete request can authorize and prepare this turn.
+      formal = await readCompleteRequest(this.room, receipt.threadKey);
+      if (formal.request.status !== 'open' || formal.current?.actions?.answer !== true) {
+        this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
+      }
+    }
     if (!(await this.authorized({messageIds:receipt.messageIds}))) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }

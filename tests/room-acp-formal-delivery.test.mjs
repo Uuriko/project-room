@@ -290,7 +290,8 @@ for (const terminalLimit of [false,true]) test(`actual wake redelivery survives 
     assert.equal(bridge.stopReason,'context_unavailable');assert.equal(bridge.controller.signal.aborted,true);
     assert.equal(f.counts.prompts,0);assert.ok((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId));
   }else{
-    assert.equal(preparations,3);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
+    // Two failures, successful preparation, then the fresh post-session check.
+    assert.equal(preparations,4);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');
     assert.equal((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId),false);
   }
 });
