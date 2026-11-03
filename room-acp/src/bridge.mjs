@@ -507,7 +507,24 @@ export class Bridge {
     if (formal && (formal.request.status !== 'open' || formal.current?.actions?.answer !== true)) {
       this.chatReceipts.save(key, {...receipt, phase:'discarded'}); return;
     }
-    const thread = formal ? selected.thread : (await this.readThread(receipt.threadKey)).thread;
+    let thread = selected.thread;
+    if (!formal) {
+      try { thread = (await this.room.thread(receipt.threadKey)).thread; }
+      catch (error) {
+        // This ordinary batch has not started a model/session. Preserve its
+        // exact inputs without ACK, rather than stopping independent threads.
+        if (error instanceof RoomError && error.status === 413 && error.code === 'current_thread_too_large') {
+          const selectedRead = {method:'GET', path:`/api/rooms/${encodeURIComponent(this.connection.roomId)}/messages/${encodeURIComponent(receipt.threadKey)}/thread?view=message`};
+          this.chatReceipts.save(key, {...receipt, contextBlocked:{version:1,
+            code:error.code, roomId:this.connection.roomId, threadKey:receipt.threadKey,
+            requestId:receipt.requestId, selectedRead}});
+          this.log(`Ordinary thread ${receipt.threadKey} parked (${error.code}); ${receipt.signalIds.length} wakes remain unacknowledged. Selected review: GET ${selectedRead.path}. Message IDs are retained in the queued receipt.`);
+          return;
+        }
+        this.stopForContextLimit(error);
+        throw error;
+      }
+    }
     const {sessionId, created} = await this.host.session(receipt.threadKey);
     if (formal) {
       // Session startup may wait while the requester cancels or adds context.
@@ -591,6 +608,16 @@ export class Bridge {
     if (receipt.phase==='linked') return this.deliverChatReceipt(receipt.groupKey);
     if (receipt.phase==='needs_review') return;
     if (receipt.phase === 'queued') {
+      if (receipt.contextBlocked !== undefined) {
+        const blocked = receipt.contextBlocked;
+        const path = `/api/rooms/${encodeURIComponent(this.connection.roomId)}/messages/${encodeURIComponent(receipt.threadKey)}/thread?view=message`;
+        if (!blocked || blocked.version !== 1 || blocked.code !== 'current_thread_too_large'
+          || blocked.roomId !== this.connection.roomId || blocked.threadKey !== receipt.threadKey
+          || blocked.requestId !== receipt.requestId || blocked.selectedRead?.method !== 'GET'
+          || blocked.selectedRead.path !== path)
+          throw Error('Invalid blocked context receipt; manual recovery required');
+        return; // No full-context reload, model turn, POST or ACK on replay.
+      }
       await this.executeQueuedChatReceipt(key, receipt);
       receipt = this.chatReceipts.read(key);
       if (receipt.phase === 'queued') return;

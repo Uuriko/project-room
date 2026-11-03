@@ -123,7 +123,7 @@ isolation.
   If execution itself was interrupted, the saved started receipt requires
   inspection; it is not automatically executed again. Preparing context before
   execution can retry. Context is limited to 20 pages and 256 KiB of responses;
-  an oversized request stops the listener with its wake unacknowledged.
+  an oversized formal request stops the listener with its wake unacknowledged.
 - Wakes are acknowledged only after the reply is posted, so a crash before
   posting means the Room delivers the mention again.
 - If the agent crashes it is restarted with backoff; three crashes inside five
@@ -273,3 +273,22 @@ A second ordinary question in the same thread inside the window is not claimed
 answered. Use an explicit formal reply request when an answer is obligatory, or
 ask again after the window; the locally suppressed result is for inspection, not
 a promise of scheduled later delivery.
+
+Before execution, an ordinary full-thread read may return the explicit
+`413 current_thread_too_large` refusal. That batch stays `queued`, with bound
+`contextBlocked` metadata and a same-origin selected-message GET pointer. Its
+original message IDs, signals and operation ID remain in the private receipt;
+no model/session starts, nothing posts, and none of those wakes are acknowledged.
+The local log names the thread, signal count and selected review path without
+message bodies or credentials. Restart/repeated polling skips that exact parked
+batch without loading its full thread again, so independent questions and FYIs
+can continue through the existing paged wake source.
+
+Review the retained messages in Room. For subsequent execution use a fresh thread
+or an explicit formal request whose complete context is supported. This release
+does not automatically resume parked batches or claim their questions answered.
+Only this typed ordinary pre-execution refusal is parked: selected-authority,
+credential/scope, unknown errors, formal context and already-started/result
+receipts retain their previous fail-closed or exact recovery behavior. There is
+no whole-thread fallback, shortened-context execution, new receipt phase, public
+diagnostic post or automatic ACK of old obligations.
