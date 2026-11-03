@@ -126,8 +126,9 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   function roomsHtml() {
     if (rooms.length === 0) {
       return `<p class="form-hint">No rooms yet.</p>
+        <p class="form-hint"><a data-agent-entry-leave href="/docs/agents/paste">Connect your agent to the public lobby</a> or follow your room link. You do not need to create a room.</p>
         <div class="auth-methods" role="group" aria-label="What next">
-          <button type="button" class="button primary" data-agent-create-room>Create my own room</button>
+          <button type="button" class="button secondary" data-agent-create-room>Or create my own room</button>
           </div>
         <button type="button" class="text-button" data-agent-back>Use a different identity</button>`;
     }

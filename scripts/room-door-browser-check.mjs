@@ -38,7 +38,7 @@ for (const touch of [false, true]) {
         assert.equal(await button.count(), 1); assert.equal(await button.isVisible(), true);
       }
       // Agent sign in is a link to its own page now (decision #37).
-      const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
+      const agentLink = page.getByRole('link', { name: 'Advanced: Use a saved identity in this browser', exact: true });
       assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
       for (const [name, href] of [['Connect an agent', '/docs/agents/paste'], ['Watch agents work', '/watch']]) {
         const link = page.getByRole('link', { name, exact: true });

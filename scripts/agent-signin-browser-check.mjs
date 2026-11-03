@@ -42,13 +42,17 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator("#agent-signin-button").click();
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
     assert.equal(new URL(page.url()).pathname === "/agent-signin", true);
-    assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "page load preserves the start of keyboard navigation");
+    await page.goto(`http://127.0.0.1:${server.address().port}/agent-signin`);
+    assert.equal(await page.locator('[name="identityId"]').isVisible(), false, "ordinary arrival keeps credentials behind a closed disclosure");
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "ordinary page load preserves the start of keyboard navigation");
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.activeElement.className), "skip-link");
     const skipBox = await page.locator(".skip-link").boundingBox();
     assert.ok(skipBox && skipBox.x >= 0 && skipBox.y >= 0, "focused skip link is visible");
     await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "main");
+    await page.locator("#saved-identity summary").focus();
+    await page.keyboard.press("Enter");
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
     assert.equal(await page.evaluate(() => document.activeElement.name), "identityId", "invalid submission still focuses the required field");
     let pendingRoute;
@@ -63,6 +67,8 @@ test("visible entry choices open focused flows without hiding pending agent sign
     // same way through the same leave()).
     await page.locator("#agent-signin-home").click();
     assert.equal(new URL(page.url()).pathname === "/agent-signin", true, "pending request stays visible");
+    await page.locator("#agent-connect-guide").click();
+    assert.equal(new URL(page.url()).pathname, "/agent-signin", "connection guide respects the same pending-request leave guard");
     assert.equal(await page.locator('[data-agent-form="credentials"]').isVisible(), true);
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
@@ -73,7 +79,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator("#agent-signin-home").click();
     await page.locator("#agent-signin-button").click();
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
-    assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY", "leaving clears the phase and reopening preserves page navigation");
+    assert.equal(await page.locator("#saved-identity").evaluate(node => node.open), true, "explicit saved-identity navigation opens the advanced form");
     await page.unroute("**/api/auth/agent/rooms");
     await page.route("**/api/auth/agent/rooms", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rooms: [], displayName: "Synthetic UI agent" }) }));
     await page.route("**/api/agent-identities", route => route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ identityId: "ai_synthetic_ui", secret: "synthetic-test-secret", privateKey: "synthetic-test-private-key" }) }));
@@ -258,6 +264,9 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   await page.locator('[data-agent-form="create"] button[type="submit"]').click();
   await page.locator('[data-agent-created]').waitFor();
   page.once("dialog", dialog => { assert.match(dialog.message(), /cannot be recovered/); return dialog.dismiss(); });
+  await page.locator("#agent-connect-guide").click();
+  assert.equal(await page.locator('[data-agent-created]').isVisible(), true, "guide navigation cannot discard unsaved credentials without confirmation");
+  page.once("dialog", dialog => { assert.match(dialog.message(), /cannot be recovered/); return dialog.dismiss(); });
   await page.locator("#agent-signin-home").click();
   assert.equal(await page.locator('[data-agent-created]').isVisible(), true);
   assert.equal(await page.locator('[data-agent-secret][type="password"]').count(), 2);
@@ -267,4 +276,42 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");
   assert.equal(await page.locator('[data-agent-secret]').count(), 0);
+});
+
+for (const width of [1280, 390]) test(`normal agent connection at ${width}px uses the guide without browser credentials`, { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const credentialRequests = [];
+  page.on("request", request => {
+    if (/\/api\/(agent-identities|agent-rooms|auth\/agent\/)/.test(new URL(request.url()).pathname)) credentialRequests.push(request.url());
+  });
+  await page.goto(origin);
+  await page.locator('#auth-panel .entry-public-actions a[href="/docs/agents/paste"]').click();
+  await page.locator("#agent-paste-prompt-1").waitFor({ state: "visible" });
+  assert.match(await page.locator("#agent-paste-prompt-1").inputValue(), /public lobby/);
+  await page.goto(origin + "/agent-signin");
+  assert.equal(await page.locator("#saved-identity").evaluate(node => node.open), false);
+  assert.equal(await page.locator('[name="identityId"]').isVisible(), false);
+  assert.match(await page.locator("main").innerText(), /do not need a Project Room account, an invitation or a new room/);
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement.className), "skip-link");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "agent-connect-guide");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  await page.screenshot({ path: `/tmp/agent-guide-first-${width}-1103.png`, fullPage: true });
+  await page.keyboard.press("Enter");
+  await page.waitForURL(origin + "/docs/agents/paste");
+  assert.equal(new URL(page.url()).pathname, "/docs/agents/paste");
+  await page.locator("#agent-paste-prompt-1").waitFor({ state: "visible" });
+  assert.match(await page.locator("#agent-paste-prompt-1").inputValue(), /saved connection/);
+  assert.deepEqual(credentialRequests, [], "normal guide navigation never mints an identity, creates a room or submits browser credentials");
 });

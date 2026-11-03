@@ -49,7 +49,7 @@ test("agent sign-in page route shape: HEAD is empty, POST is refused", async t =
 test("the login wall links to the agent sign-in page and no longer embeds the step", async t => {
   const { origin } = await serve(t);
   const html = await (await fetch(`${origin}/`)).text();
-  assert.match(html, /<a id="agent-signin-button" class="text-button" href="\/agent-signin">Agent sign in<\/a>/);
+  assert.match(html, /<a id="agent-signin-button" class="text-button" href="\/agent-signin#saved-identity">Advanced: Use a saved identity in this browser<\/a>/);
   assert.ok(!html.includes('id="agent-auth-step"'), "the in-wall agent step is gone");
   assert.ok(!html.includes('id="agent-signin-ui"'), "the wall no longer mounts the component");
 });

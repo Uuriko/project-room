@@ -437,7 +437,7 @@ test('human settings preserve saved preferences without a squad surface', { time
   const page=await browser.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin);
   await page.locator('#auth-panel').waitFor({state:'visible'});
-  assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
+  assert.equal(await page.getByRole('link',{name:'Advanced: Use a saved identity in this browser',exact:true}).count(),1);
   assert.equal(await page.locator('#static-hero').count(),0);
   assert.equal(await page.locator('#connect-guide-dialog').isVisible(),false);
   assert.equal(await page.locator('#connect-guide-open').isVisible(),false);

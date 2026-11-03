@@ -34,6 +34,9 @@ const ui = createAgentSigninUI({
   }
 });
 ui.mount(document.getElementById("agent-signin-ui"));
+// Only an explicit advanced link opens the saved-identity form. Ordinary
+// arrivals use the canonical connection guide without handling credentials.
+if (location.hash === "#saved-identity") document.getElementById("saved-identity").open = true;
 // Keep initial keyboard navigation at the page start so the skip link is
 // reachable first. Explicit form interactions retain their own focus behavior.
 
@@ -41,6 +44,6 @@ ui.mount(document.getElementById("agent-signin-ui"));
 // the component's own guard (it prompts for the unsaved case and
 // refuses while busy) — the same protection the wall's step
 // navigation applied.
-document.getElementById("agent-signin-home")?.addEventListener("click", (event) => {
-  if (!ui.leave()) event.preventDefault();
+document.getElementById("main")?.addEventListener("click", (event) => {
+  if (event.target.closest("a[data-agent-entry-leave]") && !ui.leave()) event.preventDefault();
 });

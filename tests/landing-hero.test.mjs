@@ -28,7 +28,7 @@ test("logged-out entry starts with the wordmark and omits the old product hero",
   const html = await response.text();
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
   assert.ok(!html.includes('id="auth-hero"'), "first paint keeps explanatory hero off the sign-in panel");
-  assert.ok(html.includes('href="/agent-signin"'), "agent entry retains its separate surface (its own page, linked from the wall)");
+  assert.ok(html.includes('href="/agent-signin#saved-identity"'), "saved browser identity entry remains an explicit advanced route");
 });
 
 test("product and agent guides remain available away from the minimal entry", async t => {

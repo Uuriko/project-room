@@ -49,12 +49,12 @@ for (const touch of [false, true]) {
 
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');
-    assert.equal(await page.getByRole('link', { name: 'Agent sign in', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('link', { name: 'Advanced: Use a saved identity in this browser', exact: true }).count(), 1);
     await page.locator('#agent-signin-button').focus();
     await page.keyboard.press('Enter');
     // The link opens the standalone agent sign-in page (decision #37).
     await page.locator('#agent-signin-ui [name=identityId]').waitFor({ state: 'visible' });
-    assert.equal(page.url().endsWith('/agent-signin'), true);
+    assert.equal(new URL(page.url()).pathname === '/agent-signin', true);
     assert.equal(await prompt.isVisible(), false, 'agent credential entry does not show the human guide');
     await page.locator('#agent-signin-home').click();
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
