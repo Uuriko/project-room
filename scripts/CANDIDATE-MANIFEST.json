@@ -81,7 +81,7 @@
     "room-acp/src/queue.mjs": "sha256:4705d70b507ce441853b5c0874d95d0a23d95e80d6ff7a8b30b21ff7ec8e45c3",
     "room-acp/src/redact.mjs": "sha256:50088678973ecc01ffda58a983eaa89e76f5184c8988e7368a150fcd364c7e30",
     "room-acp/src/render.mjs": "sha256:bbba8330664fb693a76f7f3e569b1487e0c13091de133cc6e09c765f99505e1b",
-    "room-acp/src/room.mjs": "sha256:ace23cfa000391ba408e44bd4bb261f36e2663152f49ced09f482aca83cc11fa",
+    "room-acp/src/room.mjs": "sha256:6e0cb3fa95fac901af051af10984c6698fd83bf72e067ad7cbbefa3b90627f4b",
     "room-acp/src/run.mjs": "sha256:d4ddceed8b56fabfe600e61e100b02e93ed6c8a1cc2cedbdc3ad4d0b5eb79cc0",
     "room-acp/src/sessions.mjs": "sha256:5d2bf0c6d7f410abb53f86779e44fe84ae74fb0775cd5cae20feedc5c202dde8",
     "scripts/build-agent-docs.mjs": "sha256:d6dd3a5e47dd9aa67e80143e36ea2866481c0765edf6b01aafe51aa48660d1e5",
