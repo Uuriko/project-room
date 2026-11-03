@@ -85,12 +85,13 @@ test('RoomClient.poll sends the cursor when one is given, and omits it otherwise
   const urls = [];
   const fetchImpl = async url => {
     urls.push(String(url));
-    return { ok: true, headers: { get: () => null }, json: async () => ({ pendingWakes: [] }) };
+    return { ok: true, headers: { get: () => null }, json: async () => ({ roomId: 'r', pendingWakes: [] }) };
   };
   const client = new RoomClient({ apiBase: 'http://localhost', roomId: 'r', memberId: 'agent', credential: 'x', fetchImpl });
   await client.poll({ hostId: 'h', waitMs: 0 });
   await client.poll({ hostId: 'h', waitMs: 0, cursor: 'cur sor/1' });
   assert.equal(urls.length, 2);
+  assert.equal(new URL(urls[0]).searchParams.get('roomId'), 'r');
   assert.ok(!urls[0].includes('cursor='));
   assert.ok(urls[1].includes(`cursor=${encodeURIComponent('cur sor/1')}`));
 });

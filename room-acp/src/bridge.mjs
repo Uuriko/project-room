@@ -247,6 +247,11 @@ export class Bridge {
   }
 
   stopForContextLimit(error) {
+    if (error instanceof RoomError && error.status === 409 && error.code === "wake_scope_unavailable") {
+      this.stopReason = "context_unavailable";
+      this.log("Room did not confirm the selected wake scope. Upgrade the server and check the saved room before restarting; foreign wakes remain unacknowledged.");
+      this.stop(); return true;
+    }
     if (!(error instanceof RoomError) || !(error.status === 413 && ['current_thread_too_large','formal_context_too_large'].includes(error.code)
       || error.status === 409 && ['selected_message_context_unavailable','selected_authority_unavailable'].includes(error.code))) return false;
     if (this.stopReason !== "context_unavailable") {

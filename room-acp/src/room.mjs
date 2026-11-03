@@ -79,9 +79,13 @@ export class RoomClient {
   heartbeat({ hostId, cadenceSeconds = 30 }) {
     return this.request("/api/agent-heartbeats", { body: { hostId, mode: "wakeable", cadenceSeconds, listenerLease: { roomId: this.roomId } } });
   }
-  poll({ hostId, waitMs = 25000, signal, cursor = null }) {
+  async poll({ hostId, waitMs = 25000, signal, cursor = null }) {
     const page = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-    return this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}${page}`, { timeoutMs: waitMs + 15000, signal });
+    const value = await this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}&roomId=${encodeURIComponent(this.roomId)}${page}`, { timeoutMs: waitMs + 15000, signal });
+    if (typeof this.roomId !== "string" || !this.roomId || value?.roomId !== this.roomId
+      || !Array.isArray(value.pendingWakes) || value.pendingWakes.some(wake => wake?.roomId !== this.roomId))
+      throw new RoomError(409, "wake_scope_unavailable", "Room did not confirm the selected wake scope; upgrade the server and check the saved room before restarting. No foreign wakes were handled.");
+    return value;
   }
   ack({ signalIds, fencingToken }) {
     return this.request("/api/agent-heartbeats/ack", { body: { signalIds, ...(fencingToken ? { fencingToken } : {}) } });
