@@ -61,3 +61,18 @@ test('only acquired selected listener advertises installed newest capability wit
   assert.equal(s.transaction(() => heartbeatWithListener(s,auth,{...input,hostId:'other'})).wakeSelection,undefined);
   assert.equal(s.transaction(() => heartbeatWithListener(s,auth,{hostId:'host',mode:'pull-only'})).wakeSelection,undefined);
 });
+
+test('newest common horizon crosses fully filtered byte windows without losing older signals', t => {
+  const s = fixture(t); seed(s, 1);
+  s.agentHeartbeats.heartbeat({agentId:'agent',hostId:'host',mode:'pull-only',workWakes:false});
+  s.transaction(() => { const insert=s.db.prepare("INSERT INTO agent_work_wakes VALUES(?,'agent','commons','worker','task',0,?,'owner',?,2,NULL,NULL)");
+    for(let n=0;n<40;n++)insert.run('work-'+String(n).padStart(3,'0'),'event-'+n,' '.repeat(8192)); });
+  const observed=[]; let cursor=null, emptyMore=0;
+  for(let n=0;n<10;n++) {
+    const p=s.agentHeartbeats.pendingWakePage('agent',{roomId:'commons',hostId:'host',order:'newest',cursor});
+    observed.push(...p.signals); if(!p.more)break;
+    if(!p.signals.length)emptyMore++; assert.ok(p.nextCursor); assert.notEqual(p.nextCursor,cursor);cursor=p.nextCursor;
+  }
+  assert.equal(emptyMore,2); assert.deepEqual(observed.map(x=>x.signalId),['commons-00000']);
+  assert.equal(s.db.prepare('SELECT count(*) n FROM agent_work_wakes WHERE delivered_at IS NOT NULL').get().n,0);
+});

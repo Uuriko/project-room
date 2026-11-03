@@ -888,7 +888,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
     }
     // Q3-B: the store page includes `more` when pendingWakes is truncated.
-    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability, listener } = store.transaction(() => {
+    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability, listener, wakeSelection } = store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       return heartbeatWithListener(store, auth, data, { roomKey });
@@ -909,7 +909,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // room the owner paused learns it before it asks anything in the room.
     const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
     return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
-      ...(listener ? { listener } : {}) });
+      ...(listener ? { listener } : {}), ...(wakeSelection ? { wakeSelection } : {}) });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
@@ -986,6 +986,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       return member.id;
     };
     const initialMemberId = selectedMember(auth);
+    const rawOrder = url.searchParams.get("order");
+    if (rawOrder !== null && (url.searchParams.getAll("order").length !== 1 || !["oldest", "newest"].includes(rawOrder))
+        || rawOrder === "newest" && roomId === null)
+      reject(422, "invalid_wake_poll", "order must be oldest or newest; newest requires a selected room");
+    const order = rawOrder ?? "oldest", selectionField = order === "newest" ? { order } : {};
     // hostId keys the per-host waiter slot below. A supplied hostId is
     // validated exactly as before. An OMITTED hostId is derived when the
     // identity has exactly one registered host — the cold-start shape:
@@ -1070,7 +1075,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       // notePoll gets waiterHostId — the REGISTERED host id (room-key
       // credentials register under the prefixed form) — so WorkWakes
       // consent matching sees the same host heartbeat() reports for.
-      const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId, hostId: waiterHostId, cursor });
+      const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId, hostId: waiterHostId, cursor, order });
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || immediate.more === true || waitMs === 0) {
@@ -1079,7 +1084,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         // BUILD-HEARTBEAT-CADENCE: it also carries the server-assigned
         // cadenceSeconds — the poll is the contract door for pull-only
         // seats that may never read a heartbeat response.
-        return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+        return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: immediate.pendingWakes,
           cadenceSeconds: immediate.cadenceSeconds,
           more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
@@ -1100,9 +1105,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (current.identityId !== auth.identityId || (current.roomId ?? null) !== boundRoomId
           || selectedMember(current) !== initialMemberId)
         reject(403, "identity_changed", "Credential or selected room binding changed during wake wait");
-      const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor });
+      const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor, order });
       const timedOut = !woken && fresh.pendingWakes.length === 0 && fresh.more !== true;
-      return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+      return json(res, 200, { agentId: auth.identityId, roomId, hostId: waiterHostId, ...selectionField, pendingWakes: fresh.pendingWakes,
         cadenceSeconds: fresh.cadenceSeconds,
         more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });

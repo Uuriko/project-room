@@ -104,11 +104,11 @@ export class WorkWakes {
     // door sleeps through the assignment until its wait expires.
     if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
-  pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false } = {}) {
+  pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false, order = "oldest" } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery
     // requires the reporting host, whose explicit consent is checked below.
     if (!this.available || hostId === null) return bounded ? { signals: [], more: false, through: null } : [];
-    const window = bounded ? readWakeWindow(this.db, 'agent_work_wakes', agentId, after, roomId) : null;
+    const window = bounded ? readWakeWindow(this.db, 'agent_work_wakes', agentId, after, roomId, order) : null;
     const rows = window ? window.rows : this.db.prepare(`SELECT * FROM agent_work_wakes WHERE agent_id=? AND delivered_at IS NULL
       AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))

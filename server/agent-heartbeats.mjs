@@ -1089,11 +1089,14 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null, order = "oldest" } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
-    const scope = [1, agentId, roomId, hostId];
+    check(["oldest", "newest"].includes(order) && (order !== "newest" || roomId !== null),
+      422, "invalid_wake_poll", "Newest wake discovery requires a selected room");
+    const newest = order === "newest", direction = newest ? -1 : 1;
+    const scope = [newest ? 2 : 1, agentId, roomId, hostId];
     let after = null;
     if (cursor !== null) {
       try {
@@ -1107,7 +1110,8 @@ export class AgentHeartbeats {
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
     const bounded = boundedWakeDeliveryActive(this.db);
-    const messageWindow = bounded ? readWakeWindow(this.db, 'agent_wake_signals', agentId, after, roomId) : null;
+    check(!newest || bounded, 503, "storage_unavailable", "Newest wake discovery requires installed bounded delivery indexes");
+    const messageWindow = bounded ? readWakeWindow(this.db, 'agent_wake_signals', agentId, after, roomId, order) : null;
     const messages = messageWindow ? messageWindow.rows.filter(row => (roomId === null || row.room_id === roomId) && !held.has(row.room_id)).map(signalView)
       : this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
@@ -1116,15 +1120,15 @@ export class AgentHeartbeats {
       ORDER BY created_at,signal_id LIMIT ?`)
       .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
         after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
-    const workWindow = bounded ? this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after, bounded: true })
+    const workWindow = bounded ? this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after, bounded: true, order })
       ?? { signals: [], more: false, through: null } : null;
     const work = workWindow ? workWindow.signals : this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
     // Never cross an unexamined source position. A fully filtered window may
     // yield an empty page with an honest continuation, without acknowledging it.
-    const horizons = bounded ? [messageWindow, workWindow].filter(window => window.more).map(window => window.through).sort(compareWakePosition) : [];
+    const horizons = bounded ? [messageWindow, workWindow].filter(window => window.more).map(window => window.through).sort((a, b) => direction * compareWakePosition(a, b)) : [];
     const horizon = horizons[0] ?? null;
-    const combined = [...messages, ...work].filter(signal => !held.has(signal.roomId) && (!horizon || compareWakePosition(signal, horizon) <= 0))
-      .sort(compareWakePosition);
+    const combined = [...messages, ...work].filter(signal => !held.has(signal.roomId) && (!horizon || direction * compareWakePosition(signal, horizon) <= 0))
+      .sort((a, b) => direction * compareWakePosition(a, b));
     const page = combined.slice(0, limit);
     const more = combined.length > limit || horizons.length > 0;
     const continuation = more ? combined.length > limit ? page.at(-1) : horizon : null;
@@ -1160,7 +1164,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null, hostId = null, cursor = null }) {
+  notePoll({ agentId, roomId = null, hostId = null, cursor = null, order = "oldest" }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -1187,7 +1191,7 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
-    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor, order });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
       // BUILD-HEARTBEAT-CADENCE: the poll response carries the

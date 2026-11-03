@@ -1,5 +1,6 @@
 // Shared synchronous heartbeat/receiving-lease operation. Call inside the same
 // transaction as fresh credential resolution. A lease never grants execution.
+import { boundedWakeDeliveryActive } from "./wake-delivery-window.mjs";
 import { ownMember } from "../src/events.js";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { assertRoomKeyPullOnly, roomKeyHostId, assertScopedKeyListener, scopedKeyHostId } from "./room-key-presence.mjs";
@@ -44,7 +45,7 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   // Presence reporting never fails because another host holds the
   // lease — the response says so (acquired:false + the active
   // listener's id).
-  let listener = null;
+  let listener = null, wakeSelection;
   if (data.listenerLease !== undefined) {
     const requestedRoom = data.listenerLease === true ? null : data.listenerLease.roomId;
     let leaseRoomId;
@@ -72,8 +73,10 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
     listener = lease.acquired
       ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
       : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
+    if (lease.acquired && leaseRoomId !== null && boundedWakeDeliveryActive(store.db))
+      wakeSelection = { version: 1, newest: true, roomId: leaseRoomId };
   }
-  return { ...result, listener };
+  return { ...result, listener, ...(wakeSelection ? { wakeSelection } : {}) };
 }
 
 // Graceful disconnect (#5382 follow-up): resolve the stored host id the same
