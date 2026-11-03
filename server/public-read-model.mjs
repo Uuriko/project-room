@@ -1279,13 +1279,67 @@ export function collectPublicReceipts(store) {
     .map(row => receiptWithOutcome(store, row));
 }
 
-export function listPublicReceiptSitemap(store, limit = 1000) {
-  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
+// The sitemap carries EVERY public receipt (consent #3710, D3/H2:
+// "/sitemap.xml carries every public receipt"). Two legs:
+//   - Stored receipts (public_receipts), under the one visibility
+//     predicate. There is NO 1,000-entry clamp: the clamp the #3710
+//     decision record expected PR #4189 to remove survived because
+//     #4189 was closed unmerged (2026-10-25), so a bare call — the
+//     /sitemap.xml handler's call — enumerates completely, and an
+//     explicit positive-integer limit is honoured exactly (existing
+//     callers pass one to bound a page; hidden rows are still filtered
+//     before the limit, so they never consume its budget). Scale
+//     note: the response grows linearly with the public-receipt
+//     count (one short <url> entry per receipt); if that count ever
+//     approaches the sitemap protocol's 50,000-URL per-file limit,
+//     the follow-on is a sitemap index with paged receipt files
+//     (the shape #4189 designed), never a silent clamp.
+//   - Lot receipts (lot_ ids have no public_receipts row; the journal
+//     is their record). A lot is listed iff the lot detail read would
+//     serve it: its bounty carries a recorded settlement verdict and
+//     the lot passes the one visibility definition's lot rule
+//     (lotReceiptVisible — recorded opt-in consulted at read time,
+//     directory toggle, operator unpublish), composed exactly as
+//     publicLotReceiptById composes it. Unsettled and non-bounty
+//     lots are not receipts and are never listed.
+export function listPublicReceiptSitemap(store, limit) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+  const hasLimit = Number.isInteger(limit) && limit > 0;
+  // With an explicit limit the combined top-`limit` can hold at most
+  // `limit` stored rows, so the SQL LIMIT survives for that leg.
+  const entries = store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC${hasLimit ? " LIMIT ?" : ""}`)
+    .all(...(hasLimit ? [limit] : []))
+    .map(row => ({ id: row.id, at: row.at }));
+  entries.push(...listPublicLotSitemapEntries(store));
+  entries.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const bounded = hasLimit ? entries.slice(0, limit) : entries;
+  return bounded.map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
+}
+
+function listPublicLotSitemapEntries(store) {
+  let candidates;
+  try {
+    candidates = store.db.prepare(`SELECT j.lot_id AS id, j.room_id AS roomId,
+        b.room_id AS bountyRoomId, b.resolution_json AS resolutionJson, MIN(j.at) AS at
+      FROM bounty_journal j JOIN bounty_records b ON b.bounty_id = j.bounty_id
+      WHERE j.lot_id IS NOT NULL AND j.bounty_id IS NOT NULL
+      GROUP BY j.lot_id, j.room_id, b.room_id, b.resolution_json`).all();
+  } catch { return []; } // a store with no escrow ledger has no lot receipts (publicLotReceiptById's contract)
+  const entries = [];
+  for (const candidate of candidates) {
+    if (!LOT_RECEIPT_ID.test(candidate.id ?? "")) continue;
+    if (typeof candidate.roomId !== "string" || candidate.bountyRoomId !== candidate.roomId) continue;
+    let resolution = null;
+    try { resolution = candidate.resolutionJson ? JSON.parse(candidate.resolutionJson) : null; } catch { resolution = null; }
+    const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
+    if (!settlement || typeof settlement !== "object") continue; // unsettled: not yet a public receipt
+    if (!lotReceiptVisible(store.db, { id: candidate.id, roomId: candidate.roomId })) continue;
+    entries.push({ id: candidate.id, at: candidate.at });
+  }
+  return entries;
 }
 
 export function loadPublicRoom(store, slug) {
