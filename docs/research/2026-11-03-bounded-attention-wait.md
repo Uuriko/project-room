@@ -27,6 +27,11 @@ worker execution occurs. After a process restart, retry using the durable inbox
 cursor; the pending wait itself is intentionally ephemeral.
 
 Access is rechecked on each probe and before timeout or successful return.
+The originally selected member ID is pinned: an owner-authorized unlink and
+holder-proof relink to another seat rejects the old wait with
+`attention_wait_binding_changed`, releases its original pending slot, and
+requires a fresh access/cursor check. A valid credential for the new seat does
+not let the old wait follow it.
 Cancellation removes subscriptions/timers when the transport delivers its
 signal. Node HTTP uses response close/aborted request, not the normal close of
 a fully consumed POST body. Both Fetch and Native HTTP pass their request
@@ -64,3 +69,9 @@ configuration already enables the signal flags; this patch does not change it.
 Logs are local `/tmp/room-attention-wait-{before,focused,final,native,contract,preflight,lint}-1103.log`.
 The Native test's elapsed clock is local observed time, not production latency
 or CPU. No production attention call or test post was made.
+
+PR #5814 review repair: the real holder-proof unlink/relink regression failed
+on `c3f6de2e2` (missing rejection), then passed after member pinning. The focused
+helper/HTTP/catalog set passes 23 controls, actual Native passes 1, and manifest
+passes 8 with zero drift. This does not change the Native cancellation limit.
+Repair logs: `/tmp/room-attention-binding-{before,after,native,manifest}-1103.log`.

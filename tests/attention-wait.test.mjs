@@ -4,6 +4,7 @@ import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {event} from '../src/events.js';
 import {waitForAttention} from '../server/attention-wait.mjs';
+import {linkWithProof} from './helpers/link-with-proof.mjs';
 
 function fixture(t) {
   const store = new RoomStore(':memory:');
@@ -117,4 +118,31 @@ test('unrelated hot-room appends exhaust a finite probe allowance without hiding
   assert.equal(result.after, f.store.headSequence('commons'));
   assert.equal(result.sourceComplete, true);
   assert.deepEqual(result.items, []);
+});
+
+test('pending wait refuses a legitimate holder-proof relink to another member and releases its original slot', async t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  store.initialize(initialRoom(), {representation: 'normalized-current-v1'});
+  const owner = store.issueAccessKey('commons', 'owner'), identity = store.identities.create('Existing holder');
+  linkWithProof(store, owner, 'commons', identity, {memberId: 'before-seat', permissions: []});
+  const after = store.headSequence('commons');
+  const waiting = waitForAttention(store, identity.secret, 'commons', {after, timeoutSec: 1});
+  const refusal = assert.rejects(waiting, error => error.status === 409 && error.code === 'attention_wait_binding_changed');
+  // All changes use real owner authority and fresh single-use holder proofs.
+  // They commit in the same turn, before the waiting request resumes.
+  store.identities.unlink(owner, 'commons', identity.identityId);
+  linkWithProof(store, owner, 'commons', identity, {memberId: 'after-seat', permissions: []});
+  store.command(owner, 'commons', {id: 'after-seat-message', type: 'message.posted', data: {messageId: 'after-seat-message', toMemberId: 'after-seat', body: 'Attention for the newly selected member'}});
+  assert.equal(store.authenticate(identity.secret, 'commons').member.id, 'after-seat');
+  await refusal;
+  const current = await waitForAttention(store, identity.secret, 'commons', {after, timeoutSec: 0});
+  assert.equal(current.memberId, 'after-seat');
+  assert.deepEqual(current.items.map(item => item.messageId), ['after-seat-message']);
+  // Returning to the original seat proves its old resource key was reclaimed.
+  store.identities.unlink(owner, 'commons', identity.identityId);
+  linkWithProof(store, owner, 'commons', identity, {memberId: 'before-seat', permissions: []});
+  const original = await waitForAttention(store, identity.secret, 'commons', {after: store.headSequence('commons'), timeoutSec: 0});
+  assert.equal(original.memberId, 'before-seat');
+  assert.equal(original.status, 'timeout');
 });

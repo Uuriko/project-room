@@ -12,13 +12,19 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     throw new ServiceError(422, 'invalid_attention_wait', 'after must be a nonnegative integer and timeoutSec an integer from 0 to 120');
   }
   const auth = store.authenticate(secret, roomId);
+  const memberId = auth.member.id;
+  const requireSameMember = () => {
+    if (store.authenticate(secret, roomId).member.id !== memberId) {
+      throw new ServiceError(409, 'attention_wait_binding_changed', 'The selected room member changed; check access and start a new wait with the current inbox cursor');
+    }
+  };
   if (!isCurrentRoom(store.db, roomId)) {
     throw new ServiceError(409, 'attention_wait_unavailable', 'Bounded attention waiting requires a normalized room; use room_read_inbox');
   }
   if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
   let active = pending.get(store);
   if (!active) pending.set(store, active = new Set());
-  const key = JSON.stringify([roomId, auth.member.id]);
+  const key = JSON.stringify([roomId, memberId]);
   if (active.has(key) || active.size >= MAX_PENDING) {
     throw new ServiceError(429, 'attention_wait_busy', 'At most one pending wait per member and room, and 32 per server, is allowed');
   }
@@ -37,10 +43,10 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.
-      store.authenticate(secret, roomId);
+      requireSameMember();
       done = true;
       clean();
-      resolve({roomId, memberId: auth.member.id, status, items, after: cursor,
+      resolve({roomId, memberId, status, items, after: cursor,
         sourceComplete, globalAttentionComplete: false, acknowledges: false,
         timeoutSec, waitedMs: Math.max(0, Date.now() - started),
         nextRead: {tool: 'room_read_inbox', arguments: {roomId, after: cursor, limit: 4}}});
@@ -48,6 +54,7 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     const probe = () => {
       if (done) return;
       try {
+        requireSameMember();
         probes++;
         const page = store.agentInbox(secret, roomId, {after: cursor, limit: 4});
         cursor = page.cursor.after;
