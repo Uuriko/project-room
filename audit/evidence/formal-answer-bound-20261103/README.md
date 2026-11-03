@@ -15,10 +15,12 @@ Commands (run in this worktree; full logs and raw SHA-256 values in qualificatio
 
 ```sh
 /Users/johnpotter/.local/bin/node --test --test-name-pattern='formal answer (reported|boundary|escaped|unicode)' tests/room-acp-formal-delivery.test.mjs
-/Users/johnpotter/.local/bin/node --test tests/room-acp-formal-delivery.test.mjs tests/reply-actions.test.js tests/reply-response-validation.test.js tests/room-acp-empty-turn.test.mjs tests/reply-requests.test.js tests/current-reply-reader.test.mjs tests/room-acp-stale-wakes.test.mjs tests/room-acp-authority-loss.test.mjs tests/candidate-manifest.test.mjs
+/Users/johnpotter/.local/bin/node --test tests/room-acp-formal-delivery.test.mjs tests/reply-actions.test.js tests/reply-response-validation.test.js tests/room-acp-empty-turn.test.mjs tests/reply-requests.test.js tests/current-reply-reader.test.mjs tests/room-acp-stale-wakes.test.mjs tests/room-acp-authority-loss.test.mjs tests/candidate-manifest.test.js
 /Users/johnpotter/.local/bin/node --test --test-name-pattern='SQLite cold' tests/room-acp-formal-delivery.test.mjs
 /Users/johnpotter/.local/bin/node scripts/candidate-manifest.mjs --write
 /Users/johnpotter/.local/bin/node scripts/secret-scan-diff.mjs --base effa1696e628906f1bb7d805b0aa959add145c2d
 ```
 
 ESLint on the nine changed JavaScript modules/tests: exit 0, no errors, 30 existing Store warnings. Changed-file secret scan, committed diff scan and git diff --check: exit 0. Candidate manifest: schema 45, 182 assets. No real credentials, grants, provider calls or production operations used.
+
+Root independent qualification: 36 actual HTTP controls and one actual workerd/SQLite boundary test pass. The Worker test saves an 8,192-unit fully escaped answer, retries without another event, cold-reopens storage, and checks exact content/participants and another exact retry. It is registered in cloudflare/package.json. Native and HTTP logs are hashed in native-qualification.json. Production rollout and already-loaded runner upgrades remain separate.
