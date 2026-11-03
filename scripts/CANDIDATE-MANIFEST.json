@@ -61,7 +61,7 @@
     "operator.html": "sha256:12248586e2ca34f63d12d3b48f8cc3a6bde75b2edb686ab355223f9c328553df",
     "project-room-mark.svg": "sha256:abc1e95e4d76b7e84d1c3eb2c004da6e6225e616b765bc0c02e4658cc04ec08a",
     "push-sw.js": "sha256:dd274367cfbe1ec861c0605f1f996773b0e80267c06aecdac8e4a42b1c173a28",
-    "room-acp/README.md": "sha256:e502101991b4e28c33f66d2583fb19ca22c7e66d4bdf2043af2d9167c14764ec",
+    "room-acp/README.md": "sha256:f75f452e4dee8db11cf6a789f2f7dc8fd8621fb32a0c662eaac1498277ad1157",
     "room-acp/package.json": "sha256:2f8ff0498926f45ed04a15d1e34563d10f8481252f5cf91ea527a8085601e133",
     "room-acp/src/agent-host.mjs": "sha256:e743fbf88027bef05e8772b12aa5223667a1fd1b8d72053751985f381e76fb35",
     "room-acp/src/agents.mjs": "sha256:f5a01ce8c86661ec8ab965b99e42ca30941c6c052a87602eec49965117a46984",
