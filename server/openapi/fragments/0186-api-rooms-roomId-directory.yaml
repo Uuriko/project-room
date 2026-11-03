@@ -28,8 +28,9 @@
       summary: Toggle directory listing (owner)
       description: >-
         Room owner only. Accepts { discoverable } and/or { publicReceipts }.
-        Enabling discoverable lists the room in the public directory (title,
-        purpose, member count only); disabling removes it immediately.
+        Enabling discoverable lists the room in the public directory (roomId,
+        title, purpose, kind, member count, and listedAt); disabling removes
+        it immediately.
         publicReceipts toggles whether this room's public receipts appear in
         the public receipts feed. At least one field is required; any other
         field is 422 invalid_directory.
