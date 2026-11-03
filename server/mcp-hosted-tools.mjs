@@ -20,7 +20,7 @@ const bondIdField = { ...idField, description: "Bond id from bond_propose or bon
 const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCOPES] }, minItems: 1, maxItems: BOND_SCOPES.length };
 
 export const hostedRoomTools = [
-  tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
+  tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
     roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }

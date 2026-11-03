@@ -777,6 +777,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (nativeEvents) store.enqueueNativeMcpEvent = nativeEvents.emit;
   const hostedRoomMcp = createHostedRoomMcp(store, {
     nativeHandler: nativeEvents?.handler,
+    nativeStatus: nativeEvents?.status,
     agentRooms, oauthProvider: oauthResource ? oauthProvider : null, inviteOAuthProvider: inviteOAuth?.provider, oauthResource,
     spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
   });
