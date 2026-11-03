@@ -169,6 +169,7 @@ optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin 
 optional.push("cloudflare/mcp-event-transport.mjs"); // Restricted native Events transport imported by the packaged Worker.
 optional.push("server/mcp-oauth.mjs", "server/mcp-modern.mjs", "server/mcp-events-runtime.mjs", "server/native-mention-context.mjs", "server/mcp-event-subscriptions.mjs", "server/mcp-events-wire.mjs", "server/mcp-invite-oauth.mjs", "server/routes/mcp-invite-oauth.mjs", "server/listener-fence.mjs"); // Native OAuth principals and local runtime fencing.
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
+optional.push("server/attention-wait.mjs"); // bounded cancellable hosted attention wait
 optional.push("server/mcp-request-defaults.mjs"); // pinned API-key roomId defaults for hosted MCP calls (imported by server/mcp-room-profile.mjs and server/mcp-full-profile.mjs)
 optional.push("client/request-id.mjs"); // deterministic transport request IDs (imported by client/mcp-stdio.mjs, work-actions, help-actions, and reply-actions)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)

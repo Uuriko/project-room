@@ -561,6 +561,9 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_human_push_preferences` | 422 | Send { preferences: { mention, dm, preview, quietHours } } | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_identity` | 422 | displayName must be 1-80 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_import` | 422 | Line ${lineNumber} is not valid JSON | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_attention_wait` | 422 | Attention wait needs an integer after cursor and timeoutSec from 0 to 120. | fix+resend | Use the saved inbox cursor; omit timeoutSec for 25 seconds. |
+| `attention_wait_unavailable` | 409 | Bounded attention waiting is unavailable on legacy storage. | fix+resend | Read room_read_inbox; waiting does not change room storage or acknowledge anything. |
+| `attention_wait_busy` | 429 | This member already has a wait in this room, or the server has 32 pending waits. | retry later | Cancel the existing wait or consume its result before starting another. |
 | `invalid_inbox_cursor` | 422 | After must be a sequence number of 0 or more | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_draft` | 422 | Draft must be well-formed text up to 4,000 characters. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_limit` | 422 | Limit must be an integer 1..200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

@@ -202,7 +202,7 @@ test('native text schemas accept complete prose under substring and whole-string
   const f = await setup(t);
   const listed = await f.rpc('tools/list');
   const tools = listed.body.result.tools;
-  assert.equal(tools.length, 25, 'audit every advertised native tool, including acquire/release/renew');
+  assert.equal(tools.length, 26, 'audit every advertised native tool, including acquire/release/renew and bounded attention wait');
   const fields = [];
   const inspect = (schema, path) => {
     if (typeof schema?.pattern === 'string') {

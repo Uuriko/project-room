@@ -72,6 +72,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
+  { name: "room_wait_for_attention", focus: ["conversation", "automation"] },
   { name: "room_link_work_claim_pr", focus: ["work"] },
   { name: "room_begin_work", focus: ["work"] },
   { name: "room_submit_text_result", focus: ["work"] },
