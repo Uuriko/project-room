@@ -124,6 +124,7 @@ import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
 import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 import { backfillAllRoomsWorkItemBoard, boardClaimId, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES, liveClaim, boardStateForWorkItem } from "./work-item-board.mjs";
+import {readCurrentWorkDiscussion} from "./current-work-discussion.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -6557,6 +6558,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }, {maxRecords:512}));
   }
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
+    const current=readCurrentWorkDiscussion(this,token,roomId,workItemId,{cursor,since,limit,consistent,resumeToken,expectedSessionBinding});
+    if(current!==undefined)return current;
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");

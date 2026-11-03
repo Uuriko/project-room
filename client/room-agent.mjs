@@ -868,6 +868,47 @@ export class RoomAgentClient {
     if (resumeToken !== null) query.set("resumeToken", resumeToken);
     const result = await this.#request(`/work-discussion?${query}`, undefined, signal), page = result?.discussion, current = result?.current;
     const invalid = () => { throw new RoomClientError(200, "invalid_response", "Work discussion does not match the request"); };
+    if (result?.contractVersion === 2) {
+      const opaque = value => typeof value === "string" && value.length > 0 && value.length <= 2048 && /^[A-Za-z0-9_-]+$/.test(value);
+      if (result.contentTrust !== CONTENT_TRUST || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
+        || result.selection?.rule !== "source-linked-descendants-v1" || result.scope?.membership !== "room"
+        || result.scope.targetedMessages !== "room-visible" || result.scope.externalExecution !== false
+        || !page || page.cursorMode !== "opaque-head-bound-v1" || page.cursor !== cursor
+        || !integer(page.horizon) || !integer(page.since) || !integer(page.after) || page.since > page.after || page.after > page.horizon
+        || cursor === null && resumeToken === null && (page.since !== (since ?? 0) || page.after !== (since ?? 0))
+        || page.limit !== limit || !Array.isArray(page.items) || page.items.length > limit || typeof page.hasMore !== "boolean"
+        || page.sourceWindow?.complete !== !page.hasMore || page.sourceWindow?.maxSources !== 4
+        || !integer(current?.evaluatedThrough) || current.evaluatedThrough !== page.horizon || !Number.isFinite(Date.parse(current.evaluatedAt))
+        || !integer(current.workRevision) || current.next?.workItemId !== workItemId || current.next.workRevision !== current.workRevision
+        || !Array.isArray(current.participants) || current.participants.length > 8
+        || (page.hasMore ? page.checkpoint !== null || !opaque(page.nextCursor) || page.nextCursor === cursor
+          : page.nextCursor !== null || page.checkpoint !== page.horizon)
+        || (consistent || resumeToken !== null) && page.consistent !== true
+        || page.consistent === true && (page.hasMore ? page.resumeToken !== null : !opaque(page.resumeToken))) invalid();
+      let previous = page.after, bytes = 0; const ids = new Set(), events = new Set(), parties = new Set();
+      for (const row of page.items) {
+        const message = row?.message, proposal = message?.proposal;
+        if (!integer(row?.sequence) || row.sequence <= previous || row.sequence > page.horizon || !validId(row.eventId) || events.has(row.eventId)
+          || !["source", "linked", "reply"].includes(row.relation) || !validId(message?.id) || ids.has(message.id) || !validId(message.authorId)
+          || typeof message.body !== "string" || !Number.isFinite(Date.parse(message.createdAt))
+          || ["replyToId", "toMemberId", "workItemId"].some(key => message[key] !== null && !validId(message[key]))
+          || message.toMemberId && message.toMemberId !== result.viewerId && message.authorId !== result.viewerId
+          || row.relation === "source" && message.id !== result.selection.sourceMessageId
+          || row.relation === "linked" && message.workItemId !== workItemId
+          || row.relation === "reply" && (!message.replyToId || message.workItemId !== null)
+          || proposal && (!validId(proposal.packetId) || !integer(proposal.basisRevision) || !integer(proposal.submittedAtRevision)
+            || proposal.basisRevision > proposal.submittedAtRevision || proposal.attribution !== "manual-unverified")
+          || message.authorId !== result.viewerId && message.untrusted !== true
+          || message.authorId === result.viewerId && Object.hasOwn(message, "untrusted")) invalid();
+        const {untrusted, ...bare} = message;
+        bytes += Buffer.byteLength(JSON.stringify(Object.hasOwn(message, "untrusted") ? {...row, message:bare} : row));
+        previous = row.sequence; ids.add(message.id); events.add(row.eventId);
+        parties.add(message.authorId); if(message.toMemberId)parties.add(message.toMemberId);
+      }
+      if (bytes > 65536 || page.rowBytes !== bytes || current.participants.length !== parties.size
+        || current.participants.some(member => !parties.delete(member?.id))) invalid();
+      return result;
+    }
     const continuation = (token, kind = "page") => {
       let value;
       if (typeof token !== "string" || token.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(token)) invalid();

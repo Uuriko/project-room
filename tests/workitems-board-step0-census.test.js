@@ -46,6 +46,7 @@ const WORKITEMS_REFERENCE_SITES = [
   "server/current-room-repository.mjs",
   "server/current-search.mjs",
   "server/current-work-capacity.mjs",
+  "server/current-work-discussion.mjs",
   "server/current-work-list.mjs",
   "server/current-work-privacy.mjs",
   "server/current-work-snapshot.mjs",
@@ -131,6 +132,7 @@ const NORMALIZED_WORKITEMS_ROLES = {
   "server/current-work-list.mjs": "reader",
   "server/current-work-privacy.mjs": "derived-policy",
   "server/current-work-snapshot.mjs": "reader",
+  "server/current-work-discussion.mjs": "reader",
   "server/recovery-census-continuation.mjs": "recovery",
   "server/recovery-checkpoint-seed.mjs": "recovery",
   "server/recovery-reminder-consumption.mjs": "recovery-oracle",
@@ -160,7 +162,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (83 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (84 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 

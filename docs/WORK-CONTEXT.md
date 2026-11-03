@@ -258,6 +258,38 @@ token. Store text and token together only after every page and current viewer
 scope have been checked. The preflight consumer implements that storage flow;
 MCP's numeric discussion checkpoint remains unchanged.
 
+### Normalized discussion pages (contract version 2)
+
+Normalized rooms use the same work-discussion endpoint and SDK method. The response
+has `contractVersion: 2`, `discussion.cursorMode: "opaque-head-bound-v1"`, and
+`discussion.sourceWindow.complete`. Each page examines at most four authorized
+conversation sources before selecting source, linked, and reply-descendant messages.
+Private DMs outside the viewer's parties do not consume that source window.
+Historical posting bodies are projected out in SQL; discussion displays the
+protected current canonical body. The raw opening-event source ledger retains a
+64 KiB prefix with one legal large first atom, and can stop before the next
+opening even when the output page has spare space. The
+existing history floor is checked independently. Source messages can predate the
+work item; no timestamp-to-sequence inference skips them.
+
+Pages can be empty with `hasMore: true`. Follow `nextCursor` even then; only a
+non-null `checkpoint` means that selection's source scan completed. Installed SDKs
+that understand only version 1 refuse version 2 rather than infer completion.
+The current SDK and hosted preparation loop consume these pages. Preparation makes
+at most four page calls and returns its continuation when still incomplete; it does
+not automatically scan an entire room.
+
+Current-format tokens are server-encrypted and bind the protected head, work,
+viewer, credential/session and addressed history-floor basis. Any room write or
+service restart invalidates a token with `discussion_reset_required`: discard the
+retained text and restart without cursor/resumeToken. Even a completed consistent
+token cannot bridge a changed current head. This conservative contract differs from
+legacy version 1's content-validated historical-prefix continuation. No background
+retry or historical snapshot is promised. Numeric `since` remains unanchored and
+must be discarded after recovery. Busy-room tolerance and efficient enumeration of
+large unrelated visible histories remain limitations; no new index or schema was
+introduced by this port.
+
 ### Task prerequisites
 
 `room_propose_work` accepts optional `dependsOn`: up to 16 existing Board claim

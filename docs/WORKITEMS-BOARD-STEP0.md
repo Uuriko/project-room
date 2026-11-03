@@ -407,6 +407,7 @@ The legacy field-fate and rework/divergence tests remain unchanged.
 | `server/current-work-list.mjs` | reader | Authorized paged native work discovery, selected result pointers and continuation; partial summaries are not a complete work map. |
 | `server/current-work-privacy.mjs` | derived-policy | Derives private request parties and work-request links from canonical work and requests; no board mapping. |
 | `server/current-work-snapshot.mjs` | reader | Bounded work-view pages load selected canonical work records, with protected private-party redaction and explicit partial coverage; no lifecycle writes or complete-map claim. |
+| `server/current-work-discussion.mjs` | reader | Bounded selected canonical work and addressed message ancestry, privacy/history filtering and opaque continuation; no board sync, lifecycle mutation, whole-map hydration or complete-history claim. |
 | `server/recovery-census-continuation.mjs` | recovery | Independent protected work-reference/body/summary/capacity/privacy census and complete membership counts. |
 | `server/recovery-checkpoint-seed.mjs` | recovery | Partitions checkpoint work maps into restore scratch and applies existing control defaults; scratch is not serving authority. |
 | `server/recovery-reminder-consumption.mjs` | recovery-oracle | Preserves default reminder oracle work lookups and consumes only independently qualified reminder coverage in operator scope. |

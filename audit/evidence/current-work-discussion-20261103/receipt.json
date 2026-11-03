@@ -1,0 +1,247 @@
+{
+  "base": "b1058f18f5ff156b15b9f8cfab4f9930a14a198e",
+  "runtime": "a805d8b30",
+  "qualification": "2439bdc1a + 8853f4e00",
+  "friendRegression": {
+    "before": {
+      "pass": 1,
+      "fail": 2,
+      "code": "current_room_context_required"
+    },
+    "after": {
+      "pass": 3,
+      "fail": 0
+    }
+  },
+  "tests": {
+    "currentNode": 8,
+    "neighborhoodNodeIncludingCurrent": 40,
+    "nativeHttp": 1,
+    "runtimeClosureAndPreflight": 2,
+    "censusAndManifest": 15
+  },
+  "bounds": {
+    "authorizedSourcesPerPage": 4,
+    "metadataPerVisibilityStream": 5,
+    "visibilityStreams": 3,
+    "uniqueMessageDependencies": 12,
+    "ancestryDepth": 8,
+    "inputBytes": 262144,
+    "recordBytes": 131072,
+    "outputRowBytes": 65536,
+    "recordReservation": 512
+  },
+  "logs": {
+    "current-work-discussion-before-1103.log.gz": {
+      "sha256Uncompressed": "fd7f2a70427138b0f936f49032b016d9173d1dfc3436f9dd61d3c362cc1be9fc"
+    },
+    "current-work-discussion-friend-after-1103.log.gz": {
+      "sha256Uncompressed": "fe3236e9caabdb41598b99339f61ffda5ab9125586f041565e210861b5a1d825"
+    },
+    "current-work-discussion-tests-1103.log.gz": {
+      "sha256Uncompressed": "f060f710cb63dcd8c8f0b401f55392b2a0b995c4a8617f47bc77eb6d9b428698"
+    },
+    "current-work-discussion-neighborhood-1103.log.gz": {
+      "sha256Uncompressed": "25047c1368987e46c7c7b9cf413e59ac6da82200e1baccba48082a4bea0f95bc"
+    },
+    "current-work-discussion-native-1103.log.gz": {
+      "sha256Uncompressed": "0705de7079de33f639a4cc9249c93d42f15004cc16b370673bc21addd7b465d6"
+    },
+    "current-work-discussion-package-1103.log.gz": {
+      "sha256Uncompressed": "37ed7ae97d0fbd3f41d9a3be1a759d44f42378f1b0c0743f43b30df6a816075d"
+    },
+    "current-work-discussion-registration-1103.log.gz": {
+      "sha256Uncompressed": "aad5ae9791068260c701cef6700c02f4e685e85d9652a17f37c779c33d015e1f"
+    },
+    "current-work-discussion-preflight-1103.log.gz": {
+      "sha256Uncompressed": "e2fb3cf4e5fa13963740969391eca6dbd9ffc9d8e96d211733ee7e236d332b0b"
+    },
+    "current-work-discussion-lint-1103.log.gz": {
+      "sha256Uncompressed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "current-work-discussion-tests-final-1103.log.gz": {
+      "sha256Uncompressed": "fb78b320a781e0d215252d9a9f32b847aea4b29d556aa0aac9058d244c45c1e8"
+    },
+    "current-work-discussion-native-final-1103.log.gz": {
+      "sha256Uncompressed": "2fc96eda8b14fa693a99cc2e8a392965ffdf339ab220d9b4873f4c7c56b1be00"
+    },
+    "current-work-discussion-lint-final-1103.log.gz": {
+      "sha256Uncompressed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limitations": [
+    "head changes reset continuation",
+    "service restart invalidates encrypted tokens",
+    "unrelated authorized history requires repeated source pages",
+    "complete 1k/5k unrelated enumeration not measured",
+    "large/deep dependencies fail explicitly; no full room fallback",
+    "full recovery oracle unchanged"
+  ],
+  "native": {
+    "costs": [
+      {
+        "n": 1000,
+        "kind": "public-unrelated",
+        "statements": 168,
+        "rowsRead": 938,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 269150,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 21981,
+        "boundParameterBytes": 5171,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 4
+      },
+      {
+        "n": 1000,
+        "kind": "private-unrelated",
+        "statements": 162,
+        "rowsRead": 925,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 281920,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 19477,
+        "boundParameterBytes": 5100,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 3
+      },
+      {
+        "n": 5000,
+        "kind": "public-unrelated",
+        "statements": 168,
+        "rowsRead": 938,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 238314,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 21981,
+        "boundParameterBytes": 5171,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 3
+      },
+      {
+        "n": 5000,
+        "kind": "private-unrelated",
+        "statements": 162,
+        "rowsRead": 925,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 252453,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 19477,
+        "boundParameterBytes": 5100,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 4
+      }
+    ],
+    "completeUnrelatedEnumeration": false,
+    "sourceLimit": 4,
+    "historySizes": [
+      1000,
+      5000
+    ],
+    "localClockNotCPU": true
+  },
+  "finalRuntime": "a805d8b30 + 8853f4e00",
+  "nativeFinal": {
+    "costs": [
+      {
+        "n": 1000,
+        "kind": "public-unrelated",
+        "statements": 168,
+        "rowsRead": 938,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 269150,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 21981,
+        "boundParameterBytes": 5171,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 4
+      },
+      {
+        "n": 1000,
+        "kind": "private-unrelated",
+        "statements": 162,
+        "rowsRead": 925,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 281920,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 19477,
+        "boundParameterBytes": 5100,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 12
+      },
+      {
+        "n": 5000,
+        "kind": "public-unrelated",
+        "statements": 168,
+        "rowsRead": 938,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 238314,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 21981,
+        "boundParameterBytes": 5171,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 4
+      },
+      {
+        "n": 5000,
+        "kind": "private-unrelated",
+        "statements": 162,
+        "rowsRead": 925,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 252453,
+        "eventPayloadBytes": 0,
+        "sqlTextBytes": 19477,
+        "boundParameterBytes": 5100,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "observedWorkerWallMs": 4
+      }
+    ],
+    "completeUnrelatedEnumeration": false,
+    "sourceLimit": 4,
+    "historySizes": [
+      1000,
+      5000
+    ],
+    "localClockNotCPU": true
+  }
+}
