@@ -137,7 +137,7 @@
     "src/join.js": "sha256:3dcfbd42dad1bd119f98a8d204656686388c815c7a1c2b6c129390bdcd645e0a",
     "src/login-polish.css": "sha256:05709c36d8aa46255191b21e0d4d817fccfec21ace4e005f7796ac8dfd08aa03",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
-    "src/message-reducers.js": "sha256:699e9fd57e70d9ee1b250ca570f003e37022b65b358095434748f8988ec8bc09",
+    "src/message-reducers.js": "sha256:791da1859dee052ca98c3c4ddfa6f7173b5af73b4741fed9e2cdf34ad9578b44",
     "src/needs-attention.js": "sha256:7902b33312749f6e7a879935dd7f6c65ffe0eff1329b89ace7b9e88eba415550",
     "src/operator-ui.js": "sha256:49a9e113e6d3dcf7eafc933d2c2016ea45fa1a28e2d75bb6480577b5521d481c",
     "src/operator.css": "sha256:82342f24af01bec07b8e9e87035dd869c26db5a78fade40a45c38b2a3e88c02c",
@@ -193,12 +193,12 @@
     ".github/workflows/deploy-prod.yml": "sha256:dde1a1a309b23870b9e9d11aee0499c8a9cf1089997f6f5cf61b5087110eb0a8",
     "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
-    "cloudflare/package.json": "sha256:3287db315d49b4ff5f28caacd7ceff8080fe3236e392297463ea17276760c974",
+    "cloudflare/package.json": "sha256:b40d2bf847efe69c92451c7fb9bdc7d1a4e778663af672e27042b7e0c27050fa",
     "cloudflare/pnpm-lock.yaml": "sha256:ccd56c35c71f2a0e696120d5db191035aea0b091c2f0b95935dd85a59bbf9248",
     "cloudflare/room.mjs": "sha256:6826917c6583abc25a2d3ff3836847cde5237f30ca0285211f8f4c7e76ec82f1",
     "cloudflare/storage.mjs": "sha256:8ab552b91c75ef7fb87e9a5c001a242b54739f6f6bf0a21702633b718f657432",
     "cloudflare/wrangler.jsonc": "sha256:fb298c415e846fde5cdf2ca65788484caf99122435dd688c77be91751eebdb48",
-    "scripts/deploy-recovery.mjs": "sha256:db46a9fce22c7cc4c210bc8bb39b357a263a72ba3f027ef28e249d61351a045b"
+    "scripts/deploy-recovery.mjs": "sha256:0bce7a1ea4d2beff4e15d3383383950cd3c14b5e7ecc8e8dfa640211c4617d04"
   },
   "packages": {
     "package-lock.json": "sha256:57a7bb7de32bd0745c448f602cfd52f9c295a13fe566f7e39d527aa5b5cd0bca",

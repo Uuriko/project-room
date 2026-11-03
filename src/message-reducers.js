@@ -5,6 +5,8 @@ import {currentRecordReplyRootChannel} from './current-record-context.js';
 import { normalizePoll } from './polls.js';
 import { prepareReplyPost, recordReplyPost } from './reply-requests.js';
 
+export const MESSAGE_EDIT_HISTORY_LIMITS = Object.freeze({entries: 25, bodyChars: 20000, totalChars: 32768, entryOverheadChars: 64});
+
 // Receipt-card cost, kept only in its recorded shape: non-negative integer
 // cents or null, and a short model string or null. Anything else is dropped
 // so a malformed card never shows an invented number.
@@ -188,14 +190,14 @@ export function createMessageReducers({ requireMember, knownMember, requireField
   // item 3, evidence 12458). Keep the most recent EDIT_HISTORY_MAX_ENTRIES prior
   // versions, each body capped at EDIT_HISTORY_MAX_BODY_CHARS, dropping the
   // oldest first; the newest entry is always kept so an edit is still marked.
-  const EDIT_HISTORY_MAX_ENTRIES = 25;
-  const EDIT_HISTORY_MAX_BODY_CHARS = 20000;
+  const EDIT_HISTORY_MAX_ENTRIES = MESSAGE_EDIT_HISTORY_LIMITS.entries;
+  const EDIT_HISTORY_MAX_BODY_CHARS = MESSAGE_EDIT_HISTORY_LIMITS.bodyChars;
   // One message's history may never hold more than a 128th of the 4 MiB room
   // projection, so even the cap's ceiling cannot crowd out the room's writes.
-  const EDIT_HISTORY_MAX_TOTAL_CHARS = 32768;
+  const EDIT_HISTORY_MAX_TOTAL_CHARS = MESSAGE_EDIT_HISTORY_LIMITS.totalChars;
 
   function appendEditHistory(history, entry) {
-    const size = (e) => (typeof e.body === "string" ? e.body.length : 0) + 64;
+    const size = (e) => (typeof e.body === "string" ? e.body.length : 0) + MESSAGE_EDIT_HISTORY_LIMITS.entryOverheadChars;
     const trimmed = typeof entry.body === "string" && entry.body.length > EDIT_HISTORY_MAX_BODY_CHARS
       ? { ...entry, body: entry.body.slice(0, EDIT_HISTORY_MAX_BODY_CHARS) }
       : entry;

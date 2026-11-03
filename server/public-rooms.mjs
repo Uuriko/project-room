@@ -70,7 +70,11 @@ a{color:#8eb6ff}
 footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6b2}
 img,svg,table{max-width:100%}
 .public-tasks li{margin:.75rem 0;overflow-wrap:anywhere}
-.public-task-instructions{white-space:pre-wrap;margin:.35rem 0}`;
+.public-task-instructions{white-space:pre-wrap;margin:.35rem 0}
+#copy-room-setup{min-height:44px;padding:0 1rem;border:0;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
+#copy-room-setup:hover{background:#6a6ad4}
+#copy-room-setup:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
+#copy-room-setup:disabled{opacity:.65;cursor:wait}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;

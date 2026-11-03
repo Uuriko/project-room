@@ -128,7 +128,7 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress, signal } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -152,7 +152,7 @@ async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, 
       ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
-  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
+  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal });
 }
 
 export async function dispatchRoomMcp(message, options = {}) {
@@ -256,7 +256,8 @@ export async function roomMcpFetchPost(request, options = {}) {
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
       searchParams: url.searchParams,
-      userAgent: request.headers.get("user-agent")
+      userAgent: request.headers.get("user-agent"),
+      signal: request.signal
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -271,7 +272,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply, Boolean(modern)), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl, signal } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -322,6 +323,15 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   const modern = modernMcpRequest(message, req.headers);
   if (modern) cors['MCP-Protocol-Version'] = modern.version;
   let reply;
+  const cancellation = new AbortController();
+  const cancel = () => cancellation.abort();
+  // IncomingMessage.close also fires for a normally consumed POST body.
+  // Response.close tracks the client going away while the tool is pending.
+  const responseClosed = () => { if (!res.writableEnded) cancel(); };
+  req.once('aborted', cancel);
+  res.once('close', responseClosed);
+  signal?.addEventListener('abort', cancel, {once: true});
+  if (signal?.aborted || req.aborted || res.destroyed) cancel();
   try {
     reply = await dispatchRoomMcp(message, {
       headers: req.headers,
@@ -330,7 +340,8 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       roomMcp,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
-      remoteAddress
+      remoteAddress,
+      signal: cancellation.signal
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {
@@ -340,7 +351,12 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       category: "unavailable",
       status: "failed",
     });
+  } finally {
+    req.removeListener('aborted', cancel);
+    res.removeListener('close', responseClosed);
+    signal?.removeEventListener('abort', cancel);
   }
+  if (cancellation.signal.aborted) return;
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();
