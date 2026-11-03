@@ -16,8 +16,9 @@ test('Workers password HTTP login renews an old slot across restart and logout',
  const worker=()=>new Miniflare({modules:true,script:b.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'SessionRenewHttpRoom',useSQLite:true}},durableObjectsPersist:dir,bindings:{ROOM_ORIGIN:origin}});
  let mf=worker();
  try{
-  const seeded=await (await mf.dispatchFetch(origin+'/__test-aged-slot')).json();
-  const login=await mf.dispatchFetch(origin+'/api/auth/password/login',{method:'POST',headers:{Origin:origin,'content-type':'application/json'},body:JSON.stringify({email:'renew@example.invalid',password:'synthetic-password-long',sessionToken:seeded.token,sessionRevision:seeded.revision})});
+  const password=crypto.randomUUID();
+  const seeded=await (await mf.dispatchFetch(origin+'/__test-aged-slot',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password})})).json();
+  const login=await mf.dispatchFetch(origin+'/api/auth/password/login',{method:'POST',headers:{Origin:origin,'content-type':'application/json'},body:JSON.stringify({email:'renew@example.invalid',password,sessionToken:seeded.token,sessionRevision:seeded.revision})});
   assert.equal(login.status,200,await login.clone().text());const raw=login.headers.get('set-cookie'),match=/account_session=([A-Za-z0-9_-]{43})/.exec(raw??'');assert.ok(match);assert.notEqual(match[1],seeded.token);assert.ok(Number(/Max-Age=(\d+)/i.exec(raw)?.[1])>29*86400);
   const cookie='__Host-account_session='+match[1];await mf.dispose();mf=worker();
   const response=await mf.dispatchFetch(origin+'/api/account-session',{headers:{Cookie:cookie}});const session=await response.json();assert.equal(response.status,200);assert.equal(session.authenticated,true);assert.equal(session.account.id,'worker-renew-owner');
