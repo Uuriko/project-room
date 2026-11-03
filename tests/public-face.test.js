@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { PublicFace, roomPublicFaceSchema, PUBLIC_CODE_PREFIX } from "../server/public-face.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
@@ -160,4 +162,94 @@ test("faceHtml escapes content and carries noindex", () => {
   assert.ok(!html.includes("<script>alert(1)</script>"));
   assert.ok(html.includes("&lt;script&gt;"));
   assert.ok(html.includes("noindex"));
+});
+
+// ---- body token scrub (parity with the operator export) -------------------
+// Synthetic fixtures only — fake token shapes, never real credentials.
+const sha256Hex = value => createHash("sha256").update(value).digest("hex");
+const FAKE_TOKENS = [
+  "pri_" + "SynthPriToken0123456789abcdef",
+  "rak_" + "SynthRakToken0123456789abcdef",
+  "ga1." + "SynthGa1Token0123456789abcdefXYZ"
+];
+
+test("sanitize scrubs room token shapes in bodies; the sha256 stands in, text around it intact", () => {
+  const state = baseState();
+  state.messages = FAKE_TOKENS.map((token, i) => ({
+    id: `t${i}`, authorId: "alice", body: `room token ${token} end`, createdAt: 30 + i
+  }));
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const snap = face.sanitize(store.room("r1").state);
+  assert.equal(snap.messages.length, FAKE_TOKENS.length);
+  snap.messages.forEach((m, i) => {
+    assert.ok(!m.body.includes(FAKE_TOKENS[i]), "raw token must not be served");
+    assert.equal(m.body, `room token ${sha256Hex(FAKE_TOKENS[i])} end`);
+  });
+});
+
+test("faceByCode, feedByCode and faceHtml all serve scrubbed bodies", () => {
+  const state = baseState();
+  state.messages = [
+    { id: "t1", authorId: "alice", body: `leak ${FAKE_TOKENS[0]} here`, createdAt: 30 },
+    { id: "t2", authorId: "bob", body: "clean neighbour", createdAt: 31 }
+  ];
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  const expected = `leak ${sha256Hex(FAKE_TOKENS[0])} here`;
+  const byCode = face.faceByCode(publicCode);
+  assert.equal(byCode.messages[0].body, expected);
+  assert.equal(byCode.messages[1].body, "clean neighbour");
+  const feed = face.feedByCode(publicCode, { limit: 10 });
+  assert.equal(feed.messages[0].body, expected);
+  assert.equal(feed.messages[1].body, "clean neighbour");
+  const html = face.faceHtml(publicCode);
+  assert.ok(!html.includes(FAKE_TOKENS[0]), "raw token must not reach the HTML face");
+  assert.ok(html.includes(sha256Hex(FAKE_TOKENS[0])));
+});
+
+test("legitimate bodies pass the scrub byte-identical, including under-floor shapes", () => {
+  const bodies = [
+    "plain standup notes: shipped the fix, tests green",
+    "unicode — café and “quotes” & <angle> brackets",
+    "pri_ short (under the 8-char floor) is just text",
+    "rak_abc is not a token either",
+    "a code sample: const x = ga1; // no dot, no token"
+  ];
+  const state = baseState();
+  state.messages = bodies.map((body, i) => ({ id: `c${i}`, authorId: "alice", body, createdAt: 40 + i }));
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const snap = face.sanitize(store.room("r1").state);
+  assert.deepEqual(snap.messages.map(m => m.body), bodies);
+  const { publicCode } = face.enable("r1", "owner");
+  const feed = face.feedByCode(publicCode, { limit: 10 });
+  assert.deepEqual(feed.messages.map(m => m.body), bodies);
+});
+
+test("a token straddling the body cap is hashed whole, never served in part", () => {
+  const token = FAKE_TOKENS[0];
+  const state = baseState();
+  state.messages = [{ id: "s1", authorId: "alice", body: "a".repeat(1990) + " " + token + " end", createdAt: 50 }];
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const snap = face.sanitize(store.room("r1").state);
+  assert.ok(!snap.messages[0].body.includes(token));
+  assert.ok(!snap.messages[0].body.includes(token.slice(0, 20)), "no partial token at the cap boundary");
+  assert.ok(snap.messages[0].body.length <= 2004);
+});
+
+test("body scrub pattern stays in parity with the operator export scrubber", () => {
+  const tokenSourceOf = path => {
+    const match = readFileSync(new URL(path, import.meta.url), "utf8")
+      .match(/const TOKEN_SOURCE = "([^"]+)"/);
+    assert.ok(match, `TOKEN_SOURCE literal found in ${path}`);
+    return match[1];
+  };
+  assert.equal(
+    tokenSourceOf("../server/public-face.mjs"),
+    tokenSourceOf("../server/room-export.mjs"),
+    "public-face and room-export TOKEN_SOURCE literals must not drift"
+  );
 });

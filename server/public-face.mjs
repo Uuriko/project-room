@@ -13,15 +13,16 @@ import {currentPublicMetadata,readCurrentPublicFace} from './current-public-face
 //   - DMs (messages with toMemberId) never appear: not counted, not hinted.
 //   - Members are handles (displayName) only: no emails, no member ids, no
 //     identity links, no permission lists.
-//   - Message bodies are shown as written (the owner opted in) but capped
-//     in length; deleted bodies (null) are skipped; attachments omitted.
+//   - Message bodies are capped in length and scrubbed of room token
+//     shapes (see the body token scrub below); deleted bodies (null) are
+//     skipped; attachments omitted.
 //   - No invite codes, keys, secrets, or share-link codes anywhere.
 //
 // The module is shaped like ShareLinks/DmConsents: it takes the RoomStore
 // (db handle, transactions, room state) and exports its schema for
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
@@ -46,6 +47,28 @@ export const PUBLIC_CODE_PREFIX = "pub1.";
 export const MAX_FACE_MESSAGES = 50;
 export const MAX_FEED_LIMIT = 100;
 export const MAX_BODY_CHARS = 2000;
+
+// Body token scrub — parity with the operator export. server/room-export.mjs
+// (scrubTokens / scrubEventTokens) replaces every TOKEN_SOURCE match with
+// its sha256 hex, and message bodies served anonymously get exactly the same
+// treatment here: the owner's opt-in publishes the conversation, not any
+// room credential pasted into it. The pattern is mirrored, not imported —
+// room-export.mjs pulls in store.mjs, which would cycle back to this
+// module — and tests/public-face.test.js pins the two TOKEN_SOURCE literals
+// equal so the surfaces cannot drift silently. Coverage is exactly the
+// three room token shapes (pri_…, rak_…, ga1.…); any other secret shape
+// pasted into a body passes verbatim, as it does in the operator export at
+// this base — a widening, if it comes, must widen both surfaces together.
+const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
+const sha256Hex = value => createHash("sha256").update(value).digest("hex");
+const scrubBodyTokens = value => value.replace(new RegExp(TOKEN_SOURCE, "g"), match => sha256Hex(match));
+// Scrub before capping: the served body then never exceeds the cap by a
+// hash's extra length, and a token straddling the cap boundary is hashed
+// whole rather than served in part.
+const publicBody = body => {
+  const scrubbed = scrubBodyTokens(body);
+  return scrubbed.length > MAX_BODY_CHARS ? scrubbed.slice(0, MAX_BODY_CHARS) + " …" : scrubbed;
+};
 
 const nowMs = () => Date.now();
 
@@ -173,7 +196,7 @@ export class PublicFace {
       .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0)
       .slice(-messageLimit)
       .map(m => {
-        const body = m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body;
+        const body = publicBody(m.body);
         return Object.freeze({
           at: m.createdAt ?? null,
           from: handleOf(state, m.authorId) ?? "unknown",
@@ -240,7 +263,7 @@ export class PublicFace {
         id: m.id,
         at: m.createdAt ?? null,
         from: handleOf(state, m.authorId) ?? "unknown",
-        body: m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body
+        body: publicBody(m.body)
       }))),
       next: page.length ? page[page.length - 1].id : after,
       hasMore,
