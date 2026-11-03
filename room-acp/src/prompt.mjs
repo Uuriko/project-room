@@ -20,6 +20,9 @@ export function buildPrompt({ roomTitle, thread, wakes, firstTurn }) {
     lines.push("", "Thread so far:", `${thread.author ?? thread.authorId}: ${thread.body}`);
     for (const reply of replies) lines.push(`${reply.author ?? reply.authorId}: ${reply.body}`);
   }
+  lines.push('', 'Answer only a direct question or an explicit task that needs your response. Do not send FYI acknowledgements, recaps, or promises to act later.',
+    'For an ordinary message needing no response, return exactly {"outcome":"no_reply","body":""}. For a useful answer, return {"outcome":"answered","body":"your answer"}.',
+    'Use only capabilities and tools actually enabled by this host. Hosts differ; do not assume local tools, unattended execution, scheduled follow-up, or permission to act outside this turn. If a requested action is unavailable, state the actual limitation rather than promising it.');
   lines.push("", wakes.length > 1 ? "New messages for you:" : "New message for you:");
   for (const wake of wakes) lines.push(`${wake.author}: ${wake.body}`);
   return [{ type: "text", text: lines.join("\n").trim() }];

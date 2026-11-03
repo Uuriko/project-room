@@ -41,6 +41,7 @@ export const CLAIM_WAKE_REASONS = Object.freeze(["assigned"]);
 export const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 export const CLAIM_KEY = "work-claim:";
 export const MAX_CLAIM_NOTE = 1500;
+export const ORDINARY_REPLY_WINDOW_MS = 60000;
 // The person who put the claim on the Board is who asked for the work.
 export const claimRequester = claim => (claim?.history ?? []).find(entry => entry?.action === "created")?.agentId ?? null;
 
@@ -99,12 +100,33 @@ class TurnReceipts {
   }
 }
 
+// Only a completed, activity-free ordinary turn may elect silence. Formal
+// requests use their separate obligatory answered/declined/pending contract.
+function ordinaryTurn(recorder, stopReason) {
+  let value;
+  try { value = JSON.parse(recorder.text); } catch { /* Plaintext hosts remain supported. */ }
+  const structured = value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 2 && Object.hasOwn(value, 'outcome') && Object.hasOwn(value, 'body');
+  const noReply = structured && value.outcome === 'no_reply' && value.body === '';
+  const activityFree = recorder.tools instanceof Map && recorder.tools.size === 0
+    && (recorder.plan === undefined || Array.isArray(recorder.plan) && recorder.plan.length === 0);
+  const silent = stopReason === 'end_turn' && activityFree
+    && (noReply || typeof recorder.text === 'string' && !recorder.text.trim());
+  if (silent) return {silent:true};
+  if (structured && value.outcome === 'answered' && typeof value.body === 'string' && value.body.trim())
+    return {silent:false, recorder:{...recorder, text:value.body}};
+  if (noReply) return {silent:false, recorder:{...recorder,
+    text:'No-reply was not accepted because this turn contained activity or did not finish successfully. Inspect the local turn before treating it as complete.'}};
+  return {silent:false, recorder};
+}
+
 export class Bridge {
   constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
     this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
+    this.replyWindows = new TurnReceipts(connection, env, persistSessions, "chat-reply-windows");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionApproverId = permissionApproverId;
@@ -513,12 +535,9 @@ export class Bridge {
         if (delivery.kind === 'formal') formalDelivery = delivery;
         else { formalPending = delivery.pendingReason; formalDraft = delivery.draft; }
       } else {
-        // Silence is a successful ordinary outcome, never an inferred failure,
-        // formal answer, tool result, plan, early stop or uncertain execution.
-        silent = stopReason === 'end_turn' && typeof recorder.text === 'string' && !recorder.text.trim()
-          && recorder.tools instanceof Map && recorder.tools.size === 0
-          && (recorder.plan === undefined || Array.isArray(recorder.plan) && recorder.plan.length === 0);
-        if (!silent) body = renderTurn(recorder, {stopReason});
+        const outcome = ordinaryTurn(recorder, stopReason);
+        silent = outcome.silent;
+        if (!silent) body = renderTurn(outcome.recorder, {stopReason});
       }
     } catch (error) {
       this.log(`turn failed: ${error.message}`);
@@ -533,8 +552,38 @@ export class Bridge {
     // Reuse the terminal ACK-only phase so an older reader cannot replay a
     // silent turn as new work. The explicit disposition records why no post exists.
     this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
-      : {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {}),
+      : {...result, phase:'result', body, ordinaryChat:!formal, ...(formalDelivery ? {formalDelivery} : {}),
         ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {})});
+  }
+
+  // One addressed local reservation per existing seat/thread. This is not a
+  // server-wide chat limit. Listener fencing supplies the single active bridge.
+  reserveOrdinaryReply(receipt, now = Date.now()) {
+    const valid = window => window && window.version === 1 && window.threadKey === receipt.threadKey
+      && typeof window.operationId === 'string' && window.operationId.length > 0
+      && Number.isSafeInteger(window.reservedAt) && window.reservedAt >= 0;
+    if (receipt.ordinaryReplyWindow !== undefined) {
+      if (!valid(receipt.ordinaryReplyWindow) || receipt.ordinaryReplyWindow.operationId !== receipt.requestId)
+        throw Error('Invalid ordinary reply reservation; manual recovery required');
+      // An uncertain send always retries its exact operation, even after a later
+      // window has been reserved. The Room command id deduplicates that retry.
+      return {allowed:true, window:receipt.ordinaryReplyWindow};
+    }
+    if (!Number.isSafeInteger(now) || now < 0) throw Error('Invalid ordinary reply clock');
+    const proposed = {version:1, threadKey:receipt.threadKey, operationId:receipt.requestId, reservedAt:now};
+    const saved = this.replyWindows.begin(receipt.threadKey, {...proposed, phase:'started'});
+    if (!valid(saved.receipt)) throw Error('Invalid ordinary reply window; manual recovery required');
+    let window = saved.receipt;
+    if (window.operationId !== receipt.requestId) {
+      if (now < window.reservedAt + ORDINARY_REPLY_WINDOW_MS)
+        return {allowed:false, nextEligibleAt:window.reservedAt + ORDINARY_REPLY_WINDOW_MS};
+      window = {...window, ...proposed};
+      this.replyWindows.save(saved.key, window);
+    }
+    // The first reservation is durable before the operation's authorization is
+    // saved. A crash between those saves recovers through the matching op id.
+    return {allowed:true, window:{version:1, threadKey:window.threadKey,
+      operationId:window.operationId, reservedAt:window.reservedAt}};
   }
 
   async deliverChatReceipt(key) {
@@ -556,6 +605,18 @@ export class Bridge {
         const { body: _body, formalDelivery:_delivery, ...discarded } = receipt;
         receipt = { ...discarded, phase: "discarded" };
         this.chatReceipts.save(key, receipt);
+      }
+      if (receipt.phase === 'result' && receipt.ordinaryChat === true) {
+        const reservation = this.reserveOrdinaryReply(receipt);
+        if (!reservation.allowed) {
+          receipt = {...receipt, phase:'discarded', disposition:'reply_window_limited',
+            replyWindowLimitedUntil:reservation.nextEligibleAt};
+          this.chatReceipts.save(key, receipt); // Retain the result locally; no hidden model/tool rerun.
+          this.log('Automatic ordinary reply limited to one per thread per 60 seconds; result retained locally and wake acknowledged.');
+        } else if (receipt.ordinaryReplyWindow === undefined) {
+          receipt = {...receipt, ordinaryReplyWindow:reservation.window};
+          this.chatReceipts.save(key, receipt); // Before POST; exact ambiguous retries remain authorized.
+        }
       }
       if (receipt.phase === "result") {
         if (receipt.formalDelivery && !receipt.formalReview) {

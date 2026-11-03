@@ -14,11 +14,14 @@ function setup(t) {
   const home = mkdtempSync(pathJoin(tmpdir(), "chat-retry-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const counts = { prompts: [], posts: [], acks: [] };
+  let reservationClock = Date.now();
   const make = () => {
     const bridge = new Bridge({ connection: { apiBase: "http://localhost", roomId: "r", memberId: "agent", hostId: "h" }, env: { ROOM_ACP_HOME: home }, host: {
       session: async () => ({ sessionId: "s", created: true }),
       prompt: async (_key, prompt) => { counts.prompts.push(prompt); return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
     } });
+    const reserve = bridge.reserveOrdinaryReply.bind(bridge);
+    bridge.reserveOrdinaryReply = receipt => reserve(receipt, reservationClock);
     bridge.fencingToken = "test-listener";
     bridge.room.checkListener = async () => ({ listener: { valid: true } });
     bridge.room.room = async () => ({ state: { room: { ownerId: "owner" }, members: { owner: { id: "owner", kind: "human", active: true }, [bridge.connection.memberId]: { id: "agent", active: true } } } });
@@ -27,7 +30,7 @@ function setup(t) {
     bridge.room.ack = async args => { counts.acks.push(args.signalIds); };
     return bridge;
   };
-  return { make, counts };
+  return { make, counts, advanceReservation: ms => { reservationClock += ms; } };
 }
 
 test("lost chat ack retries only ack after restart and split batch delivery", async t => {
@@ -43,10 +46,11 @@ test("lost chat ack retries only ack after restart and split batch delivery", as
 });
 
 test("lost chat result replays identical command and message IDs across rebatching", async t => {
-  const { make, counts } = setup(t);
+  const { make, counts, advanceReservation } = setup(t);
   const first = make();
   first.room.post = async args => { counts.posts.push(args); throw Error("response lost"); };
   await first.turn("root", [wake("a"), wake("b")]);
+  advanceReservation(60000); // Fresh c may post in the next window; old a/b still retry their original operation.
   await make().turn("root", [wake("b"), wake("c"), wake("a")]);
   assert.equal(counts.prompts.length, 2);
   assert.deepEqual(counts.posts[0], counts.posts[1]);
@@ -57,9 +61,10 @@ test("lost chat result replays identical command and message IDs across rebatchi
 });
 
 test("failure retrying an old result does not strand newly batched work", async t => {
-  const { make, counts } = setup(t);
+  const { make, counts, advanceReservation } = setup(t);
   const first = make(); first.room.post = async () => { throw Error("network"); };
   await first.turn("root", [wake("a")]);
+  advanceReservation(60000); // Test delivery recovery for a fresh result in its own allowed window.
   const restarted = make(); restarted.room.post = async () => { throw Error("network"); };
   await restarted.turn("root", [wake("a"), wake("b")]);
   await make().turn("root", [wake("b"), wake("a")]);
