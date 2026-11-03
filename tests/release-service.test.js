@@ -119,6 +119,24 @@ test('browser renewal cannot revive an expired slot', t => {
   assert.throws(()=>store.authenticateAccountSession(slot.token),/expired/);
 });
 
+test('renewed browser session and signout survive a storage restart', t => {
+  const directory=mkdtempSync(join(tmpdir(),'room-renew-restart-')),path=join(directory,'room.sqlite');
+  let now=Date.now(),store=new RoomStore(path,{now:()=>now});
+  t.after(()=>{store.close();rmSync(directory,{recursive:true,force:true});});
+  store.initialize(initialRoom());
+  const owner=store.issueAccessKey('commons','owner'),accountId=store.authenticate(owner).account.id;
+  const slot=store.createAccountSessionSlot();now+=29*86400000;
+  const renewed=store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true});
+  store.close();store=new RoomStore(path,{now:()=>now});
+  const session=store.authenticateAccountSession(renewed.token);
+  assert.equal(session.account.id,accountId);
+  assert.ok(session.expiresAt-now>29*86400000);
+  assert.throws(()=>store.authenticateAccountSession(slot.token),/expired|revoked|ended/);
+  store.logoutAccountSession(renewed.token,session.sessionRevision);
+  store.close();store=new RoomStore(path,{now:()=>now});
+  assert.throws(()=>store.authenticateAccountSession(renewed.token),/expired|revoked|ended/);
+});
+
 test('research: failed rotation rolls back the renewed slot and login', t => {
   const {store,owner,advance}=fixture(t),accountId=store.authenticate(owner).account.id;
   const slot=store.createAccountSessionSlot();advance(29*86400000);
