@@ -69,6 +69,12 @@ test('the standard setup credential (rak_) runs the room-scoped listener end to 
     { hostId: 'saved-host', mode: 'pull-only', cadenceSeconds: 60 });
   assert.equal(beat.status, 200);
   assert.equal(beat.value.host.hostId, 'saved-host');
+  const scopedStatus = await f.request('/api/wake-status?roomId=commons', f.connection.token);
+  assert.equal(scopedStatus.status, 200);
+  assert.deepEqual(scopedStatus.value.evidence, { activityBasis: 'heartbeat_or_poll', listenerStatus: 'unverified' });
+  const otherStatus = await f.request('/api/wake-status?roomId=annex', f.connection.token);
+  assert.equal(otherStatus.status, 403);
+  assert.equal(otherStatus.value.error.code, 'room_mismatch');
   const rows = f.store.db.prepare('SELECT host_id FROM agent_hosts WHERE agent_id=?').all(f.setup.identityId);
   assert.ok(rows.some(row => row.host_id.startsWith('ak_')), 'scoped registration is namespaced under the key');
   assert.equal(f.store.agentHeartbeats.statusOf(f.setup.identityId).status, 'online');
