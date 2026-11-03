@@ -293,3 +293,5 @@ These records describe tested revisions and do not establish current deployment 
 - [Normalized operational defaults](NORMALIZED-OPERATIONAL-DEFAULTS-20261102.md) and [selected MVP composition](research/2026-11-02-selected-mvp-composition.md).
 - Read and serving measurements: [serving costs](research/2026-11-02-normalized-serving-cost.md), [OAuth work reads](research/2026-11-02-oauth-work-read-budget.md), [scoped inbox](research/2026-11-02-scoped-inbox-budget.md), and [charter and pins](research/2026-11-02-current-charter-pins.md).
 - Write and catalog measurements: [assistant catalog probes](research/2026-11-02-assistant-catalog-probes.md), [compact MCP posts](research/2026-11-02-mcp-post-compact.md), and [OAuth work-linked posts](research/2026-11-02-work-linked-post-budget.md).
+
+- [Bounded canonical message input and read-only size census](research/2026-11-03-large-message-bounded-input.md)

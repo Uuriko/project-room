@@ -561,8 +561,6 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_human_push_preferences` | 422 | Send { preferences: { mention, dm, preview, quietHours } } | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_identity` | 422 | displayName must be 1-80 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_import` | 422 | Line ${lineNumber} is not valid JSON | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
-| `message_body_temporarily_limited` | 422 | A new normalized message exceeds the temporary 8192 UTF-16-unit body limit. | fix+resend | Shorten the new body. Historical content and exact retries are unchanged; the permanent large-entity fix is pending. |
-| `message_entity_temporarily_limited` | 422 | The candidate canonical message exceeds the temporary 131072-byte readable proof-field limit. | fix+resend | No changes were saved. The error gives entity bytes and maximum; do not retry unchanged or truncate retained history. |
 | `invalid_inbox_cursor` | 422 | After must be a sequence number of 0 or more | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_draft` | 422 | Draft must be well-formed text up to 4,000 characters. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_limit` | 422 | Limit must be an integer 1..200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -1213,3 +1211,5 @@ These rows are source-checked against the offline schema 45 candidate at `47b40b
 | `current_account_erasure_unavailable` | 409 | An explicit account deletion encountered a noncanonical historical body outside its current protected erasure grammar. No partial deletion is committed. | no | Preserve the account and original confirmation evidence. Request the specific authorized historical privacy path; do not alter old proofs or report deletion complete. |
 
 | `current_updates_aggregate_unavailable` | 409 | The legacy Updates aggregate is unavailable for this normalized room. | fix+resend | Read the room needs-me endpoint named in the response; follow its cursor and coverage rather than treating it as a complete aggregate. |
+
+| `current_message_entity_too_large` | 422 | The prepared canonical message exceeds its derived 917504-byte input ceiling. | fix+resend | No changes were saved. Shorten new input; do not truncate retained history or retry unchanged. |

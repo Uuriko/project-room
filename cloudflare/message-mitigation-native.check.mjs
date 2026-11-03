@@ -5,7 +5,7 @@ import {Miniflare} from 'miniflare';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-test('actual Native mitigation cold-reads, edits and erases each escaped body family at the temporary limit', {timeout: 60000}, async t => {
+test('actual Native cold-reads, edits and erases each escaped body family at the former temporary boundary', {timeout: 60000}, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'message-mitigation-native-'));
   const script = (await build({entryPoints: [new URL('./message-mitigation-native.test-fixture.mjs', import.meta.url).pathname], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']})).outputFiles[0].text;
   const create = () => new Miniflare({script, modules: true, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'], durableObjectsPersist: directory, durableObjects: {ROOM: {className: 'MessageMitigationRoom', useSQLite: true}}, bindings: {ROOM_ORIGIN: 'https://room.example.test'}, serviceBindings: {ASSETS: async () => new Response('missing', {status: 404})}});
@@ -21,7 +21,7 @@ test('actual Native mitigation cold-reads, edits and erases each escaped body fa
       const command = (id, type, data) => call('/api/rooms/commons/commands', {method: 'POST', headers, body: JSON.stringify({id, type, data})});
       for (const id of ['edit', 'delete']) assert.equal((await command('post-' + id, 'message.posted', {messageId: id, body})).status, 201);
       const tooLarge = await command('over', 'message.posted', {messageId: 'over', body: body + 'x'});
-      assert.equal(tooLarge.status, 422); assert.equal(tooLarge.value.error.code, 'message_body_temporarily_limited');
+      assert.equal(tooLarge.status, 201, 'the qualified full fix restores bodies above8192 units');
       await mf.dispose(); mf = create();
       for (const id of ['edit', 'delete']) {
         const read = await call('/api/rooms/commons/conversation?messageId=' + id, {headers});
@@ -36,6 +36,6 @@ test('actual Native mitigation cold-reads, edits and erases each escaped body fa
       assert.equal(edited.status, 200); assert.equal(edited.value.messages[0].body, 'Short replacement');
       assert.equal(deleted.status, 200); assert.equal(deleted.value.messages[0].body, null);
     }
-    t.diagnostic('8192 UTF-16 body units admitted for all four families;8193 refused; production constructor/HTTP and cold persistence passed. No production load.');
+    t.diagnostic('8192 and8193 UTF-16 body units admitted after the full fix; all four families retain production HTTP/cold edit/delete behavior. No production load.');
   } finally { await mf.dispose(); await rm(directory, {recursive: true, force: true}); }
 });

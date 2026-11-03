@@ -7113,13 +7113,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
-      // Temporary #5759 mitigation applies only to new live commands. Keep
-      // historical/replay acceptance and exact committed retries unchanged.
-      if ([T.MESSAGE_POSTED, T.MESSAGE_EDITED].includes(command.type)
-        && typeof command.data.body === 'string' && command.data.body.length > 8192
-        && isCurrentRoom(this.db, roomId)) {
-        fail(422, 'message_body_temporarily_limited', 'New normalized message bodies are temporarily limited to 8192 UTF-16 units; existing history is unchanged');
-      }
       return withCurrentServingWriter(this.db,roomId,() => {
       // Exact replays of commands committed before the pause returned above.
       refusePausedAgentWrite(this, roomId, auth.member, command);

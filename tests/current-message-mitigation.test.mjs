@@ -23,12 +23,13 @@ function fixture(t, legacy = false) {
 const command = (store, key, id, type, data) => store.command(key, 'commons', {id, type, data});
 const read = (f, messageId) => readConversation(f.store, f.key, 'commons', {messageId}).messages[0];
 
-for (const [kind, body] of bodies) test(`temporary ${kind} cap survives cold read, reply dependency, edit and deletion`, t => {
+for (const [kind, body] of bodies) test(`former temporary ${kind} boundary survives cold read, reply dependency, edit and deletion`, t => {
   const f = fixture(t);
   assert.equal(body.length, 8192);
   for (const id of ['edit', 'delete']) command(f.store, f.key, 'post-' + id, 'message.posted', {messageId: id, body});
-  assert.throws(() => command(f.store, f.key, 'over', 'message.posted', {messageId: 'over', body: body + 'x'}), error => error.code === 'message_body_temporarily_limited' && /8192 UTF-16/.test(error.message));
+  command(f.store, f.key, 'over', 'message.posted', {messageId: 'over', body: body + 'x'});
   f.reopen();
+  assert.equal(read(f, 'over').body, body + 'x', 'the full fix restores bodies above the old temporary boundary');
   assert.equal(read(f, 'edit').body, body);
   assert.equal(read(f, 'delete').body, body);
   command(f.store, f.key, 'reply', 'message.posted', {messageId: 'reply', body: 'Useful reply', replyToId: 'edit'});
@@ -41,32 +42,22 @@ for (const [kind, body] of bodies) test(`temporary ${kind} cap survives cold rea
   assert.equal(read(f, 'delete').body, null);
 });
 
-test('repeated escaped edits cannot persist an entity exceeding the existing readable proof limit', t => {
+test('repeated escaped edits above the former proof limit remain readable under the shared derived allowance', t => {
   const f = fixture(t), body = '\u0001'.repeat(8192);
   command(f.store, f.key, 'post', 'message.posted', {messageId: 'edit', body});
-  let refused = false;
   for (let revision = 0; revision < 5; revision++) {
-    const before = f.store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get();
-    const row = f.store.db.prepare("SELECT * FROM messages WHERE room_id='commons' AND message_id='edit'").get();
-    try { command(f.store, f.key, 'edit-' + revision, 'message.edited', {messageId: 'edit', body, expectedMessageRevision: revision}); }
-    catch (error) {
-      assert.equal(error.code, 'message_entity_temporarily_limited');
-      assert.match(error.message, /\d+ bytes.*131072 bytes/);
-      assert.deepEqual(f.store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get(), before);
-      assert.deepEqual(f.store.db.prepare("SELECT * FROM messages WHERE room_id='commons' AND message_id='edit'").get(), row);
-      refused = true;
-      break;
-    }
+    command(f.store, f.key, 'edit-' + revision, 'message.edited', {messageId: 'edit', body, expectedMessageRevision: revision});
     f.reopen();
     assert.equal(read(f, 'edit').body, body);
   }
-  assert.equal(refused, true);
+  const size = f.store.db.prepare("SELECT length(CAST(body AS BLOB))+length(CAST(record_json AS BLOB))+length(CAST(reducer_extras_json AS BLOB)) bytes FROM messages WHERE room_id='commons' AND message_id='edit'").get();
+  assert.ok(size.bytes > 131072, 'the fixture genuinely exceeds the old limit');
   f.reopen();
   command(f.store, f.key, 'delete-after-refusal', 'message.deleted', {messageId: 'edit', expectedMessageRevision: read(f, 'edit').revision});
   assert.equal(read(f, 'edit').body, null);
 });
 
-test('temporary new-body admission preserves exact retries committed before normalization', t => {
+test('exact retries committed before normalization remain unchanged', t => {
   const f = fixture(t, true), data = {messageId: 'old', body: 'x'.repeat(8193)};
   const saved = command(f.store, f.key, 'before-normalized', 'message.posted', data);
   const selection = {roomId: 'commons', discardLegacyAssignments: true}, plan = operatorNormalization(f.store, selection);

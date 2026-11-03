@@ -21,7 +21,8 @@ import { bindCurrentRecordContext } from '../src/current-record-context.js';
 // compatibility and prospective write integrity, not authority against a DBA.
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { emptyRoomState, memberHistoryVisibility, validId } from '../src/events.js';
+import { emptyRoomState, memberHistoryVisibility, validId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
+import { MESSAGE_EDIT_HISTORY_LIMITS } from '../src/message-reducers.js';
 import { messageProofMatches, MESSAGE_PROOF_SELECT, recordProjectionWrite } from './write-integrity.mjs';
 import { decodeMessageEntity } from './message-entity-projection.mjs';
 import { referenceWorkItems } from './work-repository.mjs';
@@ -37,11 +38,35 @@ const serializeCurrentCarrier = (revision, headHash) =>
 const corrupt = message => { throw Error('current_room_corrupt: ' + message); };
 const refuse = message => { throw new ServiceError(409,'current_room_context_unavailable',message); };
 const MAX_INPUT = 256 * 1024, MAX_RECORD = 128 * 1024;
-function admitTemporaryMessageWrite(row, current) {
+// One cumulative canonical-message input reservation per current read scope.
+// The body occurs twice: UTF-8 text (<=3 bytes/unit) and JSON (<=6 bytes/unit).
+// History keeps the original producer limits; metadata keeps its 128KiB cap.
+export const CURRENT_MESSAGE_INPUT_BYTES = 9 * MAX_MESSAGE_BODY_CHARS + 6 * MESSAGE_EDIT_HISTORY_LIMITS.totalChars + MAX_RECORD;
+const encodedBodyBytes = body => typeof body === 'string' ? Buffer.byteLength(JSON.stringify(body)) - 2 : 0;
+function messageGeometry(row, message) {
+  const history = message.editHistory ?? [];
+  if (typeof message.body === 'string' && message.body.length > MAX_MESSAGE_BODY_CHARS
+    || !Array.isArray(history) || history.length > MESSAGE_EDIT_HISTORY_LIMITS.entries) refuse('Canonical message body/history exceeds the accepted producer limits');
+  let historyUnits = 0, historyBytes = 0;
+  for (const entry of history) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || entry.body != null && typeof entry.body !== 'string'
+      || typeof entry.body === 'string' && entry.body.length > MESSAGE_EDIT_HISTORY_LIMITS.bodyChars) refuse('Canonical message history exceeds the accepted producer limits');
+    historyUnits += (typeof entry.body === 'string' ? entry.body.length : 0) + MESSAGE_EDIT_HISTORY_LIMITS.entryOverheadChars;
+    historyBytes += encodedBodyBytes(entry.body);
+  }
+  if (historyUnits > MESSAGE_EDIT_HISTORY_LIMITS.totalChars) refuse('Canonical message history exceeds the accepted producer limits');
+  const bytes = MESSAGE_PROOF_FIELDS.reduce((sum, key) => sum + (row[key] == null ? 0 : Buffer.byteLength(String(row[key]))), 0);
+  const metadataBytes = bytes - (row.body == null ? 0 : Buffer.byteLength(row.body)) - encodedBodyBytes(message.body) - historyBytes;
+  if (metadataBytes < 0 || metadataBytes > MAX_RECORD || bytes > CURRENT_MESSAGE_INPUT_BYTES) refuse('Canonical message metadata exceeds bounded input');
+  return {bytes, metadataBytes};
+}
+function admitCanonicalMessageWrite(row, current) {
   if (current.candidate) return; // Historical candidate replay is not a new command.
   const bytes = MESSAGE_PROOF_FIELDS.reduce((sum, key) => sum + (row[key] == null ? 0 : Buffer.byteLength(String(row[key]))), 0);
-  if (bytes > MAX_RECORD) throw new ServiceError(422, 'message_entity_temporarily_limited',
-    `Message entity is ${bytes} bytes; the temporary maximum is ${MAX_RECORD} bytes (body limit 8192 UTF-16 units). No changes were saved`);
+  if (bytes > CURRENT_MESSAGE_INPUT_BYTES) throw new ServiceError(422, 'current_message_entity_too_large',
+    `Message entity is ${bytes} bytes; the derived maximum is ${CURRENT_MESSAGE_INPUT_BYTES} bytes. No changes were saved`);
+  if (bytes > MAX_RECORD) messageGeometry(row, decodeMessageEntity(row));
 }
 const maps = new Set(['members','channels','workItems','replyRequests','agentHalts','helpOffers','bonds']);
 const omitted = new Set(['messages','messageAuthority','eventLog','seenEvents','seenIdempotencyKeys']);
@@ -467,10 +492,57 @@ export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)?
   if(!scalar){if(witness!==undefined)corrupt('witnessed canonical message missing');return undefined;}
   if(!witness)corrupt('canonical message lacks independent membership witness');
   const bytes=Object.values(scalar).reduce((sum,value)=>sum+(value??0),0);
-  if(bytes>MAX_RECORD)refuse('Message dependency exceeds bounded input');charge(b,bytes+512);
+  if (bytes > CURRENT_MESSAGE_INPUT_BYTES || (b.messageBytes ?? 0) + bytes > CURRENT_MESSAGE_INPUT_BYTES)
+    refuse('Canonical message dependencies exceed the shared bounded input reservation');
+  let admittedMetadata;
+  if (bytes > MAX_RECORD) {
+    if ((scalar.body ?? 0) > 3 * MAX_MESSAGE_BODY_CHARS
+      || (scalar.record_json ?? 0) > 6 * MAX_MESSAGE_BODY_CHARS + MAX_RECORD
+      || (scalar.reducer_extras_json ?? 0) > 6 * MESSAGE_EDIT_HISTORY_LIMITS.totalChars + MAX_RECORD)
+      refuse('Canonical message fields exceed bounded input');
+    // Only scalar geometry crosses into JS before payload admission. The raw
+    // cells already have a fixed ceiling; JSON traversal cannot scan history.
+    const shape = db.prepare(`WITH valid AS MATERIALIZED (
+      SELECT CASE WHEN json_valid(record_json) THEN record_json END AS record,
+        CASE WHEN json_valid(reducer_extras_json) THEN reducer_extras_json END AS extras
+      FROM messages WHERE room_id=? AND message_id=?),
+      history AS MATERIALIZED (SELECT e.value,e.type FROM valid,json_each(extras,'$.editHistory') e)
+      SELECT json_type(record) AS recordType,json_type(extras) AS extrasType,
+        (SELECT count(*) FROM json_each(record) WHERE key='body') AS bodyKeys,
+        json_type(record,'$.body') AS bodyType,
+        CASE WHEN json_type(record,'$.body')='text' THEN length(CAST(json_quote(json_extract(record,'$.body')) AS BLOB))-2 ELSE 0 END AS bodyBytes,
+        (SELECT count(*) FROM json_each(extras) WHERE key='editHistory') AS historyKeys,
+        json_type(extras,'$.editHistory') AS historyType,
+        (SELECT count(*) FROM history) AS historyCount,
+        (SELECT coalesce(sum(CASE WHEN type='object' THEN
+          CASE WHEN json_type(value,'$.body')='text' THEN length(CAST(json_quote(json_extract(value,'$.body')) AS BLOB))-2 ELSE 0 END ELSE 0 END),0) FROM history) AS historyBytes,
+        (SELECT coalesce(max(CASE WHEN type='object' THEN
+          CASE WHEN json_type(value,'$.body')='text' THEN length(CAST(json_quote(json_extract(value,'$.body')) AS BLOB))-2 ELSE 0 END ELSE 0 END),0) FROM history) AS historyMaxBytes,
+        (SELECT count(*) FROM history WHERE CASE WHEN type='object' THEN
+          (SELECT count(*) FROM json_each(history.value) WHERE key='body')>1
+          OR coalesce(json_type(value,'$.body'),'null') NOT IN ('text','null') ELSE 1 END) AS invalidHistory
+      FROM valid`).get(roomId, messageId);
+    if (!shape || shape.recordType !== 'object' || shape.extrasType !== 'object'
+      || shape.bodyKeys !== 1 || !['text', 'null'].includes(shape.bodyType)
+      || shape.bodyBytes > 6 * MAX_MESSAGE_BODY_CHARS || shape.historyKeys > 1
+      || shape.historyType != null && shape.historyType !== 'array'
+      || shape.historyCount > MESSAGE_EDIT_HISTORY_LIMITS.entries || shape.invalidHistory
+      || shape.historyMaxBytes > 6 * MESSAGE_EDIT_HISTORY_LIMITS.bodyChars
+      || shape.historyBytes > 6 * (MESSAGE_EDIT_HISTORY_LIMITS.totalChars - shape.historyCount * MESSAGE_EDIT_HISTORY_LIMITS.entryOverheadChars))
+      refuse('Canonical message history/shape exceeds bounded input');
+    admittedMetadata = bytes - (scalar.body ?? 0) - shape.bodyBytes - shape.historyBytes;
+    if (admittedMetadata < 0 || admittedMetadata > MAX_RECORD) refuse('Canonical message metadata exceeds bounded input');
+    charge(b, admittedMetadata + 512, 2);
+  } else charge(b,bytes+512);
+  b.messageBytes = (b.messageBytes ?? 0) + bytes;
   const row=db.prepare(`SELECT ${MESSAGE_PROOF_SELECT},entity_hash FROM messages WHERE room_id=? AND message_id=?`).get(roomId,messageId);
   if(!messageProofMatches(row)||witness.sequence!==row.seq||witness.entityHash!==row.entity_hash)corrupt('message field proof changed');
-  return {row,value:decodeMessageEntity(row)};
+  const value = decodeMessageEntity(row);
+  if (admittedMetadata !== undefined) {
+    const geometry = messageGeometry(row, value);
+    if (geometry.bytes !== bytes || geometry.metadataBytes !== admittedMetadata) corrupt('message scalar geometry changed');
+  }
+  return {row,value};
 }
 
 const supported = new Set(['message.pinned','message.unpinned','member.sponsor_transferred','channel.created','work.public_set','capabilities.advertised','bond.propose','bond.accept','bond.decline','bond.revoke','bond.proposed','bond.activated','bond.revoked','dm.posted','claim.acquired','claim.renewed','claim.released','room.spend_pricing_set','room.spend_allowance_set','room.archived','room.exported','room.charter_updated','room.policy_set','room.trust_set','message.deleted','message.edited','work.superseded','ownership.transferred','reply_request.cancelled','work_claim.updated','message.posted','work.proposed','work.accepted','work.started','work.completed','work.handoff_recorded','work.halt_cleared','verification.recorded','owner.decision_recorded']);
@@ -847,7 +919,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
     const added=state.messages.filter(message=>!previous.state.messages.some(old=>old.id===message.id));
     for(const message of added) {
       const row=messageRowForWrite(message,{sequence,pinned:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
-      admitTemporaryMessageWrite(row, current);
+      admitCanonicalMessageWrite(row, current);
       changes.push({domain:'messageWitness',key:message.id,value:{sequence,entityHash:messageProofHash(row)}});
       let root=message;const seen=new Set();
       while(root.replyToId) {if(seen.has(root.id))corrupt('new reply cycle');seen.add(root.id);const parent=state.messages.find(m=>m.id===root.replyToId);if(!parent)corrupt('unloaded reply ancestor');root=parent;}
@@ -864,7 +936,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
       &&(state.pins??[]).some(pin=>pin.messageId===message.id)!==(source.row.pinned===1);
     if(!source||(isDeepStrictEqual(message,source.value)&&!pinChanged))continue;
     const row=messageRowForWrite(message,{sequence:source.row.seq,pinned:event.type==='member.merged'?source.row.pinned===1:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
-    admitTemporaryMessageWrite(row, current);
+    admitCanonicalMessageWrite(row, current);
     changes.push({domain:'messageWitness',key:message.id,value:{sequence:source.row.seq,entityHash:messageProofHash(row)}});
   }
   if(current.merge) {
