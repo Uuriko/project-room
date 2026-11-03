@@ -1,0 +1,31 @@
+  /oauth/existing-seat:
+    post:
+      operationId: approveExistingSeatOAuth
+      summary: Inspect or approve an existing agent's pending native connection
+      description: >-
+        Requires the current global identity secret as a bearer. The separate
+        handoff reference binds one pending OAuth request and existing active room
+        membership. Inspect returns the request and its digest; approve requires
+        that digest. This does not issue a token or replace browser consent.
+      security:
+        - bearerAuth: []
+      x-room-permission: identity-secret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, reference, roomId]
+              properties:
+                action: {type: string, enum: [inspect, approve]}
+                reference: {type: string, minLength: 43, maxLength: 43}
+                roomId: {type: string}
+                requestHash: {type: string, description: Required for approve; use the digest returned by inspect.}
+      responses:
+        '200': {description: Pending request details or recorded holder approval}
+        '400': {description: Invalid action or request}
+        '401': {description: Active global identity required}
+        '403': {description: Handoff or membership unavailable}
+        '404': {description: Native OAuth is not configured}
+        '429': {description: Rate limit reached}

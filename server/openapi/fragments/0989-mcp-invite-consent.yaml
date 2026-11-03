@@ -11,12 +11,13 @@
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required: [nonce, invitation, decision]
+              required: [nonce, decision]
               properties:
                 nonce: {type: string}
                 invitation: {type: string}
-                decision: {type: string, enum: [preview, allow, deny]}
+                decision: {type: string, enum: [preview, allow, allow_public, deny, existing_start, existing_check, existing_allow]}
                 display_name: {type: string, maxLength: 80}
+                reference: {type: string, description: Handoff reference used to retain the waiting view.}
       responses:
         '200':
           description: Invitation preview and consent form

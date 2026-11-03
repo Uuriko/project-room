@@ -19,6 +19,7 @@ import { auditRecovery } from "./recovery.mjs";
 import { ensureReplayCutoverRestoreSchema } from "./replay-cutover.mjs";
 import { Buffer } from "node:buffer";
 import { ensureOAuthProviderSchema, OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
+import { ensureExistingSeatOAuthSchema } from "./existing-seat-oauth-schema.mjs";
 import { ensureMcpInviteOAuthSchema, inviteOAuthDatabase } from "./mcp-invite-oauth.mjs";
 import { mcpEventSubscriptionsSchema } from "./mcp-event-subscriptions.mjs";
 
@@ -578,6 +579,7 @@ export function ensureNativeAgentRestoreSchema(db, names) {
     ensureMcpInviteOAuthSchema(db);
     ensureOAuthProviderSchema(inviteOAuthDatabase(db));
   }
+  if (["oauth_existing_seat_proofs", "oauth_existing_seat_handoffs"].some(table => names.has(table))) ensureExistingSeatOAuthSchema(db);
   if (names.has("mcp_event_subscriptions") || names.has("mcp_event_outbox")) db.exec(mcpEventSubscriptionsSchema);
 }
 

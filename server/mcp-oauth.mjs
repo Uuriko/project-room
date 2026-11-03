@@ -13,6 +13,7 @@ import { hasMessageAuthority } from './message-authority.mjs';
 import { assertProjectionWrite } from './write-integrity.mjs';
 
 export const PUBLIC_LOBBY_GRANT = 'public-lobby-guest-v1';
+export const EXISTING_SEAT_GRANT = 'existing-seat-holder-v1';
 
 export { mcpOAuthResourceMetadata } from "./oauth-metadata.mjs";
 
@@ -239,10 +240,18 @@ export function validateMcpInviteOAuthBinding(store, grantId, binding) {
   // Zero expiry is reserved for self-joined public guests. Their membership
   // persists, while access/refresh families retain expiry and revocation.
   const durablePublic = grant?.invite_hash === PUBLIC_LOBBY_GRANT && grant.room_id === PUBLIC_LOBBY_ROOM_ID && grant.expires_at === 0;
-  if (!grant || grant.revoked_at !== null || (!durablePublic && grant.expires_at <= store.now())
+  const durableHolder = grant?.invite_hash === EXISTING_SEAT_GRANT && grant.expires_at === 0;
+  if (!grant || grant.revoked_at !== null || (!durablePublic && !durableHolder && grant.expires_at <= store.now())
     || grant.room_id !== binding.roomId || grant.identity_id !== binding.identityId || grant.member_id !== binding.memberId
     || grant.identity_epoch !== binding.identityEpoch) return null;
-  if (grant.invite_hash === PUBLIC_LOBBY_GRANT) {
+  if (grant.invite_hash === EXISTING_SEAT_GRANT) {
+    // This marker alone grants nothing: an atomically consumed holder proof
+    // must link this precise grant to the same current identity and member.
+    let proof;
+    try { proof = store.db.prepare('SELECT * FROM oauth_existing_seat_proofs WHERE grant_id=?').get(grantId); } catch { return null; }
+    if (!proof || proof.consumed_at === null || proof.identity_id !== binding.identityId
+      || proof.identity_epoch !== binding.identityEpoch || proof.room_id !== binding.roomId || proof.member_id !== binding.memberId) return null;
+  } else if (grant.invite_hash === PUBLIC_LOBBY_GRANT) {
     if (grant.room_id !== PUBLIC_LOBBY_ROOM_ID) return null;
   } else {
     const invite = store.db.prepare('SELECT redeemed_identity_id,revoked_at FROM agent_invite_codes WHERE code_hash=?').get(grant.invite_hash);
@@ -254,7 +263,7 @@ export function validateMcpInviteOAuthBinding(store, grantId, binding) {
     || invitationEpoch(mcpOAuthIdentityEpoch(store,binding.identityId),member)!==binding.identityEpoch) return null;
   return Object.freeze({ principalType: 'invited-agent', invitationGrantId: grantId, roomId: binding.roomId,
     identityId: binding.identityId, memberId: binding.memberId, sponsorMemberId: grant.sponsor_member_id,
-    controllerVerification: grant.invite_hash === PUBLIC_LOBBY_GRANT ? 'public-consent' : 'invitation-capability' });
+    controllerVerification: grant.invite_hash === EXISTING_SEAT_GRANT ? 'identity-holder' : grant.invite_hash === PUBLIC_LOBBY_GRANT ? 'public-consent' : 'invitation-capability' });
 }
 
 export function mcpOAuthPrincipalDescriptor(principal) {

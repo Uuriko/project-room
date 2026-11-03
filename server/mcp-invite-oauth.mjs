@@ -32,7 +32,17 @@ export const PUBLIC_LOBBY_PROOF_SCRIPT = `(() => {
  };
  retry.addEventListener('click',solve); void solve();
 })();`;
-import { mcpInviteOAuthIdentityEpoch, validateMcpInviteOAuthBinding, PUBLIC_LOBBY_GRANT } from './mcp-oauth.mjs';
+export const EXISTING_SEAT_COPY_SCRIPT = `(() => {
+ const button=document.getElementById('existing-copy'),field=document.getElementById('existing-prompt'),status=document.getElementById('existing-copy-status');
+ if(!button||!field||!status)return;
+ button.hidden=false;
+ button.addEventListener('click',async()=>{
+  try{await navigator.clipboard.writeText(field.value);status.textContent='Copied.';}
+  catch{field.focus();field.select();status.textContent='Select and copy the prompt.';}
+ });
+})();`;
+import { mcpInviteOAuthIdentityEpoch, validateMcpInviteOAuthBinding, PUBLIC_LOBBY_GRANT, EXISTING_SEAT_GRANT } from './mcp-oauth.mjs';
+import { createExistingSeatProof } from './existing-seat-oauth-proof.mjs';
 export const MCP_INVITE_RECOVERY = 'If this connection expired, was revoked, or its invitation was already confirmed, ask the Room sponsor for a fresh agent invitation and reconnect the plugin. A fresh invitation creates a new agent seat; it does not restore the previous seat or extend its 30-day grant.';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const escape = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -47,6 +57,7 @@ export function ensureMcpInviteOAuthSchema(db) {
     created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS oauth_invite_grants_expires ON oauth_invite_grants(expires_at) WHERE (expires_at != 0 OR invite_hash != 'public-lobby-guest-v1' OR room_id != 'project-room-lobby');
+  CREATE INDEX IF NOT EXISTS oauth_invite_grants_expires_v2 ON oauth_invite_grants(expires_at) WHERE (expires_at != 0 OR (invite_hash != 'existing-seat-holder-v1' AND (invite_hash != 'public-lobby-guest-v1' OR room_id != 'project-room-lobby')));
   CREATE TABLE IF NOT EXISTS oauth_invite_pending (
     nonce_hash TEXT PRIMARY KEY, request_json TEXT NOT NULL,
     expires_at INTEGER NOT NULL, grant_id TEXT, approval_hash TEXT
@@ -76,11 +87,14 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
       .run(hash(nonce), JSON.stringify(request), store.now() + 600000);
     return { nonce, request };
   };
-  const read = nonce => {
-    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(nonce)) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
-    const pending = db.prepare('SELECT * FROM oauth_invite_pending WHERE nonce_hash=?').get(hash(nonce));
+  const readByHash = nonceHash => {
+    const pending = db.prepare('SELECT * FROM oauth_invite_pending WHERE nonce_hash=?').get(nonceHash);
     if (!pending || pending.expires_at <= store.now()) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
     return { pending, request: JSON.parse(pending.request_json) };
+  };
+  const read = nonce => {
+    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(nonce)) throw new Error('Connection confirmation expired. Restart plugin connection. ' + MCP_INVITE_RECOVERY);
+    return readByHash(hash(nonce));
   };
   const codeFrom = text => {
     if (typeof text !== 'string' || text.length > 2048) throw new Error('Paste a Member agent invitation link or RM code');
@@ -161,6 +175,32 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
   });
+  // Prototype only: a future HTTP caller must check the same-origin cookie and
+  // display the reviewed seat before invoking this final consent operation.
+  let holderProof;
+  const existingSeatProof = () => holderProof ??= createExistingSeatProof({ store, inviteOAuth: { read, readByHash } });
+  const approveExisting = nonce => {
+    const proof = existingSeatProof(), { pending, request } = read(nonce);
+    const issue = (grant, seat) => {
+      const binding = { principalType: 'invited-agent', invitationGrantId: grant.grantId, resource, ...seat };
+      const { code } = provider.issueCode({ ...request, userId: grant.grantId, binding, codeIdempotencyKey: nonce });
+      const redirect = new URL(request.redirectUri);
+      redirect.searchParams.set('code', code); redirect.searchParams.set('iss', issuer);
+      if (request.state) redirect.searchParams.set('state', request.state);
+      return redirect.href;
+    };
+    if (pending.grant_id) return proof.replayGrant(nonce, issue);
+    return proof.consumeForGrant(nonce, seat => {
+      const authority = store.roomAuthority(seat.roomId, { memberId: seat.memberId });
+      const member = store.identities.resolveIdentityLink(seat.identityId, seat.roomId)?.member;
+      if (!member || member.id !== seat.memberId) throw new Error('Existing agent unavailable');
+      const grantId = `oig_${randomBytes(24).toString('base64url')}`;
+      db.prepare('INSERT INTO oauth_invite_grants(id,room_id,identity_id,member_id,identity_epoch,invite_hash,sponsor_member_id,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)')
+        .run(grantId, seat.roomId, seat.identityId, seat.memberId, seat.identityEpoch, EXISTING_SEAT_GRANT,
+          member.accountableHumanId ?? authority.ownerId, store.now(), 0);
+      return { grantId };
+    }, issue);
+  };
   const cancel = nonce => store.transaction(() => {
     const { pending, request } = read(nonce);
     if (pending.grant_id) throw new Error('This connection was already confirmed. Manage the connection in your host, or ask the sponsor to revoke its Room access. ' + MCP_INVITE_RECOVERY);
@@ -172,14 +212,22 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
     if (request.state) redirect.searchParams.set('state', request.state);
     return redirect.href;
   });
-  return { provider, begin, read, preview, approve, approvePublic, publicLobbyAvailable, cancel };
+  return { provider, begin, read, readByHash, preview, approve, approvePublic, publicLobbyAvailable, cancel, existingSeatProof, approveExisting };
 }
-export function inviteOAuthPage({ nonce, request, invitation = null, code = '', accountUrl, invitationChoice = false, publicLobby = false, proofChallenge = null, displayName = '' }) {
+export function inviteOAuthPage({ nonce, request, invitation = null, code = '', accountUrl, invitationChoice = false, publicLobby = false, proofChallenge = null, displayName = '', existingHandoff = null, existingReview = null, existingIssuer = '', existingWaiting = false }) {
   const hidden = `<input type="hidden" name="nonce" value="${escape(nonce)}">`;
+  if (existingHandoff || existingReview) {
+    const prompt = `Connect your existing Project Room agent. Use your saved identity secret only as the Authorization bearer at ${existingIssuer}/oauth/existing-seat. POST JSON with action inspect, reference ${existingHandoff}, and your existing roomId. Review the client, redirect and scopes. If approved, POST again with action approve, the same reference and roomId, and the returned requestHash. Keep your secret private; do not create a new identity. Tell me when done.`;
+    const content = existingHandoff
+      ? `<p>Paste this into your existing agent, then check approval.</p><label for="existing-prompt">Agent prompt</label><textarea id="existing-prompt" readonly rows="5">${escape(prompt)}</textarea><button id="existing-copy" type="button" hidden>Copy prompt</button><span id="existing-copy-status" role="status" aria-live="polite"></span><input type="hidden" name="reference" value="${escape(existingHandoff)}">${existingWaiting ? '<p role="status">Waiting for your agent to approve.</p>' : ''}<button name="decision" value="existing_check">Check approval</button><script>${EXISTING_SEAT_COPY_SCRIPT}</script>`
+      : `<p>Connect <strong>${escape(existingReview.displayName)}</strong> in <strong>${escape(existingReview.roomId)}</strong>.</p><p>Agent ID: ${escape(existingReview.memberId)}<br>Client: ${escape(existingReview.clientName)} (${escape(existingReview.clientId)})<br>Redirect: ${escape(existingReview.redirectUri)}<br>Access: ${escape(existingReview.scopes.join(', '))}</p><button name="decision" value="existing_allow">Allow</button>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect existing agent</title><style>body{font-family:system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}h1{font-size:1.5rem}textarea{display:block;box-sizing:border-box;width:100%;padding:.7rem;font:inherit}button{display:inline-block;padding:.7rem 1rem;margin:.5rem .3rem .5rem 0;border:1px solid #bbb;border-radius:.5rem;background:white;font:inherit;cursor:pointer}button:focus-visible,textarea:focus-visible{outline:3px solid #1468ce;outline-offset:3px}</style></head><body><main><h1>Connect existing agent</h1><form method="post" action="/oauth/invite">${hidden}${content}<button name="decision" value="deny">Cancel</button></form></main></body></html>`;
+  }
   const consent = invitation
     ? `<p>Room: <strong>${escape(invitation.roomTitle)}</strong></p><p>Invitation sponsor: ${escape(invitation.inviterDisplayName || 'Room member')}</p><p>Room access: ${escape(invitation.profile)}. Requested scopes: ${escape(request.scopes.join(', '))}.</p><p>The sponsor grants access inside this Room. Your ChatGPT tool permissions stay under your control. No Room human account is created or claimed. This Room connection lasts up to 30 days and can be revoked.</p><input type="hidden" name="invitation" value="${escape(code)}"><label>Agent name <input name="display_name" maxlength="80" value="My agent" required></label><button name="decision" value="allow">Connect this agent</button>`
     : '<label>Agent invitation link or RM code <input name="invitation" maxlength="2048" autocomplete="off" required></label><button name="decision" value="preview">Review invitation</button>';
-  const account = accountUrl ? `<section aria-labelledby="reconnect-title"><h2 id="reconnect-title">Already connected before?</h2><p>Use your Room account to choose an existing agent and room.</p><a class="primary" data-account-reconnect href="${escape(accountUrl)}">Reconnect existing agent</a></section>` : '';
+  const account = (accountUrl ? `<section aria-labelledby="reconnect-title"><h2 id="reconnect-title">Already connected before?</h2><p>Use your Room account to choose an existing agent and room.</p><a class="primary" data-account-reconnect href="${escape(accountUrl)}">Use Room account</a></section>` : '')
+    + (!invitation && !proofChallenge ? `<form method="post" action="/oauth/invite">${hidden}<button name="decision" value="existing_start">Use saved agent identity</button></form>` : '');
   const publicForm = publicLobby && !invitation ? proofChallenge
     ? `<section><h2>Verifying your connection</h2><p id="proof-status" role="status">Verifying this connection…</p><form id="public-proof" method="post" action="/oauth/invite" data-prefix="${escape(proofChallenge.prefix)}" data-challenge="${escape(proofChallenge.challenge)}">${hidden}<input type="hidden" name="display_name" value="${escape(displayName)}"><input type="hidden" name="decision" value="allow_public"><input type="hidden" name="proof"><noscript>JavaScript is required for verification. Please use an invitation instead.</noscript></form><button id="proof-retry" type="button" hidden>Retry verification</button><script>${PUBLIC_LOBBY_PROOF_SCRIPT}</script></section>`
     : `<section><h2>Join the public lobby</h2><p>Connect your agent as a guest in the public lobby. This creates a new agent seat with read and chat access. Lobby messages are public. No Room account or invitation is required. Already connected? Reuse your saved host connection. The account reconnect option above is for seats linked to a Room account.</p><form method="post" action="/oauth/invite">${hidden}<label>Agent name <input name="display_name" maxlength="80" value="Agent ${escape(nonce.slice(0, 6))}" required></label><button name="decision" value="allow_public">Connect to the lobby</button></form></section>` : '';

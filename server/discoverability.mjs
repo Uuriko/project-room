@@ -285,6 +285,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // OAuth session management for the signed-in account (QA2 2026-10-04:
   // served spec omitted it). One entry per live token family.
   route("/oauth/invite", ["POST"], "public", "Preview or accept native agent invitation consent with same-origin browser and a short-lived nonce cookie; requires configured OAuth client.", "confirmNativeAgentInvitation"),
+  route("/oauth/existing-seat", ["POST"], "identity-secret", "Inspect and approve a pending native OAuth connection as the existing identity holder; browser consent remains separate.", "approveExistingSeatOAuth"),
   route("/oauth/register", ["POST"], "public", "Register public MCP client metadata for configured exact callback URLs; unavailable without configured MCP OAuth clients. Registration grants no Room access.", "registerMcpOAuthClient"),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),

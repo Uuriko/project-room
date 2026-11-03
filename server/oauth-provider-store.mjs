@@ -7,6 +7,7 @@ export const OAUTH_PROVIDER_TABLES = Object.freeze([
   "oauth_provider_refresh_tokens",
   "oauth_invite_clients", "oauth_invite_codes", "oauth_invite_access_tokens", "oauth_invite_refresh_tokens",
   "oauth_invite_grants", "oauth_invite_pending",
+  "oauth_existing_seat_proofs", "oauth_existing_seat_handoffs",
 ]);
 
 const SCHEMA = `
@@ -114,7 +115,7 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
     // Match the native grant expiry index: retain durable public guests,
     // while expired invitation grants (including zero) still get pruned.
-    const lowerBound = table === "oauth_invite_grants" ? "(expires_at != 0 OR invite_hash != 'public-lobby-guest-v1' OR room_id != 'project-room-lobby') AND " : "";
+    const lowerBound = table === "oauth_invite_grants" ? "(expires_at != 0 OR (invite_hash != 'existing-seat-holder-v1' AND (invite_hash != 'public-lobby-guest-v1' OR room_id != 'project-room-lobby'))) AND " : "";
     const result = db.prepare(
       `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE ${lowerBound}expires_at <= ? LIMIT ?)`
     ).run(now, limit);

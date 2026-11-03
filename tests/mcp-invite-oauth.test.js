@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { RoomStore } from '../server/store.mjs';
 import { runInNewContext } from 'node:vm';
-import { createMcpInviteOAuth, PUBLIC_LOBBY_PROOF_SCRIPT } from '../server/mcp-invite-oauth.mjs';
+import { createMcpInviteOAuth, PUBLIC_LOBBY_PROOF_SCRIPT, EXISTING_SEAT_COPY_SCRIPT } from '../server/mcp-invite-oauth.mjs';
 import { solveIdentityMintProof } from '../server/agent-identities.mjs';
 import { mcpOAuthPrincipalDescriptor, resolveMcpOAuthPrincipal, authorizeMcpOAuthDescriptor, listMcpOAuthAgents, validateMcpOAuthBinding } from '../server/mcp-oauth.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
@@ -15,6 +15,18 @@ import { defaultServerArgs } from '../server/boot-options.mjs';
 const CLIENT = { clientId: 'native-test', name: 'Native test agent', redirectUris: ['https://client.example/callback'] };
 const origin = 'https://room.example', resource = origin + '/mcp';
 const verifier = 'x'.repeat(43), challenge = createHash('sha256').update(verifier).digest('base64url');
+test('copy prompt sends exact text to clipboard and selects it on failure', async () => {
+  for (const fails of [false, true]) {
+    let clicked, copied, selected = false, focused = false;
+    const button = { hidden: true, addEventListener: (_, handler) => { clicked = handler; } };
+    const field = { value: 'Exact test prompt', focus: () => { focused = true; }, select: () => { selected = true; } };
+    const status = { textContent: '' }, elements = { 'existing-copy': button, 'existing-prompt': field, 'existing-copy-status': status };
+    runInNewContext(EXISTING_SEAT_COPY_SCRIPT, { document: { getElementById: id => elements[id] }, navigator: { clipboard: { writeText: async text => { if (fails) throw Error('denied'); copied = text; } } } });
+    assert.equal(button.hidden, false); await clicked();
+    if (fails) { assert.equal(focused && selected, true); assert.match(status.textContent, /Select and copy/); }
+    else { assert.equal(copied, field.value); assert.equal(status.textContent, 'Copied.'); }
+  }
+});
 const fetch = (url, options = {}) => new Promise((resolve, reject) => {
   const req = request(url, { method: options.method || 'GET', headers: { Host: 'room.example', ...options.headers } }, res => {
     const chunks = []; res.on('data', chunk => chunks.push(chunk));
@@ -43,6 +55,36 @@ async function setup(t, { client = CLIENT, clients = [client] } = {}) {
   };
   return { store, owner, base, invitation, accountsBefore, start, submit, exchange, rpc };
 }
+test('prototype HTTP reconnect requires identity-holder approval and browser consent for the same seat', async t => {
+  const f = await setup(t), identity = f.store.identities.create('Existing agent');
+  const joined = f.store.invites.redeem(f.invitation.code, { identitySecret: identity.secret, displayName: 'Existing agent' });
+  const count = f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
+  const started = await f.submit('existing_start'); assert.equal(started.status, 200);
+  const reference = (await started.text()).match(/reference ([A-Za-z0-9_-]{43})/)?.[1]; assert.ok(reference);
+  const holder = (action, extra = {}, secret = identity.secret) => fetch(f.base + '/oauth/existing-seat', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + secret }, body: JSON.stringify({ action, reference, roomId: 'commons', ...extra }) });
+  assert.equal((await holder('inspect', {}, 'invalid')).status, 401);
+  assert.equal((await f.submit('existing_allow', {}, '')).status, 403);
+  assert.equal((await f.submit('existing_allow')).status, 400);
+  const waiting = await f.submit('existing_check', { reference }); assert.equal(waiting.status, 200);
+  assert.match(await waiting.text(), /Waiting for your agent to approve/);
+  const inspected = await holder('inspect'); assert.equal(inspected.status, 200);
+  const details = await inspected.json(); assert.equal(details.memberId, joined.memberId);
+  assert.equal((await holder('approve', { requestHash: 'wrong' })).status, 403);
+  assert.equal((await holder('approve', { requestHash: details.requestHash })).status, 200);
+  const review = await f.submit('existing_check'); assert.equal(review.status, 200);
+  const html = await review.text(); assert.match(html, /Existing agent/); assert.match(html, /commons/); assert.ok(html.includes(joined.memberId)); assert.match(html, /Native test agent/); assert.doesNotMatch(html, new RegExp(identity.secret));
+  const allowed = await f.submit('existing_allow'); assert.equal(allowed.status, 302, await allowed.clone().text());
+  const replay = await f.submit('existing_allow'); assert.equal(replay.headers.get('location'), allowed.headers.get('location'));
+  const code = new URL(allowed.headers.get('location')).searchParams.get('code');
+  const exchanged = await f.exchange({ grant_type: 'authorization_code', code }); assert.equal(exchanged.status, 200);
+  const tokens = await exchanged.json(), access = await f.rpc(tokens.access_token);
+  assert.equal(access.status, 200); assert.equal(access.body.result.structuredContent.memberId, joined.memberId);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n, count);
+  assert.equal((await f.submit('existing_allow')).status, 400);
+  f.store.db.prepare('UPDATE agent_identities SET secret_hash=? WHERE identity_id=?').run('rotated-verifier', identity.identityId);
+  assert.equal((await f.rpc(tokens.access_token)).status, 401);
+  assert.equal((await f.exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).status, 400);
+});
 test('invitation native OAuth needs no account, survives lost consent response without duplicate seats, and acts as the agent', async t => {
   const f = await setup(t);
   const metadata = await (await fetch(f.base + '/.well-known/oauth-authorization-server')).json();
