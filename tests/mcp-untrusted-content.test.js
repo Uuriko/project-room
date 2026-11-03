@@ -175,8 +175,12 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     if (name !== "room_claim") assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`); // room_claim joined core in #5468
   }
   const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
-  assert.ok(existingTools.length <= 115,
-    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget remains 115 tools`);
+  // #5814 adds exactly one reviewed wait tool outside core. Ratchet the full
+  // count by one; the core token/count limits and all annotation guards stay.
+  assert.equal(fullTools.filter(tool => tool.name === "room_wait_for_attention").length, 1);
+  assert.equal(coreTools.some(tool => tool.name === "room_wait_for_attention"), false);
+  assert.ok(existingTools.length <= 116,
+    `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget is 116 tools including the reviewed attention wait`);
   for (const name of ["room_read_messages", "room_read_request", "room_needs_me"]) {
     assert.equal(coreTools.find(tool => tool.name === name).annotations.openWorldHint, true, name);
   }
