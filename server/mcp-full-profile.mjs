@@ -113,10 +113,26 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   });
   const mapped = messages.map(message => markIfOther(message, memberId, message.from));
   const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
+  // History hint: a cold read (no after, not latest) starts at the oldest
+  // event. Point at the caller's existing catch-up marker so a joining or
+  // woken agent can skip history it already handled. Reuses catchUpCursor;
+  // no counts, no new summary, and reading does not acknowledge.
+  const catchUp = args.after === undefined && !latest ? catchUpHint(store, roomId, memberId) : null;
   return withContentTrust({
     roomId, messages: mapped,
     next: cursor.next, hasMore: cursor.hasMore,
+    ...(catchUp ? { catchUp } : {}),
   });
+}
+
+function catchUpHint(store, roomId, memberId) {
+  let after;
+  try { after = store.catchUpCursor(roomId, memberId); } catch { return null; }
+  if (!Number.isSafeInteger(after) || after <= 0) return null;
+  return {
+    after, source: "saved_catch_up_marker", acknowledges: false,
+    nextRead: { tool: "room_read_messages", arguments: { roomId, after } },
+  };
 }
 
 function replyRead(store, secret, roomId, name, args) {
