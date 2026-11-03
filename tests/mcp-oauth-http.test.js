@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { event } from '../src/events.js';
 import { createRoomServer } from '../server/http.mjs';
 import { mcpOAuthIdentityEpoch } from '../server/mcp-oauth.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
@@ -25,10 +24,10 @@ const origin = 'https://room.example';
 const resource = origin + '/mcp';
 const verifier = 'v'.repeat(43);
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false, seedEvents=initialRoom()} = {}) {
+async function setup(t, {legacyOwned=false, client=CLIENT, database=':memory:', clock, normalized=false} = {}) {
   let store = new RoomStore(database);
   if(clock)store.now=clock;
-  store.initialize(seedEvents, normalized ? {representation: 'normalized-current-v1'} : {});
+  store.initialize(initialRoom(), normalized ? {representation: 'normalized-current-v1'} : {});
   const ownerKey = store.issueAccessKey('commons', 'owner');
   const ownerSession = store.createSession(ownerKey);
   const accountId = store.db.prepare("SELECT account_id FROM member_accounts WHERE member_id='owner'").get().account_id;
@@ -517,38 +516,30 @@ test('OAuth inbox reply actions use the connected MCP tool and preserve private 
   assert.equal(publicAction.arguments.replyToId,'oauth-public-mention');assert.equal(publicAction.arguments.toMemberId,undefined);
 });
 
-test('OAuth help_wanted walks bounded normalized sources and discovers explicit live invitations', async t => {
-  let now=Date.now();const seedEvents=initialRoom();
-  const send=(id,type,data)=>seedEvents.push(event({id,roomId:'commons',actorId:'owner',type,data,at:new Date(now).toISOString()}));
-  send('add-outsider','member.added',{memberId:'guest',displayName:'Outsider',kind:'agent',permissions:[]});
-  for(let i=0;i<6;i++){
-    const workItemId='oauth-help-'+i;
-    send('propose-'+i,'work.proposed',{workItemId,title:'Help '+i,definitionOfDone:'Useful answer',mode:'read',accountableMemberId:'owner'});
-    send('accept-'+i,'work.accepted',{workItemId,expectedRevision:0});
-    if(i!==1)send('invite-'+i,'work.help_updated',{workItemId,expectedRevision:1,expectedHelpRevision:0,status:'open',scope:'Suggest improvements '+i,expiresAt:new Date(now+60000).toISOString()});
-  }
-  send('withdraw-2','work.help_updated',{workItemId:'oauth-help-2',expectedRevision:1,expectedHelpRevision:1,status:'withdrawn'});
-  send('private-help-request','message.posted',{messageId:'private-help-request',workItemId:'oauth-help-3',toMemberId:'guest',requestKind:'reply',requestPolicyVersion:1,body:'Private scope'});
-  const f=await setup(t,{normalized:true,clock:()=>now,seedEvents});
+test('OAuth help_wanted gives a truthful supported pointer without scanning or implying an empty queue', async t => {
+  const f=await setup(t,{normalized:true});
+  for(let i=0;i<32;i++)f.store.command(f.ownerKey,'commons',{id:'noise-'+i,type:'work.proposed',data:{workItemId:'noise-'+i,title:'Other work '+i,definitionOfDone:'Useful answer',mode:'read',accountableMemberId:'owner'}});
+  f.store.command(f.ownerKey,'commons',{id:'addressed-work',type:'work.proposed',data:{workItemId:'addressed-work',title:'Your useful next step',definitionOfDone:'Useful answer',mode:'read',accountableMemberId:'friend-dot'}});
+  f.store.command(f.ownerKey,'commons',{id:'addressed-request',type:'message.posted',data:{messageId:'addressed-request',toMemberId:'friend-dot',requestKind:'reply',body:'Please inspect your next step'}});
   f.store.room=()=>{throw Error('whole-room hydration');};f.store.snapshot=()=>{throw Error('whole snapshot');};
-  const ids=[];let args={roomId:'commons',focus:'help_wanted',limit:100},eligibleContinuation,pages=0;
   const before=f.store.db.prepare('SELECT count(*) n FROM events').get().n;
-  while(args){
-    const read=await f.rpc('tools/call',{name:'room_list_work',arguments:args});
-    assert.notEqual(read.body.result?.isError,true,JSON.stringify(read.body));assert.equal(read.body.error,undefined);
-    const page=read.body.result.structuredContent;pages++;if(page.work.some(work=>work.id==='oauth-help-4'))eligibleContinuation={...args};
-    assert.equal(page.focus,'help_wanted');assert.equal(page.clockSource,'service');assert.equal(page.scope.externalExecution,false);
-    assert.equal(page.page.totalWork,null);assert.equal(page.selection.matches,null);
-    assert.ok(page.selection.examinedWork<=1);assert.ok(pages<10);
-    for(const work of page.work){assert.equal(work.help.authority,'invitation_only');assert.equal(work.help.canOffer,true);assert.equal(work.nextRead.arguments.includeOffers,undefined);assert.equal(work.offerEligibility.status,'unavailable');ids.push(work.id);
-      const selected=await f.rpc('tools/call',{name:work.nextRead.tool,arguments:work.nextRead.arguments});assert.notEqual(selected.body.result?.isError,true,JSON.stringify(selected.body));}
-    args=page.page.nextRead?.arguments;
-  }
-  assert.equal(pages,6);assert.deepEqual(ids,['oauth-help-0','oauth-help-4','oauth-help-5']);
-  assert.equal(f.store.db.prepare('SELECT count(*) n FROM events').get().n,before,'listing writes no events');
-  now+=60000;
-  const continued=await f.rpc('tools/call',{name:'room_list_work',arguments:eligibleContinuation});
-  assert.deepEqual(continued.body.result.structuredContent.work,[],'continued pages use the current service clock');
-  const expired=await f.rpc('tools/call',{name:'room_list_work',arguments:{roomId:'commons',focus:'help_wanted'}});
-  assert.deepEqual(expired.body.result.structuredContent.work,[],'a fresh evaluation excludes expired invitations');
+  const read=await f.rpc('tools/call',{name:'room_list_work',arguments:{roomId:'commons',focus:'help_wanted',limit:100}});
+  assert.notEqual(read.body.result?.isError,true,JSON.stringify(read.body));assert.equal(read.body.error,undefined);
+  const value=read.body.result.structuredContent;
+  assert.equal(value.status,'selection_unavailable');assert.equal(value.selection.available,false);
+  assert.equal(value.selection.requestedFocus,'help_wanted');assert.equal(value.selection.reason,'current_help_index_unavailable');
+  assert.match(value.selection.guidance,/does not mean no invitations exist/);
+  for(const key of ['work','page','nextCursor','totalWork'])assert.equal(Object.hasOwn(value,key),false,key+' must not imply an empty queue');
+  assert.equal(value.viewerId,'friend-dot');assert.equal(value.scope.externalExecution,false);
+  assert.deepEqual(value.nextRead,{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}});
+  const next=await f.rpc('tools/call',{name:value.nextRead.tool,arguments:value.nextRead.arguments});
+  assert.notEqual(next.body.result?.isError,true,JSON.stringify(next.body));
+  assert.deepEqual(next.body.result.structuredContent.work.map(item=>item.id),['addressed-work']);
+  assert.deepEqual(next.body.result.structuredContent.replyRequests.map(item=>item.id),['addressed-request']);
+  assert.equal(next.body.result.structuredContent.page.hasMore,false);
+  const selected=await f.rpc('tools/call',{name:'room_read_work',arguments:{workItemId:'addressed-work'}});
+  assert.notEqual(selected.body.result?.isError,true,JSON.stringify(selected.body));
+  const all=await f.rpc('tools/call',{name:value.alternatives[0].tool,arguments:value.alternatives[0].arguments});
+  assert.notEqual(all.body.result?.isError,true,JSON.stringify(all.body));
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM events').get().n,before,'discovery and selected reads write no events');
 });

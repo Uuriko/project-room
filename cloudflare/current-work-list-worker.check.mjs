@@ -33,18 +33,25 @@ test('actual Worker HTTP work source pages stay bounded across excluded backlog 
 });
 
 
-test('actual Worker invitation discovery follows bounded pages without hydrating the Room',{timeout:120000},async()=>{
+test('actual Worker help fallback performs no work-source scan and routes directly to addressed work',{timeout:120000},async()=>{
  const built=await build({entryPoints:[fileURLToPath(new URL('./current-work-list-worker.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
  const mf=new Miniflare({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'CurrentWorkListProbe',useSQLite:true}}});
  const call=async path=>{const response=await mf.dispatchFetch('http://localhost'+path),body=await response.json();assert.equal(response.status,200,JSON.stringify(body));return body;};
+ const costs=[];
  try{
-  await call('/seed?count=32&help=1');let query=new URLSearchParams({focus:'help_wanted'}),pages=0,maxRead=0;const found=[];
-  while(query){const page=await call('/list?'+query);assert.equal(page.result.status,200,JSON.stringify(page));const value=page.result.page;pages++;assert.equal(value.selection.examinedWork,1);assert.equal(page.cost.rowsWritten,0);assert.equal(page.rawRuntime.rowsWritten,0);assert.equal(page.cost.unknown,0);maxRead=Math.max(maxRead,page.cost.rowsRead);
-   if(pages===1){assert.deepEqual(value.work,[]);assert.equal(value.page.hasMore,true);}
-   for(const work of value.work){assert.equal(work.help.status,'open');assert.equal(work.help.authority,'invitation_only');assert.equal(work.offerEligibility.status,'unavailable');assert.equal(work.nextRead.arguments.includeOffers,undefined);found.push(work.id);}
-   query=value.page.nextRead?new URLSearchParams(value.page.nextRead.arguments):null;assert.ok(pages<=32);
+  for(const count of [32,128]){
+   await call('/seed?count='+count+'&surface=help-'+count);
+   await call('/list?focus=help_wanted&surface=help-'+count);
+   const fallback=await call('/list?focus=help_wanted&surface=help-'+count),value=fallback.result.page;
+   assert.equal(fallback.result.status,200);assert.equal(value.status,'selection_unavailable');assert.equal(value.selection.available,false);
+   assert.equal(Object.hasOwn(value,'work'),false);assert.equal(Object.hasOwn(value,'page'),false);
+   assert.equal(fallback.cost.rowsWritten,0);assert.equal(fallback.rawRuntime.rowsWritten,0);assert.equal(fallback.cost.unknown,0);assert.equal(fallback.rawRuntime.workSourceReads,0);
+   assert.deepEqual(value.nextRead,{tool:'room_list_work',arguments:{roomId:'commons',focus:'needs_me'}});
+   const next=await call('/list?'+new URLSearchParams({...value.nextRead.arguments,surface:'help-'+count}));
+   assert.equal(next.result.status,200);assert.deepEqual(next.result.page.work.map(item=>item.id),['task-'+String(count-1).padStart(4,'0')]);assert.deepEqual(next.result.page.replyRequests.map(item=>item.id),['request-12']);assert.equal(next.result.page.page.hasMore,false);assert.ok(next.rawRuntime.workSourceReads>0,'source-read counter detects the explicit addressed selection');
+   costs.push({sources:count,fallback:fallback.cost,explicitReadsToAddressedWork:2});
   }
-  assert.equal(pages,32);assert.deepEqual(found,['task-0031']);assert.ok(maxRead<1024);
-  console.log('CURRENT_HELP_LIST_WORKER '+JSON.stringify({sources:32,pages,found,maxRead,rowsWritten:0,offerEligibility:'unavailable',syntheticRoom:true}));
+  assert.ok(costs.every(row=>row.fallback.rowsRead<1024));assert.ok(Math.abs(costs[0].fallback.rowsRead-costs[1].fallback.rowsRead)<=16);
+  console.log('CURRENT_HELP_FALLBACK_WORKER '+JSON.stringify({costs,selectionAvailable:false,sourceScan:false,rowsWritten:0,syntheticRooms:true}));
  }finally{await mf.dispose();}
 });
