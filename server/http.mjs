@@ -1547,7 +1547,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
             completed.expectedRevision, { method: { kind: "oauth", ref: linked.methodRef },
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-              rotateSlot: true });
+              rotateSlot: true, renewBrowserSession: true });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
             .get(linked.accountId);
@@ -1724,7 +1724,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
           // invalidate the pre-login one — see the Google path above.
           const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(pending.sessionToken, linked.accountId,
-            pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef }, rotateSlot: true });
+            pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef }, rotateSlot: true, renewBrowserSession: true });
           setCookie(res, accountCookieName, freshSlotToken,
             Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           if (githubWantsHtml) return githubHtml(githubLanding(linked.accountId));
@@ -2789,7 +2789,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // token is dead on success; on failure nothing is upgraded.
           const { token: freshSlotToken, session: loggedIn } = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
             revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-            rotateSlot: true
+            rotateSlot: true, renewBrowserSession: true
           });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           return json(res, 201, sessionAccountView(loggedIn));
@@ -2861,7 +2861,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // never authenticate after the redeem.
         const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
           method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" },
-          rotateSlot: true
+          rotateSlot: true, renewBrowserSession: true
         });
         setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, { remaining: redemption.remaining, session: sessionAccountView(loggedIn) });
