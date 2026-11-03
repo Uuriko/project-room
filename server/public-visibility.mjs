@@ -473,6 +473,54 @@ export function recordedReceiptsSetting(db, roomId) {
   return { status: "recorded", enabled: row.enabled === 1 ? 1 : row.enabled === 0 ? 0 : null };
 }
 
+// The same recorded setting, read from its read-model copy
+// (room_public_receipts_setting) instead of the authoritative record:
+// the form a public HTTP route may use, because public reads never
+// touch rooms.projection (the read model's founding invariant, pinned
+// by tests/public-read-model.test.js). Returns the same contract as
+// recordedReceiptsSetting:
+//   { status: "recorded", enabled: 1 | 0 } — a recorded on/off. The
+//     copy is rewritten in the same transaction as every recorded
+//     setting change (syncRoomPublication) and reconciled
+//     level-triggered on every later room write (#5623), so a desync
+//     of the public_rooms listing column — the DETAIL 8 shape: that
+//     column stale, or a receipt row re-seeded after an opt-out —
+//     cannot move this read: the copy, not the listing row, decides.
+//   { status: "recorded", enabled: null } — a recorded row whose value
+//     is uninterpretable: not an opt-in, the verdict is private.
+//   { status: "absent", enabled: null } — the copy is readable and
+//     holds no row for the room: no setting was ever recorded (#3594:
+//     absent is private). A copy that exists but cannot be read is
+//     also "absent", never a fallback to a weaker mirror.
+//   { status: "unavailable", enabled: null } — the store carries no
+//     rooms relation at all, or predates the copy's table: no recorded
+//     setting can be consulted here, and the caller falls back to the
+//     listing column, the only record such a store can hold (the same
+//     legacy fallback recordedReceiptsSetting's callers keep).
+// Named residual: a desync of this copy itself (a projection-only
+// rewrite with no subsequent room write or backfill) is the same
+// residual the stored-row opt-out leg already carries on every public
+// surface; #5623's level trigger is its cure. Only the lot path, which
+// is not a public HTTP route in the invariant test's set, reads the
+// authoritative record directly (recordedReceiptsSetting).
+export function readModelReceiptsSetting(db, roomId) {
+  let mirrored;
+  try {
+    mirrored = mirroredReceiptsSetting(db, roomId);
+  } catch {
+    return { status: "absent", enabled: null }; // present-but-unreadable copy: no recorded opt-in can be shown
+  }
+  if (mirrored === 1 || mirrored === 0) return { status: "recorded", enabled: mirrored };
+  if (mirrored === "unknown") return { status: "recorded", enabled: null };
+  // mirrored === null: no recorded row, or the copy's table is absent.
+  // Both legacy shapes — no rooms relation at all, or a store predating
+  // the copy — are "unavailable", decided structurally, never from
+  // error text.
+  if (!relationExists(db, "rooms")) return { status: "unavailable", enabled: null };
+  if (!relationExists(db, "room_public_receipts_setting")) return { status: "unavailable", enabled: null };
+  return { status: "absent", enabled: null };
+}
+
 // The write-time mirror of the recorded setting: the fallback record
 // for stores with no rooms table (see recordedReceiptsSetting), and
 // the fact the stored-row opt-out leg reads — public reads consult

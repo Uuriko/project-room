@@ -37,6 +37,20 @@ function publishRoom(store, slug, receiptsEnabled) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     slug, "Commons", "A room that publishes its work.", 0, 1, JSON.stringify([]), JSON.stringify([]), JSON.stringify([]),
     receiptsEnabled, "request", null, "owner", now, now);
+  // The pages gate on the recorded setting through its read-model
+  // copy (room_public_receipts_setting), not the listing row above —
+  // seed both halves of the record the owner's
+  // room.public_receipts_set command would have written (the
+  // projection leg, and the copy syncRoomPublication rewrites in the
+  // same transaction), in agreement with the listing row, so the
+  // fixture models an in-sync store. Desync between the listing row
+  // and the recorded setting is pinned separately in
+  // tests/mirror-readtime.test.js (DETAIL 8).
+  store.db.prepare("UPDATE rooms SET projection = json_set(projection, '$.room.publicReceipts', json(?)) WHERE id=?")
+    .run(JSON.stringify({ enabled: receiptsEnabled === 1, revision: 1, setById: "owner", setAt: now }), slug);
+  store.db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+      ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`)
+    .run(slug, receiptsEnabled === 1 ? 1 : 0);
 }
 
 async function serve(t, { receiptsEnabled = 1 } = {}) {

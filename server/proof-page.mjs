@@ -4,7 +4,10 @@
 //   GET /r/<slug>/proof        GET /r/<slug>/proof.json
 //
 // The page exists only for a room that is publicly listed AND whose owner
-// turned public receipts on (public_rooms.receipts_enabled). It lists the
+// turned public receipts on — the gate is the owner's recorded setting,
+// read at read time from its read-model copy
+// (readModelReceiptsSetting in server/public-visibility.mjs), never the
+// listing column public_rooms.receipts_enabled. It lists the
 // room's public receipts — the same rows /receipts serves, read through
 // receipts-live so the owner toggle and operator unpublish apply — and
 // labels each entry with what its record actually proves (proofLevelOf in
@@ -22,6 +25,7 @@ import { CONTENT_TRUST } from "./content-trust.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./html-escape.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
+import { readModelReceiptsSetting } from "./public-visibility.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
 import { PROOF_LEVELS, jsonLdScriptTag } from "./receipt-share.mjs";
 
@@ -103,7 +107,23 @@ function proofEntry(receipt) {
 
 export function roomProofView(store, slug, { cursor = null } = {}) {
   const room = loadPublicRoom(store, slug);
-  if (!room || room.receiptsEnabled !== true) return null;
+  if (!room) return null;
+  // The gate is the recorded setting, not the listing mirror (INV-E
+  // DETAIL 8): a stale public_rooms row after a restore/import that
+  // bypassed the sync must not 404 an opted-in room's proof page, and
+  // a stale receipts_enabled=1 must not resurrect an opted-out one.
+  // The recorded setting is consulted through its read-model copy
+  // (room_public_receipts_setting, rewritten in the same transaction
+  // as every recorded change), because public routes never read
+  // rooms.projection (tests/public-read-model.test.js). Where the
+  // store carries no rooms table at all (a predating/partial store)
+  // no recorded setting can exist, so the listing column is the only
+  // record that can decide — the same legacy fallback shape the cured
+  // lot read keeps. Never-recorded reads as enabled=null and stays
+  // private (#3594).
+  const recorded = readModelReceiptsSetting(store.db, room.slug);
+  const receiptsEnabled = recorded.status === "unavailable" ? room.receiptsEnabled : recorded.enabled === 1;
+  if (receiptsEnabled !== true) return null;
   const visible = queryRoomProof(store, slug);
   const counts = {
     total: visible.length,
