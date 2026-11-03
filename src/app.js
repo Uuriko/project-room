@@ -2148,7 +2148,7 @@ function render() {
     const agent = m.kind === "agent" && m.active !== false;
     const presence = (connectionStale || agent && presenceStale) ? "unknown" : memberPresence(merged, railCtx);
     const queued = agent && !connectionStale ? queuedNote(merged, presence) : "";
-    const availability = (connectionStale ? uiText("connection.staleAvailability") : agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence)) + (queued ? ` · ${queued}` : "");
+    const availability = (connectionStale ? uiText("connection.staleAvailability") : agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence, merged)) + (queued ? ` · ${queued}` : "");
     // Keep names readable; duplicate names retain their IDs and every exact
     // identity remains available in the member disclosure and action choices.
     const handle = m.kind === "agent" ? memberHandle(m, displayName(m.id)) : displayName(m.id);

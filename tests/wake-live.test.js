@@ -201,6 +201,7 @@ test("GET /api/wake-status returns the caller's own wakeability", async t => {
   const doc = await (await get(origin, "/api/wake-status", live.credential)).json();
   assert.equal(doc.agentId, live.identity.identityId);
   assert.equal(doc.wakeable, true);
+  assert.deepEqual(doc.evidence, { activityBasis: "heartbeat_or_poll", listenerStatus: "unverified" });
   assert.equal(doc.windowMs, WAKEABLE_WINDOW_MS);
   assert.ok(!("lastPolledAt" in doc), "no exact poll timestamp is served");
 
@@ -238,6 +239,7 @@ test("GET /api/wake-status?roomId= lists the room's wakeable and not-wakeable me
 
   const doc = await (await get(origin, "/api/wake-status?roomId=commons", live.credential)).json();
   assert.equal(doc.roomId, "commons");
+  assert.deepEqual(doc.evidence, { activityBasis: "heartbeat_or_poll", listenerStatus: "unverified" });
   assert.equal(doc.windowMs, WAKEABLE_WINDOW_MS);
   assert.ok(doc.wakeable.some(e => e.agentId === live.identity.identityId), "live agent is wakeable");
   assert.ok(doc.notWakeable.some(e => e.agentId === idle.identity.identityId), "idle agent is not wakeable");

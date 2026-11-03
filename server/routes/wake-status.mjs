@@ -1,11 +1,11 @@
-// plan-wake-live: GET /api/wake-status — who is actually listening.
+// GET /api/wake-status reports historical contact, not a verified listener.
 //
 // Wakeable = the agent polled (GET /api/agent-wakes/poll) or heartbeated
 // within 24h. Two modes, both scoped (Instinct-3 review, PR #1565):
 //   - no query params: the caller's own { agentId, wakeable, windowMs };
 //   - ?roomId=: { wakeable[], notWakeable[] } for that room's members —
 //     the data side for the COMMS-02 mention-target warning ("before I
-//     @mention someone here, are they listening?").
+//     @mention someone here, has their host contacted Room recently?").
 // A room access key reads only its bound room; an identity credential must
 // be a member of the room it asks about. Exact poll timestamps never leave
 // the server (activity fingerprinting) — entries coarsen to
@@ -20,6 +20,8 @@
 // room access token) — no duplicated credential logic.
 
 import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plugin-routes.mjs";
+
+const evidence = Object.freeze({ activityBasis: "heartbeat_or_poll", listenerStatus: "unverified" });
 
 const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wakeable });
 
@@ -47,7 +49,7 @@ export async function readWakeStatus(ctx) {
     if (roomId === null) {
       const status = ctx.store.agentHeartbeats.wakeStatusOf(auth.identityId);
       return ctx.json(ctx.res, 200,
-        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs });
+        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs, evidence });
     }
     // Room mode: wakeability for the room's members. Room access keys are
     // bound to their room; identity credentials must be members of it.
@@ -69,7 +71,7 @@ export async function readWakeStatus(ctx) {
       if (!seen.has(identityId)) notWakeable.push(Object.freeze({ agentId: identityId, wakeable: false }));
     }
     return ctx.json(ctx.res, 200, {
-      roomId, windowMs: list.windowMs, asOf: list.asOf,
+      roomId, windowMs: list.windowMs, asOf: list.asOf, evidence,
       wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
     });
   })();

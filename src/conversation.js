@@ -110,7 +110,11 @@ export function memberHandle(member, label) {
   return name.startsWith("@") ? name : `@${name}`;
 }
 
-export function presenceLabel(presence) {
+export function presenceLabel(presence, member = null) {
+  if (presence === "idle" && member?.kind === "agent" && member?.watching)
+    return uiText("people.connection_listener_unverified");
+  if (presence === "idle" && member?.kind === "agent" && member?.presence?.status === "online")
+    return uiText("people.host_listener_unverified");
   // #660: server-derived states first, then the legacy local derivation.
   if (presence === "working") return "Working";
   if (presence === "listening") return "Listening";
@@ -120,8 +124,7 @@ export function presenceLabel(presence) {
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
 
-// #5382: when an agent is not listening, say its mentions are queued (not
-// lost): the server holds them until the agent's bridge reconnects.
+// Pending wakes are stored; a host heartbeat does not prove delivery.
 export function queuedNote(member, presence) {
   const n = Number(member?.queuedWakes);
   if (member?.kind !== "agent" || !Number.isSafeInteger(n) || n <= 0) return "";
