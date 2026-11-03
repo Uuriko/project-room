@@ -772,7 +772,7 @@ export class Bridge {
       await this.discoverRecent();
       if (this.controller.signal.aborted) return;
       if (!(await this.pacePoll())) return;
-      const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: !this.freshWakeDiscovery && page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
+      const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
       const wakes = value?.pendingWakes ?? [];
       for (const signal of wakes) {
         if (this.controller.signal.aborted) break;

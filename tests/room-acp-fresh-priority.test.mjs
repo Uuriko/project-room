@@ -48,7 +48,7 @@ test('a quiet thread outside every recent head is eventually discovered through 
  const calls=[],accepted=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},persistSessions:false,host:{},minPollIntervalMs:0});b.lease=async()=>true;b.freshWakeDiscovery=true;
  let newest=0,done=false;
  b.room.poll=async({order='oldest',cursor,waitMs})=>{
-  assert.equal(waitMs,0);calls.push({order,cursor});
+  assert.equal(waitMs,order==='oldest'&&cursor===null?b.waitMs:0);calls.push({order,cursor});
   if(order==='newest'){assert.equal(cursor,undefined);return{roomId:'r',order,pendingWakes:[{signalId:'new-'+newest++,roomId:'r'}],more:true,nextCursor:'unused-newest-position'};}
   const n=cursor===null?0:Number(cursor.slice(1));if(n===MAX_POLL_PAGES+2){done=true;return{pendingWakes:[{signalId:'quiet-outside-recent-window'}],more:false};}
   return{pendingWakes:[{signalId:'old-'+n}],more:true,nextCursor:'c'+(n+1)};
@@ -108,4 +108,11 @@ test('a single-session bridge retains original oldest-only discovery even when n
  b.room.heartbeat=async()=>({listener:{acquired:true,fencingToken:'fence',leaseExpiresAt:Date.now()+60000},wakeSelection:{version:1,newest:true,roomId:'r'}});
  await b.lease();assert.equal(b.freshWakeDiscovery,false);assert.equal(b.queue.reservedPriority,0);
  let polls=0;b.room.poll=async()=>{polls++;};await b.discoverRecent();assert.equal(polls,0);
+});
+
+test('an advertised idle host retains the existing oldest long wait after its bounded recent peek',async()=>{
+ const polls=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},waitMs:12345,minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;
+ b.room.poll=async options=>{polls.push({order:options.order??'oldest',waitMs:options.waitMs,cursor:options.cursor});return{pendingWakes:[],more:false};};
+ await b.pollOnce();assert.deepEqual(polls,[{order:'newest',waitMs:0,cursor:undefined},{order:'oldest',waitMs:12345,cursor:null}]);
 });
