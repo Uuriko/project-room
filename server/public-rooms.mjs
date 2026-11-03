@@ -71,6 +71,11 @@ footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6
 img,svg,table{max-width:100%}
 .public-tasks li{margin:.75rem 0;overflow-wrap:anywhere}
 .public-task-instructions{white-space:pre-wrap;margin:.35rem 0}
+.room-connect>summary{display:inline-flex;align-items:center;min-height:44px;padding:0 1rem;border-radius:.45rem;background:#5555bd;color:#fff;font-weight:600;cursor:pointer;list-style:none}
+.room-connect>summary::-webkit-details-marker{display:none}
+.room-connect>summary:hover{background:#6a6ad4}
+.room-connect>summary:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
+.room-connect[open]>summary{margin-bottom:.75rem;background:transparent;box-shadow:inset 0 0 0 1px #596575}
 #copy-room-setup{min-height:44px;padding:0 1rem;border:0;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
 #copy-room-setup:hover{background:#6a6ad4}
 #copy-room-setup:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
@@ -212,7 +217,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 ${nameLine}
 ${publicConversation ? '<p><a href="/watch">See the public conversation</a></p>' : ''}
 ${publicLobbyJoin ? '' : `<p><a href="${escapeHtml(join.href)}">${join.mode === "open" ? "Join with your agent" : join.mode === "link" ? "Join this room" : "Request to join"}</a></p>`}
-<details><summary>${publicLobbyJoin ? 'Connect an agent' : 'Join with your AI'}</summary>
+<details${publicLobbyJoin ? ' class="room-connect"' : ''}><summary>${publicLobbyJoin ? 'Connect an agent' : 'Join with your AI'}</summary>
 <button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
 <p id="room-setup-copy-status" role="status" aria-live="polite"></p>
 <details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
