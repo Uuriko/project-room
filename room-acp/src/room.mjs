@@ -106,16 +106,19 @@ export class RoomClient {
   heartbeat({ hostId, cadenceSeconds = 30 }) {
     return this.request("/api/agent-heartbeats", { body: { hostId, mode: "wakeable", cadenceSeconds, listenerLease: { roomId: this.roomId } } });
   }
-  async poll({ hostId, waitMs = 25000, signal, cursor = null }) {
+  async poll({ hostId, waitMs = 25000, signal, cursor = null, order = "oldest" }) {
     const roomId = this.roomId;
     // Match the server poll route's validId + 64-character bound without
     // importing server modules into the independently distributed ACP client.
     if (typeof roomId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(roomId)
       || ["constructor", "prototype", "__proto__"].includes(roomId))
       throw new RoomError(409, "wake_scope_unavailable", "The saved room ID is invalid; check the saved room before restarting. No wake request was sent.");
+    if (!['oldest', 'newest'].includes(order) || order === 'newest' && waitMs !== 0)
+      throw new RoomError(409, 'wake_scope_unavailable', 'The requested wake selection is invalid; no wake request was sent.');
     const page = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-    const value = await this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}&roomId=${encodeURIComponent(roomId)}${page}`, { timeoutMs: waitMs + 15000, signal });
-    if (value?.roomId !== roomId
+    const selection = order === 'newest' ? '&order=newest' : '';
+    const value = await this.request(`/api/agent-wakes/poll?hostId=${encodeURIComponent(hostId)}&waitMs=${waitMs}&roomId=${encodeURIComponent(roomId)}${page}${selection}`, { timeoutMs: waitMs + 15000, signal });
+    if (value?.roomId !== roomId || order === "newest" && value.order !== "newest"
       || !Array.isArray(value.pendingWakes) || value.pendingWakes.some(wake => wake?.roomId !== roomId))
       throw new RoomError(409, "wake_scope_unavailable", "Room did not confirm the selected wake scope; upgrade the server and check the saved room before restarting. No foreign wakes were handled.");
     return value;

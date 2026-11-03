@@ -137,7 +137,7 @@ export class Bridge {
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
     this.permissionApproverId = permissionApproverId;
     this.permissionTimeoutMs = permissionTimeoutMs; this.permissionPollMs = permissionPollMs;
-    this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.wakeCursor = null; this.crashes = []; this.pausedUntil = 0; this.ready = null;
+    this.restartDelayMs = restartDelayMs; this.minPollIntervalMs = minPollIntervalMs; this.lastPollAt = 0; this.wakeCursor = null; this.freshWakeDiscovery = false; this.crashes = []; this.pausedUntil = 0; this.ready = null;
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
@@ -261,6 +261,10 @@ export class Bridge {
     if (this.fencingToken && Date.now() < this.leaseRenewAt) return true;
     const value = await this.room.heartbeat({ hostId: this.connection.hostId, cadenceSeconds: this.cadenceSeconds });
     this.fencingToken = value?.listener?.acquired ? value.listener.fencingToken : null;
+    const selection = value?.wakeSelection;
+    this.freshWakeDiscovery = Boolean(this.queue.concurrency > 1 && this.fencingToken && selection?.version === 1 && selection.newest === true
+      && selection.roomId === this.connection.roomId && Object.keys(selection).sort().join(',') === 'newest,roomId,version');
+    this.queue.reservePriority(this.freshWakeDiscovery && this.queue.concurrency > 1 ? 1 : 0);
     this.room.listenerToken = this.fencingToken;
     const expires = Number(value?.listener?.leaseExpiresAt);
     this.leaseRenewAt = Math.min(Date.now() + this.cadenceSeconds * 1000 / 2, Number.isFinite(expires) ? expires - 20000 : Infinity);
@@ -295,29 +299,43 @@ export class Bridge {
     catch (error) { this.stopForContextLimit(error); throw error; }
   }
 
-  async threadRoot(messageId) {
+  async threadRoot(messageId, {selection = false} = {}) {
     let selected = await this.readThread(messageId, {selected:true});
     for (let hops = 0; selected.thread.replyToId && hops < 5; hops++) {
       if (selected.replyRequest?.recipientId === this.connection.memberId) break;
       selected = await this.readThread(selected.thread.replyToId, {selected:true});
     }
-    return selected.thread;
+    return selection ? selected : selected.thread;
   }
 
   // Route one wake signal into the queue, or ack it as not for us.
-  async accept(signal) {
+  async accept(signal, {priority = false} = {}) {
     if (this.seen.has(signal.signalId)) return;
     this.seen.add(signal.signalId);
     try {
       if (signal.workClaim) { await this.acceptClaim(signal); return; }
       if (!signal.messageId || !["mention", "dm", "reply", "direct"].includes(signal.kind)) { await this.ack([signal.signalId]); this.stats.skipped++; return; }
-      const message = (await this.readThread(signal.messageId, {selected:true})).thread;
+      const selected = await this.readThread(signal.messageId, {selected:true});
+      const message = selected.thread;
       // Routing does not authorize execution. The queued turn checks all
       // actual stored request authors against a fresh selected authority read.
-      const root = message.replyToId ? await this.threadRoot(message.id) : message;
+      const rootSelection = message.replyToId ? await this.threadRoot(message.id, {selection:true}) : selected;
+      const root = rootSelection.thread;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
-      this.queue.push(root.id, { signalId: signal.signalId, messageId: message.id, author: message.author ?? message.authorId, body: message.body });
+      let eligible = priority === true && this.freshWakeDiscovery && this.queue.concurrency > 1
+        && !rootSelection.replyRequest && root.requestKind !== "reply"
+        && Number.isSafeInteger(signal.createdAt) && signal.createdAt >= 0
+        && typeof signal.signalId === 'string' && signal.signalId.length > 0 && signal.signalId.length <= 128
+        && !this.chatReceipts.find(this.chatReceipts.key(signal.signalId));
+      if (eligible) {
+        const fact = this.readParkedThread(root.id);
+        if (fact?.rootHash === createHash('sha256').update(JSON.stringify(root)).digest('hex')) eligible = false;
+      }
+      if (eligible) eligible = (await this.messageAuthority([message.id])).get(message.id) === 'allowed';
+      const added = this.queue.push(root.id, { signalId: signal.signalId, messageId: message.id, author: message.author ?? message.authorId, body: message.body },
+        {priority:eligible, priorityPosition:eligible ? {createdAt:signal.createdAt, signalId:signal.signalId} : null});
+      return added && eligible;
     } catch (error) { this.seen.delete(signal.signalId); throw error; }
   }
 
@@ -716,6 +734,26 @@ export class Bridge {
     }
   }
 
+  async pacePoll() {
+    const gap = this.lastPollAt + this.minPollIntervalMs - Date.now();
+    if (gap > 0) await sleep(gap, this.controller.signal);
+    if (this.controller.signal.aborted) return false;
+    this.lastPollAt = Date.now(); return true;
+  }
+
+  async discoverRecent() {
+    if (!this.freshWakeDiscovery || !(await this.pacePoll())) return;
+    const recent = await this.room.poll({hostId:this.connection.hostId, waitMs:0, order:'newest', signal:this.controller.signal});
+    // A bounded head peek is not a completion frontier. Keep the oldest cursor
+    // independent; only its original traversal accounts for the entire journal.
+    for (const signal of recent.pendingWakes ?? []) {
+      if (this.controller.signal.aborted) return;
+      // Select only the newest eligible ordinary root. Seen, parked, formal,
+      // unknown and uncertain entries do not consume this designation.
+      if (await this.accept(signal, {priority:true})) break;
+    }
+  }
+
   async pollOnce() {
     if (!(await this.lease())) { await sleep(5000, this.controller.signal); return; }
     // Drain every queued page in this cycle: signals on later pages are
@@ -729,13 +767,12 @@ export class Bridge {
       if (this.controller.signal.aborted) return;
       // Every page is an HTTP poll and counts toward the identity's 30/min
       // limit. Pace continuation pages too, without losing their cursor.
-      const gap = this.lastPollAt + this.minPollIntervalMs - Date.now();
-      if (gap > 0) await sleep(gap, this.controller.signal);
-      if (this.controller.signal.aborted) return;
-      // A multi-page traversal may outlast a lease renewal interval.
+      // Renew before either selection after a potentially long routed page.
       if (page > 0 && !(await this.lease())) return;
-      this.lastPollAt = Date.now();
-      const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
+      await this.discoverRecent();
+      if (this.controller.signal.aborted) return;
+      if (!(await this.pacePoll())) return;
+      const value = await this.room.poll({ hostId: this.connection.hostId, waitMs: !this.freshWakeDiscovery && page === 0 && cursor === null ? this.waitMs : 0, signal: this.controller.signal, cursor });
       const wakes = value?.pendingWakes ?? [];
       for (const signal of wakes) {
         if (this.controller.signal.aborted) break;
