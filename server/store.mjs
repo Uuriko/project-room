@@ -591,6 +591,7 @@ const invitationSchema = `
     created_at INTEGER NOT NULL,
     login_method_kind TEXT,
     login_method_ref TEXT,
+    draft_recovery_lineage TEXT,
     CHECK(
       (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
       OR
@@ -1763,6 +1764,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='login_method_ref'").get()) {
         this.db.exec("ALTER TABLE account_session_slots ADD COLUMN login_method_ref TEXT");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='draft_recovery_lineage'").get()) {
+        this.db.exec("ALTER TABLE account_session_slots ADD COLUMN draft_recovery_lineage TEXT");
       }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
@@ -4500,19 +4504,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       roomId: auth.roomId,
       csrf: auth.csrf,
       sessionBinding: auth.sessionBinding,
+      ...(auth.credentialScope === 'account-session' && auth.draftRecoveryLineage ? {draftRecoveryLineage: auth.draftRecoveryLineage} : {}),
       sessionRevision: auth.sessionRevision,
       expiresAt: auth.expiresAt
     };
   }
-  loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null, rotateSlot = false } = {}) {
+  // This value is only a local draft-recovery namespace, never a credential.
+  // A live same-account session may carry it over a verified token rotation;
+  // an anonymous, expired, revoked, or different-account slot starts anew.
+  draftRecoveryLineageForLogin(slotToken, accountId, authEpoch) {
+    try {
+      const current = this.authenticateAccountSession(slotToken);
+      if (current.account.id === accountId && current.account.authEpoch === authEpoch)
+        return current.draftRecoveryLineage ?? current.sessionBinding;
+    } catch (error) {
+      if (error?.status !== 401) throw error;
+    }
+    return key();
+  }
+  loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null, rotateSlot = false, renewBrowserSession = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     return this.transaction(() => {
       const slot = this.accountSessionSlot(slotToken);
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
       const access = this.authenticateAccountAccessKey(accountAccessKey);
+      const draftLineage = this.draftRecoveryLineageForLogin(slotToken, access.account.id, access.account.authEpoch);
       const revision = expectedRevision + 1;
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='access-key',login_method_ref=NULL
-        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 30 * 86400000), slot.credentialHash, expectedRevision);
+      if (renewBrowserSession && !rotateSlot) fail(422, 'invalid_session_renewal', 'Session renewal requires token rotation');
+      const slotExpiresAt = renewBrowserSession ? Math.max(slot.expiresAt, this.now() + 30 * 86400000) : slot.expiresAt;
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,expires_at=?,authenticated_until=?,login_method_kind='access-key',login_method_ref=NULL,draft_recovery_lineage=?
+        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, slotExpiresAt, Math.min(slotExpiresAt, access.expiresAt, this.now() + 30 * 86400000), draftLineage, slot.credentialHash, expectedRevision);
       // Switching browser identity and retiring its former Room credential are one
       // commit. A storage failure must not report a rejected login after switching.
       if (revokeRoomToken !== null) {
@@ -4532,7 +4553,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // authenticated account session once its own verification has passed. `method`
   // is a short audit descriptor: { kind, ref } (ref is a public handle such as
   // the login-methods row id, never a secret).
-  loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null, rotateSlot = false } = {}) {
+  loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null, rotateSlot = false, renewBrowserSession = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     if (method == null || typeof method !== "object" || typeof method.kind !== "string" || method.kind.trim() === "") fail(422, "invalid_login_method", "A verified login method is required");
     if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
@@ -4541,8 +4562,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
       const account = this.account(accountId);
       if (!account.active) fail(403, "access_denied", "Active account required");
+      const draftLineage = this.draftRecoveryLineageForLogin(slotToken, accountId, account.authEpoch);
       const revision = expectedRevision + 1;
-      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 30 * 86400000);
+      // Renew only after a verified login, with atomic token rotation.
+      if (renewBrowserSession && !rotateSlot) fail(422, 'invalid_session_renewal', 'Session renewal requires token rotation');
+      const slotExpiresAt = renewBrowserSession ? Math.max(slot.expiresAt, this.now() + 30 * 86400000) : slot.expiresAt;
+      const authenticatedUntil = Math.min(slotExpiresAt, this.now() + 30 * 86400000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
       // CX4: persist the verified method on the slot itself (bounded,
       // public data only — kind + the ref the login already treats as a
@@ -4550,8 +4575,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // session signed in, native (desktop) sessions included.
       const methodKind = method.kind.trim().slice(0, 64);
       const methodRef = typeof method.ref === "string" && method.ref.trim() !== "" ? method.ref.trim().slice(0, 128) : null;
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind=?,login_method_ref=?
-        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, methodKind, methodRef, slot.credentialHash, expectedRevision);
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,expires_at=?,authenticated_until=?,login_method_kind=?,login_method_ref=?,draft_recovery_lineage=?
+        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, slotExpiresAt, authenticatedUntil, methodKind, methodRef, draftLineage, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
@@ -4577,10 +4602,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!row || row.account_id === null) fail(409, "slot_not_authenticated", "Only an authenticated session slot can rotate its token");
       const token = key();
       this.db.prepare(`INSERT INTO account_session_slots
-        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at,login_method_kind,login_method_ref)
-        VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at,login_method_kind,login_method_ref,draft_recovery_lineage)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
         .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
-          row.expires_at, row.authenticated_until, this.now(), row.login_method_kind ?? null, row.login_method_ref ?? null);
+          row.expires_at, row.authenticated_until, this.now(), row.login_method_kind ?? null, row.login_method_ref ?? null, row.draft_recovery_lineage ?? null);
       if (this.db.prepare("SELECT 1 FROM share_link_joins WHERE slot_hash=? LIMIT 1").get(slot.credentialHash)) {
         // Invitation receipts are immutable and retain this foreign key.
         // Leave an expired, unauthenticated tombstone: the old token cannot
@@ -4614,15 +4639,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (existing.active !== 1) fail(403, "access_denied", "Active account required");
         accountAuthEpoch = existing.auth_epoch;
       }
+      const draftLineage = this.draftRecoveryLineageForLogin(slotToken, accountId, accountAuthEpoch);
       const revision = expectedRevision + 1;
       // The slot table requires a parent credential when an account is set.
       // Record the Google login as an account credential (the token is never
       // exposed; the verified Google subject is the credential).
       const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 30 * 86400000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='google',login_method_ref=NULL
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='google',login_method_ref=NULL,draft_recovery_lineage=?
         WHERE hash=? AND revision=?`).run(revision, accountId, accountAuthEpoch, parentCredentialHash,
-        authenticatedUntil, slot.credentialHash, expectedRevision);
+        authenticatedUntil, draftLineage, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
@@ -4727,7 +4753,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       account: { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch },
       member: null, roomId: null, credentialHash: row.hash, credentialScope: "account-session", kind: "session",
       expiresAt: Math.min(row.expires_at, row.authenticated_until), authenticatedUntil: row.authenticated_until, sessionRevision: row.revision,
-      csrf: hash(`account-csrf:${token}:${row.revision}`), sessionBinding
+      csrf: hash(`account-csrf:${token}:${row.revision}`), sessionBinding, draftRecoveryLineage: row.draft_recovery_lineage ?? null
     };
     if (roomId === null) return auth;
     if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");

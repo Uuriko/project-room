@@ -93,6 +93,24 @@ test("request -> consume roundtrip upgrades the slot and links the method", asyn
   assert.equal((await again.json()).error.code, "invalid_magic_code");
 });
 
+test("magic sign-in renews an old browser slot while rotating its cookie", async t => {
+  const { origin, store, sent } = await startServer(t);
+  store.now = () => Date.now() - 29 * 86400000;
+  const slot = await openSlot(origin);
+  store.now = () => Date.now();
+  const email = "old-slot@example.com";
+  assert.equal((await requestCode(origin, slot, email)).status, 200);
+  const consumed = await consumeCode(origin, slot, email, sent[0].code);
+  assert.equal(consumed.status, 201);
+  const cookie = consumed.headers.get("set-cookie") ?? "";
+  const token = /account_session=([A-Za-z0-9_-]{43})/.exec(cookie)?.[1];
+  assert.ok(token);
+  assert.notEqual(token, slot.cookie);
+  assert.ok(Number(/Max-Age=(\d+)/i.exec(cookie)?.[1]) > 29 * 86400);
+  assert.ok(store.authenticateAccountSession(token).expiresAt - store.now() > 29 * 86400000);
+  assert.throws(() => store.authenticateAccountSession(slot.cookie), /expired|revoked|ended/);
+});
+
 test("consume links to the existing account when the email already has one", async t => {
   const { origin, store, sent } = await startServer(t);
   const slot = await openSlot(origin);
