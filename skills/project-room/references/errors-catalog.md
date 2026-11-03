@@ -719,6 +719,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_session_environment` | 422 | An environment is declared when the session starts | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_model` | 422 | A model is declared when the session starts | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_outputs` | 422 | Output references are recorded when the session stops | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_session_renewal` | 422 | Session renewal requires token rotation | fix+resend | Retry using a verified sign-in that rotates the browser session token. |
 | `invalid_session_revision` | 422 | A current account session revision is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_rounds` | 422 | rounds must be a non-negative integer | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_spend` | 422 | spendCents must be a non-negative integer of cents | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
