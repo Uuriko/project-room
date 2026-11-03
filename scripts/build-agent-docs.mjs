@@ -130,7 +130,7 @@ pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anyw
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .agent-paste-prompt{box-sizing:border-box;width:100%;max-width:100%;padding:12px 16px;background:#191a20;color:var(--text);border:1px solid var(--line);border-radius:.45rem;font:inherit;resize:vertical}
 .agent-paste-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.agent-paste-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+label[for^="agent-paste-prompt-"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .copy-prompt{margin:8px 0;padding:8px 14px;border:1px solid var(--line);border-radius:.45rem;background:#393b45;color:var(--text);font:inherit;cursor:pointer}
 .copy-prompt:not([hidden]){display:block}
 .copy-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
@@ -185,7 +185,7 @@ export function agentPages(dir = join(root, "docs", "agents")) {
   if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
   if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
   const pasteBody = renderMarkdown(pasteMd, { labelPrefix: "Paste block",
-    renderCode: (text, label, index) => `<label class="agent-paste-label" for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea>` });
+    renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea>` });
   const pasteSections = pasteBody.split(/(?=<h2>)/);
   const compactPasteBody = pasteSections.map((section, index) => index < 2 ? section : section.replace(/^<h2>(.*?)<\/h2>/, '<details class="guide-section"><summary>$1</summary>') + '</details>').join('');
   pages.set(PASTE_PAGE.htmlFile, page({
