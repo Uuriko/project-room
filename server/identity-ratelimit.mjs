@@ -4,6 +4,14 @@
 // All state is caller-owned (a Map); the module is pure and
 // dependency-free (time is injected). Frozen outputs; malformed inputs
 // throw RateLimitError. HTTP middleware wiring is a later slice.
+//
+// This is the codebase's one token bucket implementation and its one
+// RateLimitError identity (S-05): the former second bucket module was
+// retired into this file, and its sole consumer (the per-connection send
+// budgets in server/channel-send-budgets.mjs) now builds on
+// createRateLimiter, using check()'s `remaining` count and the
+// non-consuming peek() snapshot below. HTTP routes use http.mjs's rate();
+// use this limiter for non-HTTP / store-level metering.
 class RateLimitError extends Error { constructor(code, message) { super(message); this.name = "RateLimitError"; this.code = code; } }
 const fail = (code, message) => { throw new RateLimitError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_ratelimit", message); };
@@ -47,20 +55,39 @@ export function createRateLimiter({ store, now, capacity = 60, refillPerSecond =
       bucket.lastRefill = clock();
     }
   };
-  // Check if an action is allowed. Returns { allowed, retryAfterMs, message }.
+  // Check if an action is allowed. Returns { allowed, remaining,
+  // retryAfterMs, message }; remaining is the whole tokens left after this
+  // call (0 when refused), computed atomically with the spend.
   const checkLimit = identityId => {
     const bucket = bucketFor(identityId);
     refill(bucket);
     if (bucket.tokens >= 1) {
       bucket.tokens -= 1;
       buckets.set(identityId, bucket);
-      return Object.freeze({ allowed: true, retryAfterMs: 0,
+      return Object.freeze({ allowed: true, remaining: Math.floor(bucket.tokens), retryAfterMs: 0,
         message: "OK" });
     }
     const retryAfterMs = Math.ceil((1 - bucket.tokens) / refillPerSecond * 1000);
     const seconds = Math.ceil(retryAfterMs / 1000);
-    return Object.freeze({ allowed: false, retryAfterMs,
+    return Object.freeze({ allowed: false, remaining: 0, retryAfterMs,
       message: `Rate limit reached. Please wait ${seconds} second${seconds === 1 ? "" : "s"} and try again.` });
+  };
+  // Non-consuming snapshot for diagnostics: { remaining, retryAfterMs,
+  // fullAtMs }. fullAtMs is null when the bucket is already full, otherwise
+  // the instant it returns to full at the current refill rate, computed
+  // from the fractional token count so a partially refilled bucket reports
+  // its true reset instant. An unseen identity reports a full bucket and
+  // is NOT created: peeking must not mint state (or LRU pressure) for a
+  // key that may never spend.
+  const peek = identityId => {
+    check(typeof identityId === "string" && identityId.length > 0, "identityId must be a non-empty string");
+    if (!buckets.has(identityId)) return Object.freeze({ remaining: capacity, retryAfterMs: 0, fullAtMs: null });
+    const bucket = bucketFor(identityId);
+    refill(bucket);
+    const remaining = Math.floor(bucket.tokens);
+    const retryAfterMs = bucket.tokens >= 1 ? 0 : Math.ceil((1 - bucket.tokens) / refillPerSecond * 1000);
+    const fullAtMs = bucket.tokens >= capacity ? null : Math.ceil(clock() + ((capacity - bucket.tokens) / refillPerSecond) * 1000);
+    return Object.freeze({ remaining, retryAfterMs, fullAtMs });
   };
   // Return one token spent by an earlier check() — for callers whose action
   // failed after the check, so a rejected attempt does not burn quota the
@@ -82,6 +109,6 @@ export function createRateLimiter({ store, now, capacity = 60, refillPerSecond =
     refill(bucket);
     return Object.freeze({ identityId, tokens: Math.floor(bucket.tokens), capacity });
   };
-  return Object.freeze({ check: checkLimit, refund: refundLimit, state, capacity, refillPerSecond });
+  return Object.freeze({ check: checkLimit, peek, refund: refundLimit, state, capacity, refillPerSecond });
 }
 export { RateLimitError };

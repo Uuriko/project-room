@@ -1,5 +1,5 @@
 // Per-connection send budgets (TASKS item #41). A thin policy layer over the
-// token-bucket limiter (server/token-bucket.mjs) for the
+// per-identity token bucket (server/identity-ratelimit.mjs) for the
 // POST /api/inbox/channel-sends path: every (channel, account, connection)
 // gets its own bucket, so one noisy bot can never spend another connection's
 // budget or hammer the provider into a ban. Exhaustion is an honest HTTP 429
@@ -21,7 +21,7 @@
 // design (task 17) is [JOHN]-gated; building Gmail send budgets waits on that
 // approval. `check`/`view` for the gmail channel are documented no-ops, and
 // the route layer must not call check() for gmail sends.
-import { createLimiter } from "./token-bucket.mjs";
+import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { ServiceError } from "./service-error.mjs";
 
 export const DEFAULT_SEND_BUDGET_PER_MIN = 30;
@@ -101,7 +101,7 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
     if (!config) return null;
     const signature = `${config.rate}/${config.burst}`;
     const cached = limiters.get(key);
-    if (cached && cached.signature === signature) { limiters.delete(key); limiters.set(key, cached); return cached.limiter; }
+    if (cached && cached.signature === signature) { limiters.delete(key); limiters.set(key, cached); return cached; }
     // Resume an evicted scope's bucket state so LRU eviction does not hand
     // back a silently refilled burst. A config change still starts fresh.
     const buckets = new Map();
@@ -110,9 +110,17 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
       retiredBuckets.delete(key);
       for (const [bucketKey, bucket] of retired.buckets) buckets.set(bucketKey, { ...bucket });
     }
-    const limiter = createLimiter({ rate: config.rate, burst: config.burst, store: buckets });
+    // The surviving limiter takes its clock at construction, where the
+    // retired one took a timestamp per call. A per-entry time box bridges
+    // the two: check()/view() set timeBox.at to the call's explicit
+    // timestamp (or null to fall back to the registry clock) immediately
+    // before invoking the limiter, synchronously, so a per-call override
+    // drives refill exactly as it did before the merge.
+    const timeBox = { at: null };
+    const limiter = createRateLimiter({ store: buckets, capacity: config.burst, refillPerSecond: config.rate, now: () => timeBox.at ?? now() });
+    const entry = { limiter, signature, buckets, timeBox };
     limiters.delete(key);
-    limiters.set(key, { limiter, signature, buckets });
+    limiters.set(key, entry);
     while (limiters.size > Math.max(1, cacheSize)) {
       const oldest = limiters.keys().next().value;
       const evicted = limiters.get(oldest);
@@ -123,7 +131,7 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
       retiredBuckets.set(oldest, { buckets: evicted.buckets, signature: evicted.signature });
       while (retiredBuckets.size > Math.max(1, cacheSize)) retiredBuckets.delete(retiredBuckets.keys().next().value);
     }
-    return limiter;
+    return entry;
   };
   const validateScope = scope => {
     if (!scope || typeof scope !== "object" || typeof scope.channel !== "string" || !scope.channel
@@ -136,8 +144,9 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
   const check = (scope, { now: at } = {}) => {
     validateScope(scope);
     if (scope.channel === "gmail") return { remaining: null, pendingApproval: GMAIL_BUDGET_PENDING_APPROVAL };
-    const limiter = limiterFor(scope);
-    const result = limiter.tryTake(budgetKey(scope), { now: at ?? now() });
+    const entry = limiterFor(scope);
+    entry.timeBox.at = at ?? null;
+    const result = entry.limiter.check(budgetKey(scope));
     if (!result.allowed)
       throw new ServiceError(429, "send_budget_exhausted",
         "Send budget exhausted for this connection. Wait and retry; nothing was sent.",
@@ -150,8 +159,9 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
     if (!scope || typeof scope !== "object" || typeof scope.channel !== "string" || !scope.channel
       || typeof scope.accountId !== "string" || !scope.accountId) return null;
     if (scope.channel === "gmail") return { pendingApproval: GMAIL_BUDGET_PENDING_APPROVAL };
-    const limiter = limiterFor(scope);
-    const snap = limiter.peek(budgetKey(scope), { now: at ?? now() });
+    const entry = limiterFor(scope);
+    entry.timeBox.at = at ?? null;
+    const snap = entry.limiter.peek(budgetKey(scope));
     return { remaining: snap.remaining, resetsAtMs: snap.fullAtMs };
   };
   return Object.freeze({ check, view, budgetKey, resolveSendBudget, size: () => limiters.size });
