@@ -1,7 +1,8 @@
 // The bridge loop: lease the room's wake queue, long-poll for mentions,
 // run each thread's turn on the local ACP agent, post the reply in the
-// thread, then ack the wakes. Wakes are acked only after the reply posts,
-// so a crash before posting means the Room re-delivers them.
+// thread, then ack the wakes. Wakes are acked after the reply posts or a
+// successful ordinary empty turn has a persisted silent disposition.
+// Incomplete execution stays available for explicit recovery.
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, linkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -473,7 +474,7 @@ export class Bridge {
       : buildPrompt({roomTitle:this.title, thread, wakes, firstTurn:created});
     const started = {...receipt, phase:'started', ...(formal ? {formalContext:formal} : {})};
     this.chatReceipts.save(key, started);
-    let body, formalDelivery;
+    let body, formalDelivery, silent = false;
     try {
       const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId});
       this.stats.turns++;
@@ -481,7 +482,14 @@ export class Bridge {
         const delivery = prepareFormalDelivery(formal, recorder.text, stopReason);
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
-      } else body = renderTurn(recorder, {stopReason});
+      } else {
+        // Silence is a successful ordinary outcome, never an inferred failure,
+        // formal answer, tool result, plan, early stop or uncertain execution.
+        silent = stopReason === 'end_turn' && typeof recorder.text === 'string' && !recorder.text.trim()
+          && recorder.tools instanceof Map && recorder.tools.size === 0
+          && (recorder.plan === undefined || Array.isArray(recorder.plan) && recorder.plan.length === 0);
+        if (!silent) body = renderTurn(recorder, {stopReason});
+      }
     } catch (error) {
       this.log(`turn failed: ${error.message}`);
       if (this.controller.signal.aborted) return;
@@ -492,7 +500,10 @@ export class Bridge {
     // Drop the input copy after execution, retaining it only for an interrupted
     // started receipt that may need local inspection.
     const {formalContext:_context, wakes:_wakes, ...result} = started;
-    this.chatReceipts.save(key, {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {})});
+    // Reuse the terminal ACK-only phase so an older reader cannot replay a
+    // silent turn as new work. The explicit disposition records why no post exists.
+    this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
+      : {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {})});
   }
 
   async deliverChatReceipt(key) {
