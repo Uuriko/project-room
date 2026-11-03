@@ -26,7 +26,7 @@ import { MESSAGE_EDIT_HISTORY_LIMITS } from '../src/message-reducers.js';
 import { messageProofMatches, MESSAGE_PROOF_SELECT, recordProjectionWrite } from './write-integrity.mjs';
 import { decodeMessageEntity } from './message-entity-projection.mjs';
 import { referenceWorkItems } from './work-repository.mjs';
-import { syncMessageRows, materializeCurrentMessageRows } from './messages-store.mjs';
+import { syncMessageRows, materializeCurrentMessageRows, affectedMessageIds } from './messages-store.mjs';
 import { ServiceError } from './service-error.mjs';
 
 export const CURRENT_ROOM_TABLES = Object.freeze(['current_room_records','current_room_record_proofs','current_room_head','current_room_writer_permit']);
@@ -60,6 +60,43 @@ function messageGeometry(row, message) {
   const metadataBytes = bytes - (row.body == null ? 0 : Buffer.byteLength(row.body)) - encodedBodyBytes(message.body) - historyBytes;
   if (metadataBytes < 0 || metadataBytes > MAX_RECORD || bytes > CURRENT_MESSAGE_INPUT_BYTES) refuse('Canonical message metadata exceeds bounded input');
   return {bytes, metadataBytes};
+}
+const MESSAGE_HEADER_FIELDS = Object.freeze(['message_id','seq','channel_id','thread_root_id','reply_to_id','to_member_id','work_item_id','author_id','created_at','deleted_at']);
+const messageHeader = row => Object.fromEntries(MESSAGE_HEADER_FIELDS.map(key => [key, row[key] ?? null]));
+const messageWitness = row => ({sequence: row.seq, entityHash: row.entity_hash ?? messageProofHash(row), header: messageHeader(row)});
+const headerSource = (header, entityHash) => ({headerOnly: true, row: {...header, entity_hash: entityHash}, value: {
+  id: header.message_id, authorId: header.author_id, channelId: header.channel_id,
+  replyToId: header.reply_to_id, toMemberId: header.to_member_id, workItemId: header.work_item_id,
+  createdAt: header.created_at, ...(header.deleted_at ? {deletedAt: header.deleted_at} : {})
+}});
+// These dependencies are never returned as messages or persisted. Their private
+// and ancestry fields are authenticated by the protected witness, not by a
+// caller-supplied/stale scalar hash. Old witnesses require a full verified read.
+function readCurrentMessageHeader(db, roomId, id, b) {
+  const witness = readCurrentRecord(db, roomId, 'messageWitness', id, b);
+  if (witness?.header === undefined) {
+    b.ancestorReads = (b.ancestorReads ?? 0) + 1;
+    if (b.ancestorReads > 32) refuse('Legacy reply ancestry exceeds bounded proof work');
+    // Keep the SAME cumulative metadata/receipt budget. Only body proof work
+    // uses a separate finite 32-entity ceiling, one loaded entity at a time.
+    const unit = {...b, messageBytes: 0};
+    let source;
+    try { source = readCurrentMessage(db, roomId, id, unit); }
+    finally {
+      b.bytes = unit.bytes; b.records = unit.records;
+      b.ancestorBytes = (b.ancestorBytes ?? 0) + (unit.messageBytes ?? 0);
+    }
+    if ((b.ancestorBytes ?? 0) > 32 * CURRENT_MESSAGE_INPUT_BYTES) refuse('Legacy reply ancestry exceeds bounded proof work');
+    return source ? headerSource(messageHeader(source.row), source.row.entity_hash) : undefined;
+  }
+  const size = db.prepare(`SELECT ${MESSAGE_HEADER_FIELDS.map(key => `length(CAST(${key} AS BLOB)) AS ${key}`).join(',')},length(CAST(entity_hash AS BLOB)) AS entity_hash FROM messages WHERE room_id=? AND message_id=?`).get(roomId, id);
+  if (!size) corrupt('witnessed canonical message missing');
+  const bytes = Object.values(size).reduce((n, value) => n + (value ?? 0), 0);
+  if (bytes > MAX_RECORD) refuse('Canonical message header exceeds bounded input');
+  charge(b, bytes + 256, 2);
+  const row = db.prepare(`SELECT ${MESSAGE_HEADER_FIELDS.join(',')},entity_hash FROM messages WHERE room_id=? AND message_id=?`).get(roomId, id);
+  if (witness.sequence !== row.seq || witness.entityHash !== row.entity_hash || !isDeepStrictEqual(witness.header, messageHeader(row))) corrupt('message header proof changed');
+  return headerSource(witness.header, witness.entityHash);
 }
 function admitCanonicalMessageWrite(row, current) {
   if (current.candidate) return; // Historical candidate replay is not a new command.
@@ -419,7 +456,7 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
     for(const [key,value] of privacy.links)fields.set(JSON.stringify(['workRequest',key]),value);
     const counts={messages:messageRows.length,workItems:Object.keys(state.workItems).length,workCapacity:Object.keys(state.workItems).length,
       replyRequests:Object.keys(state.replyRequests??{}).length,members:Object.keys(state.members).length,roundLimitPauses:0,threadParticipants:0};
-    for(const row of messageRows)fields.set(JSON.stringify(['messageWitness',row.message_id]),{sequence:row.seq,entityHash:row.entity_hash});
+    for(const row of messageRows)fields.set(JSON.stringify(['messageWitness',row.message_id]),messageWitness(row));
     if(state.messagesArchive){
       const archive=state.messagesArchive;
       if(!Number.isSafeInteger(archive.count)||archive.count<0||!Number.isSafeInteger(archive.throughSeq)||!Array.isArray(archive.retainedIds))corrupt('invalid adoption archive');
@@ -536,7 +573,8 @@ export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)?
   } else charge(b,bytes+512);
   b.messageBytes = (b.messageBytes ?? 0) + bytes;
   const row=db.prepare(`SELECT ${MESSAGE_PROOF_SELECT},entity_hash FROM messages WHERE room_id=? AND message_id=?`).get(roomId,messageId);
-  if(!messageProofMatches(row)||witness.sequence!==row.seq||witness.entityHash!==row.entity_hash)corrupt('message field proof changed');
+  if(!messageProofMatches(row)||witness.sequence!==row.seq||witness.entityHash!==row.entity_hash
+    ||witness.header!==undefined&&!isDeepStrictEqual(witness.header,messageHeader(row)))corrupt('message field proof changed');
   const value = decodeMessageEntity(row);
   if (admittedMetadata !== undefined) {
     const geometry = messageGeometry(row, value);
@@ -689,16 +727,17 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
   if(store.humanPush?.vapid)refuse('Human push visibility dependencies require qualification');
   const messages=new Map(),workRefs=new Map();
   const loadMessage=id=>{
-    if(!id||messages.has(id))return messages.get(id);
+    if(!id||messages.has(id)&&!messages.get(id).headerOnly)return messages.get(id);
     const source=readMessage?readMessage(id,b):readCurrentMessage(db,roomId,id,b);if(source)messages.set(id,source);return source;
   };
-  const wantedMessages=[command.data.messageId??command.id,`${command.data.messageId??command.id}:channel`,command.data.replyToId,
+  const wantedMessages=[command.data.messageId??command.id,`${command.data.messageId??command.id}:channel`,
     command.data.sourceMessageId,command.data.evidenceMessageId,command.data.requestMessageId,command.data.progressMessageId];
   for(const id of wantedMessages)if(typeof id==='string')loadMessage(id);
   let cursor = command.data.replyToId ?? (['message.edited','message.pinned','message.unpinned'].includes(command.type)?command.data.messageId:command.type==='message.deleted'?messages.get(command.data.messageId)?.value.replyToId:null), childSeq = Number.MAX_SAFE_INTEGER;
   for(let depth=0;cursor;depth++) {
     if(depth>=32)refuse('Reply ancestry exceeds bounded context');
-    const source=loadMessage(cursor);if(!source)break;
+    const source=messages.get(cursor)??(readMessage?loadMessage(cursor):readCurrentMessageHeader(db,roomId,cursor,b));if(!source)break;
+    if(!messages.has(cursor))messages.set(cursor,source);
     if(source.row.seq>=childSeq)corrupt('reply ancestry is cyclic or out of order');childSeq=source.row.seq;
     const request=readCurrentRecord(db,roomId,'replyRequests',cursor,b);
     if(request!==undefined)(state.replyRequests??={})[cursor]=request;
@@ -880,6 +919,11 @@ export function currentPairingMergeContext(store, roomId, {actorId,keptMemberId,
 }
 export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,current}) {
   const db=store.db,refs={},workWrites=[];
+  const affected = new Set(affectedMessageIds(event));
+  for (const [id, source] of current.messageRows) if (source.headerOnly) {
+    if (affected.has(id) || !isDeepStrictEqual(source.value, state.messages.find(message => message.id === id)))
+      corrupt('header-only dependency cannot be mutated or persisted');
+  }
   for(const [id,item] of Object.entries(state.workItems)) {
     const body=JSON.stringify(item),digest=hash(body),prior=current.workRefs.get(id);
     refs[id]={_workEntity:1,id,revision:item.revision,digest};
@@ -920,7 +964,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
     for(const message of added) {
       const row=messageRowForWrite(message,{sequence,pinned:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
       admitCanonicalMessageWrite(row, current);
-      changes.push({domain:'messageWitness',key:message.id,value:{sequence,entityHash:messageProofHash(row)}});
+      changes.push({domain:'messageWitness',key:message.id,value:messageWitness(row)});
       let root=message;const seen=new Set();
       while(root.replyToId) {if(seen.has(root.id))corrupt('new reply cycle');seen.add(root.id);const parent=state.messages.find(m=>m.id===root.replyToId);if(!parent)corrupt('unloaded reply ancestor');root=parent;}
       const key=root.id+'\0'+message.authorId;
@@ -937,7 +981,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
     if(!source||(isDeepStrictEqual(message,source.value)&&!pinChanged))continue;
     const row=messageRowForWrite(message,{sequence:source.row.seq,pinned:event.type==='member.merged'?source.row.pinned===1:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
     admitCanonicalMessageWrite(row, current);
-    changes.push({domain:'messageWitness',key:message.id,value:{sequence:source.row.seq,entityHash:messageProofHash(row)}});
+    changes.push({domain:'messageWitness',key:message.id,value:messageWitness(row)});
   }
   if(current.merge) {
     const roots=new Set([...current.merge.touched].map(id=>current.messageRows.get(id).row.thread_root_id??id));

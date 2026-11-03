@@ -5,6 +5,18 @@ import {withCurrentRoomWriter} from '../server/current-room-repository.mjs';
 export class LargeMessageInputRoom extends MessageMitigationRoom {
   async fetch(request) {
     const url = new URL(request.url), s = this.store;
+    if (url.pathname === '/__chain-seed') {
+      const events = initialRoom(), at = Date.now() - 100000;
+      const add = (type, data) => events.push(event({roomId: 'commons', actorId: 'owner', type, data, at: new Date(at + events.length * 1000).toISOString()}));
+      for (const memberId of ['party', 'other']) add('member.added', {memberId, displayName: memberId, kind: 'agent', permissions: []});
+      add('room.history_visibility_set', {historyVisibility: 'since_join'});
+      add('channel.created', {channelId: 'science', name: 'Science'});
+      for (const [id, parent] of [['a', null], ['b', 'a']]) add('message.posted', {messageId: id, body: '\u0001'.repeat(65536), channelId: 'science', ...(parent ? {replyToId: parent} : {})});
+      add('member.added', {memberId: 'late', displayName: 'Late', kind: 'agent', permissions: []});
+      s.initialize(events, {representation: 'normalized-current-v1'});
+      const witness = JSON.parse(s.db.prepare("SELECT payload FROM current_room_records WHERE room_id='commons' AND domain='messageWitness' AND record_key='a'").get().payload);
+      return Response.json({...Object.fromEntries(['owner','other','late'].map(id => [id, s.issueAccessKey('commons', id)])), header: witness.header !== undefined});
+    }
     if (url.pathname === '/__large-seed') {
       const count = Number(url.searchParams.get('count') ?? 0), kind = url.searchParams.get('kind');
       const body = kind === 'cjk' ? '界'.repeat(65536) : kind === 'control' ? '\u0001'.repeat(65536) : kind === 'astral' ? '😀'.repeat(32768) : 'x'.repeat(65536);

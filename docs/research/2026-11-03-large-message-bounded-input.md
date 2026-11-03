@@ -75,3 +75,44 @@ Generate the exact selected-room Data Studio SQL without opening a database:
 ```sh
 node --input-type=module -e "import {messageInputPageSql} from './scripts/audit-current-message-input.mjs'; console.log(messageInputPageSql({selectedRoom:true}))"
 ```
+
+## Reply ancestry composition
+
+Independent review found the first repair still rejected a short C after maximum
+A → maximum B → C, and could not edit/delete B. Those were three real normal-
+command failures, not invalid input. Ancestor text is irrelevant to these checks.
+The existing protected messageWitness now also records exact scalar headers
+(identity, sequence, channel/root/reply links, parties, work link, dates) during
+initialization and qualified writes. Command ancestry compares addressed scalar
+headers and entity-hash identity with that protected header. It does not pretend
+to validate an unneeded ancestor body from the scalar hash. Actual selected,
+edited, deleted and evidence messages retain full body/hash/witness verification.
+
+Header-only dependencies are private internal context. Before persistence, any
+reducer mutation or affected-message selection of one refuses; ancestors are
+never written as message stubs. DM ancestry, root channel and request ancestry
+checks still see all headers. Header changes, hash changes, missing witnesses,
+and full-body tampering remain covered by their respective qualified readers.
+
+Existing hash-only witnesses are not rewritten by reads. They fall back to full
+verification of at most 32 ancestor entities, one at a time, retaining only the
+header. ALL raw field bytes count cumulatively against a separate **29360128-byte
+ancestry-work ceiling** (32 × 917504), with the SAME metadata/record/receipt
+budget. The selected-body pool stays 917504 bytes. This compatibility fallback
+can be expensive; it is not a constant-small byte claim or a free fresh ancestor
+budget. New witnesses avoid ancestor body transfer. No history scan, table,
+schema upgrade, readonly proof write or grant is introduced.
+
+Actual Native qualification includes a genuine detached `9e6beac42` producer
+initializing old hash-only witnesses, then cold reopening that same persisted
+Durable Object with the new runtime before C/editB/deleteB and a second cold
+read. The optional local qualification source is explicit:
+
+```sh
+ROOM_MESSAGE_OLD_SOURCE=/tmp/pr-large-message-before-1103 node --test cloudflare/current-large-message-input.check.mjs
+```
+
+The default check always exercises new headers; the supplied old source adds
+the genuine old-witness case, and diagnostics distinguish both. It creates no
+runtime dependency on a historical Git SHA. The before control is retained in
+`/tmp/current-message-ancestry-before-1103.log` (three failures).

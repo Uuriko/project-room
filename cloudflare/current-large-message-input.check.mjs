@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {Miniflare} from 'miniflare';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 test('actual Native large canonical input retains cold privacy/proofs and flat addressed 1k/5k source cost', {timeout: 120000}, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'large-message-input-native-'));
   const script = (await build({entryPoints: [new URL('./current-large-message-input.test-fixture.mjs', import.meta.url).pathname], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']})).outputFiles[0].text;
-  const create = () => new Miniflare({script, modules: true, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'], durableObjectsPersist: directory, durableObjects: {ROOM: {className: 'LargeMessageInputRoom', useSQLite: true}}, bindings: {ROOM_ORIGIN: 'https://room.example.test'}, serviceBindings: {ASSETS: async () => new Response('missing', {status: 404})}});
+  const create = (runtime = script) => new Miniflare({script: runtime, modules: true, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'], durableObjectsPersist: directory, durableObjects: {ROOM: {className: 'LargeMessageInputRoom', useSQLite: true}}, bindings: {ROOM_ORIGIN: 'https://room.example.test'}, serviceBindings: {ASSETS: async () => new Response('missing', {status: 404})}});
   let mf = create(); const costs = [];
   try {
     for (const [kind, count, live = false] of [['ascii', 0], ['cjk', 0], ['astral', 0], ['control', 1000], ['control', 5000], ['ascii', 0, true], ['cjk', 0, true], ['control', 0, true], ['astral', 0, true]]) {
@@ -41,6 +41,33 @@ test('actual Native large canonical input retains cold privacy/proofs and flat a
       const mode = kind === 'ascii' ? 'body' : kind === 'cjk' ? 'hash' : 'witness';
       assert.equal((await call('/__large-tamper?mode=' + mode)).status, 200);
       assert.notEqual((await call('/api/rooms/commons/conversation?messageId=private', {headers})).status, 200);
+    }
+    const oldSource = process.env.ROOM_MESSAGE_OLD_SOURCE;
+    const oldScript = oldSource ? (await build({stdin: {contents: await readFile(new URL('./current-large-message-input.test-fixture.mjs', import.meta.url), 'utf8'), resolveDir: join(oldSource, 'cloudflare')}, bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']})).outputFiles[0].text : null;
+    for (const legacy of oldScript ? [false, true] : [false]) {
+      const surface = legacy ? 'old-header-chain' : 'new-header-chain';
+      await mf.dispose(); mf = create(legacy ? oldScript : script);
+      const request = async (path, options = {}) => {
+        const response = await mf.dispatchFetch('https://room.example.test' + path + (path.includes('?') ? '&' : '?') + 'surface=' + surface, options);
+        return {status: response.status, value: await response.json()};
+      };
+      const seed = await request('/__chain-seed'); assert.equal(seed.status, 200); assert.equal(seed.value.header, !legacy);
+      await mf.dispose(); mf = create();
+      const headers = {authorization: 'Bearer ' + seed.value.owner, 'content-type': 'application/json'};
+      const command = (id, type, data) => request('/api/rooms/commons/commands', {method: 'POST', headers, body: JSON.stringify({id, type, data})});
+      assert.equal((await request('/api/rooms/commons/conversation?messageId=b', {headers})).value.messages[0].body.length, 65536);
+      assert.equal((await request('/api/rooms/commons/conversation?messageId=b', {headers: {authorization: 'Bearer ' + seed.value.late}})).status, 404);
+      assert.equal((await command('chain-c', 'message.posted', {messageId: 'c', replyToId: 'b', channelId: 'general', body: 'Useful follow-up'})).status, 201);
+      const replyCost = (await request('/__large-cost')).value;
+      t.diagnostic('ANCESTRY_REPLY_COST ' + JSON.stringify({legacy, ...replyCost}));
+      assert.equal((await command('chain-c', 'message.posted', {messageId: 'c', replyToId: 'b', channelId: 'general', body: 'Useful follow-up'})).status, 200);
+      assert.equal((await request('/api/rooms/commons/conversation?messageId=c', {headers})).value.messages[0].channelId, 'science');
+      assert.equal((await command('chain-edit', 'message.edited', {messageId: 'b', expectedMessageRevision: 0, body: 'Edited reply'})).status, 201);
+      assert.equal((await command('chain-delete', 'message.deleted', {messageId: 'b', expectedMessageRevision: 1})).status, 201);
+      await mf.dispose(); mf = create();
+      assert.equal((await request('/api/rooms/commons/conversation?messageId=b', {headers})).value.messages[0].body, null);
+      assert.equal((await request('/api/rooms/commons/conversation?messageId=a', {headers})).value.messages[0].body.length, 65536);
+      t.diagnostic('ANCESTRY_COLD_SOURCE ' + JSON.stringify({legacy, oldSource: legacy ? oldSource : null, complete: true}));
     }
     assert.equal(costs[0].reads, costs[1].reads);
     assert.equal(costs[0].statements, costs[1].statements);

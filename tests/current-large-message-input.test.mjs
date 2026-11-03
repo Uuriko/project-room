@@ -110,3 +110,38 @@ for (const [kind, body] of families) test(`new max ${kind} writes stay readable 
   f.reopen();
   assert.equal(readConversation(f.store, f.owner, 'commons', {messageId: 'new-max'}).messages[0].body, null);
 });
+
+for (const action of ['reply', 'edit', 'delete']) test(`maximum-message reply ancestry admits a later ${action} after cold reopen`, t => {
+  const f = fixture(t, 'Small source'), body = '\u0001'.repeat(65536);
+  f.store.command(f.owner, 'commons', {id: 'chain-a', type: 'message.posted', data: {messageId: 'chain-a', body}});
+  f.store.command(f.owner, 'commons', {id: 'chain-b', type: 'message.posted', data: {messageId: 'chain-b', replyToId: 'chain-a', body}});
+  f.reopen();
+  if (action === 'reply') {
+    const command = {id: 'chain-c', type: 'message.posted', data: {messageId: 'chain-c', replyToId: 'chain-b', body: 'Useful follow-up'}};
+    f.store.command(f.owner, 'commons', command);
+    assert.equal(f.store.command(f.owner, 'commons', command).duplicate, true);
+    assert.equal(readConversation(f.store, f.owner, 'commons', {messageId: 'chain-c'}).messages[0].body, 'Useful follow-up');
+  } else {
+    f.store.command(f.owner, 'commons', {id: 'chain-' + action, type: action === 'edit' ? 'message.edited' : 'message.deleted', data: {messageId: 'chain-b', expectedMessageRevision: 0, ...(action === 'edit' ? {body: 'Short edited reply'} : {})}});
+    f.reopen();
+    assert.equal(readConversation(f.store, f.owner, 'commons', {messageId: 'chain-b'}).messages[0].body, action === 'edit' ? 'Short edited reply' : null);
+  }
+});
+
+test('protected ancestry headers preserve root channel and DM parties without rewriting ancestor bodies', t => {
+  const f = fixture(t, 'Small source'), body = '\u0001'.repeat(65536);
+  f.store.command(f.owner, 'commons', {id: 'science', type: 'channel.created', data: {channelId: 'science', name: 'Science'}});
+  f.store.command(f.owner, 'commons', {id: 'private-root', type: 'message.posted', data: {messageId: 'private-root', body, toMemberId: 'party', channelId: 'science'}});
+  f.store.command(f.owner, 'commons', {id: 'private-child', type: 'message.posted', data: {messageId: 'private-child', replyToId: 'private-root', body}});
+  const ancestorRows = () => f.store.db.prepare("SELECT * FROM messages WHERE room_id='commons' AND message_id IN ('private-root','private-child') ORDER BY message_id").all();
+  const before = ancestorRows();
+  f.reopen();
+  assert.throws(() => f.store.command(f.other, 'commons', {id: 'bystander', type: 'message.posted', data: {messageId: 'bystander', replyToId: 'private-child', body: 'Must not enter DM'}}), e => e.code === 'command_rejected');
+  f.store.command(f.owner, 'commons', {id: 'private-grandchild', type: 'message.posted', data: {messageId: 'private-grandchild', replyToId: 'private-child', channelId: 'general', body: 'Useful private follow-up'}});
+  const message = readConversation(f.store, f.owner, 'commons', {messageId: 'private-grandchild'}).messages[0];
+  assert.equal(message.channelId, 'science'); assert.equal(message.toMemberId, 'party');
+  assert.deepEqual(ancestorRows(), before);
+  f.store.transaction(() => withCurrentRoomWriter(f.store.db, 'commons', () => f.store.db.prepare("UPDATE messages SET channel_id='general' WHERE room_id='commons' AND message_id='private-root'").run()));
+  assert.throws(() => f.store.command(f.owner, 'commons', {id: 'tampered-header', type: 'message.posted', data: {messageId: 'tampered-header', replyToId: 'private-child', body: 'Must not save'}}), /message header proof changed/);
+  assert.throws(() => readConversation(f.store, f.owner, 'commons', {messageId: 'private-root'}), /message field proof changed/);
+});
