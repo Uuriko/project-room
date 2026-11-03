@@ -203,7 +203,7 @@ export class Bridge {
             ownerId:authority.ownerId,respondTo:this.respondTo}) ? 'allowed' : 'denied']));
   }
 
-  async authorized({ messageIds, claimId } = {}) {
+  async authorized({ messageIds, claimId, requireRunnable = false } = {}) {
     if (this.controller.signal.aborted) throw new Error("bridge stopped");
     if (!claimId) {
       // Old receipts lack original source IDs; they cannot authorize disclosure.
@@ -221,7 +221,8 @@ export class Bridge {
     if (claimRequester(claim) !== requester || authority.unresolved.has(requester))
       throw new RoomError(409, 'authority_member_unresolved', 'Claim requester changed or is unresolved; retry with fresh authority');
     return Boolean(authority.members[this.connection.memberId] && authority.me.active !== false
-      && claim?.owner === authority.me.id && mayTalk({authorId:requester,members:authority.members,
+      && claim?.owner === authority.me.id && (!requireRunnable || !TERMINAL_CLAIM_STATES.includes(claim.state))
+      && mayTalk({authorId:requester,members:authority.members,
         me:authority.me,ownerId:authority.ownerId,respondTo:this.respondTo}));
   }
 
@@ -326,11 +327,18 @@ export class Bridge {
           await this.agentReady();
           if (this.controller.signal.aborted) return;
           const { sessionId } = await this.host.session(threadKey);
-          if (!(await this.authorized({ claimId }))) { await this.ack(signalIds); return; }
+          // Queueing and session startup can outlive the assignment. Check
+          // runnable state here without blocking results already in progress.
+          if (!(await this.authorized({ claimId, requireRunnable: true }))) {
+            receipt = { phase: "discarded", requestId: receipt.requestId };
+            this.claimReceipts.save(key, receipt);
+            await this.ack(signalIds); return;
+          }
           const { recorder, stopReason } = await this.host.prompt(threadKey, buildClaimPrompt({ roomTitle: this.title, claim: item.claim, author: item.author }), { sessionId });
           body = renderTurn(recorder, { stopReason });
           this.stats.turns++;
         } catch (error) {
+          if (receipt.phase === "discarded") throw error; // Retry ACK without creating a result.
           this.log(`claim turn failed: ${error.message}`);
           if (this.controller.signal.aborted) return;
           body = renderTurn({ text: "", tools: new Map() }, { error: error.message });
