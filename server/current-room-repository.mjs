@@ -37,6 +37,12 @@ const serializeCurrentCarrier = (revision, headHash) =>
 const corrupt = message => { throw Error('current_room_corrupt: ' + message); };
 const refuse = message => { throw new ServiceError(409,'current_room_context_unavailable',message); };
 const MAX_INPUT = 256 * 1024, MAX_RECORD = 128 * 1024;
+function admitTemporaryMessageWrite(row, current) {
+  if (current.candidate) return; // Historical candidate replay is not a new command.
+  const bytes = MESSAGE_PROOF_FIELDS.reduce((sum, key) => sum + (row[key] == null ? 0 : Buffer.byteLength(String(row[key]))), 0);
+  if (bytes > MAX_RECORD) throw new ServiceError(422, 'message_entity_temporarily_limited',
+    `Message entity is ${bytes} bytes; the temporary maximum is ${MAX_RECORD} bytes (body limit 8192 UTF-16 units). No changes were saved`);
+}
 const maps = new Set(['members','channels','workItems','replyRequests','agentHalts','helpOffers','bonds']);
 const omitted = new Set(['messages','messageAuthority','eventLog','seenEvents','seenIdempotencyKeys']);
 const normalized = sql => sql?.trim().replace(/;$/,'').replace(/IF NOT EXISTS /g,'').replace(/\s+/g,' ');
@@ -841,6 +847,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
     const added=state.messages.filter(message=>!previous.state.messages.some(old=>old.id===message.id));
     for(const message of added) {
       const row=messageRowForWrite(message,{sequence,pinned:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
+      admitTemporaryMessageWrite(row, current);
       changes.push({domain:'messageWitness',key:message.id,value:{sequence,entityHash:messageProofHash(row)}});
       let root=message;const seen=new Set();
       while(root.replyToId) {if(seen.has(root.id))corrupt('new reply cycle');seen.add(root.id);const parent=state.messages.find(m=>m.id===root.replyToId);if(!parent)corrupt('unloaded reply ancestor');root=parent;}
@@ -857,6 +864,7 @@ export function prepareCurrentWrite(store,{roomId,previous,state,event,sequence,
       &&(state.pins??[]).some(pin=>pin.messageId===message.id)!==(source.row.pinned===1);
     if(!source||(isDeepStrictEqual(message,source.value)&&!pinChanged))continue;
     const row=messageRowForWrite(message,{sequence:source.row.seq,pinned:event.type==='member.merged'?source.row.pinned===1:(state.pins??[]).some(pin=>pin.messageId===message.id),threadMessages:new Map(state.messages.map(m=>[m.id,m]))});
+    admitTemporaryMessageWrite(row, current);
     changes.push({domain:'messageWitness',key:message.id,value:{sequence:source.row.seq,entityHash:messageProofHash(row)}});
   }
   if(current.merge) {
