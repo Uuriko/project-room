@@ -1,0 +1,63 @@
+{
+  "source": "fd65608c63976bf903412c9fe8586260d5533443",
+  "base": "6dca37dada6d801e58aa9d748fb3630d3ca11cd7",
+  "node": "v24.22.1",
+  "initialBefore": {
+    "exit": 1,
+    "tests": 9,
+    "pass": 5,
+    "fail": 4
+  },
+  "intermediateComposed": {
+    "exit": 1,
+    "tests": 100,
+    "pass": 96,
+    "fail": 4,
+    "reason": "Four old immediate-second ordinary reply assertions conflict with authorized 60-second reservation rule; reconciled using only injected reservation clock."
+  },
+  "final": {
+    "exit": 0,
+    "tests": 105,
+    "pass": 105,
+    "fail": 0,
+    "skip": 0
+  },
+  "lintExit": 0,
+  "secretFilesExit": 0,
+  "secretCommittedDiffExit": 0,
+  "logs": {
+    "before": {
+      "bytes": 8942,
+      "sha256": "5f0769c0dfe86761dbcebfe0f253c382cea8152a688b603483b52e9abd1f3106"
+    },
+    "composed": {
+      "bytes": 49030,
+      "sha256": "2a290aac5df1d4f4f942bfc84e8becf6c51a009b798f13f09977e22327fa02f2"
+    },
+    "final": {
+      "bytes": 49740,
+      "sha256": "5694bb118445df5ce23e4d9fe5ab1bf6c13ef9e1a20d340f06e48302f2c1744d"
+    },
+    "lint-final": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret": {
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    },
+    "secret-diff": {
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  },
+  "files": {
+    "room-acp/README.md": "f75f452e4dee8db11cf6a789f2f7dc8fd8621fb32a0c662eaac1498277ad1157",
+    "room-acp/src/bridge.mjs": "7ee43a19706c8149f05f3662bcea32057bbdd368690571993bca5b1b961a9921",
+    "room-acp/src/prompt.mjs": "a0bf6a01bab58425b2ffc5f588d8ffe615b047a4a3ea2261d33a966ea9b721ca",
+    "scripts/CANDIDATE-MANIFEST.json": "f8e9c8499e51b8af43803274fb151ca0e49dc014a94abc842b0c58e6097b5c08",
+    "tests/room-acp-bridge.test.js": "2e8e94497e4248bd6222ef6704e5928a758104c6f707348b4c3413daf45755f2",
+    "tests/room-acp-chat-retry.test.js": "aad72ad5d1419ff5e722ed4a5fe842140b58410b355efe85e2e2ecb349f03e3b",
+    "tests/room-acp-no-reply.test.mjs": "6c36fabf1fabeae7c187d56a33eb820c30aaeb2fbca0f4fe4a94a4abfd2e2c6b"
+  }
+}
