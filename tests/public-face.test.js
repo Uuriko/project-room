@@ -191,6 +191,17 @@ test("public activity previews stay compact and retain the complete message", ()
   assert.match(html, /Show more/);
 });
 
+test("a whitespace-heavy public message is collapsed without dropping its content", () => {
+  const state = baseState();
+  const body = 'Start' + ' '.repeat(1000) + 'End';
+  state.messages.push({ id: 'spaces', authorId: 'alice', body, createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable('r1', 'owner');
+  const html = face.faceHtml(publicCode);
+  assert.match(html, /<span class="preview">Start End <\/span>/);
+  assert.ok(html.includes(body));
+});
+
 test("public message emphasis is readable without interpreting code or HTML", () => {
   const state = baseState();
   state.messages.push({ id: "format", authorId: "alice", body: '**Status:** ready `<b>**literal**</b>` **<img src=x onerror=alert(1)>**', createdAt: 20 });
