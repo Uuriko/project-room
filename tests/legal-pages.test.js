@@ -100,6 +100,10 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
   // Long inline code (env names like ROOM_RETENTION_ALLOW_DELETION=0) must wrap
   // on a 320px phone instead of widening the page into horizontal scroll.
   assert.match(privacy.text, /code\{overflow-wrap:anywhere\}/);
+  // Backticked env names render as <code>, not literal backticks, so the
+  // wrap rule above actually applies (Grok Build 17185: 347px at 320).
+  assert.match(privacy.text, /<code>ROOM_RETENTION_ALLOW_DELETION=0<\/code>/);
+  assert.doesNotMatch(privacy.text, /`ROOM_RETENTION_ALLOW_DELETION/);
   const subprocessors = await raw(origin, "/subprocessors");
   for (const name of ["Cloudflare, Inc.", "Resend, Inc.", "Google LLC", "GitHub, Inc.", "Microsoft Corporation", "Firecrawl", "Telegram FZ-LLC"]) {
     assert.match(subprocessors.text, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
