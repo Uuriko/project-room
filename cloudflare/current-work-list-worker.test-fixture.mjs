@@ -18,7 +18,8 @@ export class CurrentWorkListProbe extends DurableObject{
    if(u.pathname==='/seed'){
     const count=Number(u.searchParams.get('count'));if(![32,128].includes(count))throw Error('invalid count');const events=initialRoom();
     for(const id of ['worker','other'])events.push(event({roomId:'commons',actorId:'owner',type:'member.added',data:{memberId:id,displayName:id,kind:'agent',permissions:[]}}));
-    for(let i=0;i<count;i++)events.push(event({roomId:'commons',actorId:'owner',type:'work.proposed',data:{workItemId:'task-'+String(i).padStart(4,'0'),title:'Useful '+i,definitionOfDone:'NOT-HYDRATED-DEFINITION',accountableMemberId:i===count-1?'worker':'other'}}));
+    for(let i=0;i<count;i++)events.push(event({roomId:'commons',actorId:'owner',type:'work.proposed',data:{workItemId:'task-'+String(i).padStart(4,'0'),title:'Useful '+i,definitionOfDone:'NOT-HYDRATED-DEFINITION',accountableMemberId:i===count-1?(u.searchParams.has('help')?'owner':'worker'):'other'}}));
+    if(u.searchParams.has('help')){const workItemId='task-'+String(count-1).padStart(4,'0');events.push(event({roomId:'commons',actorId:'owner',type:'work.accepted',data:{workItemId,expectedRevision:0}}),event({roomId:'commons',actorId:'owner',type:'work.help_updated',data:{workItemId,expectedRevision:1,expectedHelpRevision:0,status:'open',scope:'Suggest a useful improvement',expiresAt:new Date(Date.now()+60000).toISOString()}}));}
     for(let i=0;i<13;i++)events.push(event({roomId:'commons',actorId:'owner',type:'message.posted',data:{messageId:'request-'+String(i).padStart(2,'0'),toMemberId:i===12?'worker':'other',requestKind:'reply',requestPolicyVersion:1,body:'NOT-HYDRATED-REQUEST-BODY'}}));
     s.initialize(events,{representation:'normalized-current-v1'});const key=s.issueAccessKey('commons','worker');await this.ctx.storage.put('key',key);result={count};
    }else if(u.pathname==='/list'){

@@ -5,6 +5,7 @@ import {ownMember} from '../src/events.js';
 import {validWorkPage} from './work-list-page.mjs';
 import {nextWorkStep} from '../src/workflow.js';
 import {currentResult} from '../src/work-selectors.js';
+import {workHelpContext} from '../src/work-help.js';
 import {charterContext} from '../src/room-charter.js';
 import {messageInHistory} from './history-visibility.mjs';
 import {ServiceError} from './service-error.mjs';
@@ -78,10 +79,11 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
     if(!validWorkPage(args))fail('invalid_work_page','Use limit 1–100 and a returned cursor.');
     const focus=args.focus??'all';
     if(!['all','needs_me','results','help_wanted'].includes(focus))fail('invalid_focus','Choose a supported work focus.');
-    if(args.query!==undefined||args.sort!==undefined||focus==='help_wanted')
-      fail('current_work_selection_unavailable','This bounded listing supports all, needs_me, and results. Global search, ranking, and help eligibility require a qualified reader.',409);
+    if(args.query!==undefined||args.sort!==undefined)
+      fail('current_work_selection_unavailable','This bounded listing supports all, needs_me, results, and help_wanted. Global search and ranking require a qualified reader.',409);
     return withCurrentReadContext(store.db,roomId,b=>{
-      const head=readCurrentHead(store.db,roomId),limit=Math.min(args.limit??4,4);
+      // Invitation evaluation reads one proven full item; retain the same read budget.
+      const head=readCurrentHead(store.db,roomId),limit=Math.min(args.limit??4,focus==='help_wanted'?1:4);
       const initial={v:2,roomId,viewerId:auth.member.id,head:head.head_sha256,focus,limit,at:store.now(),workAfter:'',requestAfter:'',workDone:false,requestsDone:focus!=='needs_me'};
       const saved=args.cursor===undefined?initial:decode(args.cursor,store,secret);
       if(saved.v!==2||saved.roomId!==roomId||saved.viewerId!==auth.member.id||saved.head!==initial.head||saved.focus!==focus||saved.limit!==limit)
@@ -94,14 +96,24 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
       const source=addressed&&!saved.workDone?addressedWorkWindow(store,roomId,auth.member.id,room.ownerId,saved.workAfter,limit,b):null;
       const overview=addressed?{state:{members:{[auth.member.id]:auth.member},room,workItems:{}},workWindow:{nextAfter:source?.hasMore?source.after:null}}
         :readCurrentOverviewWindow(store,roomId,{viewerId:auth.member.id,workAfter:saved.workAfter,limit:saved.workDone?1:limit});
-      const member=ownMember(overview.state.members,auth.member.id),now=saved.at;
+      const member=ownMember(overview.state.members,auth.member.id),now=focus==='help_wanted'?store.now():saved.at;
       const items=saved.workDone?[]:source?.items??Object.values(overview.state.workItems);
-      const work=items.filter(item=>focus==='all'||focus==='results'&&currentResult(item)
+      const invitations=new Map();
+      if(focus==='help_wanted')for(const item of items) {
+        // Private work titles are already masked by the proven summary reader.
+        // Do not expose its invitation scope to an unrelated viewer.
+        if(item.title===null||!['accepted','working','blocked'].includes(item.state))continue;
+        const full=readCurrentWorkItem(store.db,roomId,item.id,b);
+        const help=workHelpContext({...overview.state,workItems:{[item.id]:full}},item.id,member.id,new Date(now).toISOString());
+        if(help.canOffer)invitations.set(item.id,help);
+      }
+      const work=items.filter(item=>focus==='all'||focus==='results'&&currentResult(item)||focus==='help_wanted'&&invitations.has(item.id)
         ||focus==='needs_me'&&member.active!==false&&nextWorkStep(item,now,overview.state.room.ownerId).memberId===member.id
           &&nextWorkStep(item,now,overview.state.room.ownerId).needsAttention).map(item=>({
         id:item.id,title:item.title,state:item.state,revision:item.revision,mode:item.mode,
         next:nextWorkStep(item,now,overview.state.room.ownerId),
         nextRead:{tool:'room_read_work',arguments:{workItemId:item.id}},
+        ...(focus==='help_wanted'?{help:invitations.get(item.id),offerEligibility:{status:'unavailable',reason:'current_offer_context_unavailable'}}:{}),
         ...(focus==='results'?(()=>{const current=readCurrentWorkItem(store.db,roomId,item.id);return {
           result:currentResult(current),nextResultRead:current.receipt.nativeText
             ?{tool:'room_read_result',arguments:{workItemId:item.id,completionEventId:current.receipt.eventId}}:null};})():{})
@@ -125,7 +137,8 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
         scope:{kind:"room",permissions:[...member.permissions],externalExecution:false},
         work,...(focus==='needs_me'?{replyRequests,replyRequestsEvaluatedThrough:evaluatedThrough}:{}),
         workScope:'bounded_source_window',selection:{order:'id',...(addressed?{source:'addressed-role-indexes',examinedWorkKeys:source?.examinedKeys??0}:{}),examinedWork:items.length,examinedRequests:requests?.requests.length??0,
-          matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting.'},
+          matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting.'
+          +(focus==='help_wanted'?' Explicit invitations only. Read selected work for scope and discussion. Offer queue eligibility is unavailable on this storage representation; this is not offer, assignment, claim or execution authority.':'')},
         page:{limit,totalWork:null,totalReplyRequests:null,hasMore,nextCursor,consistency:'restart_on_change',
           nextRead:hasMore?{tool:'room_list_work',arguments:{roomId,focus,...(args.limit===undefined?{}:{limit:args.limit}),cursor:nextCursor}}:null}};
     });

@@ -23,9 +23,11 @@ export const inboxNext = (roomId, directMessages, assignments, mentions, directM
       optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
+      tool: "room_reply",
+      arguments: { roomId, replyToId: latest.replyToId, ...(latest.private ? { toMemberId: latest.replyToMemberId } : {}) },
       description: latest.private
-        ? `If useful, reply to the ${timing}private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. This ordinary mention is not a formal reply obligation. ${outcome} Send your identity secret as the Bearer token.`
-        : `If useful, reply to the ${timing}@mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. This ordinary mention is not a formal reply obligation. ${outcome} An unrelated post does not. Send your identity secret as the Bearer token.`,
+        ? `If useful, reply to the ${timing}private @mention from member ${latest.from} privately: call room_reply with replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" and your body. Keep the private recipient. This ordinary mention is not a formal reply obligation. ${outcome} Use your existing authenticated MCP connection; no identity secret is needed. For REST, use an existing credential authorized for this API, not an MCP OAuth token.`
+        : `If useful, reply to the ${timing}@mention from member ${latest.from}: call room_reply with replyToId: "${latest.replyToId}" and your body. This ordinary mention is not a formal reply obligation. ${outcome} An unrelated post does not. Use your existing authenticated MCP connection; no identity secret is needed. For REST, use an existing credential authorized for this API, not an MCP OAuth token.`,
     }));
   }
   if (directMessages.length > 0) {
@@ -35,7 +37,9 @@ export const inboxNext = (roomId, directMessages, assignments, mentions, directM
       optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `If useful, reply to the recent DM from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your reply", toMemberId: "${latest.from}" } }. Recent conversation history does not establish a reply obligation; no acknowledgement is required. Send your identity secret as the Bearer token.`,
+      tool: "room_reply",
+      arguments: { roomId, replyToId: latest.messageId, toMemberId: latest.from },
+      description: `If useful, reply to the recent DM from member ${latest.from}: call room_reply with replyToId: "${latest.messageId}", toMemberId: "${latest.from}" and your body. Keep the private recipient. Recent conversation history does not establish a reply obligation; no acknowledgement is required. Use your existing authenticated MCP connection; no identity secret is needed. For REST, use an existing credential authorized for this API, not an MCP OAuth token.`,
     }));
   }
   if (assignments.length > 0) {

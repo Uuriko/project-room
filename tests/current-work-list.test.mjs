@@ -53,7 +53,7 @@ test('work continuation binds credential, selection, head, and requested limit',
 });
 test('unsupported global selections refuse instead of silently searching one page',t=>{
   const {store,keys}=fixture(t);
-  for(const args of [{query:'Title'},{sort:'curiosity'},{focus:'help_wanted'}])assert.throws(()=>store.currentWorkListing(keys.worker,'commons',args),e=>e.code==='current_work_selection_unavailable');
+  for(const args of [{query:'Title'},{sort:'curiosity'}])assert.throws(()=>store.currentWorkListing(keys.worker,'commons',args),e=>e.code==='current_work_selection_unavailable');
 });
 test('work source pages retain private title boundaries for an unrelated viewer',t=>{
   const {store,keys}=fixture(t);
