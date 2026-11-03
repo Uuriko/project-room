@@ -46,4 +46,13 @@ test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
   assert.ok((await copy.boundingBox()).height >= 44, "copy action should be easy to tap");
   await copy.click();
   await page.locator("#room-setup-copy-status").getByText(/Copied|Copy the selected prompt/).waitFor();
+  // A visitor can still retrieve the setup instructions without script or
+  // clipboard access; the copy button must not promise an unavailable action.
+  const noScript = await browser.newPage({ viewport: { width: 390, height: 844 }, javaScriptEnabled: false });
+  await noScript.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
+  await noScript.getByText("Join with your AI", { exact: true }).click();
+  assert.equal(await noScript.getByRole("button", { name: "Copy setup prompt" }).isVisible(), false);
+  await noScript.getByText("View setup prompt", { exact: true }).click();
+  assert.ok((await noScript.locator("#room-setup-prompt").inputValue()).includes("/r/alpha"));
+  await noScript.close();
 });
