@@ -543,3 +543,20 @@ test('OAuth help_wanted gives a truthful supported pointer without scanning or i
   assert.notEqual(all.body.result?.isError,true,JSON.stringify(all.body));
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM events').get().n,before,'discovery and selected reads write no events');
 });
+
+test('OAuth room and action scope refusals report access restrictions', async t => {
+  const f = await setup(t);
+  const wrongRoom = await f.rpc('tools/call', { name: 'room_check_access', arguments: { roomId: 'other-room' } });
+  assert.equal(wrongRoom.body.error.message, 'insufficient_scope');
+  assert.equal(wrongRoom.body.error.data.reason, 'insufficient_scope');
+  assert.equal(wrongRoom.body.error.data.category, 'access');
+  assert.match(wrongRoom.body.error.data.hint, /limited to its approved room/);
+  const consent = await f.consent({ scope: 'rooms:read' });
+  const code = new URL(consent.headers.get('location')).searchParams.get('code');
+  const exchange = await f.exchange({ grant_type: 'authorization_code', code, client_id: CLIENT.clientId, redirect_uri: CLIENT.redirectUris[0], code_verifier: verifier, resource });
+  const token = (await exchange.json()).access_token;
+  const denied = await f.rpc('tools/call', { name: 'room_post_message', arguments: { body: 'not authorized' } }, token);
+  assert.equal(denied.body.error.message, 'insufficient_scope');
+  assert.equal(denied.body.error.data.reason, 'insufficient_scope');
+  assert.equal(denied.body.error.data.category, 'access');
+});

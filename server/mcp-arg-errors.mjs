@@ -1,7 +1,7 @@
 // Structured MCP tools/call errors. Callers get unknown_tool, auth_required,
-// or invalid_arguments instead of one fixed "Unknown tool or invalid arguments"
+// invalid_arguments, or insufficient_scope instead of one fixed "Unknown tool or invalid arguments"
 // string. The JSON-RPC code stays -32602 for schema problems and -32001 when
-// a room tool is called with no identity bearer.
+// a room tool is called with no identity bearer; -32003 denotes insufficient scope.
 
 import { randomBytes } from "node:crypto";
 
@@ -161,6 +161,23 @@ export function diagnoseArguments(schema, args, { base64Fields = [] } = {}) {
 }
 
 export function mcpCallError(id, { reason, tool, suggestion = null, missing = [], unexpected = [], invalid = {}, hint = null } = {}) {
+  if (reason === "insufficient_scope") {
+    return {
+      jsonrpc: "2.0", id,
+      error: {
+        code: -32003,
+        message: "insufficient_scope",
+        data: {
+          tool: tool ?? null,
+          ...canonicalData({
+            reason: "insufficient_scope", category: "access",
+            hint: hint || "This connection does not have the required access.",
+            next: [Object.freeze({ command: "Use a connection authorized for the intended room and action; request approval if needed. Do not retry unchanged." })],
+          }),
+        },
+      },
+    };
+  }
   if (reason === "auth_required") {
     return {
       jsonrpc: "2.0",
