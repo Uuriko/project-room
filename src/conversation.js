@@ -524,6 +524,8 @@ export class DraftRecovery {
   // can rule one out before another account is shown its room list.
   reconcileAccount(identity) {
     try {
+      // Version 1 cannot be scoped to the current account and must not linger.
+      this.storage?.removeItem('project-room:drafts:v1');
       const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem('project-room:drafts:v2');
       if (!raw) return;
       if (raw.length > 500000) throw new Error('size');
