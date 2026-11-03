@@ -2,22 +2,42 @@
 // room-scoped credential from the invite. Only explicit redemption recovery
 // uses its private identity secret; responses never reach logs raw.
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 
 export class RoomError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
 }
 
 export class RoomClient {
-  #token; #fetch; #identitySecret;
-  constructor({ apiBase, roomId = null, memberId = null, credential = null, identitySecret = null, fetchImpl = fetch }) {
-    this.apiBase = apiBase; this.roomId = roomId; this.memberId = memberId; this.#token = credential; this.#identitySecret = identitySecret; this.#fetch = fetchImpl;
+  #token; #fetch; #identitySecret; #signal; #cooldownUntil = 0;
+  async waitForCooldown(signal) {
+    while (this.#cooldownUntil > performance.now()) {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Request cancelled', 'AbortError');
+      await new Promise((resolve, reject) => {
+        let timer;
+        const clean = () => { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); };
+        const cancelled = () => { clean(); reject(signal.reason ?? new DOMException('Request cancelled', 'AbortError')); };
+        signal?.addEventListener('abort', cancelled, {once:true});
+        if (signal?.aborted) cancelled();
+        else timer = setTimeout(() => { clean(); resolve(); }, Math.ceil(this.#cooldownUntil - performance.now()));
+      });
+    }
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Request cancelled', 'AbortError');
+  }
+  constructor({ apiBase, roomId = null, memberId = null, credential = null, identitySecret = null, fetchImpl = fetch, signal = null }) {
+    this.apiBase = apiBase; this.roomId = roomId; this.memberId = memberId; this.#token = credential; this.#identitySecret = identitySecret; this.#fetch = fetchImpl; this.#signal = signal;
   }
 
-  async request(path, { body, timeoutMs = 15000, auth = true, signal, listenerToken } = {}) {
+  async request(path, options = {}) { return this.#request(path, options, this.#signal); }
+
+  async #request(path, { body, timeoutMs = 15000, auth = true, signal, listenerToken } = {}, defaultSignal) {
     let response;
     try {
+      const stopSignal = defaultSignal && signal ? AbortSignal.any([defaultSignal, signal]) : signal ?? defaultSignal;
+      await this.waitForCooldown(stopSignal);
+      const networkTimeout = AbortSignal.timeout(timeoutMs); // Existing network budget begins after the server cooldown.
       response = await this.#fetch(this.apiBase + path, {
-        method: body === undefined ? "GET" : "POST", redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+        method: body === undefined ? "GET" : "POST", redirect: "error", signal: stopSignal ? AbortSignal.any([stopSignal, networkTimeout]) : networkTimeout,
         headers: { "user-agent": "room-acp", ...(listenerToken === undefined ? {} : { "x-room-listener-token": listenerToken }), ...(auth && this.#token ? { authorization: `Bearer ${this.#token}` } : {}),
           ...(body === undefined ? {} : { "content-type": "application/json", origin: new URL(this.apiBase).origin }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -27,8 +47,13 @@ export class RoomClient {
     }
     const value = await response.json().catch(() => null);
     if (!response.ok) {
-      const retry = Number(response.headers.get("retry-after"));
-      throw new RoomError(response.status, value?.error?.code ?? "http_error", value?.error?.message ?? `HTTP ${response.status}`, Number.isFinite(retry) && retry > 0 ? retry * 1000 : null);
+      const rawRetry = response.headers.get('retry-after') ?? '';
+      const seconds = /^\d{1,3}$/.test(rawRetry) ? Number(rawRetry) : 0;
+      const retryAfterMs = Number.isInteger(seconds) && seconds >= 1 && seconds <= 120 ? seconds * 1000 : null;
+      if (response.status === 429 && retryAfterMs !== null)
+        this.#cooldownUntil = Math.max(this.#cooldownUntil, performance.now() + retryAfterMs);
+      // Return the original failure. No request, model turn or write is retried here.
+      throw new RoomError(response.status, value?.error?.code ?? "http_error", value?.error?.message ?? `HTTP ${response.status}`, retryAfterMs);
     }
     return value;
   }
@@ -73,7 +98,9 @@ export class RoomClient {
   }
 
   disconnect({ hostId, fencingToken = null }) {
-    return this.request("/api/agent-heartbeats", { body: { hostId, disconnect: fencingToken ? { fencingToken } : true, listenerLease: { roomId: this.roomId } } });
+    // run() disconnects after stop(). Keep that original bounded cleanup path
+    // independent of the stopped work signal, while still obeying cooldown.
+    return this.#request("/api/agent-heartbeats", { body: { hostId, disconnect: fencingToken ? { fencingToken } : true, listenerLease: { roomId: this.roomId } } }, AbortSignal.timeout(15000));
   }
 
   heartbeat({ hostId, cadenceSeconds = 30 }) {

@@ -37,6 +37,11 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  attention_wait_superseded: {
+    status: "action_required", hint: uiText("agentError.attention_wait_superseded.hint"),
+    next: [{ command: uiText("agentError.attention_wait_superseded.recovery") }],
+    catalog: { http: 409, retry: "no", recovery: uiText("agentError.attention_wait_superseded.recovery") }
+  },
   current_room_corrupt: {
     status: "action_required", hint: uiText("agentError.current_room_corrupt.hint"),
     next: [{ command: uiText("agentError.current_room_corrupt.recovery") }],

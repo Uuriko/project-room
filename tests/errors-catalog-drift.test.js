@@ -242,6 +242,12 @@ function catalogRowFor(code, http) {
 const nextTextOf = ax => ax.next.map(s => s.command ?? s.path ?? `tool:${s.tool}`).join(" ; ");
 
 const REGISTRY_FIXTURES = [
+  ["attention_wait_superseded", { httpStatus: 409 }, ax => {
+    assert.equal(ax.reason, "attention_wait_superseded");
+    assert.equal(ax.status, "action_required");
+    assert.match(nextTextOf(ax), /newer request result/);
+    assert.match(nextTextOf(ax), /do not restart/);
+  }],
   ["current_room_corrupt", { httpStatus: 409 }, ax => {
     assert.equal(ax.status, "action_required");
     assert.match(ax.hint, /integrity check/);
@@ -372,7 +378,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "attachment_index_budget_exceeded", "attachment_index_conflict", "authority_archive_not_supported", "authority_budget_exceeded", "authority_integrity_failure", "authority_not_ready", "authority_plan_required", "confirmation_mismatch", "current_room_corrupt", "dry_run_required", "export_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_authority_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "invalid_work_cursor", "invalid_work_page", "money_bearing_room", "proof_required", "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "request_id_required", "room_not_archived", "stale_card", "stale_public_claim", "stale_public_work", "stale_work_cursor"],
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "attachment_index_budget_exceeded", "attachment_index_conflict", "attention_wait_superseded", "authority_archive_not_supported", "authority_budget_exceeded", "authority_integrity_failure", "authority_not_ready", "authority_plan_required", "confirmation_mismatch", "current_room_corrupt", "dry_run_required", "export_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_authority_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "invalid_work_cursor", "invalid_work_page", "money_bearing_room", "proof_required", "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "request_id_required", "room_not_archived", "stale_card", "stale_public_claim", "stale_public_work", "stale_work_cursor"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too (MGMT-PANEL Slice 2 added the four operator-purge codes)");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });

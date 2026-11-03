@@ -123,7 +123,7 @@ isolation.
   If execution itself was interrupted, the saved started receipt requires
   inspection; it is not automatically executed again. Preparing context before
   execution can retry. Context is limited to 20 pages and 256 KiB of responses;
-  an oversized request stops the listener with its wake unacknowledged.
+  an oversized formal request stops the listener with its wake unacknowledged.
 - Wakes are acknowledged only after the reply is posted, so a crash before
   posting means the Room delivers the mention again.
 - If the agent crashes it is restarted with backoff; three crashes inside five
@@ -273,3 +273,49 @@ A second ordinary question in the same thread inside the window is not claimed
 answered. Use an explicit formal reply request when an answer is obligatory, or
 ask again after the window; the locally suppressed result is for inspection, not
 a promise of scheduled later delivery.
+
+Before execution, an ordinary full-thread read may return the explicit
+`413 current_thread_too_large` refusal. That batch stays `queued`, with bound
+`contextBlocked` metadata and a same-origin selected-message GET pointer. Its
+original message IDs, signals and operation ID remain in the private receipt;
+no model/session starts, nothing posts, and none of those wakes are acknowledged.
+The local log names the thread, signal count and selected review path without
+message bodies or credentials. Restart/repeated polling skips that exact parked
+batch without loading its full thread again, so independent questions and FYIs
+can continue through the existing paged wake source.
+
+Review the retained messages in Room. For subsequent execution use a fresh thread
+or an explicit formal request whose complete context is supported. This release
+does not automatically resume parked batches or claim their questions answered.
+Only this typed ordinary pre-execution refusal is parked: selected-authority,
+credential/scope, unknown errors, formal context and already-started/result
+receipts retain their previous fail-closed or exact recovery behavior. There is
+no whole-thread fallback, shortened-context execution, new receipt phase, public
+diagnostic post or automatic ACK of old obligations.
+
+For newly queued batches of the same oversized ordinary thread, an addressed
+`chat-blocked-threads` receipt records the observed typed refusal and a hash of
+the protected selected root. Every new batch still rechecks its source authors,
+current room/member authority, listener fence, and selected root/formal status.
+Only an identical ordinary root may reuse the fact; changed roots are inspected
+again, and formal requests never use it. Each batch keeps its own original IDs
+and unacknowledged disposition. The fact is not cached authorization, a global
+registry, or an execution/completion record. Existing blocked batches need no
+migration or scan; the first new qualifying batch can record the fact.
+
+A valid server `429 Retry-After` now delays subsequent fetches across this one
+RoomClient's chat, work and poll paths. Accepted values are integer seconds from
+1 through 120. The client keeps a monotonic deadline; later valid responses can
+extend it, while malformed/unsupported values cannot erase it. It never retries
+the failed request automatically. Waiting honors the bridge/caller abort signal;
+the original network timeout begins after the cooldown. Best-effort listener
+disconnect after stop retains a separate original 15-second total cleanup bound
+and still respects cooldown. Other clients, hosts and credentials do not share
+this local deadline; this is backpressure, not a higher quota or a guarantee of
+no future rate-limit errors.
+
+Synthetic actual-HTTP measurement across ten fresh batches: full-thread refusals
+10 to 1; direct turn requests 80 to 71 (first batch 8, warm batches 7). Setup/routing,
+poll and heartbeat calls are excluded from those per-turn totals. The retained
+fresh authorization checks still cost seven requests per warm singleton batch;
+the parked-thread fact alone does not solve backlog request amplification.
