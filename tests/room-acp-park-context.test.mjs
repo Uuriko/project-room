@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import {createHash} from 'node:crypto';
 import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {seedScopedInbox} from './helpers/scoped-inbox-source.mjs';
@@ -19,16 +21,16 @@ async function fixture(t){
  for(let i=0;i<30;i++)post('park-old-'+i,{replyToId:'oversize-root',body:'Historical context '+i});
  post('fresh-question',{body:'@Worker which API should I use for a selected request?'});
  post('fresh-fyi',{body:'@Worker FYI: the update is complete; no acknowledgement needed.'});
- const counts={prompts:[],posts:[],acks:[],full:0},logs=[];
+ const counts={prompts:[],posts:[],acks:[],full:0,requests:[]},logs=[];
  const make=async()=>{
-  const bridge=new Bridge({connection,env:{ROOM_ACP_HOME:home},minPollIntervalMs:0,log:line=>logs.push(line),fetchImpl:async(url,options)=>{if(new URL(url).pathname.endsWith('/messages/oversize-root/thread')&&!new URL(url).search)counts.full++;return fetch(url,options);},host:{session:async()=>({sessionId:'synthetic',created:true}),prompt:async(key)=>{counts.prompts.push(key);return{recorder:{text:JSON.stringify(key==='fresh-fyi'?{outcome:'no_reply',body:''}:{outcome:'answered',body:'Use the selected request API and retain the original request ID.'}),tools:new Map(),plan:[]},stopReason:'end_turn'};}}});
+  const bridge=new Bridge({connection,env:{ROOM_ACP_HOME:home},minPollIntervalMs:0,log:line=>logs.push(line),fetchImpl:async(url,options)=>{if(new URL(url).pathname.endsWith('/messages/oversize-root/thread')&&!new URL(url).search)counts.full++;const response=await fetch(url,options);counts.requests.push({path:new URL(url).pathname,selected:new URL(url).searchParams.get('view')==='message',status:response.status});return response;},host:{session:async()=>({sessionId:'synthetic',created:true}),prompt:async(key)=>{counts.prompts.push(key);return{recorder:{text:JSON.stringify(key==='fresh-fyi'?{outcome:'no_reply',body:''}:{outcome:'answered',body:'Use the selected request API and retain the original request ID.'}),tools:new Map(),plan:[]},stopReason:'end_turn'};}}});
   const send=bridge.room.post.bind(bridge.room),ack=bridge.room.ack.bind(bridge.room);
   bridge.room.post=async args=>{counts.posts.push(args);return send(args);};bridge.room.ack=async args=>{counts.acks.push(...args.signalIds);return ack(args);};
   await bridge.refreshRoom();await bridge.lease();return bridge;
  };
  const old=Array.from({length:12},(_,i)=>({signalId:'old-wake-'+i,kind:'mention',messageId:'park-old-'+i,author:'owner',body:'Historical context '+i}));
  const wake=id=>({signalId:id+'-wake',kind:'mention',messageId:id,author:'owner',body:id});
- return{store,home,make,counts,logs,old,wake};
+ return{store,seeded,home,make,counts,logs,old,wake};
 }
 const saved=(bridge,id)=>bridge.chatReceipts.read(bridge.chatReceipts.key(id));
 test('real HTTP oversize ordinary batch parks all12wakes, and later question and FYI continue across restart',async t=>{
@@ -80,4 +82,45 @@ test('mismatched parked receipt binding fails closed without loading, prompting 
  bridge.chatReceipts.save(key,{...receipt,contextBlocked:{...receipt.contextBlocked,requestId:'different-operation'}});
  await assert.rejects(bridge.deliverChatReceipt(key),/Invalid blocked context receipt/);
  assert.equal(f.counts.full,1);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);
+});
+
+test('ten fresh same-root batches reuse one durable parked-thread fact after restart with measured HTTP counts',async t=>{
+ const f=await fixture(t);let bridge=await f.make();const measurements=[];
+ for(let i=0;i<10;i++){
+  if(i===5)bridge=await f.make();const start=f.counts.requests.length;
+  await bridge.turn('oversize-root',[{...f.old[0],signalId:'series-'+i}]);
+  measurements.push(f.counts.requests.length-start);await delay(150);
+ }
+ t.diagnostic('PARKED_THREAD_HTTP '+JSON.stringify({batches:10,perBatch:measurements,total:measurements.reduce((a,b)=>a+b,0),full:f.counts.full,statuses:f.counts.requests.reduce((counts,row)=>({...counts,[row.status]:(counts[row.status]??0)+1}),{})}));
+ assert.equal(f.counts.full,1);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);
+ for(let i=0;i<10;i++)assert.equal(saved(bridge,'series-'+i).contextBlocked.code,'current_thread_too_large');
+});
+test('fresh source-author authorization is still required when a parked-thread fact exists',async t=>{
+ const f=await fixture(t),bridge=await f.make();await bridge.turn('oversize-root',f.old);
+ f.store.agentPlugin.revokeApiKey({identityId:f.seeded.identityId,keyId:f.seeded.keyId});
+ await bridge.turn('oversize-root',[{...f.old[0],signalId:'revoked-fact'}]);
+ assert.equal(saved(bridge,'revoked-fact').contextBlocked,undefined);assert.equal(f.counts.full,1);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);
+});
+test('changed protected root invalidates the parked-thread fingerprint before reuse',async t=>{
+ const f=await fixture(t),bridge=await f.make();await bridge.turn('oversize-root',f.old);
+ f.store.command(f.seeded.owner,'commons',{id:'root-edited',type:'message.edited',data:{messageId:'oversize-root',body:'Changed root context',expectedMessageRevision:0}});
+ await bridge.turn('oversize-root',[{...f.old[0],signalId:'changed-root'}]);assert.equal(f.counts.full,2);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);
+});
+test('even a matching local fact cannot turn a current formal request into ordinary parked context',async t=>{
+ const f=await fixture(t),bridge=await f.make();await bridge.turn('oversize-root',f.old);
+ const selected=await bridge.room.thread('dm',{selected:true});
+ if(bridge.parkedThreads){const fact=bridge.parkedThreads.read(bridge.parkedThreads.key('oversize-root'));
+ bridge.parkedThreads.save(bridge.parkedThreads.key('dm'),{...fact,threadKey:'dm',rootHash:createHash('sha256').update(JSON.stringify(selected.thread)).digest('hex'),selectedRead:{method:'GET',path:'/api/rooms/commons/messages/dm/thread?view=message'}});}
+ await bridge.turn('dm',[{signalId:'formal-after-fact',messageId:'dm',author:'owner',body:'Please answer'}]);
+ assert.equal((await bridge.room.request('/api/rooms/commons/reply-context?requestMessageId=dm')).request.status,'answered');
+ assert.equal(saved(bridge,'formal-after-fact').contextBlocked,undefined);assert.deepEqual(f.counts.prompts,['dm']);
+});
+
+test('wrong-member parked-thread fact is rejected after fresh authority without full read or ACK',async t=>{
+ const f=await fixture(t),bridge=await f.make();await bridge.turn('oversize-root',f.old);
+ const key=bridge.parkedThreads.key('oversize-root'),fact=bridge.parkedThreads.read(key);
+ bridge.parkedThreads.save(key,{...fact,memberId:'another-member'});
+ await bridge.turn('oversize-root',[{...f.old[0],signalId:'wrong-member-fact'}]);
+ assert.equal(saved(bridge,'wrong-member-fact').contextBlocked,undefined);assert.equal(f.counts.full,1);assert.equal(f.counts.prompts.length,0);assert.equal(f.counts.acks.length,0);
+ assert.match(f.logs.join('\n'),/Invalid parked thread fact/);
 });

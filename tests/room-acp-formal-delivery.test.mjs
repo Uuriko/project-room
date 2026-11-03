@@ -297,7 +297,11 @@ for (const terminalLimit of [false,true]) test(`actual wake redelivery survives 
   }
   if(terminalLimit){
     assert.equal(bridge.stopReason,'context_unavailable');assert.equal(bridge.controller.signal.aborted,true);
-    assert.equal(f.counts.prompts,0);assert.ok((await poll()).pendingWakes.some(w=>w.signalId===initial.signalId));
+    assert.equal(f.counts.prompts,0);
+    // The stopped work client now aborts all requests; observe the unchanged
+    // server queue with the same existing credential through a fresh reader.
+    const observer=new RoomClient(f.connection);
+    assert.ok((await observer.poll({hostId:f.connection.hostId,waitMs:0})).pendingWakes.some(w=>w.signalId===initial.signalId));
   }else{
     // Two failures, successful preparation, then the fresh post-session check.
     assert.equal(preparations,4);assert.equal(f.counts.prompts,1);assert.equal((await f.read(bridge,'retry-formal')).request.status,'answered');

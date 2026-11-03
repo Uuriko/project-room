@@ -292,3 +292,30 @@ credential/scope, unknown errors, formal context and already-started/result
 receipts retain their previous fail-closed or exact recovery behavior. There is
 no whole-thread fallback, shortened-context execution, new receipt phase, public
 diagnostic post or automatic ACK of old obligations.
+
+For newly queued batches of the same oversized ordinary thread, an addressed
+`chat-blocked-threads` receipt records the observed typed refusal and a hash of
+the protected selected root. Every new batch still rechecks its source authors,
+current room/member authority, listener fence, and selected root/formal status.
+Only an identical ordinary root may reuse the fact; changed roots are inspected
+again, and formal requests never use it. Each batch keeps its own original IDs
+and unacknowledged disposition. The fact is not cached authorization, a global
+registry, or an execution/completion record. Existing blocked batches need no
+migration or scan; the first new qualifying batch can record the fact.
+
+A valid server `429 Retry-After` now delays subsequent fetches across this one
+RoomClient's chat, work and poll paths. Accepted values are integer seconds from
+1 through 120. The client keeps a monotonic deadline; later valid responses can
+extend it, while malformed/unsupported values cannot erase it. It never retries
+the failed request automatically. Waiting honors the bridge/caller abort signal;
+the original network timeout begins after the cooldown. Best-effort listener
+disconnect after stop retains a separate original 15-second total cleanup bound
+and still respects cooldown. Other clients, hosts and credentials do not share
+this local deadline; this is backpressure, not a higher quota or a guarantee of
+no future rate-limit errors.
+
+Synthetic actual-HTTP measurement across ten fresh batches: full-thread refusals
+10 to 1; direct turn requests 80 to 71 (first batch 8, warm batches 7). Setup/routing,
+poll and heartbeat calls are excluded from those per-turn totals. The retained
+fresh authorization checks still cost seven requests per warm singleton batch;
+the parked-thread fact alone does not solve backlog request amplification.

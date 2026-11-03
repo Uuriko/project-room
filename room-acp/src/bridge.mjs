@@ -92,6 +92,10 @@ class TurnReceipts {
         receipt.phase === "linked" && !/^[a-f0-9]{64}$/.test(receipt.groupKey)) throw new Error("Invalid execution receipt; manual recovery required");
     return receipt;
   }
+  find(key) {
+    if (!this.dir && !this.memory.has(key)) return undefined;
+    try { return this.read(key); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  }
   save(key, receipt) {
     if (!this.dir) { this.memory.set(key, receipt); return; }
     const path = join(this.dir, key + ".json"), temporary = path + "." + randomUUID() + ".tmp";
@@ -123,9 +127,11 @@ function ordinaryTurn(recorder, stopReason) {
 export class Bridge {
   constructor({ connection, candidate, cwd, env, mode = null, respondTo = "anyone", maxSessions = 4, waitMs = 25000, cadenceSeconds = 30, fetchImpl = fetch, log = () => {}, host = null, persistSessions = true, restartDelayMs = 1000, minPollIntervalMs = 2500, permissionTimeoutMs = DEFAULT_PERMISSION_TIMEOUT_MS, permissionPollMs = 1500, permissionApproverId = connection.permissionApproverId ?? null }) {
     this.connection = connection; this.respondTo = respondTo; this.waitMs = waitMs; this.cadenceSeconds = cadenceSeconds; this.log = log;
-    this.room = new RoomClient({ apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
+    this.controller = new AbortController();
+    this.room = new RoomClient({ signal:this.controller.signal, apiBase: connection.apiBase, roomId: connection.roomId, memberId: connection.memberId, credential: connection.credential, fetchImpl });
     this.claimReceipts = new TurnReceipts(connection, env, persistSessions);
     this.chatReceipts = new TurnReceipts(connection, env, persistSessions, "chat-turns");
+    this.parkedThreads = new TurnReceipts(connection, env, persistSessions, "chat-blocked-threads");
     this.replyWindows = new TurnReceipts(connection, env, persistSessions, "chat-reply-windows");
     this.sessionMap = new SessionMap({ roomId: connection.roomId, hostId: connection.hostId, env, persist: persistSessions });
     this.host = host ?? new AgentHost({ candidate, cwd, env, mode, log, savedSessions: this.sessionMap, onPermission: request => this.onPermission(request) });
@@ -135,7 +141,7 @@ export class Bridge {
     this.queue = new ThreadQueue({ concurrency: maxSessions, run: (threadKey, batch) => this.turn(threadKey, batch) });
     this.host.onExit?.(info => this.onAgentExit(info));
     this.approverController = new AbortController();
-    this.fencingToken = null; this.seen = new Set(); this.controller = new AbortController(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
+    this.fencingToken = null; this.seen = new Set(); this.stats = { turns: 0, posted: 0, acked: 0, skipped: 0 };
   }
 
   // Agent process died: restart with backoff; CRASH_LIMIT crashes inside
@@ -467,6 +473,24 @@ export class Bridge {
     }
   }
 
+  readParkedThread(threadKey) {
+    const fact = this.parkedThreads.find(this.parkedThreads.key(threadKey));
+    if (fact === undefined) return undefined;
+    const path = `/api/rooms/${encodeURIComponent(this.connection.roomId)}/messages/${encodeURIComponent(threadKey)}/thread?view=message`;
+    if (fact.phase !== 'queued' || fact.version !== 1 || fact.code !== 'current_thread_too_large'
+      || fact.roomId !== this.connection.roomId || fact.memberId !== this.connection.memberId || fact.threadKey !== threadKey
+      || typeof fact.observedRequestId !== 'string' || !fact.observedRequestId || !/^[a-f0-9]{64}$/.test(fact.rootHash)
+      || fact.selectedRead?.method !== 'GET' || fact.selectedRead.path !== path)
+      throw Error('Invalid parked thread fact; manual recovery required');
+    return fact;
+  }
+
+  parkChatBatch(key, receipt, selectedRead) {
+    this.chatReceipts.save(key, {...receipt, contextBlocked:{version:1,
+      code:'current_thread_too_large', roomId:this.connection.roomId, threadKey:receipt.threadKey,
+      requestId:receipt.requestId, selectedRead}});
+  }
+
   async executeQueuedChatReceipt(key, receipt) {
     // Repair a crash during the per-signal link writes. An unlinked queued
     // sibling has never executed and can join this group. A sibling already
@@ -509,15 +533,28 @@ export class Bridge {
     }
     let thread = selected.thread;
     if (!formal) {
+      // A fact is only a conservative context refusal, never cached authority.
+      // Source-author/listener checks above and this selected classification are fresh for every new batch.
+      const rootHash = createHash('sha256').update(JSON.stringify(selected.thread)).digest('hex');
+      const fact = !selected.replyRequest ? this.readParkedThread(receipt.threadKey) : undefined;
+      if (fact?.rootHash === rootHash) {
+        this.parkChatBatch(key, receipt, fact.selectedRead);
+        return;
+      }
       try { thread = (await this.room.thread(receipt.threadKey)).thread; }
       catch (error) {
         // This ordinary batch has not started a model/session. Preserve its
         // exact inputs without ACK, rather than stopping independent threads.
         if (error instanceof RoomError && error.status === 413 && error.code === 'current_thread_too_large') {
           const selectedRead = {method:'GET', path:`/api/rooms/${encodeURIComponent(this.connection.roomId)}/messages/${encodeURIComponent(receipt.threadKey)}/thread?view=message`};
-          this.chatReceipts.save(key, {...receipt, contextBlocked:{version:1,
-            code:error.code, roomId:this.connection.roomId, threadKey:receipt.threadKey,
-            requestId:receipt.requestId, selectedRead}});
+          this.parkChatBatch(key, receipt, selectedRead);
+          if (!selected.replyRequest) {
+            const observed = {phase:'queued', version:1, code:error.code, roomId:this.connection.roomId,
+              memberId:this.connection.memberId, threadKey:receipt.threadKey, rootHash,
+              observedRequestId:receipt.requestId, selectedRead};
+            const saved = this.parkedThreads.begin(receipt.threadKey, observed);
+            if (!saved.fresh) this.parkedThreads.save(saved.key, {...saved.receipt, ...observed});
+          }
           this.log(`Ordinary thread ${receipt.threadKey} parked (${error.code}); ${receipt.signalIds.length} wakes remain unacknowledged. Selected review: GET ${selectedRead.path}. Message IDs are retained in the queued receipt.`);
           return;
         }
