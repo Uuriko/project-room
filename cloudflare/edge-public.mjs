@@ -7,7 +7,7 @@ import {renderLobbyAgentPastePage} from '../server/agent-paste-copy.mjs';
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../server/public-assets.mjs';
 import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
+import { acceptPrefersHtml, compareIndexRedirect, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
@@ -151,6 +151,7 @@ export function classifyEdgePath(pathname) {
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
+  if (compareIndexRedirect(pathname)) return 'compare-index';
   if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
   return null;
 }
@@ -352,6 +353,12 @@ export async function edgePublicResponse(request, env, url) {
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
+  if (kind === 'compare-index') {
+    const headers = baseHeaders(url);
+    if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(headers, 'GET, HEAD');
+    headers.set('Location', compareIndexRedirect(url.pathname));
+    return new Response(null, { status: 301, headers });
+  }
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
   // method-guarded document) but the edge classified '/' as an asset and
   // answered 405. Decide it once, Node's way: 404 with the standard envelope,
