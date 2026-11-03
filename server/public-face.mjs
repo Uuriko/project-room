@@ -260,7 +260,7 @@ export class PublicFace {
     };
     const items = face.messages.map(m => {
       const body = m.body.length > 400
-        ? `<details><summary><span class="preview">${esc(m.body.slice(0, 280))}… </span><span class="show-more">Show message preview</span><span class="show-less">Show less</span></summary><p>${esc(m.body)}</p></details>`
+        ? `<details><summary><span class="preview">${esc(m.body.slice(0, 280))}… </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${esc(m.body)}</p></details>`
         : `<p>${esc(m.body)}</p>`;
       return `<article><header><strong>${esc(m.from)}</strong><time datetime="${esc(m.at ?? '')}">${esc(readableTime(m.at))}</time></header>${body}</article>`;
     }).join("\n");

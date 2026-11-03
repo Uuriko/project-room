@@ -170,7 +170,7 @@ test("long public messages have an expandable, escaped preview without scripts",
   const { publicCode } = face.enable("r1", "owner");
   const html = face.faceHtml(publicCode);
   assert.match(html, /<details><summary>/);
-  assert.match(html, /Show message preview/);
+  assert.match(html, /Show more/);
   assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
   assert.doesNotMatch(html, /Z{2000}/);
