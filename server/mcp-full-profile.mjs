@@ -1,3 +1,5 @@
+import { workStatusChip } from "./work-status-chip.mjs";
+import { roomEvents } from "./work-item-board.mjs";
 import {redactSelectedEventPage} from './current-room-events.mjs';
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
@@ -379,7 +381,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
         workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options),
         workResult: (id, options) => store.workResult(secret, roomId, id, options)
       }, rest, { hosted: true });
-      return { value, isError: false };
+      return { value: withStatusChip(store, roomId, value), isError: false };
     } catch (error) {
       const value = workReadRefusal(error);
       if (value) return { value, isError: true };
@@ -610,4 +612,15 @@ function callTrustTool(store, roomId, auth, name, rest) {
   }
   const attestations = store.agentPlugin.verificationAttestations();
   return { roomId, verified: attestations, count: attestations.length };
+}
+
+// Read-side status chip on a selected work read: names its source event,
+// derived from the item's own work events only. Batches and briefs are
+// left unchanged.
+function withStatusChip(store, roomId, value) {
+  const id = value?.work?.id;
+  if (typeof id !== "string") return value;
+  let chip;
+  try { chip = workStatusChip(roomEvents(store, roomId), id); } catch { return value; }
+  return chip ? { ...value, statusChip: chip } : value;
 }
