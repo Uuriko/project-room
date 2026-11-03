@@ -43,6 +43,13 @@ test("saved marker: cold read points at it; one follow-up read returns only unha
   const next = await f.read(cold.catchUp.nextRead.arguments);
   assert.deepEqual(next.messages.map(m => m.messageId), ["new-reply"]);
   assert.equal(next.catchUp, undefined, "explicit after carries no hint");
+  // The woken agent answers using only the hint plus that one read.
+  const target = next.messages[0];
+  const answered = await callHostedStdioTool(f.store, f.keys.worker1, "room_reply",
+    { roomId: "commons", replyToId: target.messageId, body: "answered from catch-up" }).then(r => r.value);
+  assert.ok(answered.messageId, "reply recorded");
+  const after = await f.read({ latest: true, limit: 1 });
+  assert.equal(after.messages[0].replyToId, "new-reply");
   // Reading did not move the marker.
   assert.equal(f.store.catchUpCursor("commons", "worker1"), handled);
 });
