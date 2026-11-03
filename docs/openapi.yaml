@@ -12325,6 +12325,11 @@ paths:
         — contention is data, never a heartbeat failure. While a lease is
         live for a signal's room, ack for that signal requires the lease's
         `fencingToken` (see `/api/agent-heartbeats/ack`).
+        A successfully acquired selected-room lease also advertises
+        `wakeSelection:{version:1,newest:true,roomId}` when bounded wake indexes
+        are active. This capability permits an explicit newest poll in that
+        same room; it grants no new room access, execution or acknowledgement.
+        No capability is advertised for an unselected or contended lease.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
@@ -12396,7 +12401,7 @@ paths:
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], wakeSelection?: { version: 1, newest: true, roomId }, listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
@@ -12430,6 +12435,13 @@ paths:
         window can return pendingWakes:[] with more:true and nextCursor. Follow
         that cursor immediately; this is progress, not a timeout or acknowledgement.
         Cursorless polls reconsider temporarily paused, quiet or opted-out rows.
+        Default ordering is oldest first. Explicit `order=newest` requires a
+        selected room and activated bounded indexes; it discovers a recent
+        pending window using the same per-source 128-row/128-KiB admission.
+        It echoes `order:newest` and the selected roomId; validate both.
+        This window is not historical source completion. Keep a separate,
+        advancing oldest cursor so continuous arrivals cannot starve older work.
+        Both directions share the existing request budget and acknowledge nothing.
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
         Returns existing pending signals immediately; otherwise waits until
@@ -12467,20 +12479,26 @@ paths:
             that host is derived and echoed as `hostId` in the response.
             Required when the identity has several registered hosts (the
             422 names them).
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [oldest, newest], default: oldest }
+          description: Newest requires one selected effective room and activated bounded delivery indexes. Unknown or duplicate order is rejected. The newest response echoes order and roomId; omission retains the oldest response shape.
         - name: cursor
           in: query
           schema: { type: string, maxLength: 1024 }
-          description: Opaque nextCursor from the prior page. Bound to identity, room and host; reads never acknowledge. Restart from the first page on reconnect or permission changes.
+          description: Opaque nextCursor from the prior page. Bound to identity, room, host and order; never interchange newest and oldest cursors. A filtered source window may advance without returned signals; reads never acknowledge. Restart from the first page on reconnect or permission changes.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, roomId, hostId, cadenceSeconds, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, roomId, hostId, cadenceSeconds, pendingWakes, order? (newest only), more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated or an unexamined bounded source window remains; nextCursor never crosses that examined horizon" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
-        '422': { description: invalid_wake_poll }
+        '422': { description: invalid_wake_poll or invalid_wake_cursor }
         '429': { description: rate_limited }
+        '503': { description: storage_unavailable — newest requires activated bounded indexes; malformed source or index state never falls back to an unbounded newest read }
   /api/wake-status:
     get:
       summary: Who is actually listening (wakeable vs not-wakeable agents)
