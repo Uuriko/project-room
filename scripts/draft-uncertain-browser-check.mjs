@@ -8,8 +8,8 @@ import {chromium} from 'playwright';
 import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 
-for (const otherAccount of [false,true]) {
-  test(`uncertain login reconciles draft for ${otherAccount?'another':'the same'} account`, {timeout:30000}, async t => {
+for (const otherAccount of [false,true]) for (const privateDraft of [false,true]) {
+  test(`uncertain login reconciles ${privateDraft?'private':'general'} draft for ${otherAccount?'another':'the same'} account`, {timeout:30000}, async t => {
     const dir=mkdtempSync(join(tmpdir(),'draft-uncertain-'));
     const store=new RoomStore(join(dir,'room.sqlite'));
     const owner=store.createAccount('draft-owner');store.completeOnboarding(owner.id);
@@ -38,6 +38,10 @@ for (const otherAccount of [false,true]) {
     const origin=`http://127.0.0.1:${server.address().port}`;
     await page.goto(origin+'/fixture/login');
     await page.getByText('Connected',{exact:true}).waitFor({state:'visible'});
+    if(privateDraft) {
+      await page.locator('#new-direct-message').click();
+      await page.locator('#new-direct-dialog').getByRole('button',{name:'Other'}).click();
+    }
     await page.locator('#message-input').fill('synthetic private draft');
     await page.waitForFunction(()=>sessionStorage.getItem('project-room:drafts:v3')?.includes('synthetic private draft'));
     const second=await context.newPage();await second.goto(origin+'/fixture/rotate');await second.close();
@@ -53,6 +57,11 @@ for (const otherAccount of [false,true]) {
       await page.getByRole('button',{name:'Open Draft test'}).click();
       await page.waitForFunction(()=>document.querySelector('#message-input')?.value==='synthetic private draft');
       assert.equal(await page.locator('#message-input').inputValue(),'synthetic private draft');
+      if(privateDraft) {
+        assert.equal(await page.locator('#conversation-title').innerText(),'Other');
+        await page.locator('#channel-list').getByRole('button',{name:'general'}).click();
+        assert.equal(await page.locator('#message-input').inputValue(),'','private draft must never enter the general composer');
+      }
     }
   });
 }
