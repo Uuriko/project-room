@@ -14,6 +14,10 @@ import {readCompleteRequest, prepareFormalDelivery} from '../room-acp/src/formal
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 
+const syntheticAnswerEnding = '\n\nVerification: the answer is saved exactly; no tools or model calls are repeated.';
+const syntheticAnswer4141 = Array.from({length:20}, (_, index) => `Step ${index + 1}: I recommend preserving the original request identity and checking current recipient authority before delivery. Save the exact response command before its first network send, then reuse that command after an uncertain acknowledgement. Verify the selected response and its context binding before marking local delivery complete.`).join('\n\n')
+  .slice(0, 4141 - syntheticAnswerEnding.length) + syntheticAnswerEnding;
+
 async function fixture(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), 'formal-bridge-'));
   const database = options.persist ? join(home,'room.sqlite') : ':memory:';
@@ -56,7 +60,7 @@ test('ACP answer completes a real normalized reply request, rather than posting 
 });
 
 test('lost committed formal response retries the frozen recipe after restart without a second execution or event', async t => {
-  const f = await fixture(t,{text:JSON.stringify({outcome:'answered',body:'r'.repeat(4141)})}); let lose = true;
+  const f = await fixture(t,{text:JSON.stringify({outcome:'answered',body:syntheticAnswer4141})}); let lose = true;
   const first = f.make(async (url, options) => {
     const response = await fetch(url, options);
     if (options?.body) {
@@ -301,7 +305,7 @@ for (const terminalLimit of [false,true]) test(`actual wake redelivery survives 
   }
 });
 
-for (const [label, body] of [['reported4141','a'.repeat(4141)], ['boundary8192','b'.repeat(8192)], ['escaped8192','\u0001'.repeat(8192)], ['unicode8192','😀'.repeat(4096)]])
+for (const [label, body] of [['reported4141',syntheticAnswer4141], ['boundary8192','b'.repeat(8192)], ['escaped8192','\u0001'.repeat(8192)], ['unicode8192','😀'.repeat(4096)]])
 test(`formal answer ${label} delivers exact text through actual HTTP and selected context`, async t => {
   const f = await fixture(t, {text:JSON.stringify({outcome:'answered',body})}), bridge=f.make(); await f.ready(bridge);
   await bridge.turn('dm',[f.wake]);
