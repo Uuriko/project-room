@@ -179,8 +179,8 @@ jobs:
   # One unit job. Hosted shards on 2026-10-24 were 4–6 minutes each,
   # including setup, and they queued behind the two-job account limit, so
   # the split cost three runner slots without overlapping. One process is
-  # about one setup plus the three test portions (historically ~10 minutes;
-  # the cap is 25). A pull request runs the affected files
+  # about one setup plus the three test portions. The full suite exceeded its
+  # former 25-minute cap while still making progress on 2026-11-03. A pull request runs the affected files
   # (scripts/unit-ci.mjs --affected). Main, the merge queue, schedule, and
   # workflow_dispatch run scripts/unit-ci.mjs --all, which writes
   # unit-all-*.json for the duration refresh.
@@ -188,7 +188,7 @@ jobs:
     needs: [changes]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     permissions:
       contents: read
       pull-requests: write
