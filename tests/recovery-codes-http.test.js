@@ -146,6 +146,27 @@ test("redeem burns a code, records the method use, and upgrades the slot", async
   }), 401, "invalid_recovery_code");
 });
 
+test("recovery sign-in renews an old slot and rotates its cookie", async t => {
+  const { store, request, origin } = await fixture(t);
+  const { codes } = store.accountLogins.generateRecoveryCodes("acct-1");
+  store.now = () => Date.now() - 29 * 86400000;
+  const { cookie, slot } = await anonymousSlot(request);
+  store.now = () => Date.now();
+  const oldToken = cookie.split("=", 2)[1];
+  const response = await request("/api/auth/recovery-codes/redeem", {
+    method: "POST",
+    headers: writeHeaders(cookie, origin, slot.csrf),
+    data: { email: EMAIL, code: codes[0], sessionToken: oldToken, sessionRevision: slot.sessionRevision }
+  });
+  assert.equal(response.status, 200);
+  const freshToken = accountCookie(response).split("=", 2)[1];
+  assert.notEqual(freshToken, oldToken);
+  assert.ok(Number(/Max-Age=(\d+)/i.exec(response.headers.get("set-cookie") ?? "")?.[1]) > 29 * 86400);
+  assert.ok(store.authenticateAccountSession(freshToken).expiresAt - store.now() > 29 * 86400000);
+  assert.throws(() => store.authenticateAccountSession(oldToken), { code: "unauthenticated" });
+  assert.equal(store.accountLogins.recoveryCodesRemaining("acct-1"), 9);
+});
+
 test("regenerating invalidates the previous set", async t => {
   const { store, request, origin, accountAccessKey } = await fixture(t);
   const { cookie, session } = await loginAccount(request, origin, accountAccessKey);
