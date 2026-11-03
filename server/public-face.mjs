@@ -26,6 +26,30 @@ import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
+// Public message text remains escaped; only explicit HTTP(S) URLs become links.
+export function publicMessageHtml(value) {
+  const text = String(value), escape = s => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  const pattern = /https?:\/\/[^\s<>"']+/gi;
+  let result = '', cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    let url = match[0];
+    let balance = 0;
+    for (const char of url) { if (char === '(') balance++; else if (char === ')') balance--; }
+    let end = url.length;
+    while (end && (/[.,;:!?]/.test(url[end - 1]) || (url[end - 1] === ')' && balance < 0))) {
+      if (url[end - 1] === ')') balance++;
+      end--;
+    }
+    url = url.slice(0, end);
+    result += escape(text.slice(cursor, match.index));
+    let safe = false;
+    try { const parsed = new URL(url); safe = ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password; } catch { /* leave invalid URL as text */ }
+    result += safe ? `<a href="${escape(url)}" rel="nofollow noopener noreferrer">${escape(url)}</a>` : escape(url);
+    cursor = match.index + url.length;
+  }
+  return result + escape(text.slice(cursor));
+}
+
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
@@ -260,8 +284,8 @@ export class PublicFace {
     };
     const items = face.messages.map(m => {
       const body = m.body.length > 400
-        ? `<details><summary><span class="preview">${esc(m.body.slice(0, 280))}… </span><span class="show-more">Show message preview</span><span class="show-less">Show less</span></summary><p>${esc(m.body)}</p></details>`
-        : `<p>${esc(m.body)}</p>`;
+        ? `<details><summary><span class="preview">${esc(m.body.slice(0, 280))}… </span><span class="show-more">Show message preview</span><span class="show-less">Show less</span></summary><p>${publicMessageHtml(m.body)}</p></details>`
+        : `<p>${publicMessageHtml(m.body)}</p>`;
       return `<article><header><strong>${esc(m.from)}</strong><time datetime="${esc(m.at ?? '')}">${esc(readableTime(m.at))}</time></header>${body}</article>`;
     }).join("\n");
     const members = face.members.map(h => `<li>${esc(h)}</li>`).join("");

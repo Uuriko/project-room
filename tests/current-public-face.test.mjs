@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RoomStore} from '../server/store.mjs';
+import {publicMessageHtml} from '../server/public-face.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {seedPublicLobby} from './helpers/public-lobby-source.mjs';
 import {unpublishPublic} from '../server/legal-store.mjs';
@@ -78,4 +79,19 @@ test('old public history links respect deletion, unlisting and operator unpublis
 test('invalid public history links have one safe recovery page',async t=>{
  const {store,saved,call}=await fixture(t),route='/api/rooms/'+saved.roomId+'/public-face';await call(route,{token:saved.owner,body:{enabled:true}});store.command(saved.owner,saved.roomId,{id:'publish-errors',type:'room.public_page_set',data:{enabled:true}});
  const pages=[];for(const id of ['private-0','other-channel','deleted','missing']){const r=await call('/watch?before='+id);assert.equal(r.status,422);assert.match(r.text,/This page is no longer available/);assert.match(r.text,/href="\/watch">Return to latest messages/);assert.doesNotMatch(r.text,/PRIVATE HISTORY|OTHER CHANNEL|DELETED MUST/);pages.push(r.text)}assert.ok(pages.every(x=>x===pages[0]));
+});
+test('public message links are clickable without interpreting markup or credentials',async t=>{
+ const {store,saved,call}=await fixture(t),route='/api/rooms/'+saved.roomId+'/public-face';let now=Date.now()+10000;store.now=()=>now;
+ const body='Result: https://example.com/report?a=1&b=2. <script>alert(1)</script> javascript:alert(1) https://name:secret@example.com/';
+ store.command(saved.owner,saved.roomId,{id:'public-link',type:'message.posted',data:{messageId:'public-link',body}});
+ now+=2001;store.command(saved.owner,saved.roomId,{id:'public-long-link',type:'message.posted',data:{messageId:'public-long-link',body:'x'.repeat(401)+' https://example.com/long'}});
+ await call(route,{token:saved.owner,body:{enabled:true}});store.command(saved.owner,saved.roomId,{id:'publish-links',type:'room.public_page_set',data:{enabled:true}});
+ const page=await call('/watch');assert.equal(page.status,200);assert.match(page.text,/<a href="https:\/\/example\.com\/report\?a=1&amp;b=2" rel="nofollow noopener noreferrer">https:\/\/example\.com\/report\?a=1&amp;b=2<\/a>\./);assert.match(page.text,/&lt;script&gt;alert\(1\)&lt;\/script&gt;/);assert.doesNotMatch(page.text,/<a href="(?:javascript:|https:\/\/name:secret@)/);assert.match(page.text,/<a href="https:\/\/example\.com\/long" rel="nofollow noopener noreferrer">/);
+});
+
+test('public link rendering handles punctuation and rejects deceptive credentials',()=>{
+ const html=publicMessageHtml('See https://example.com/path(a). https://trusted.example%5c@attacker.example/ <script>alert(1)</script>');
+ assert.match(html, /href="https:\/\/example\.com\/path\(a\)"/);
+ assert.doesNotMatch(html, /href="https:\/\/trusted/);
+ assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
