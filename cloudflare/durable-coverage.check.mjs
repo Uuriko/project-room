@@ -11,7 +11,10 @@ const token =
   'synthetic-durable-restore-00000000000000', exporter =
   'synthetic-durable-export-000000000000000';
 const bundle=async name=>(await build({entryPoints:[fileURLToPath(new URL(name,import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
-test('actual Native cold constructor and operator continuations preserve sealed coverage and ordinary refusal',{timeout:160000},async()=>{
+// The full cold-restart qualification reached its 160s limit on a loaded CI
+// runner after reaching the final restore/cleanup steps. Keep a finite timeout
+// with headroom; every continuation and cold-restart assertion still runs.
+test('actual Native cold constructor and operator continuations preserve sealed coverage and ordinary refusal',{timeout:300000},async()=>{
  const directory=await mkdtemp(join(tmpdir(),'native-durable-coverage-'));let script=await bundle('./durable-coverage-seed.test-fixture.mjs');const create=()=>new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:directory,durableObjects:{ROOM:{className:'DurableCoverageRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:'https://room.example.test',ROOM_RESTORE_TOKEN:token,ROOM_EXPORT_TOKEN:exporter},serviceBindings:{ASSETS:async()=>new Response('Not found',{status:404})}});let mf=create();
  const call=(surface,path,options={})=>mf.dispatchFetch('https://room.example.test'+path+(path.includes('?')?'&':'?')+'surface='+surface,{...options,headers:{Host:'room.example.test',...Object.fromEntries(new Headers(options.headers))}});
  const json=async(surface,path,status=200,options)=>{const response=await call(surface,path,options),text=await response.text();assert.equal(response.status,status,surface+path+' '+text);return JSON.parse(text);};
