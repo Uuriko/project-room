@@ -159,3 +159,48 @@ test('published colon IDs survive list, encoded detail routing, clipboard and re
   await f.page.getByRole('button', { name: /All offers/ }).click();
   assert.equal(await f.page.locator('[data-offer="team:task"]').evaluate(node => node === document.activeElement), true);
 });
+
+test('find-work form precedes the index while direct offer links keep detail first', async t => {
+  const f = await setup(t);
+  const position = async () => f.page.evaluate(() => ({
+    match: document.querySelector('.find-work').getBoundingClientRect().top,
+    index: document.querySelector('.workspace').getBoundingClientRect().top,
+  }));
+  await f.page.goto(f.origin + '/offers');
+  await f.page.locator('#find-work-form').waitFor();
+  let y = await position(); assert.ok(y.match < y.index);
+  assert.equal(await f.page.locator('.intro a[href="#find-work-title"]').count(), 0);
+  await f.page.goto(f.origin + '/offers?offer=c-cash');
+  await f.page.getByRole('heading', { name: 'Make the welcome flow easier' }).waitFor();
+  y = await position(); assert.ok(y.index < y.match);
+  assert.equal(await f.page.locator('.intro a[href="#find-work-title"]').count(), 1);
+  let detailRequests = 0;
+  f.page.on('request', request => { if (new URL(request.url()).pathname === '/api/project-offers/c-cash') detailRequests++; });
+  await f.page.locator('.intro a[href="#find-work-title"]').click();
+  await f.page.waitForURL('**/offers?offer=c-cash#find-work-title');
+  await f.page.waitForTimeout(200);
+  assert.equal(detailRequests, 0, 'hash navigation must not reload the selected offer');
+  assert.notEqual(await f.page.locator('#detail-title').evaluate(node => node === document.activeElement), true);
+});
+
+test('return from a suggested task restores focus to that suggestion', { timeout: 45000 }, async t => {
+  const f = await setup(t, { viewportWidth: 320 });
+  f.store.publicWorkClaims.enable('commons', 'owner', 'a-unpaid', { requestId: 'enable-suggestion', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['docs/README.md'] });
+  await f.page.goto(f.origin + '/offers');
+  await f.page.locator('#find-work-form button').tap();
+  const suggestion = f.page.locator('[data-match-offer="a-unpaid"]');
+  await suggestion.waitFor();
+  const instructions = await suggestion.locator('xpath=../..').locator('textarea').inputValue();
+  assert.match(instructions, /use your existing Project Room connection and saved agent identity/i);
+  assert.match(instructions, /report the limitation rather than creating a replacement identity/i);
+  await suggestion.tap();
+  await f.page.locator('#copy-offer:not(:disabled)').waitFor();
+  await f.page.locator('[data-close]').tap();
+  assert.equal(await suggestion.evaluate(node => node === document.activeElement), true);
+  await suggestion.tap(); await f.page.locator('#copy-offer:not(:disabled)').waitFor();
+  await f.page.goBack();
+  assert.equal(await suggestion.evaluate(node => node === document.activeElement), true);
+  await f.page.goForward(); await f.page.locator('#copy-offer:not(:disabled)').waitFor();
+  await f.page.locator('[data-close]').tap();
+  assert.equal(await suggestion.evaluate(node => node === document.activeElement), true);
+});

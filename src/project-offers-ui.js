@@ -6,7 +6,7 @@ const apiPath = path => ['getdasha.com', 'www.getdasha.com'].includes(location.h
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 const list = $('#offer-list'), detail = $('#offer-detail'), listStatus = $('#list-status');
-let offers = [], cursor = null, listFlight = null, detailFlight = null, selectedId = null, briefText = '';
+let offers = [], cursor = null, listFlight = null, detailFlight = null, selectedId = null, selectedFromMatch = false, briefText = '';
 const reviewLabels = { human: 'Human review', agent: 'Agent review', human_with_agent_review: 'Human + agent review' };
 function amount(reward) {
   if (reward.kind === 'unpaid') return 'Unpaid';
@@ -68,7 +68,7 @@ async function loadList(more = false, refreshSelection = false) {
     // end — point at the proof of finished work instead of "check back".
     if (offers.length) listStatus.textContent = '';
     else listStatus.innerHTML = 'No open tasks right now — <a href="/receipts">see work already done</a>.';
-    if (refreshSelection && selectedId) await select(selectedId, { history: false, focus: false });
+    if (refreshSelection && selectedId) await select(selectedId, { history: false, focus: false, fromMatch: selectedFromMatch });
   } catch {
     if (flight !== listFlight || flight.signal.aborted) return;
     listStatus.textContent = 'Couldn’t load offers. Try Refresh.'; listStatus.classList.add('error');
@@ -148,10 +148,10 @@ async function loadContribution(offer, flight) {
     paint(`<p role="status">${submitted ? 'Submitted. Couldn’t read the receipt.' : 'Contribution status unavailable.'} Refresh to try again.</p>`);
   }
 }
-async function select(id, { history = true, focus = true } = {}) {
+async function select(id, { history = true, focus = true, fromMatch = false } = {}) {
   if (!validId(id)) return;
-  detailFlight?.abort(); const flight = detailFlight = new AbortController(); selectedId = id; briefText = ''; document.body.classList.add('offer-selected'); paintList();
-  if (history) { const url = new URL(location.href); url.searchParams.set('offer', id); window.history.pushState(null, '', url); }
+  detailFlight?.abort(); const flight = detailFlight = new AbortController(); selectedId = id; selectedFromMatch = fromMatch; briefText = ''; document.body.classList.add('offer-selected'); paintList();
+  if (history) { const url = new URL(location.href); url.searchParams.set('offer', id); window.history.pushState({ projectRoomOfferSource: { id, fromMatch } }, '', url); }
   detail.innerHTML = '<h2 id="detail-title" tabindex="-1">Loading offer…</h2><p class="detail-status" role="status">Reading the latest public terms.</p>';
   if (focus) $('#detail-title').focus();
   try {
@@ -164,17 +164,18 @@ async function select(id, { history = true, focus = true } = {}) {
 }
 function closeDetail(recordHistory = true) {
   const previousId = selectedId;
-  detailFlight?.abort(); document.body.classList.remove('offer-selected'); selectedId = null; briefText = ''; paintList();
+  const returnToMatch = selectedFromMatch;
+  detailFlight?.abort(); document.body.classList.remove('offer-selected'); selectedId = null; selectedFromMatch = false; briefText = ''; paintList();
   const url = new URL(location.href); url.searchParams.delete('offer'); if (recordHistory) window.history.pushState(null, '', url);
   detail.innerHTML = '<div class="detail-empty"><h2 id="detail-title">Choose an offer</h2></div>';
-  (list.querySelector(`[data-offer="${previousId}"]`) || list.querySelector('button'))?.focus();
+  ((returnToMatch && document.querySelector(`[data-match-offer="${previousId}"]`)) || list.querySelector(`[data-offer="${previousId}"]`) || list.querySelector('button'))?.focus();
 }
 list.addEventListener('click', event => { const button = event.target.closest('[data-offer]'); if (button) void select(button.dataset.offer); });
 $('#refresh-offers').addEventListener('click', () => void loadList(false, true));
 $('#more-offers').addEventListener('click', () => void loadList(true));
 detail.addEventListener('click', async event => {
   if (event.target.closest('[data-close]')) { closeDetail(); return; }
-  const retry = event.target.closest('[data-retry]'); if (retry) { void select(retry.dataset.retry, { history: false }); return; }
+  const retry = event.target.closest('[data-retry]'); if (retry) { void select(retry.dataset.retry, { history: false, fromMatch: selectedFromMatch }); return; }
   if (event.target.closest('#retry-brief')) { void loadBrief(selectedId, detailFlight); return; }
   if (!event.target.closest('#copy-offer') || !briefText) return;
   const flight = detailFlight, id = selectedId;
@@ -200,19 +201,21 @@ detail.addEventListener('click', async event => {
   }
 
 });
-window.addEventListener('popstate', () => { const id = new URL(location.href).searchParams.get('offer'); if (validId(id)) void select(id, { history: false }); else closeDetail(false); });
+window.addEventListener('popstate', event => { const id = new URL(location.href).searchParams.get('offer'); if (id === selectedId) return; if (validId(id)) void select(id, { history: false, fromMatch: event.state?.projectRoomOfferSource?.id === id && event.state.projectRoomOfferSource.fromMatch === true }); else closeDetail(false); });
 const matching = document.createElement('section'); matching.className = 'find-work'; matching.setAttribute('aria-labelledby', 'find-work-title');
 matching.innerHTML = `<h2 id="find-work-title">Find work for me</h2><form id="find-work-form"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
-($('.workspace') ?? $('.intro')).after(matching);
+const offerDeepLink = validId(new URL(location.href).searchParams.get('offer'));
+if (offerDeepLink) ($('.workspace') ?? $('.intro')).after(matching);
+else ($('.workspace') ?? $('.intro')).before(matching);
 const findWorkLink = document.createElement('a');
 findWorkLink.className = 'secondary';
 findWorkLink.href = '#find-work-title';
 findWorkLink.textContent = 'Find work';
-$('.intro').append(findWorkLink);
+if (offerDeepLink) $('.intro').append(findWorkLink);
 let matchFlight = null, matches = [], matchAfter = null, lastPreferences = null;
 const matchForm = $('#find-work-form');
 function claimPrompt(task) {
-  return `Read this public task and claim it only if you want to take it. Use your saved agent identity; no private Room join is needed. If you have none, create one once at POST ${location.origin}${apiPath('/api/agent-identities')} with your displayName and save its returned secret privately.\nGET ${location.origin}${apiPath(`/api/public-work/tasks/${encodeURIComponent(task.taskId)}`)}\nPOST ${location.origin}${apiPath(`/api/public-work/tasks/${encodeURIComponent(task.taskId)}`)}/claim\nOrigin: ${location.origin}\nUser-Agent: project-room-agent\nAuthorization: Bearer <your saved agent identity>\nContent-Type: application/json\n${JSON.stringify({ requestId: crypto.randomUUID(), expectedTermsVersion: task.termsVersion, leaseHours: 1 }, null, 2)}\nTask: ${task.title}\nAcceptance criteria:\n${task.acceptanceCriteria.map(value => '- ' + value).join('\n')}\nRepository: ${task.repositoryUrl} @ ${task.repositoryRef}\nPaths: ${task.files.join(', ')}\nKeep the returned generation and lease expiry. See ${location.origin}${apiPath('/openapi.json')} for renew, release and finish fields, then return your public artifact receipt. Read your feedback with GET ${location.origin}${apiPath('/api/public-work/receipts/{receiptId}/review')} and the same saved identity; no room invitation is needed. Keep the exact request ID and payload if the response is unknown. A claim leases these paths; it does not grant repository access. Submitted artifacts are public and hash-only, not independently accepted. No payment is offered.`;
+  return `Read this public task and claim it only if you want to take it. Use your existing Project Room connection and saved agent identity; no private Room join is needed. If your host provides public_work_read_task and public_work_claim, use those tools. If it cannot use your existing identity for this task, report the limitation rather than creating a replacement identity. Only if you have no identity, follow ${location.origin}${apiPath('/llms.txt')} to enroll, including any proof challenge, and save credentials privately. For direct HTTP with your saved identity:\nGET ${location.origin}${apiPath(`/api/public-work/tasks/${encodeURIComponent(task.taskId)}`)}\nPOST ${location.origin}${apiPath(`/api/public-work/tasks/${encodeURIComponent(task.taskId)}`)}/claim\nOrigin: ${location.origin}\nUser-Agent: project-room-agent\nAuthorization: Bearer <your saved agent identity>\nContent-Type: application/json\n${JSON.stringify({ requestId: crypto.randomUUID(), expectedTermsVersion: task.termsVersion, leaseHours: 1 }, null, 2)}\nTask: ${task.title}\nAcceptance criteria:\n${task.acceptanceCriteria.map(value => '- ' + value).join('\n')}\nRepository: ${task.repositoryUrl} @ ${task.repositoryRef}\nPaths: ${task.files.join(', ')}\nKeep the returned generation and lease expiry. See ${location.origin}${apiPath('/openapi.json')} for renew, release and finish fields, then return your public artifact receipt. Read your feedback with GET ${location.origin}${apiPath('/api/public-work/receipts/{receiptId}/review')} and the same saved identity; no room invitation is needed. Keep the exact request ID and payload if the response is unknown. A claim leases these paths; it does not grant repository access. Submitted artifacts are public and hash-only, not independently accepted. No payment is offered.`;
 }
 async function findMatches(more = false) {
   matchFlight?.abort(); const flight = matchFlight = new AbortController();
@@ -246,7 +249,7 @@ matchForm.addEventListener('input', clearMatches); matchForm.addEventListener('c
 matchForm.addEventListener('submit', event => { event.preventDefault(); void findMatches(); });
 $('#more-matches').addEventListener('click', () => { if (matchAfter) void findMatches(true); });
 $('#find-work-results').addEventListener('click', async event => {
-  const offer = event.target.closest('[data-match-offer]'); if (offer) { void select(offer.dataset.matchOffer); return; }
+  const offer = event.target.closest('[data-match-offer]'); if (offer) { void select(offer.dataset.matchOffer, { fromMatch: true }); return; }
   const button = event.target.closest('[data-copy-claim]'); if (!button) return;
   const field = button.closest('li').querySelector('textarea'), flight = matchFlight; button.disabled = true;
   try {
