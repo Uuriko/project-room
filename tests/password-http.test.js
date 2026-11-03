@@ -154,6 +154,31 @@ test("password sign-in renews an old browser slot and rotates its cookie", async
   assert.throws(() => f.store.authenticateAccountSession(oldSlot.sessionToken), { code: "unauthenticated" });
 });
 
+test("a wrong password does not renew or rotate an old browser slot", async t => {
+  const { f, origin } = await startServer(t);
+  const created = await post(origin, "/api/auth/password/signup", {
+    email: email(105), password: password(105), ...freshSlot(f)
+  });
+  assert.equal(created.status, 202);
+  f.store.now = () => Date.now() - 29 * 86400000;
+  const oldSlot = freshSlot(f);
+  f.store.now = () => Date.now();
+  const before = f.store.accountSessionSlot(oldSlot.sessionToken);
+  const failed = await post(origin, "/api/auth/password/login", {
+    email: email(105), password: "incorrect-fixture-password", ...oldSlot
+  });
+  assert.equal(failed.status, 401);
+  assert.equal(accountCookie(failed), null);
+  const after = f.store.accountSessionSlot(oldSlot.sessionToken);
+  assert.equal(after.expiresAt, before.expiresAt);
+  assert.equal(after.sessionRevision, before.sessionRevision);
+  const retried = await post(origin, "/api/auth/password/login", {
+    email: email(105), password: password(105), ...oldSlot
+  });
+  assert.equal(retried.status, 200);
+  assert.notEqual(accountCookie(retried), oldSlot.sessionToken);
+});
+
 test("wrong password is 401 invalid_credentials", async t => {
   const { f, origin } = await startServer(t);
   const slot = freshSlot(f);
