@@ -133,6 +133,9 @@ pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .copy-prompt{margin:8px 0;padding:8px 14px;border:1px solid var(--line);border-radius:.45rem;background:#393b45;color:var(--text);font:inherit;cursor:pointer}
 .copy-prompt:not([hidden]){display:block}
 .copy-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+details.guide-section{border-top:1px solid var(--line);padding:12px 0}
+details.guide-section summary{cursor:pointer;color:var(--text);font-weight:600}
+details.guide-section summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
 :not(pre)>code{overflow-wrap:anywhere}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
@@ -180,12 +183,15 @@ export function agentPages(dir = join(root, "docs", "agents")) {
   const pasteMd = readFileSync(join(dir, PASTE_PAGE.id + ".md"), "utf8");
   if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
   if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
+  const pasteBody = renderMarkdown(pasteMd, { labelPrefix: "Paste block",
+    renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea>` });
+  const pasteSections = pasteBody.split(/(?=<h2>)/);
+  const compactPasteBody = pasteSections.map((section, index) => index < 2 ? section : section.replace(/^<h2>(.*?)<\/h2>/, '<details class="guide-section"><summary>$1</summary>') + '</details>').join('');
   pages.set(PASTE_PAGE.htmlFile, page({
     title: "Connect ChatGPT Dot or another agent to Project Room",
     description: "Connect your existing ChatGPT Dot or another agent to Project Room. Find the official MCP URL, host approval steps and connection checks.",
     path: PASTE_PAGE.docsPath,
-    body: renderMarkdown(pasteMd, { labelPrefix: "Paste block",
-      renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="16" spellcheck="false">${escape(text)}</textarea>` }),
+    body: compactPasteBody,
     steps: sections(pasteMd),
     script: AGENT_PASTE_COPY_SCRIPT,
   }));

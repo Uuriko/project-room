@@ -163,7 +163,7 @@ export function renderVerificationBlock(receipt, verification) {
   if (!verification) {
     return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
-<p><strong>Record not rechecked.</strong> This page shows the saved outcome and checks. They have not been independently rechecked for this view; a recorded check passing does not mean the delivery was accepted.</p>
+<p><strong>Record not rechecked.</strong> This page shows the recorded details and any checks. They have not been independently rechecked for this view; a recorded check passing does not mean the delivery was accepted.</p>
 <p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
 </section>`;
   }
@@ -346,6 +346,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
 <body><a class="skip-link" href="#main">Skip to content</a><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main id="main" tabindex="-1">
 <h1>${escapeHtml(receipt.title)}</h1>
+${receipt.source === "public-work" ? `<p><a href="/api/public-work/receipts/${encodeURIComponent(receipt.id)}/artifact">Download result</a></p>` : ["work-claim", "work-item"].includes(receipt.source) && !receipt.pullRequest ? '<p>This receipt records the work; the deliverable itself is not included on this page.</p>' : ""}
 ${renderVerificationBlock(receipt, verification)}
 <dl class="detail">
 ${room}

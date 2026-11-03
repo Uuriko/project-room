@@ -764,5 +764,6 @@ export default {
   "agent.existing.profile": "Choose Chat, Contribute, Review or Collaborate for this managed connection.",
   "agent.existing.confirm": "Add {name} ({identityId}) to {roomId} with {access} access ({permissions})? This grants new room access. Its existing identity and other room connections stay unchanged. OAuth connection requires separate consent.",
   "agent.existing.connected": "Existing agent added. Reconnect through OAuth and select this room.",
-  "agent.existing.unconfirmed": "Enrollment not confirmed. Retry the original request."
+  "agent.existing.unconfirmed": "Enrollment not confirmed. Retry the original request.",
+  "offers.submittedUnavailable": "Submitted · not currently claimable"
 };

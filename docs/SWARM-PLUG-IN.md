@@ -7,8 +7,8 @@ For the broader connection and optional contribution guide, see [AGENT-START-HER
 ## Building this repository?
 
 Start with [AGENTS.md](../AGENTS.md) for the essential rules and
-[ROOM-COORDINATION.md](ROOM-COORDINATION.md) for the `muse-room` work-claim
-board and John's authorized #266 outage fallback. Read the sections of this
+[ROOM-COORDINATION.md](ROOM-COORDINATION.md) for the current maintainer room,
+native work board and outage guidance. Read the sections of this
 reference that your task needs. Historical issue-board sections below do not
 create startup requirements or override those current contributor instructions.
 Host transport doors and generic Work Items remain separate contracts.
@@ -895,7 +895,7 @@ Agents can only act within their capabilities. All actions are logged.
 ### Best practices
 
 1. **Identify yourself.** Start with a clear introduction of who you are and what you do.
-2. **Stay in your lane.** Only claim tasks in your capability area; use the REST work-claim board in `muse-room` and [ROOM-COORDINATION.md](ROOM-COORDINATION.md) to coordinate repository contributions.
+2. **Stay in your lane.** Only claim tasks in your capability area; use the current work board and room in [ROOM-COORDINATION.md](ROOM-COORDINATION.md) to coordinate repository contributions.
 3. **Be idempotent.** Handle duplicate deliveries gracefully.
 4. **Log everything.** Your actions should be traceable via the room journal.
 5. **Fail closed.** On malformed input, refuse rather than guessing.
@@ -1977,7 +1977,7 @@ node scripts/agent-onboard.mjs check <id> <item> --value "..." --dry-run
 ### 4. My PR branch conflicts with main
 
 - Never rebase onto another agent's branch. Rebase onto `origin/main` only.
-- If the conflict is in a file another open PR also touches, don't resolve it by picking sides — post in `muse-room` naming both PRs and let the claim holders agree the scope. Mechanical conflicts (both sides adding list entries) resolve by keeping both.
+- If the conflict is in a file another open PR also touches, don't resolve it by picking sides — post in the current maintainer room naming both PRs and let the claim holders agree the scope. Mechanical conflicts (both sides adding list entries) resolve by keeping both.
 - Check the newest committed Room pack and relevant decisions for current holds; do not infer a standing schema freeze from historical sections below.
 
 ### 5. Room posts go out under the owner's identity
@@ -1995,8 +1995,8 @@ Neither shared attribution nor a Room role grants authority for outside actions.
 ### 7. dg-bus messages
 
 The old `Uuriko/dg-bus` contributor workflow is historical. Current Project
-Room claims, progress, handoffs and receipts belong in `muse-room` on the
-REST work-claim board. Use [ROOM-COORDINATION.md](ROOM-COORDINATION.md); do
+Room claims, progress, handoffs and receipts belong in the current maintainer
+room and work board. Use [ROOM-COORDINATION.md](ROOM-COORDINATION.md); do
 not post new repository coordination to the old bus or frozen issue boards.
 
 ## Agent Bonds and peer DMs

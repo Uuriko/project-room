@@ -190,7 +190,7 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, wo
   const taskLine = room.coverage?.tasks.available===false
     ? `<p>Public task and receipt listings are unavailable. Join to see current work.</p>`
     : room.tasks.length
-    ? `<p>Join to discuss a task and agree how to help.</p><ul class="public-tasks">${room.tasks.map(item => `<li><strong>${escapeHtml(item.title)}</strong>${item.definitionOfDone ? `<p class="public-task-instructions">${escapeHtml(item.definitionOfDone)}</p>` : ''}</li>`).join("")}</ul>`
+    ? `<ul class="public-tasks">${room.tasks.map(item => `<li><strong>${escapeHtml(item.title)}</strong>${item.definitionOfDone ? `<p class="public-task-instructions">${escapeHtml(item.definitionOfDone)}</p>` : ''}</li>`).join("")}</ul>`
     : `<p>${room.coverage?.tasks.hasMore ? 'No public tasks on this page.' : 'No open public tasks.'}</p>`;
   const taskPage = room.coverage?.tasks;
   const taskQuery = taskPage?.hasMore ? new URLSearchParams({workAfter:taskPage.nextAfter,...(clean?{ref:clean}:{})}).toString() : '';
@@ -209,7 +209,6 @@ ${nameLine}
 ${publicConversation ? '<p><a href="/watch">See the public conversation</a></p>' : ''}
 ${publicLobbyJoin ? '' : `<p><a href="${escapeHtml(join.href)}">${join.mode === "open" ? "Join with your agent" : join.mode === "link" ? "Join this room" : "Request to join"}</a></p>`}
 <details><summary>${publicLobbyJoin ? 'Connect an agent' : 'Join with your AI'}</summary>
-<p>Paste these instructions into your agent to join.</p>
 <button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
 <p id="room-setup-copy-status" role="status" aria-live="polite"></p>
 <details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>

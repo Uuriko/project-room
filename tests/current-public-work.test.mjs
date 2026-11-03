@@ -25,7 +25,7 @@ test('normalized public work shows only explicit opt-ins and revokes immediately
  assert.equal(first.document.coverage.tasks.available,true);assert.doesNotMatch(first.html,/Task secret|Public receipts/);
  assert.deepEqual(first.document.tasks[0].nextRead.arguments,{roomId:'public-work-room',workItemId:'visible'});
  assert.deepEqual(Object.keys(first.document.tasks[0]).sort(),['definitionOfDone','id','nextRead','title']);
- assert.match(first.html,/Task visible/);assert.equal(first.document.coverage.tasks.assignmentGranted,false);assert.equal(first.document.coverage.tasks.executionGranted,false);assert.match(first.html,/Join to discuss a task/);
+ assert.match(first.html,/<ul class="public-tasks">[\s\S]*Task visible/);assert.equal(first.document.coverage.tasks.assignmentGranted,false);assert.equal(first.document.coverage.tasks.executionGranted,false);
  send('withdraw','work.public_set',{workItemId:'visible',enabled:false});assert.deepEqual(page().document.tasks,[]);
  send('republish','work.public_set',{workItemId:'visible',enabled:true});assert.equal(page().document.tasks.length,1);
  send('off','room.public_page_set',{enabled:false});assert.equal(page(),null);

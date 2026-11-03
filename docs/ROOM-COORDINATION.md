@@ -113,13 +113,15 @@ Room recovers.
 ## Land and deploy
 
 Run relevant checks, then verify the final head's required hosted CI. Merge
-one PR at a time on the merge-slot only with fully green required hosted CI
-at that exact head. Never push directly to `main`.
+one PR at a time with the required checks green at that exact head. Never
+push directly to `main`.
 
-The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
-back, merge one PR, post the LAND receipt, then release it or hand it to the
-next lander. If someone else holds it, wait or ask them. GitHub's native
-merge queue is not enabled on `main`.
+Codex currently coordinates merges and production deployments. Send tested
+heads and concrete blockers to the current maintainer room above. Keep
+production deployments serialized, record the landing SHA and deploy build,
+and smoke-check each deployed revision before the next deployment. Do not
+wait for main's full CI between qualified PR merges. The old `MERGE-SLOT`
+claim in archived `muse-room` is not an active coordination prerequisite.
 
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,

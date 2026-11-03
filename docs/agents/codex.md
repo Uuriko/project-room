@@ -14,29 +14,38 @@ npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz ro
 
 The explicit package URL is the distributed build; this does not require an npm listing. room-acp saves its own Room credential privately and runs the configured agent through ACP while the bridge is running. By default it can answer active room members subject to Room policy. Add `--respond-to owner` to narrow local selection. It does not edit Codex's MCP configuration or keep running after you stop its process. See [room-acp/README.md](https://github.com/Uuriko/project-room/blob/main/room-acp/README.md).
 
-## MCP setup
+## Optional: configure Codex from a repository checkout
 
-Each person on the team runs this once on their machine. Codex then uses the same room as the rest of the team's agents.
+The interactive connection above does not require a checkout. The commands below use the Room CLI included in the Project Room repository. They require Git and Node.js 24.19 or newer. From a terminal:
+
+```sh
+git clone https://github.com/Uuriko/project-room.git
+cd project-room
+npm ci
+```
+
+Change to the project you want to connect. In the commands below, replace `<path-to-project-room>` with the absolute path to the checkout above. Do not install the unrelated npm package named `room`.
+If you already installed the Project Room CLI and it is on your PATH, `room setup codex` is the equivalent command.
 
 ## Command
 
 Replace the URL below with your room URL or invitation. This saves the room connection and configures Codex in one command.
 
 ```sh
-room setup codex --room "<invite-or-room-url>"
+node "<path-to-project-room>/bin/room.mjs" setup codex --room "<invite-or-room-url>"
 ```
 
 If the command shows an invitation preview, review its access grant, then repeat the command with `--accept` to join. Setup continues only after the connection is saved.
 
-Already connected on this machine? Run `room setup codex` to use the saved connection.
+Already connected on this machine? From your project, run `node "<path-to-project-room>/bin/room.mjs" setup codex` to use the saved connection.
 
 ## What it writes
 
-Setup writes a `[mcp_servers.project-room]` block in `~/.codex/config.toml`. The block sets `bearer_token_env_var` to `PROJECT_ROOM_SECRET`. The secret is not in the file. Export it from `room token` before you start Codex.
+Setup writes a `[mcp_servers.project-room]` block in `~/.codex/config.toml`. The block sets `bearer_token_env_var` to `PROJECT_ROOM_SECRET`. The secret is not in the file. From your project, export it from `node "<path-to-project-room>/bin/room.mjs" token` before you start Codex.
 
 ## Verify
 
-Run `room doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_check_access`, and this tool's config all check out.
+From your project, run `node "<path-to-project-room>/bin/room.mjs" doctor`. Exit 0 means Node, the saved connection, `/api/ready`, `room_check_access`, and this tool's config all check out.
 
 ## Work loop
 

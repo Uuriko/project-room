@@ -105,7 +105,7 @@ h1 {
   padding-bottom:48px
 }
 .settlement { max-width: 44rem; margin: 0 0 2rem; color: var(--muted); }
-.settlement h2 { color: var(--ink); font-size: var(--text-lg); margin: 0 0 .5rem; }
+.settlement summary { color: var(--ink); cursor: pointer; font-weight: 600; margin: .5rem 0; }
 .settlement p { margin: 0; line-height: 1.6; }
 .workspace {
   display:grid;

@@ -38,10 +38,14 @@ async function fixture(t, state) {
     requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1,
     repositoryRef: 'main', files: ['src/example.js']
   });
-  if (state === 'claimed') {
+  if (state === 'claimed' || state === 'submitted') {
     const worker = f.store.identities.create('Synthetic claim worker');
-    f.store.publicWorkClaims.act(id, worker.secret, 'claim', {
+    const claim = f.store.publicWorkClaims.act(id, worker.secret, 'claim', {
       requestId: `claim-${id}`, expectedTermsVersion: 1
+    });
+    if (state === 'submitted') f.store.publicWorkClaims.act(id, worker.secret, 'finish', {
+      requestId: `finish-${id}`, expectedTermsVersion: 1,
+      generation: claim.task.claim.generation, artifactText: 'Synthetic result', checksReported: []
     });
   }
 
@@ -58,7 +62,8 @@ for (const width of [390, 1280]) {
   for (const [state, claimState, claimable, label] of [
     ['expired', 'unclaimed', false, 'Not currently claimable'],
     ['available', 'unclaimed', true, 'Open to contributors'],
-    ['claimed', 'claimed', false, 'Claimed']
+    ['claimed', 'claimed', false, 'Claimed'],
+    ['submitted', 'submitted', false, 'Submitted · not currently claimable']
   ]) {
     test(`${width}px ${state} offer renders server claimability`, { timeout: 30000 }, async t => {
       const { id, browser, origin } = await fixture(t, state);
@@ -71,10 +76,21 @@ for (const width of [390, 1280]) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto(`${origin}/offers?offer=${id}`);
+      await page.goto(state === 'available' ? `${origin}/offers` : `${origin}/offers?offer=${id}`);
+      if (state === 'available') {
+        const card = page.locator(`[data-offer="${id}"]`);
+        await card.waitFor({ state: 'visible' });
+        await card.focus();
+        await page.keyboard.press('Enter');
+      }
       const status = page.locator('#contribution-status p[role="status"]');
       await status.waitFor({ state: 'visible' });
       assert.equal(await status.innerText(), label);
+      if (state === 'available') {
+        assert.doesNotMatch(await page.locator(`[data-offer="${id}"]`).innerText(), /Synthetic local fixture/);
+        assert.equal(await page.locator('#offer-detail .summary').innerText(), 'Synthetic local fixture');
+      }
+      if (state === 'submitted') assert.equal(await page.locator('.agent-handoff h3').innerText(), 'Agent brief');
       assert.deepEqual(errors, []);
     });
   }
