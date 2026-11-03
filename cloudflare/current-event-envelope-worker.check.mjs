@@ -22,6 +22,7 @@ test('actual Worker projects bounded historical message envelopes before unrelat
       const seed = await call('/seed?kind=' + kind);
       const first = await call(`/consume?kind=${kind}&after=${seed.openingSequence - 1}`);
       const warm = await call(`/consume?kind=${kind}&after=${seed.openingSequence - 1}`);
+      console.log('EVENT_ENVELOPE_ATOMS ' + JSON.stringify({ kind, seed, first: first.cost, warm: warm.cost }));
       assert.equal(first.status, 200, JSON.stringify(first));
       assert.deepEqual(first.page.directMessages, []);
       assert.equal(first.page.cursor.after, seed.openingSequence);
