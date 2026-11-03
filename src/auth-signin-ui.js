@@ -126,7 +126,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code);
       if (uncertain && owns()) {
         accountClient.invalidate(generation, session);
-        await onSignInUncertain?.();
+        await onSignInUncertain?.({ preserveScopedBackup: true });
       }
       throw error;
     }

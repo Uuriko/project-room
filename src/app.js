@@ -943,8 +943,8 @@ const signinUI = createAuthSigninUI({
     destination.hash = invitation.secret ? `#invite/${invitation.secret}` : (shareLinksUI?.pendingFragment() || "");
     return `${destination.pathname}${destination.search}${destination.hash}`;
   },
-  onSignInUncertain: async () => {
-    endAccountAccess();
+  onSignInUncertain: async (options) => {
+    endAccountAccess(options);
     clearPrivateWorkspace();
     await accountClient.restore();
     if (accountClient.session?.authenticated) showAccountWorkspace();

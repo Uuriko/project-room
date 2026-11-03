@@ -196,7 +196,7 @@ test("different-account rejection offers an explicit switch without logging out 
 });
 
 test("confirmed different-account switch logs out once and retries the unburned link", async () => {
-  const client = stubClient(); let consumes = 0, logouts = 0, reconciled = 0, signed = 0; const codes = [];
+  const client = stubClient(); let consumes = 0, logouts = 0, reconciled = 0, signed = 0, recoveryOptions; const codes = [];
   client.request = async (path, { data }) => {
     if (path.endsWith("request")) return { status: "sent" };
     codes.push(data.code);
@@ -204,11 +204,12 @@ test("confirmed different-account switch logs out once and retries the unburned 
     return { authenticated: true, account: { id: "target" } };
   };
   client.logout = async () => { logouts++; client.generation++; client.session = { authenticated: false, sessionRevision: 2 }; return client.session; };
-  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onAccountSwitch: () => true, onSignInUncertain: () => reconciled++ });
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onAccountSwitch: () => true, onSignInUncertain: options => { recoveryOptions = options; reconciled++; } });
   const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
   await container.listeners.submit[0](submitForm("magic-code", { code: "same-unburned-code" }));
   await container.listeners.click[0](clickOnDataset("magic-switch"));
   assert.equal(logouts, 1); assert.equal(reconciled, 1); assert.equal(consumes, 2); assert.equal(signed, 1);
+  assert.equal(recoveryOptions, undefined, 'confirmed logout must not preserve a previous account draft');
   assert.deepEqual(codes, ["same-unburned-code", "same-unburned-code"]);
 });
 
@@ -265,11 +266,12 @@ for (const view of [{}, { authenticated: true, account: { id: "" } }, { session:
   test(`invalid authentication success reconciles only the issuing identity: ${JSON.stringify(view)}`, async () => {
     const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": view });
     const old = { authenticated: true, account: { id: "old" }, sessionRevision: 1 }; client.session = old; client.generation = 4;
-    let fenced = 0, signed = 0;
-    const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
+    let fenced = 0, signed = 0, recoveryOptions;
+    const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: options => { recoveryOptions = options; fenced++; } });
     const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
     await container.listeners.submit[0](submitForm("magic-code", { code: "real-issued-code" }));
     assert.equal(client.session, null); assert.equal(client.generation, 5); assert.equal(fenced, 1); assert.equal(signed, 0);
+    assert.deepEqual(recoveryOptions, { preserveScopedBackup: true });
     assert.match(container.status.textContent, /didn.t complete/);
   });
 }
