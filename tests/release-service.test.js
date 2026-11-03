@@ -110,6 +110,15 @@ test('research: explicit browser renewal handles prior short-lived rotated slots
   assert.equal(store.accountSessionSlot(short.token).expiresAt,short.session.expiresAt);
 });
 
+test('browser renewal cannot revive an expired slot', t => {
+  const {store,owner,advance}=fixture(t), accountId=store.authenticate(owner).account.id;
+  const key=store.issueAccountAccessKey(accountId), slot=store.createAccountSessionSlot(60000);
+  advance(60000);
+  assert.throws(()=>store.loginAccountSession(slot.token,key,0,{rotateSlot:true,renewBrowserSession:true}),/expired/);
+  assert.throws(()=>store.loginAccountSessionWithMethod(slot.token,accountId,0,{method:{kind:'password'},rotateSlot:true,renewBrowserSession:true}),/expired/);
+  assert.throws(()=>store.authenticateAccountSession(slot.token),/expired/);
+});
+
 test('research: failed rotation rolls back the renewed slot and login', t => {
   const {store,owner,advance}=fixture(t),accountId=store.authenticate(owner).account.id;
   const slot=store.createAccountSessionSlot();advance(29*86400000);
