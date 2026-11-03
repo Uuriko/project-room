@@ -39,4 +39,11 @@ test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${path} is ${overflow}px wider than 390`);
   }
+  await page.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
+  await page.getByText("Join with your AI", { exact: true }).click();
+  const copy = page.getByRole("button", { name: "Copy setup prompt" });
+  assert.equal(await copy.isVisible(), true);
+  assert.ok((await copy.boundingBox()).height >= 44, "copy action should be easy to tap");
+  await copy.click();
+  await page.locator("#room-setup-copy-status").getByText(/Copied|Copy the selected prompt/).waitFor();
 });
