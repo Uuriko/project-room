@@ -13,6 +13,18 @@ const corrupt = message => {throw Error('current_room_corrupt: ' + message);};
 // uses protected current metadata, inside the same synchronous read snapshot.
 // The index is discovery only; every disclosed task retains its independent
 // current membership/reference and complete payload-hash verification.
+// Sitemap gate: the same published/not-archived check readCurrentPublicWork
+// applies, without reading tasks. Unreadable metadata is not listed.
+export function currentPublicPageListed(store, roomId) {
+  try {
+    return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
+      const head = readCurrentHead(store.db, roomId, b);
+      const room = readCurrentRecord(store.db, roomId, 'metadata', 'room', b);
+      return Boolean(head && room?.id === roomId && publicPage({room}).enabled && !room.archivedAt);
+    }));
+  } catch { return false; }
+}
+
 export function readCurrentPublicWork(store, roomId, {after = ''} = {}) {
   if (typeof after !== 'string')
     throw new ServiceError(422, 'invalid_feed_cursor', 'Invalid public task page; reload the room');

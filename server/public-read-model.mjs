@@ -1,5 +1,5 @@
 import {ServiceError} from './service-error.mjs';
-import {readCurrentPublicWork} from './current-public-work.mjs';
+import {readCurrentPublicWork, currentPublicPageListed} from './current-public-work.mjs';
 import { hydrateWorkItems } from "./work-repository.mjs";
 // Public pages read explicit publication plus protected selected current tasks,
 // never rooms.projection or unrelated private work/conversation payloads.
@@ -1319,7 +1319,11 @@ export function loadPublicRoom(store, slug, {workAfter = ''} = {}) {
 export function listPublicRoomSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC LIMIT ?").all(cap)
-    .filter(row => !isUnpublished(store.db, "room", row.slug))
+    // List only slugs loadPublicRoom would serve: a valid slug, not
+    // unpublished, and for a native room a published, unarchived page.
+    .filter(row => SLUG.test(row.slug) && !isUnpublished(store.db, "room", row.slug)
+      && (!store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(row.slug)
+        || currentPublicPageListed(store, row.slug)))
     .map(row => ({
       slug: row.slug,
       setAt: row.set_at,
