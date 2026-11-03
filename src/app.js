@@ -625,10 +625,14 @@ const client = new RoomClient({
     // persisted backup, the in-memory drafts, and the composer text so
     // re-authentication restores them.
     const sessionExpired = shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext });
+    // A changed account session is unconfirmed until the next authenticated
+    // room snapshot. Hide in-memory content immediately, but leave the scoped
+    // backup for a matching recovery lineage to prove on a later open.
+    const preserveScopedBackup = !leavingPage && !pendingSignout && endedContext === 'unconfirmed-session-change';
     // Opening a room from the room list ends "access" first, with no room open. That
     // must not wipe the draft an expired session left for this same room (E-H2).
     const openingFromList = !hadRoom && ["accepted-room-switch", "invited-room-switch"].includes(endedContext);
-    if (!leavingPage && !sessionExpired && !openingFromList) recovery.clear();
+    if (!leavingPage && !sessionExpired && !openingFromList && !preserveScopedBackup) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
@@ -757,7 +761,8 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? uiText("room.session_changed_recovery")
+      : preserveScopedBackup ? 'Session changed. Sign in or refresh to reconnect.'
+        : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -1042,11 +1047,11 @@ function clearPrivateWorkspace(options) {
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
   $("#account-settings").open = false; $("#account-settings-body").replaceChildren();
 }
-function endAccountAccess() {
+function endAccountAccess({ preserveScopedBackup = false } = {}) {
   const current = accountClient.session;
   if (current) accountClient.invalidate(accountClient.generation, current);
   $(".connection-bar").hidden = false;
-  accessEndContext = "account-switch"; client.endAccess();
+  accessEndContext = preserveScopedBackup ? 'unconfirmed-session-change' : 'account-switch'; client.endAccess();
   configureAuthPanel();
 }
 function rememberedRoomId() {
@@ -1167,6 +1172,7 @@ async function landAfterSignIn() {
 let startRoomFlight = null;
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  recovery.reconcileAccount(accountClient.session);
   if (resumeOAuthConsent()) return;
   if (accountClient.session.terms?.required) {
     $("#main").hidden = true;
@@ -1221,7 +1227,7 @@ async function confirmAccount() {
   accountCheckFlight = (async () => {
     try {
       const confirmed = await accountClient.confirm();
-      if (confirmed === false && accountClient.session === null) endAccountAccess();
+      if (confirmed === false && accountClient.session === null) endAccountAccess({ preserveScopedBackup: true });
       else if (confirmed && $("#account-status").textContent === "Couldn’t confirm account. Refresh to retry.") {
         $("#account-status").textContent = ""; $("#account-status").hidden = true;
       }
@@ -1272,7 +1278,7 @@ async function loadAccountRooms(more = false) {
       && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
-    if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
+    if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess({ preserveScopedBackup: true });
     else $("#account-rooms-status").textContent = "Couldn’t load rooms. Choose Rooms to retry.";
   }
 }

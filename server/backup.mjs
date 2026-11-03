@@ -546,6 +546,23 @@ const RECONCILE_CLASSES = [
     // silently un-happen in the restored store. Consumable codes and
     // account session credentials compare in the restored direction.
     let examined = 0;
+    // Restoring an old authenticated slot can undo a later sign-out,
+    // rotation, or account switch even if its parent credential still exists.
+    if (tableExists(restored.db, 'account_session_slots')) {
+      const select = 'SELECT hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until FROM account_session_slots';
+      const old = restored.db.prepare(select).all();
+      const live = new Map((tableExists(current.db, 'account_session_slots') ? current.db.prepare(select).all() : []).map(row=>[row.hash,row]));
+      const checkedAt = current.now();
+      examined += old.length;
+      for (const row of old) {
+        if (!row.account_id || row.expires_at <= checkedAt || row.authenticated_until <= checkedAt) continue;
+        const now = live.get(row.hash);
+        if (!now || now.expires_at <= checkedAt || now.authenticated_until == null || now.authenticated_until <= checkedAt
+            || now.account_id !== row.account_id || now.account_auth_epoch !== row.account_auth_epoch
+            || now.parent_credential_hash !== row.parent_credential_hash || now.revision !== row.revision)
+          stale.push({kind:'login_method',id:row.hash.slice(0,12),detail:`account session for ${String(row.account_id).slice(0,12)} changed or ended after the backup`});
+      }
+    }
     const bindings = [
       { table: "account_login_methods", key: "id", noun: "login method" },
       { table: "account_passkey_credentials", key: "credential_id", noun: "passkey credential" },

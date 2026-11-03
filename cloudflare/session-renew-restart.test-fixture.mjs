@@ -16,7 +16,9 @@ export class SessionRenewTestRoom extends DurableObject {
         return Response.json({oldToken:slot.token,token:renewed.token,accountId});
       }
       const {token}=await request.json();
-      if(path==='/read') {const x=s.authenticateAccountSession(token);return Response.json({accountId:x.account.id,revision:x.sessionRevision,expiresAt:x.expiresAt,now:s.now()});}
+      if(path==='/read') {const x=s.authenticateAccountSession(token);return Response.json({accountId:x.account.id,revision:x.sessionRevision,expiresAt:x.expiresAt,lineage:x.draftRecoveryLineage,binding:x.sessionBinding,now:s.now()});}
+      if(path==='/legacy') {s.db.exec('ALTER TABLE account_session_slots DROP COLUMN draft_recovery_lineage');return Response.json({ok:true});}
+      if(path==='/rotate') {const x=s.authenticateAccountSession(token);const next=s.loginAccountSessionWithMethod(token,x.account.id,x.sessionRevision,{method:{kind:'password'},rotateSlot:true});return Response.json({token:next.token,lineage:next.session.draftRecoveryLineage});}
       if(path==='/logout') {const x=s.authenticateAccountSession(token);s.logoutAccountSession(token,x.sessionRevision);return Response.json({ok:true});}
       return new Response('Not found',{status:404});
     }catch(e){return Response.json({error:{code:e.code??'internal'}},{status:e.status??500});}

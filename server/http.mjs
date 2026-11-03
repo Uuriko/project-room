@@ -280,6 +280,7 @@ const accountView = auth => ({
   account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
   csrf: auth.csrf,
   sessionBinding: auth.sessionBinding,
+  ...(auth.credentialScope === 'account-session' && auth.draftRecoveryLineage ? {draftRecoveryLineage: auth.draftRecoveryLineage} : {}),
   sessionRevision: auth.sessionRevision,
   expiresAt: auth.expiresAt,
   authenticatedUntil: auth.authenticatedUntil ?? null
@@ -291,6 +292,7 @@ const sessionView = auth => ({
   roomId: auth.roomId,
   csrf: auth.csrf,
   sessionBinding: auth.sessionBinding,
+  ...(auth.credentialScope === 'account-session' && auth.draftRecoveryLineage ? {draftRecoveryLineage: auth.draftRecoveryLineage} : {}),
   sessionRevision: auth.sessionRevision ?? null,
   credentialKind: auth.kind,
   expiresAt: auth.expiresAt

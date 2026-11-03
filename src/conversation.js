@@ -496,7 +496,7 @@ export function draftRecoveryScope(identity) {
   if (!identity?.account?.id || !Number.isInteger(identity.account.authEpoch)
     || !identity.roomId || !identity.member?.id || !identity.sessionBinding) return null;
   return JSON.stringify([identity.roomId, identity.account.id, identity.account.authEpoch,
-    identity.member.id, identity.sessionBinding]);
+    identity.member.id, identity.draftRecoveryLineage || identity.sessionBinding]);
 }
 
 // Only references and recovery state persist. File bytes never enter browser storage.
@@ -520,6 +520,22 @@ function recoveredFiles(files) {
 export class DraftRecovery {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
   clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  // An authenticated account is not enough to restore a room draft, but it
+  // can rule one out before another account is shown its room list.
+  reconcileAccount(identity) {
+    try {
+      const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem('project-room:drafts:v2');
+      if (!raw) return;
+      if (raw.length > 500000) throw new Error('size');
+      const saved = JSON.parse(raw), scope = JSON.parse(saved.scope);
+      const lineage = identity?.draftRecoveryLineage || identity?.sessionBinding;
+      if (!identity?.authenticated || !identity.account?.id || !Number.isInteger(identity.account.authEpoch)
+          || !Array.isArray(scope) || scope.length !== 5 || scope[1] !== identity.account.id
+          || scope[2] !== identity.account.authEpoch || scope[4] !== lineage
+          || !Number.isFinite(saved.expires) || saved.expires <= this.now()
+          || saved.expires > this.now() + 12 * 60 * 60 * 1000) this.clear();
+    } catch { this.clear(); }
+  }
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
