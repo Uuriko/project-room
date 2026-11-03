@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {event} from '../src/events.js';
+import {withCurrentRoomWriter} from '../server/current-room-repository.mjs';
 
 function fixture(t,extend=()=>{}){
  const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
@@ -16,6 +17,33 @@ function fixture(t,extend=()=>{}){
 test('normalized current requests list does not report an existing incoming obligation as empty',t=>{
  const {store,keys}=fixture(t),listed=store.replyRequests.list(keys.reader,'commons');
  assert.deepEqual(listed.requests.map(request=>request.id),['question']);
+});
+for(const [field,value] of [['recipientId','other'],['status','answered']])test(`list fails closed when the indexed ${field} disagrees with its witness`,t=>{
+ const {store,keys}=fixture(t);
+ store.transaction(()=>withCurrentRoomWriter(store.db,'commons',()=>store.db.prepare(
+  "UPDATE current_room_records SET payload=json_set(payload,?,?) WHERE room_id='commons' AND domain='replyRequests' AND record_key='question'"
+ ).run(`$.${field}`,value)));
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ assert.throws(()=>store.replyRequests.list(keys.reader,'commons',{direction:'incoming',status:'open'}),/current_room_corrupt/);
+});
+test('large valid cancelled requests paginate within the shared read budget',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<8;i++){
+   const id=`budget-${i}`;
+   add('message.posted',{messageId:id,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+   add('reply_request.cancelled',{requestMessageId:id,expectedRequestRevision:0,reason:'\u0001'.repeat(4096)});
+  }
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ let args={direction:'incoming',status:'cancelled',limit:8},ids=[],pages=0;
+ do{
+  const result=store.replyRequests.list(keys.reader,'commons',args);
+  ids.push(...result.requests.map(request=>request.id));
+  args=result.nextRead?.arguments;
+  assert.ok(++pages<10);
+ }while(args);
+ assert.ok(pages>1);
+ assert.deepEqual(ids,Array.from({length:8},(_,i)=>`budget-${i}`));
 });
 test('normalized selected request is readable through the existing reader and supplies exact answer basis',t=>{
  const {store,keys}=fixture(t),read=store.replyRequests.selected(keys.reader,'commons','question');
@@ -36,7 +64,7 @@ test('v2 selected and list pass the actual shared SDK/MCP validator without v1 c
  ])assert.equal(validateReplyRead(read,{name,args,roomId:'commons'}).contractVersion,2);
  assert.equal(validReplyArguments('room_list_requests',{limit:1,cursor:'opaque'}),true);
 });
-test('bounded list empty-more pages retain late obligation and hide excluded IDs in opaque cursor',t=>{
+test('list walks only the viewer\'s requests: a late obligation is on page one and excluded IDs never leak',t=>{
  const {store,keys}=fixture(t,(_events,add)=>{
   for(let i=0;i<18;i++)add('message.posted',{messageId:`a-private-${i.toString().padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Private'});
  });
@@ -47,7 +75,21 @@ test('bounded list empty-more pages retain late obligation and hide excluded IDs
   assert.equal(JSON.stringify(read).includes('a-private-'),false);
   if(!read.nextRead)break;args=read.nextRead.arguments;assert.ok(++pages<20);
  }while(true);
- assert.deepEqual(found,['question']);assert.equal(emptyMore,true);
+ assert.deepEqual(found,['question']);assert.equal(emptyMore,false);assert.equal(pages,0);
+});
+test('list directions use party indexes: outgoing for the requester, both for either party',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<12;i++)add('message.posted',{messageId:`a-noise-${i.toString().padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Noise'});
+  add('message.posted',{messageId:'b-asked-by-reader',toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'From reader'},'reader');
+ });
+ const ids=(key,args)=>store.replyRequests.list(key,'commons',{limit:8,...args}).requests.map(r=>r.id);
+ assert.deepEqual(ids(keys.reader,{direction:'outgoing'}),['b-asked-by-reader']);
+ assert.deepEqual(ids(keys.reader,{direction:'both'}),['b-asked-by-reader','question']);
+ const owner=store.replyRequests.list(keys.owner,'commons',{direction:'outgoing',limit:8});
+ assert.equal(owner.requests.length,8);assert.equal(owner.page.hasMore,true);
+ const rest=store.replyRequests.list(keys.owner,'commons',owner.nextRead.arguments).requests.map(r=>r.id);
+ assert.deepEqual(rest,['a-noise-08','a-noise-09','a-noise-10','a-noise-11','question']);
+ assert.equal([...owner.requests.map(r=>r.id),...rest].includes('b-asked-by-reader'),false);
 });
 test('selected continuation binds viewer and request, rejects tampering and carries source progress',t=>{
  const {store,keys}=fixture(t,(_events,add)=>{
@@ -123,8 +165,8 @@ test('same-member active credentials cannot transfer selected, list, or history 
  assert.equal(store.authenticate(keys.reader,'commons').member.id,store.authenticate(second,'commons').member.id);
  const selected=store.replyRequests.selected(keys.reader,'commons','question',{limit:1});
  const history=store.replyRequests.history(keys.reader,'commons',{limit:1});
- // Add one excluded request so the list also has a continuation.
- store.command(keys.owner,'commons',{id:'excluded-bound',type:'message.posted',data:{messageId:'excluded-bound',toMemberId:'other',requestKind:'reply',body:'Excluded'}});
+ // Add a second request to this reader so a one-row list page has a continuation.
+ store.command(keys.owner,'commons',{id:'excluded-bound',type:'message.posted',data:{messageId:'excluded-bound',toMemberId:'reader',requestKind:'reply',body:'Second'}});
  const list=store.replyRequests.list(keys.reader,'commons',{limit:1});
  assert.ok(list.nextRead);assert.ok(selected.nextRead);assert.ok(history.nextRead);
  for(const read of [selected,history,list]){

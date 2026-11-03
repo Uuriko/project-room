@@ -1,5 +1,5 @@
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
-import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,currentRoomAuthority,withCurrentReadContext,chargeCurrentReadBudget} from './current-room-repository.mjs';
+import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentWorkItem,currentRoomAuthority,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId,ownMember} from '../src/events.js';
 import {messageInHistory} from './history-visibility.mjs';
 import {charterContext} from '../src/room-charter.js';
@@ -29,6 +29,26 @@ function decodeBound(crypto,token,binding){
  const saved=crypto.decode(token);
  if(!saved||!selectionKeys.every(key=>saved[key]===binding[key]))fail('reply_cursor_identity_changed','Continuation belongs to another viewer or selection');
  return saved;
+}
+// Same validation, budget and cursor contract as the room-wide source window,
+// restricted to one viewer. Open incoming requests use the inbox index.
+function viewerRequestWindow(db,roomId,memberId,direction,status,after,limit,b){
+ if(typeof after!=='string'||Buffer.byteLength(after)>200)fail('invalid_reply_cursor','Invalid request source continuation');
+ const query=role=>role==='recipient'&&status==='open'
+  ?db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=? AND record_key>? ORDER BY record_key LIMIT ?`)
+  :db.prepare(`SELECT record_key FROM current_room_records INDEXED BY current_request_party_${role} WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.${role}Id')=? AND record_key>? ORDER BY record_key LIMIT ?`);
+ const roles=direction==='incoming'?['recipient']:direction==='outgoing'?['requester']:['recipient','requester'];
+ const keys=[...new Set(roles.flatMap(role=>query(role).all(roomId,memberId,after,limit+1).map(row=>row.record_key)))]
+  .sort((a,c)=>Buffer.compare(Buffer.from(a),Buffer.from(c)));
+ chargeCurrentReadBudget(b,keys.reduce((n,key)=>n+Buffer.byteLength(key)+32,0),keys.length);
+ const requests=[];
+ for(const id of keys.slice(0,limit)){
+  const scalar=db.prepare("SELECT payload_bytes FROM current_room_records WHERE room_id=? AND domain='replyRequests' AND record_key=?").get(roomId,id);
+  if(!scalar)changed();
+  if(requests.length && scalar.payload_bytes+16384>remainingCurrentReadBytes(b))break;
+  const request=readCurrentRecord(db,roomId,'replyRequests',id,b);if(request?.id!==id)changed();requests.push(request);
+ }
+ return {requests,examinedAfter:requests.at(-1)?.id??after,hasMore:keys.length>requests.length};
 }
 export function readCurrentReplies(store,token,roomId,mode,args,shape){
  if(!isCurrentRoom(store.db,roomId))return undefined;
@@ -80,7 +100,9 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   if(mode==='list'){
    const saved=args.cursor==null?null:decodeBound(crypto,args.cursor,binding);
    if(saved&&typeof saved.after!=='string')fail('invalid_reply_cursor','Invalid request source continuation');
-   const source=readCurrentReplyRequestWindow(store,roomId,{after:saved?.after??'',limit:Math.min(limit,WINDOW)});
+   // Walk only this viewer's requests through the existing party indexes, not
+   // every request in the room; excluded statuses still yield empty-more pages.
+   const source=viewerRequestWindow(db,roomId,auth.member.id,direction,status,saved?.after??'',Math.min(limit,WINDOW),b);
    for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
    const selected=source.requests.filter(r=>directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status));
    for(const request of selected)noteRequest(request);
