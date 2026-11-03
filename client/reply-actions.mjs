@@ -1,7 +1,7 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
 import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { replyPostMode, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
+import { replyPostMode, ANSWER_CREDENTIALS, MAX_REPLY_RESPONSE_CHARS, MAX_REPLY_RESPONSE_COMMAND_BYTES } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
@@ -10,6 +10,7 @@ import { withDerivedRequestId } from "./request-id.mjs";
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 // Match the complete string for hosts that full-match JSON Schema patterns.
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
+const responseBody = { ...text, maxLength: MAX_REPLY_RESPONSE_CHARS };
 const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
@@ -29,7 +30,7 @@ const definitions = [
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
-      contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
+      contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: responseBody }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]]
 ];
@@ -74,7 +75,8 @@ export function buildReplyCommand(identity, name, args) {
   }
   if (type === "message.posted") replyPostMode(data);
   const command = { id: requestId, type, data };
-  const commandLimit = name === "room_reply" ? MAX_MESSAGE_COMMAND_BYTES : 16384;
+  const commandLimit = name === "room_reply" ? MAX_MESSAGE_COMMAND_BYTES
+    : name === "room_respond_to_request" ? MAX_REPLY_RESPONSE_COMMAND_BYTES : 16384;
   if (Buffer.byteLength(JSON.stringify(command)) > commandLimit) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
   return command;
 }
@@ -148,7 +150,7 @@ export function replyRefusal(cause, { name, args = {} } = {}) {
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const nullableId = value => value === null || validId(value);
 const date = value => typeof value === "string" && Number.isFinite(Date.parse(value));
-const body = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
+const body = (value, maximum = 4096) => typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
 const keys = (value, fields) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key));
 const invalid = () => { throw Object.assign(new Error("Request response does not match the selected room, identity or window"), { status: 200, code: "invalid_response" }); };
@@ -256,7 +258,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
       const canonical = message === raw ? row : { ...row, message };
       assert(keys(row, [...rowKeys, "message"])
         && message && keys(message, ["id", "authorId", "body", "workItemId", "replyToId", "toMemberId", "createdAt", ...(message.proposal ? ["proposal"] : [])])
-        && validId(message.id) && !messages.has(message.id) && message.authorId === row.actorId && body(message.body) && message.createdAt === row.at
+        && validId(message.id) && !messages.has(message.id) && message.authorId === row.actorId && body(message.body, MAX_REPLY_RESPONSE_CHARS) && message.createdAt === row.at
         && ["workItemId", "replyToId", "toMemberId"].every(key => nullableId(message[key]))
         && (row.kind !== "context" || message.workItemId === null || message.workItemId === row.workItemId)
         && (row.kind !== "opened" || message.id === row.requestMessageId && message.toMemberId === row.recipientId && row.actorId === row.requesterId && message.workItemId === row.workItemId)
@@ -477,7 +479,7 @@ function validateCurrentReplyRead(result,{name,args,roomId}) {
   for(const exchange of preparation.previousExchanges){
     assert(keys(exchange,['requestMessageId','responseMessageId','messages'])&&validId(exchange.requestMessageId)&&validId(exchange.responseMessageId)&&Array.isArray(exchange.messages)
       &&exchange.messages.some(m=>m.id===exchange.requestMessageId)&&exchange.messages.some(m=>m.id===exchange.responseMessageId));
-    for(const raw of exchange.messages){const message=withoutUntrusted(raw);assert(message&&validId(message.id)&&validId(message.authorId)&&body(message.body)&&date(message.createdAt)
+    for(const raw of exchange.messages){const message=withoutUntrusted(raw);assert(message&&validId(message.id)&&validId(message.authorId)&&body(message.body, MAX_REPLY_RESPONSE_CHARS)&&date(message.createdAt)
       &&(!message.toMemberId||[message.authorId,message.toMemberId].includes(result.viewerId))
       &&(message.authorId===result.viewerId?!Object.hasOwn(raw,'untrusted'):raw.untrusted===true));priorMessages++;}
   }

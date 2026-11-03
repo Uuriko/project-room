@@ -34,13 +34,13 @@ test("room_reply reuses the supplied requestId as the idempotent command id", ()
   assert.equal(retry.data.messageId, first.data.messageId);
 });
 
-test("room_reply body matches the message cap and other reply text stays at 4096", () => {
+test("room_reply and formal response bodies have separate bounded limits", () => {
   const reply = replyTools.find(tool => tool.name === "room_reply");
   assert.equal(reply.inputSchema.properties.body.maxLength, MAX_MESSAGE_BODY_CHARS);
   for (const name of ["room_request_reply", "room_respond_to_request", "room_cancel_request"]) {
     const tool = replyTools.find(item => item.name === name);
     const field = name === "room_cancel_request" ? "reason" : "body";
-    assert.equal(tool.inputSchema.properties[field].maxLength, 4096, name);
+    assert.equal(tool.inputSchema.properties[field].maxLength, name === "room_respond_to_request" ? 8192 : 4096, name);
   }
   const body = "a".repeat(MAX_MESSAGE_BODY_CHARS);
   const command = buildReplyCommand(identity, "room_reply", { requestId: "req-long", replyToId: "msg-1", body });

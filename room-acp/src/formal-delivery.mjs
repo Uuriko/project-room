@@ -3,6 +3,20 @@
 // Credentials stay in RoomClient; only its service-issued command is persisted.
 import {RoomError} from './room.mjs';
 
+// Match src/reply-requests.js; room-acp is independently distributable.
+export const MAX_FORMAL_RESPONSE_CHARS = 8192;
+export const MAX_FORMAL_COMMAND_BYTES = 65536;
+const MAX_DRAFT_BYTES = 16384;
+function pendingOverflow(context, value, code, actual, maximum) {
+  const binding = {version:1, roomId:context.roomId, requestMessageId:context.request.id,
+    viewerId:context.viewerId, requestRevision:context.request.revision,
+    contextEventId:context.current.contextEventId, contextSequence:context.current.contextSequence,
+    outcome:value.outcome, body:value.body};
+  const retained = Buffer.byteLength(value.body) <= MAX_DRAFT_BYTES
+    && Buffer.byteLength(JSON.stringify(binding)) <= MAX_DRAFT_BYTES;
+  return {kind:'pending', body:`The response exceeds the ${code === 'formal_body_too_long' ? 'character' : 'serialized command byte'} limit (${actual} / ${maximum}). This request remains open. ${retained ? 'The exact draft is retained locally' : 'The draft exceeds the local retention budget and was not retained'}; shorten it and inspect the current request before responding.`,
+    pendingReason:{code, actual, maximum, draftRetained:retained}, ...(retained ? {draft:binding} : {})};
+}
 const MAX_CONTEXT_BYTES = 4 * 65536;
 const invalid = reason => {throw new RoomError(409, 'formal_context_invalid', reason);};
 
@@ -37,8 +51,10 @@ export function prepareFormalDelivery(context, output, stopReason) {
   try {value = JSON.parse(output);} catch {return {kind:'pending', body:'The agent did not return an explicit answer or decline. This request remains open.'};}
   if (!value || Array.isArray(value) || Object.keys(value).some(key => !['outcome','body'].includes(key))
     || !['answered','declined','pending'].includes(value.outcome) || typeof value.body !== 'string'
-    || !value.body.trim() || value.body.length > 4096 || stopReason !== 'end_turn')
+    || !value.body.trim() || stopReason !== 'end_turn')
     return {kind:'pending', body:'The agent did not finish a valid response. This request remains open.'};
+  const bodyLimit = value.outcome === 'pending' ? 4096 : MAX_FORMAL_RESPONSE_CHARS;
+  if (value.body.length > bodyLimit) return pendingOverflow(context,value,'formal_body_too_long',value.body.length,bodyLimit);
   if (value.outcome === 'pending') return {kind:'pending', body:value.body};
   const recipes = (context.responseHttpActions ?? []).filter(action => action.command?.data?.responseOutcome === value.outcome);
   if (recipes.length !== 1) invalid('No unique current response recipe');
@@ -54,7 +70,8 @@ export function prepareFormalDelivery(context, output, stopReason) {
     || typeof recipe.command.id !== 'string' || !recipe.command.id || typeof data.messageId !== 'string' || !data.messageId)
     invalid('Response recipe binding does not match the inspected request');
   data.body = value.body;
-  if (Buffer.byteLength(JSON.stringify(recipe.command)) > 16384) invalid('Response exceeds the service command budget');
+  const commandBytes = Buffer.byteLength(JSON.stringify(recipe.command));
+  if (commandBytes > MAX_FORMAL_COMMAND_BYTES) return pendingOverflow(context,value,'formal_command_too_large',commandBytes,MAX_FORMAL_COMMAND_BYTES);
   return {kind:'formal', recipe};
 }
 

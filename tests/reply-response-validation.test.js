@@ -55,3 +55,15 @@ test('complete response and non-message cancel stay supported; unexpected comman
   const cancelled = await f.call(f.owner.secret, 'room_cancel_request', { requestId: 'cancel-request', requestMessageId: second.requested.requestMessageId, expectedRequestRevision: 0, reason: 'No longer needed' });
   assert.equal(cancelled.status, 'recorded', JSON.stringify(cancelled));
 });
+
+for (const [label,body] of [['reported4141','r'.repeat(4141)],['escaped8192','\u0001'.repeat(8192)],['unicode8192','😀'.repeat(4096)]])
+test(`hosted MCP formal ${label} answers and retries the exact receipt`,async t=>{
+  const f=fixture(t),{requested,args}=await open(f,'long-'+label);
+  const input={...args,requestId:'answer-'+label,body};
+  const answer=await f.call(f.peer.secret,'room_respond_to_request',input);
+  assert.equal(answer.status,'recorded',JSON.stringify(answer));
+  const retry=await f.call(f.peer.secret,'room_respond_to_request',input);
+  assert.equal(retry.eventId,answer.eventId);
+  const context=await f.call(f.peer.secret,'room_read_request',{requestMessageId:requested.requestMessageId});
+  assert.equal(context.request.status,'answered');assert.equal(context.page.items.find(row=>row.kind==='answered').message.body,body);
+});

@@ -503,7 +503,7 @@ export class Bridge {
       : buildPrompt({roomTitle:this.title, thread, wakes, firstTurn:created});
     const started = {...receipt, phase:'started', ...(formal ? {formalContext:formal} : {})};
     this.chatReceipts.save(key, started);
-    let body, formalDelivery, silent = false;
+    let body, formalDelivery, formalPending, formalDraft, silent = false;
     try {
       const {recorder, stopReason} = await this.host.prompt(receipt.threadKey, prompt, {sessionId});
       this.stats.turns++;
@@ -511,6 +511,7 @@ export class Bridge {
         const delivery = prepareFormalDelivery(formal, recorder.text, stopReason);
         body = delivery.kind === 'formal' ? delivery.recipe.command.data.body : delivery.body;
         if (delivery.kind === 'formal') formalDelivery = delivery;
+        else { formalPending = delivery.pendingReason; formalDraft = delivery.draft; }
       } else {
         // Silence is a successful ordinary outcome, never an inferred failure,
         // formal answer, tool result, plan, early stop or uncertain execution.
@@ -532,7 +533,8 @@ export class Bridge {
     // Reuse the terminal ACK-only phase so an older reader cannot replay a
     // silent turn as new work. The explicit disposition records why no post exists.
     this.chatReceipts.save(key, silent ? {...result, phase:'discarded', disposition:'silent'}
-      : {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {})});
+      : {...result, phase:'result', body, ...(formalDelivery ? {formalDelivery} : {}),
+        ...(formalPending ? {formalPending} : {}), ...(formalDraft ? {formalDraft} : {})});
   }
 
   async deliverChatReceipt(key) {

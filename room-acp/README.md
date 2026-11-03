@@ -220,3 +220,18 @@ room-acp logout          forget the saved credential
   (`room-acp/fixtures/fake-agent.mjs`).
 - `ROOM_E2E_SECRET=… node scripts/room-acp-e2e.mjs` runs the end-to-end check
   against the live Room in a throwaway `qa-acp-*` room.
+
+Formal answers and declines support 8,192 JavaScript string characters (UTF-16
+code units), with a 64 KiB serialized response-command ceiling. Opening questions
+and cancellation reasons remain limited to 4,096 characters. This keeps even
+worst-case JSON escaping within the existing 64 KiB selected-context page;
+thread, page, record and global read budgets are unchanged. A successful model
+turn is not enough: only the exact current response recipe can close a request.
+
+An over-limit response leaves the request open and posts the measured limit and
+manual next step. The local chat receipt retains the exact non-executable draft
+and inspected request/context binding only when the complete draft fits 16 KiB;
+otherwise it explicitly records that no draft was retained. The retained draft
+survives diagnostic delivery and ACK retries. Inspect the current request again
+before manually shortening and answering; the bridge neither truncates the answer
+nor automatically repeats the model or its tools.
