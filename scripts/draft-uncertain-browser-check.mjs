@@ -8,8 +8,9 @@ import {chromium} from 'playwright';
 import {RoomStore} from '../server/store.mjs';
 import {createRoomServer} from '../server/http.mjs';
 
-for (const otherAccount of [false,true]) for (const privateDraft of [false,true]) {
-  test(`uncertain login reconciles ${privateDraft?'private':'general'} draft for ${otherAccount?'another':'the same'} account`, {timeout:30000}, async t => {
+for (const scenario of ['same','other','logout']) for (const privateDraft of [false,true]) {
+  const otherAccount=scenario==='other';
+  test(`${scenario} reconciles ${privateDraft?'private':'general'} draft`, {timeout:30000}, async t => {
     const dir=mkdtempSync(join(tmpdir(),'draft-uncertain-'));
     const store=new RoomStore(join(dir,'room.sqlite'));
     const owner=store.createAccount('draft-owner');store.completeOnboarding(owner.id);
@@ -44,6 +45,14 @@ for (const otherAccount of [false,true]) for (const privateDraft of [false,true]
     }
     await page.locator('#message-input').fill('synthetic private draft');
     await page.waitForFunction(()=>sessionStorage.getItem('project-room:drafts:v3')?.includes('synthetic private draft'));
+    if(scenario==='logout') {
+      page.once('dialog',dialog=>dialog.accept());
+      await page.locator('#session-menu-button').click();
+      await page.locator('#signout-button').click();
+      await page.locator('#auth-panel').waitFor({state:'visible'});
+      assert.equal(await page.evaluate(()=>sessionStorage.getItem('project-room:drafts:v3')),null,'explicit logout clears draft');
+      return;
+    }
     const second=await context.newPage();await second.goto(origin+'/fixture/rotate');await second.close();
     await page.locator('#auth-panel input[type=email]').waitFor({state:'visible'});
     await page.locator('#auth-panel input[type=email]').fill('fixture@example.com');
