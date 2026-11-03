@@ -151,7 +151,7 @@ test('SDK refuses malformed unavailable-help pointers and never follows them aut
   return new Response(JSON.stringify(mutate(await response.json())),{status:response.status,headers:response.headers});
  }});
  for(const corrupt of [
-  value=>{value.work=[];},value=>{value.totalWork=0;},value=>{value.nextRead.arguments.roomId='other-room';},
+  value=>{value.replyRequests=[];},value=>{value.replyRequests=[{id:'invented-request'}];},value=>{value.work=[];},value=>{value.totalWork=0;},value=>{value.nextRead.arguments.roomId='other-room';},
   value=>{value.nextRead.arguments.query='changed selection';},value=>{value.alternatives[0].arguments.roomId='other-room';},
   value=>{value.scope.externalExecution=true;},value=>{value.viewerId='other';}
  ]){

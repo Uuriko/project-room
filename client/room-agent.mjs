@@ -1514,7 +1514,7 @@ export class RoomAgentClient {
           &&pointer.arguments?.focus===selectedFocus&&Object.keys(pointer.arguments).every(key=>['roomId','focus'].includes(key));
         if(focus!=='help_wanted'||listing.contractVersion!==1||selection?.available!==false||selection.requestedFocus!==focus
           ||selection.reason!=='current_help_index_unavailable'||typeof selection.guidance!=='string'||!selection.guidance.trim()
-          ||['work','page','nextCursor','totalWork','totalReplyRequests'].some(key=>Object.hasOwn(listing,key))
+          ||['work','replyRequests','page','nextCursor','totalWork','totalReplyRequests'].some(key=>Object.hasOwn(listing,key))
           ||listing.scope?.kind!=='room'||listing.scope?.externalExecution!==false||!validPointer(next,'needs_me')
           ||!Array.isArray(listing.alternatives)||listing.alternatives.length!==1||!validPointer(listing.alternatives[0],'all'))
           throw new RoomClientError(200,'invalid_response','Room returned an invalid unavailable-selection pointer');
