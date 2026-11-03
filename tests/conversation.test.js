@@ -7,8 +7,19 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
+import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, observedPresenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
+
+test("connection observations do not imply an agent is listening", () => {
+  const coverage = { execution: "not-evaluated" };
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: true }), "Connected");
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: false, presence: { status: "online", basis: "host" } }), "Recent host signal");
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: false }), "No live signal");
+  assert.equal(observedPresenceLabel("listening", { watching: false, presence: { status: "online", basis: "host" } }), "Recent host signal");
+  assert.equal(observedPresenceLabel("unknown", { coverage }), "No live signal");
+  assert.equal(observedPresenceLabel("listening", null), "No live signal");
+  assert.equal(observedPresenceLabel("working", { coverage }), "Working");
+});
 
 function room(t) {
   const directory = mkdtempSync(join(tmpdir(), "conversation-")), filename = join(directory, "room.sqlite");

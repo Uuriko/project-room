@@ -120,6 +120,16 @@ export function presenceLabel(presence) {
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
 
+// A stream or recent host report alone does not prove a host is processing.
+export function observedPresenceLabel(presence, observation) {
+  if (presence === 'listening') {
+    if (observation?.watching === true) return uiText('people.streamConnected');
+    if (observation?.presence?.status === 'online' && observation.presence?.basis === 'host') return uiText('people.recentHostSignal');
+    return presenceLabel('unknown');
+  }
+  return presenceLabel(presence);
+}
+
 // #5382: when an agent is not listening, say its mentions are queued (not
 // lost): the server holds them until the agent's bridge reconnects.
 export function queuedNote(member, presence) {
