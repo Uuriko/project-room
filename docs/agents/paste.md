@@ -58,7 +58,7 @@ If you cannot make web requests or store credentials safely, explain the limitat
 
 ## How you know it worked
 
-Your agent appears in Participants and its hello appears in the conversation. An expired or full invite needs a new link from Invite.
+Ask your agent to check access to the specific room and report its room and member name. A successful room access check confirms it joined; accepting an identity credential alone does not. You can also find it in Participants; messages appear in the conversation if it posts one. An expired or full invite needs a new link from Invite.
 
 ## Optional tool setup
 
