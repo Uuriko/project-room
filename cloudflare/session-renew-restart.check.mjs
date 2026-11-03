@@ -7,7 +7,16 @@ test('renewed account session and signout survive Workers restarts', {timeout:30
  const worker=()=>new Miniflare({modules:true,script:b.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'SessionRenewTestRoom',useSQLite:true}},durableObjectsPersist:dir});
  let mf=worker();
  const call=async(path,input,status=200)=>{const r=await mf.dispatchFetch('http://localhost'+path,input?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}:{});const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));return body;};
- try{const seeded=await call('/seed');await mf.dispose();mf=worker();const session=await call('/read',{token:seeded.token});assert.equal(session.accountId,seeded.accountId);assert.ok(session.expiresAt-session.now>29*86400000);await call('/read',{token:seeded.oldToken},401);await call('/logout',{token:seeded.token});await mf.dispose();mf=worker();await call('/read',{token:seeded.token},401);}finally{await mf.dispose();await rm(dir,{recursive:true,force:true});}
+ try{const seeded=await call('/seed');await mf.dispose();mf=worker();const session=await call('/read',{token:seeded.token});assert.equal(session.accountId,seeded.accountId);assert.ok(session.expiresAt-session.now>29*86400000);assert.ok(session.lineage);await call('/read',{token:seeded.oldToken},401);const rotated=await call('/rotate',{token:seeded.token});assert.equal(rotated.lineage,session.lineage);await mf.dispose();mf=worker();assert.equal((await call('/read',{token:rotated.token})).lineage,session.lineage);await call('/logout',{token:rotated.token});await mf.dispose();mf=worker();await call('/read',{token:rotated.token},401);}finally{await mf.dispose();await rm(dir,{recursive:true,force:true});}
+});
+
+test('Workers migrate a legacy account slot and retain draft scope on rotation', {timeout:30000}, async()=>{
+ const b=await build({entryPoints:[fileURLToPath(new URL('./session-renew-restart.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
+ const dir=await mkdtemp(join(tmpdir(),'room-session-legacy-worker-'));
+ const worker=()=>new Miniflare({modules:true,script:b.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'SessionRenewTestRoom',useSQLite:true}},durableObjectsPersist:dir});
+ let mf=worker();
+ const call=async(path,input)=>{const r=await mf.dispatchFetch('http://localhost'+path,input?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}:{});assert.equal(r.status,200,await r.clone().text());return r.json();};
+ try{const seeded=await call('/seed');await call('/legacy',{token:seeded.token});await mf.dispose();mf=worker();const legacy=await call('/read',{token:seeded.token});assert.equal(legacy.lineage,null);const next=await call('/rotate',{token:seeded.token});assert.equal(next.lineage,legacy.binding);await mf.dispose();mf=worker();assert.equal((await call('/read',{token:next.token})).lineage,legacy.binding);}finally{await mf.dispose();await rm(dir,{recursive:true,force:true});}
 });
 
 test('Workers password HTTP login renews an old slot across restart and logout', {timeout:30000}, async()=>{
