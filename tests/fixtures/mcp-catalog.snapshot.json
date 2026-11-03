@@ -219,7 +219,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1139,7 +1139,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1197,6 +1197,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_wait_for_attention": {
+      "inputSchema": "78d173c84d880973",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -1672,7 +1681,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1926,10 +1935,19 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_wait_for_attention": {
+      "inputSchema": "78d173c84d880973",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -2126,7 +2144,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2290,10 +2308,19 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_wait_for_attention": {
+      "inputSchema": "78d173c84d880973",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -2627,7 +2654,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "ee6bcc585ee98220",
+      "inputSchema": "3889671b4210df76",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

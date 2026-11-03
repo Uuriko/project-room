@@ -1,0 +1,69 @@
+{
+  "base": "00c4bfd7a30b9738dfe39497fc72a78dd28bd3b8",
+  "runtimeSource": "6fdb6bec4c73b2f692afac8343c0f2a9a45d025d",
+  "testSource": "6dcd8ce3876e76af9860aeb5467f35af85a221b7",
+  "node": "v24.22.1",
+  "causalBefore": {
+    "exit": 1,
+    "tests": 1,
+    "pass": 0,
+    "fail": 1,
+    "actualLaterQuestionPosts": 0,
+    "required": 1
+  },
+  "focused": {
+    "exit": 0,
+    "tests": 99,
+    "pass": 99,
+    "fail": 0,
+    "skip": 0
+  },
+  "finalTestHardening": {
+    "exit": 0,
+    "tests": 15,
+    "pass": 15,
+    "fail": 0,
+    "skip": 0
+  },
+  "lintExit": 0,
+  "secretFilesExit": 0,
+  "secretDiffExit": 0,
+  "logs": {
+    "causal-before": {
+      "rawBytes": 2357,
+      "rawSha256": "79896d9ec577fdf0a38d655039ee858466615d3586fefab4d2b5dca9b211c6a3"
+    },
+    "focused": {
+      "rawBytes": 52191,
+      "rawSha256": "46906191b0a8fb8258026f38299348fcc10427675c4bb500486d13e117fdbae3"
+    },
+    "final": {
+      "rawBytes": 5817,
+      "rawSha256": "ea25a687c2cafc7a412524c7cdd084a17030e3b510ae09c3d149aacfa364f8f4"
+    },
+    "manifest": {
+      "rawBytes": 687,
+      "rawSha256": "40b6d16f94b6b044efd6a684d1db95cf9c646165f400fdaa5ba5fa028cc2f037"
+    },
+    "lint": {
+      "rawBytes": 0,
+      "rawSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret": {
+      "rawBytes": 24,
+      "rawSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    },
+    "secret-diff": {
+      "rawBytes": 24,
+      "rawSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    },
+    "before-fixture-collision": {
+      "rawBytes": 12758,
+      "rawSha256": "500ac417cf7969a20b9f1a98b302177345f3cd926663e5768ce653f62940a164"
+    },
+    "before-fixture-flood": {
+      "rawBytes": 13398,
+      "rawSha256": "8e2577f342b758966ebe764b6686ec6d02a2285978e28e75d3ddaebd5d17df03"
+    }
+  }
+}

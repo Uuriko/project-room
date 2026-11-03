@@ -750,6 +750,8 @@
   "currentRoom.staleWorkRevision": "Stale Work Item revision",
   "currentRoom.memberAccessUnavailable": "Member access unavailable",
   "currentRoom.recordLoading": "Loading…",
+  "agentError.attention_wait_superseded.hint": "A newer wait replaced this request.",
+  "agentError.attention_wait_superseded.recovery": "Use the newer request result; do not restart the superseded wait. No attention was acknowledged.",
   "agentError.current_room_corrupt.hint": "Selected peer data failed its integrity check.",
   "agentError.current_room_corrupt.recovery": "Stop the read and report the room ID, code and full message to the operator for integrity reconciliation. Do not retry unchanged or treat this as an empty result.",
   "agentSponsor.invalidConsent": "Invalid sponsorship consent",
