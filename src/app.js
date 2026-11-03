@@ -761,7 +761,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : preserveScopedBackup ? 'Session changed. Sign in or refresh to reconnect.'
+      : preserveScopedBackup ? uiText("room.session_changed_reconnect")
         : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");

@@ -607,6 +607,7 @@ export default {
   "cockpit.rosterReceiptHtml": " · <a href=\"{href}\">last receipt {id}…</a>",
   "cockpit.rosterRowHtml": "<article class=\"cockpit-item\" data-work-state=\"{state}\">\n      <header><strong>{name}</strong> <span>{state}{work}</span></header>\n      <p class=\"form-hint\">{room} · tier {tier} · period cost {cost}{receipt}</p>\n    </article>",
   "cockpit.rosterHtml": "<h4>Roster</h4><p class=\"form-hint\">{summary}</p>{rows}",
+  "room.session_changed_reconnect": "Session changed. Sign in or refresh to reconnect.",
   "room.session_changed_recovery": "Your session ended or changed. Private drafts were cleared. Refresh to reconnect, or sign in again.",
   "join.nameUnavailable.title": "Name not available",
   "join.nameUnavailable.reserved.message": "That display name is reserved. Edit the name and try again.",
