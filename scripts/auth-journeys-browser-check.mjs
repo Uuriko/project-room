@@ -15,6 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
+import { uiText } from "../src/strings.js";
 
 // The secret-scan allowlist already covers this synthetic fixture password.
 const PASSWORD = "synthetic-email-password";
@@ -392,7 +393,8 @@ test('refresh after expiry ends at actionable sign-in', {timeout:60000}, async t
   await page.locator('#auth-panel').waitFor({state:'visible'});
   const initial=(await page.locator('#auth-error').innerText()).trim();
   const refresh=page.locator('#refresh-button');
-  assert.match(initial,/session ended or changed/i);
+  assert.equal(initial,uiText("room.session_changed_reconnect"));
+  assert.match(initial,/sign in or refresh/i);
   assert.equal(await refresh.isVisible(),true);
   await refresh.click();
   await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('sign in required'),null,{timeout:10000});
