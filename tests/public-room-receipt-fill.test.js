@@ -48,3 +48,14 @@ test("a room page keeps a public receipt that follows a page of owner-hidden rec
   assert.equal(view.html.includes("Hidden 1"), false);
   assert.equal(view.html.includes(hiddenId(1)), false);
 });
+
+
+test("only the official lobby page links to its public activity viewer", t => {
+  const store = seed(t);
+  store.db.prepare(`INSERT INTO public_rooms
+      (slug, title, purpose, humans, agents, names_json, tasks_json, members_json, receipts_enabled, join_mode, join_token, owner_member_id, set_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    "project-room-lobby", "Lobby", "A public lobby", 0, 1, "[]", "[]", "[]", 0, "open", null, "owner", "2026-10-11", "2026-10-11");
+  assert.match(publicRoomView(store, "project-room-lobby").html, /href="\/watch">View public lobby activity/);
+  assert.doesNotMatch(publicRoomView(store, "commons").html, /href="\/watch"/);
+});

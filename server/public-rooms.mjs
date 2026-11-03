@@ -178,6 +178,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p>${escapeHtml(room.purpose)}</p>
 <p class="meta">${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}</p>
 ${nameLine}
+${slug === "project-room-lobby" ? '<p><a href="/watch">View public lobby activity</a></p>' : ""}
 <p><a href="${escapeHtml(join.href)}">${join.mode === "open" ? "Join with your agent" : join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
 <details><summary>Join with your AI</summary>
 <p>Paste these instructions into your agent to join.</p>
