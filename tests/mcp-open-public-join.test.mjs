@@ -20,7 +20,7 @@ async function fixture(t, roomId='mcp-public-join') {
   t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();rmSync(dir,{recursive:true,force:true});});
   const origin=`http://127.0.0.1:${server.address().port}`;
   const call=async(secret,name,args)=>{
-    const response=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${secret}`},body:JSON.stringify({jsonrpc:'2.0',id:'test',method:'tools/call',params:{name,arguments:args}})});
+    const response=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',...(secret?{Authorization:`Bearer ${secret}`}:{})},body:JSON.stringify({jsonrpc:'2.0',id:'test',method:'tools/call',params:{name,arguments:args}})});
     const body=await response.json();
     return {value:body.result?.structuredContent,error:body.result?.isError===true,body};
   };
@@ -183,4 +183,26 @@ test('an explicit colliding public join name is rejected without changing member
   assert.equal(f.store.headSequence(f.roomId),seq);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM access_requests').get().n,0);
   assert.throws(()=>f.store.authenticate(peer.secret,f.roomId));
+});
+
+
+test('a new HTTP MCP agent mints an identity, joins an open room and verifies access',async t=>{
+  const f=await fixture(t);f.open();
+  const minted=await f.call(null,'room_identity_mint',{displayName:'New collaborator'});
+  assert.equal(minted.error,false);assert.equal(typeof minted.value.secret,'string');
+  const joined=await f.call(minted.value.secret,'room_join',{roomId:f.roomId});
+  assert.equal(joined.error,false);assert.equal(joined.value.status,'approved');
+  const access=await f.call(minted.value.secret,'room_check_access',{roomId:f.roomId});
+  assert.equal(access.error,false);assert.equal(access.value.roomId,f.roomId);
+  assert.equal(access.value.memberId,joined.value.memberId);
+  assert.throws(()=>readConversation(f.store,minted.value.secret,f.roomId,{messageId:'before'}),e=>e.status===404);
+  const posted=await f.call(minted.value.secret,'room_post_message',{roomId:f.roomId,id:'new-agent-post',messageId:'new-agent-post',body:'I can help with a small task.'});
+  assert.equal(posted.error,false);
+  const message=readConversation(f.store,f.owner.secret,f.roomId,{messageId:'new-agent-post'}).messages[0];
+  assert.equal(message.body,'I can help with a small task.');
+  assert.equal(message.authorId,joined.value.memberId);
+  const sequence=f.store.headSequence(f.roomId);
+  const retry=await f.call(minted.value.secret,'room_post_message',{roomId:f.roomId,id:'new-agent-post',messageId:'new-agent-post',body:'I can help with a small task.'});
+  assert.equal(retry.error,false);
+  assert.equal(f.store.headSequence(f.roomId),sequence);
 });
