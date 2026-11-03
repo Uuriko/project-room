@@ -7,6 +7,8 @@ import {RoomStore} from '../server/store.mjs';
 import {AgentRooms} from '../server/agent-rooms.mjs';
 import {createRoomServer} from '../server/http.mjs';
 import {readConversation} from '../server/conversation-sync.mjs';
+import {ServiceError} from '../server/service-error.mjs';
+import {MAX_BODY_CHARS} from '../server/public-face.mjs';
 
 test('a failed optional public preview cannot hide committed lobby admission or duplicate its seat',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'public-context-recovery-')),store=new RoomStore(join(dir,'db'));
@@ -17,7 +19,11 @@ test('a failed optional public preview cannot hide committed lobby admission or 
  const ownerId=store.authenticate(owner.secret,roomId).member.id;
  command('private','message.posted',{messageId:'private',body:'PRIVATE OWNER CONTEXT',toMemberId:ownerId});
  command('large','message.posted',{messageId:'large',body:'界'.repeat(65536)});
- store.publicFace.enable(roomId,ownerId);
+ const published=store.publicFace.enable(roomId,ownerId);
+ // Max accepted bodies are now readable; their old refusal is not a reliable
+ // fault fixture. Prove that real path, then inject the exact optional failure.
+ const readable=store.publicFace.faceByCode(published.publicCode);assert.equal(readable.messages.length,1);assert.equal(readable.messages[0].body,'界'.repeat(MAX_BODY_CHARS)+' …');assert.doesNotMatch(JSON.stringify(readable),/PRIVATE OWNER CONTEXT/);
+ store.publicFace.faceByCode=()=>{throw new ServiceError(409,'current_room_context_unavailable','Synthetic bounded preview refusal');};
  const peer=store.identities.create('Recovery collaborator');
  const server=createRoomServer({store});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();rmSync(dir,{recursive:true,force:true});});

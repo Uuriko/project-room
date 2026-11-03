@@ -19,10 +19,15 @@ async function startBridge(t, room, mode) {
   const connection = await join({ link: room.invite().link, displayName: "Coder", env: room.env });
   const bridge = new Bridge({ connection, candidate: { id: "fake", label: "Fake", command: process.execPath, args: [FAKE_AGENT] },
     env: { ...room.env, FAKE_ACP_MODE: mode }, waitMs: 3000, restartDelayMs: 30, log: process.env.RA_DEBUG ? (...a) => console.error("[bridge]", ...a) : () => {} });
+  // Isolate the local ordinary-reply window from the real API/lease clocks.
+  let reservationClock = Date.now();
+  const reserve = bridge.reserveOrdinaryReply.bind(bridge);
+  bridge.reserveOrdinaryReply = receipt => reserve(receipt, reservationClock);
+  const advanceReservation = ms => { reservationClock += ms; };
   const done = bridge.run();
   t.after(async () => { bridge.stop(); await done; });
   await waitFor(() => bridge.members && bridge.fencingToken);
-  return { bridge, connection };
+  return { bridge, connection, advanceReservation };
 }
 const repliesTo = (room, rootId, memberId) => room.messages().filter(message => message.replyToId === rootId && message.authorId === memberId);
 
@@ -77,12 +82,13 @@ test("session map persists, survives reload, and stays bounded", t => {
 
 test("a crashed agent restarts and the thread resumes with session/load", async t => {
   const room = await startRoom(t);
-  const { bridge, connection } = await startBridge(t, room, "echo");
+  const { bridge, connection, advanceReservation } = await startBridge(t, room, "echo");
   const rootId = room.say("@Coder remember this");
   await waitFor(() => repliesTo(room, rootId, connection.memberId).length === 1);
   const before = bridge.host.sessions.get(rootId);
   bridge.host.process.child.kill("SIGKILL");
   await waitFor(() => bridge.crashes.length === 1);
+  advanceReservation(60000); // A new ordinary reply is eligible in its next window.
   room.say("@Coder still there?", { replyToId: rootId });
   const list = await waitFor(() => { const all = repliesTo(room, rootId, connection.memberId); return all.length === 2 ? all : null; });
   assert.equal(bridge.host.sessions.get(rootId), before, "same ACP session after restart");
@@ -91,11 +97,12 @@ test("a crashed agent restarts and the thread resumes with session/load", async 
 
 test("without loadSession a restarted thread gets the full context again", async t => {
   const room = await startRoom(t);
-  const { bridge, connection } = await startBridge(t, room, "no-loadSession");
+  const { bridge, connection, advanceReservation } = await startBridge(t, room, "no-loadSession");
   const rootId = room.say("@Coder first");
   await waitFor(() => repliesTo(room, rootId, connection.memberId).length === 1);
   bridge.host.process.child.kill("SIGKILL");
   await waitFor(() => bridge.crashes.length === 1);
+  advanceReservation(60000); // Restart recovery does not bypass reply suppression.
   room.say("@Coder second", { replyToId: rootId });
   const list = await waitFor(() => { const all = repliesTo(room, rootId, connection.memberId); return all.length === 2 ? all : null; });
   assert.match(list[1].body, /Thread so far[\s\S]*first[\s\S]*second/);
