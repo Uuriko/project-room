@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   sha256Hex,
@@ -416,7 +416,7 @@ const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
 const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
-const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, definitions: `server/writer-fence.mjs@${blob}` });
+const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, replyContractBlob: '9'.repeat(40), definitions: `server/writer-fence.mjs@${blob}\nsrc/reply-requests.js@${'9'.repeat(40)}` });
 const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema, schemaSource: fenceProof(schema, recoveryRevision) });
 
 test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
@@ -546,7 +546,8 @@ import { createServer } from "node:http";
 for (const [previousVersion, candidateVersion] of [[37, 38], [42, 42]])
 test(`actual recovery CLI refuses ${previousVersion}-to-${candidateVersion} fallback with changed table definitions`, async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
-  mkdirSync(join(dir, "server")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
+  mkdirSync(join(dir, "server")); mkdirSync(join(dir, "src")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
+  writeFileSync(join(dir, 'src/reply-requests.js'), 'export const MAX_RESPONSE_BODY = 2048;\n');
   // The extensionless fake pnpm is CommonJS even under repository-local TMPDIR.
   writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "commonjs" }));
   const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
@@ -678,7 +679,8 @@ test("automatic rollback refuses when a table list imported by writer-fence chan
   const fence = 'import { ABUSE_RATE_TABLES } from "./abuse-rate-buckets.mjs";\nexport const STORE_SCHEMA_VERSION = 42;\n';
   const oldRev = "1".repeat(40), newRev = "2".repeat(40);
   const blobs = { [`${oldRev}:server/writer-fence.mjs`]: "f".repeat(40), [`${newRev}:server/writer-fence.mjs`]: "f".repeat(40),
-    [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40) };
+    [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40),
+    [`${oldRev}:src/reply-requests.js`]: "9".repeat(40), [`${newRev}:src/reply-requests.js`]: "9".repeat(40) };
   const git = args => {
     if (args[0] === "show") return fence;
     if (args[0] === "rev-parse" && blobs[args[1]]) return `${blobs[args[1]]}\n`;
@@ -693,4 +695,54 @@ test("automatic rollback refuses when a table list imported by writer-fence chan
   // Same imported blobs on both sides stays eligible.
   blobs[`${newRev}:server/abuse-rate-buckets.mjs`] = "3".repeat(40);
   assert.equal(automaticRollbackDecision(previous, 42, schemaAt(newRev, git)).eligible, true);
+});
+
+test('automatic rollback refuses changed reply contracts at an identical schema fence using exact Git blobs', async t => {
+  const dir = tempDir(t, 'reply-contract-rollback-');
+  mkdirSync(join(dir, 'server')); mkdirSync(join(dir, 'src'));
+  const git = async args => (await execFileAsync('git', args, {cwd: dir})).stdout.trim();
+  await git(['init', '--quiet']);
+  await git(['config', 'user.name', 'Synthetic rollback test']);
+  await git(['config', 'user.email', 'rollback@example.test']);
+  writeFileSync(join(dir, 'server/writer-fence.mjs'), 'export const STORE_SCHEMA_VERSION = 45;\n');
+  writeFileSync(join(dir, 'src/reply-requests.js'), 'export const MAX_RESPONSE_BODY = 2048;\nthrow Error("must never evaluate source");\n');
+  await git(['add', '.']); await git(['commit', '--quiet', '-m', 'old reply reader']);
+  const old = await git(['rev-parse', 'HEAD']);
+  writeFileSync(join(dir, 'src/reply-requests.js'), 'export const MAX_RESPONSE_BODY = 8192;\nthrow Error("must never evaluate source");\n');
+  await git(['add', '.']); await git(['commit', '--quiet', '-m', 'expanded reply reader']);
+  const changed = await git(['rev-parse', 'HEAD']);
+  rmSync(join(dir, 'src/reply-requests.js'));
+  await git(['add', '.']); await git(['commit', '--quiet', '-m', 'missing reply proof']);
+  const missing = await git(['rev-parse', 'HEAD']);
+  // Read exact blobs without evaluating either executable sentinel.
+  const readGit = args => execFileSync('git', args, {cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  const prior = schemaAt(old, readGit), candidate = schemaAt(changed, readGit);
+  assert.equal(prior.blob, candidate.blob);
+  const previous = {known: true, versionId: recoveryOld, sourceRevision: old, codeSchemaVersion: 45, schemaSource: prior};
+  assert.equal(automaticRollbackDecision(previous, 45, candidate).eligible, false, 'new response semantics must not roll back to the unchanged-fence old reader');
+  assert.match(automaticRollbackDecision(previous, 45, candidate).reason, /reply/);
+  assert.equal(automaticRollbackDecision(previous, 45, schemaAt(old, readGit)).eligible, true);
+  assert.equal(prior.replyContractBlob, await git(['rev-parse', old + ':src/reply-requests.js']));
+  assert.equal(candidate.replyContractBlob, await git(['rev-parse', changed + ':src/reply-requests.js']));
+  const unknown = schemaAt(missing, readGit);
+  assert.equal(unknown.version, 45, 'manual schema proof remains separately available');
+  assert.equal(unknown.replyContractBlob, null);
+  assert.equal(automaticRollbackDecision(previous, 45, unknown).eligible, false);
+});
+
+test('automatic rollback refuses missing explicit reply proofs even when old definition strings match', () => {
+  const prior = previousWorker(45), candidate = fenceProof(45);
+  for (const field of [undefined, null, 'unknown']) {
+    assert.equal(automaticRollbackDecision({...prior, schemaSource: {...prior.schemaSource, replyContractBlob: field}}, 45, candidate).eligible, false);
+    assert.equal(automaticRollbackDecision(prior, 45, {...candidate, replyContractBlob: field}).eligible, false);
+  }
+});
+
+test('current repository schema proof pins the actual checked-in reply contract without evaluating it', () => {
+  const cwd = fileURLToPath(new URL('..', import.meta.url));
+  const git = args => execFileSync('git', args, {cwd, encoding: 'utf8'});
+  const revision = git(['rev-parse', 'HEAD']).trim(), proof = schemaAt(revision, git);
+  const blob = git(['rev-parse', revision + ':src/reply-requests.js']).trim();
+  assert.equal(proof.replyContractBlob, blob);
+  assert.ok(proof.definitions.split('\n').includes('src/reply-requests.js@' + blob));
 });

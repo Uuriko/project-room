@@ -40,7 +40,16 @@ export function schemaAt(revision, git = args => command(['git', ...args])) {
     const imports = [...new Set([...text.matchAll(/^\s*import\s[^;]*?\sfrom\s+["']\.\/([\w.-]+\.mjs)["']/gm)].map(match => `server/${match[1]}`))].sort();
     const pinned = [['server/writer-fence.mjs', blob], ...imports.map(path => [path, git(['rev-parse', `${revision}:${path}`]).trim()])];
     if (!pinned.every(([, sha]) => shaPattern.test(sha))) return null;
-    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
+    // Reader semantics can change without a storage-floor change. Keep an
+    // absent historical contract unknown for automatic recovery, while leaving
+    // its schema proof available to the separately qualified manual path.
+    let replyContractBlob = null;
+    try {
+      const proof = git(['rev-parse', `${revision}:src/reply-requests.js`]).trim();
+      if (shaPattern.test(proof)) replyContractBlob = proof;
+    } catch { /* an older source may not contain the reply contract */ }
+    if (replyContractBlob) pinned.push(['src/reply-requests.js', replyContractBlob]);
+    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, replyContractBlob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
   } catch { return null; }
 }
 export function allocation(status) {
@@ -66,8 +75,8 @@ export function rollbackDecision(previous, candidateSchema) {
 export function automaticRollbackDecision(previous, candidateSchema, candidateSource) {
   const floor = rollbackDecision(previous, candidateSchema);
   if (!floor.eligible) return floor;
-  // Equal schema numbers can still introduce tables unknown to the old
-  // recovery/export code. Compare exact Git definitions, never just integers.
+  // Equal schema numbers can introduce tables or accepted reply shapes unknown
+  // to prior code. Compare exact Git definitions, never just integers.
   const prior = previous.schemaSource;
   if (!shaPattern.test(candidateSource?.blob ?? '') || candidateSource?.version !== candidateSchema
     || !shaPattern.test(candidateSource?.revision ?? '') || !shaPattern.test(prior?.blob ?? '')
@@ -75,9 +84,13 @@ export function automaticRollbackDecision(previous, candidateSchema, candidateSo
     return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
   if (typeof prior.definitions !== 'string' || typeof candidateSource.definitions !== 'string')
     return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
+  if (!shaPattern.test(prior.replyContractBlob ?? '') || !shaPattern.test(candidateSource.replyContractBlob ?? ''))
+    return { eligible: false, reason: 'exact reply-contract source proof missing or inconsistent' };
+  if (prior.replyContractBlob !== candidateSource.replyContractBlob)
+    return { eligible: false, reason: 'reply-contract definitions changed; prior readers may reject newly accepted responses' };
   if (prior.blob !== candidateSource.blob || prior.definitions !== candidateSource.definitions)
-    return { eligible: false, reason: 'writer-fence definitions changed; prior recovery may reject new tables' };
-  return { eligible: true, reason: 'schema floor and exact writer-fence definition match; row/runtime compatibility is not established by this check' };
+    return { eligible: false, reason: 'writer-fence or reply-contract definitions changed; prior recovery or readers may be incompatible' };
+  return { eligible: true, reason: 'schema floor, exact writer-fence definitions and reply contract match; other row/runtime compatibility is not established by this check' };
 }
 export async function observeWorker({ status, readVersion, schema = schemaAt }) {
   const before = allocation(await status());
@@ -161,7 +174,7 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
   }
   const rows = Object.values(workers);
   const statusValue = rows.some(row => row.disposition === 'roll_forward_required') ? 'ROLL FORWARD REQUIRED' : rows.some(row => row.disposition === 'rollback_unverified') ? 'ROLLBACK NOT VERIFIED' : rows.some(row => row.disposition === 'rollback_verified') ? 'ROLLBACK VERIFIED' : 'NO DEPLOYMENT CHANGE OBSERVED';
-  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor and exact writer-fence definition only; this does not prove prior code understands new rows, semantics or retained runtime.', recordedAt: new Date().toISOString(), workers };
+  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor, exact writer-fence definitions and reply contract only; this does not prove prior code understands other new rows, semantics or retained runtime. Manual rollback requires separate explicit compatibility qualification.', recordedAt: new Date().toISOString(), workers };
 }
 export function recoveryDescription(report) {
   if (!report) return 'Recovery not attempted or report unavailable; no rollback is claimed.';
