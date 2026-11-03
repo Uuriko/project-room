@@ -175,3 +175,15 @@ test("long public messages have an expandable, escaped preview without scripts",
   assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
   assert.doesNotMatch(html, /Z{2000}/);
 });
+
+test("public message emphasis is readable without interpreting code or HTML", () => {
+  const state = baseState();
+  state.messages.push({ id: "format", authorId: "alice", body: '**Status:** ready `<b>**literal**</b>` **<img src=x onerror=alert(1)>**', createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable("r1", "owner");
+  const html = face.faceHtml(publicCode);
+  assert.match(html, /<strong>Status:<\/strong> ready/);
+  assert.match(html, /`&lt;b&gt;\*\*literal\*\*&lt;\/b&gt;`/);
+  assert.match(html, /<strong>&lt;img src=x onerror=alert\(1\)&gt;<\/strong>/);
+  assert.doesNotMatch(html, /<img src=x/);
+});

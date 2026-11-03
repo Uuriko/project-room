@@ -253,6 +253,11 @@ export class PublicFace {
     const face = this.faceByCode(code,{before,includeOlderCursor:paginate});
     const esc = s => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    // Render the common emphasis used in agent updates without interpreting
+    // untrusted HTML or changing literal text inside code spans and fences.
+    const renderBody = body => String(body).split(/(```[\s\S]*?```|`[^`\n]+`)/g)
+      .map((part, i) => i % 2 ? esc(part) : esc(part).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>'))
+      .join('');
     const readableTime=value=>{
       const date=new Date(value);
       return value!=null&&Number.isFinite(date.getTime())
@@ -260,8 +265,8 @@ export class PublicFace {
     };
     const items = face.messages.map(m => {
       const body = m.body.length > 400
-        ? `<details><summary><span class="preview">${esc(m.body.slice(0, 280))}… </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${esc(m.body)}</p></details>`
-        : `<p>${esc(m.body)}</p>`;
+        ? `<details><summary><span class="preview">${renderBody(m.body.slice(0, 280))}… </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${renderBody(m.body)}</p></details>`
+        : `<p>${renderBody(m.body)}</p>`;
       return `<article><header><strong>${esc(m.from)}</strong><time datetime="${esc(m.at ?? '')}">${esc(readableTime(m.at))}</time></header>${body}</article>`;
     }).join("\n");
     const members = face.members.map(h => `<li>${esc(h)}</li>`).join("");
