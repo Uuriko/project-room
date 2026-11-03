@@ -147,7 +147,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     assert.equal(response.status(), 200);
   };
   await heartbeat(); await refresh();
-  await signal.locator('.member-availability').filter({ hasText: /^Listening$/ }).waitFor();
+  await signal.locator('.member-availability').filter({ hasText: /^Host recently seen · listener unverified$/ }).waitFor();
   assert.equal(await signal.locator('.member-profile').evaluate(node => node.open), false, 'live availability is readable without opening options');
   const profile = signal.locator('.member-profile');
   await profile.locator(':scope > summary').click();
@@ -224,7 +224,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(await signal.locator('.member-working-on').count(), 0);
   assert.match(await signal.locator('.member-assignment').textContent(), /^Assigned: /);
   await heartbeat(); await refresh();
-  await signal.locator('.member-availability').filter({ hasText: /^Listening$/ }).waitFor();
+  await signal.locator('.member-availability').filter({ hasText: /^Host recently seen · listener unverified$/ }).waitFor();
   const chip = codex.locator(".done-chip");
   assert.equal(await chip.textContent(), "Done");
   assert.equal(await chip.getAttribute("data-done-work"), "work-review");
@@ -302,11 +302,11 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   store.command(owner, 'commons', command(T.MEMBER_ADDED, { memberId: 'snapshot-agent', displayName: 'Snapshot agent', kind: 'agent', permissions: [] }));
   await page.locator('[data-member-record-id="snapshot-agent"]').waitFor();
   await refresh();
-  await signal.locator('.member-availability').filter({ hasText: /^Listening$/ }).waitFor();
+  await signal.locator('.member-availability').filter({ hasText: /^Host recently seen · listener unverified$/ }).waitFor();
   const oldFailed = page.waitForEvent('requestfailed', request => presenceRoute.test(request.url()));
   releaseOld(); await oldFailed;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await signal.locator('.member-availability').textContent(), 'Listening');
+  assert.equal(await signal.locator('.member-availability').textContent(), 'Host recently seen · listener unverified');
   assert.doesNotMatch(await page.locator('.presence-check-note').textContent(), /could not refresh/);
   await page.unroute(presenceRoute); await refresh();
   // A captured real response from commons must not populate a restored room.

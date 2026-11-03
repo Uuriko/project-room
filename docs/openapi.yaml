@@ -1665,9 +1665,10 @@ paths:
         `basis: "member-added"` with `lastSeenAt: null` when only a join
         stamp exists — never as online).
         Derived state is working only for a fresh processing/active session;
-        listening for an SSE watcher, canonical online agent host (respecting
-        each host's cadence), or a human command within 5 minutes; idle for
-        recent agent activity without a live connection; unknown for an agent
+        listening for a human SSE watcher or a human command within 5 minutes; idle for
+        an agent transport watcher, an online agent host, or recent agent activity
+        without a verified listener.
+        Host heartbeats indicate a connection but do not prove a listener; unknown for an agent
         without reliable recent observations; unreachable for a registered
         offline host without stronger live evidence. These observations do
         not prove runtime termination, change access, or release reservations.

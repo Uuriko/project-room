@@ -5737,7 +5737,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if(isCurrentRoom(this.db,roomId))return this.readTransaction(()=>withCurrentReadContext(this.db,roomId,()=>{
       this.authenticate(token,roomId,expectedSessionBinding);
       const members=this.currentPresenceMembers(roomId,watcherMemberIds);
-      const connectedIds=members.filter(member=>member.watching||member.state==='listening').map(member=>member.memberId);
+      const connectedIds=members.filter(member=>member.watching||member.state==='listening'||member.presence?.status==='online').map(member=>member.memberId);
       const next=connectedIds.length?presenceNext(roomId,connectedIds):[{action:'watch-presence',description:'No live connection observed. Watch presence for connection updates; execution and held work have not been evaluated.'}];
       return{members,coverage:{membership:'complete-current-roster',connection:'observed',execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'},next};
     },{maxRecords:512}));
@@ -5749,7 +5749,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Holding a live claim is NOT such an observation: it never keys
       // dm-member (REGISTER row 59).
       const onlineIds = listed.filter(m => m.watching
-        || m.state === "listening" || m.state === "working").map(m => m.memberId);
+        || m.state === "listening" || m.state === "working" || m.presence?.status === "online").map(m => m.memberId);
       return {
         members: listed,
         next: Object.freeze(presenceNext(roomId, onlineIds, evidence)),
@@ -5769,7 +5769,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const host=link?this.agentHeartbeats.statusWindow(link.identity_id):null,observed=host&&host.status!=='unregistered'&&Number.isFinite(host.lastSeenAt)&&host.lastSeenAt<=this.now();
         const isWatching=watching.has(m.id),liveHost=observed&&host.status==='online';
         return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
-          state:isWatching||liveHost?'listening':'unknown',isOwner:m.id===ownerId,scopes:[...m.permissions],ownerIdentityId:link?.identity_id??null,coverage:{execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'}};
+          state:isWatching?(m.kind==='agent'?'idle':'listening'):liveHost?'idle':'unknown',isOwner:m.id===ownerId,scopes:[...m.permissions],ownerIdentityId:link?.identity_id??null,coverage:{execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'}};
       }).sort((a,b)=>a.memberId.localeCompare(b.memberId,'en'));
     },{maxRecords:512});
   }

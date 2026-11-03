@@ -30,25 +30,25 @@ test("presenceState: active session -> working", () => {
   assert.equal(presenceState({ kind: "human", hasActiveSession: true, now: NOW }), "working");
 });
 
-test("presenceState: agent ordinary command with live host -> listening", () => {
+test("presenceState: agent ordinary command with live host -> idle", () => {
   assert.equal(presenceState({
     kind: "agent", hasActiveSession: false,
     hostStatus: "online", hostLastSeenAt: NOW - 2 * min, lastCommandAt: NOW - 2 * min,
     now: NOW,
-  }), "listening");
+  }), "idle");
 });
 
 test("presenceState: agent with live host but stale command -> not working", () => {
-  // Host is live but the agent hasn't issued a command recently: listening.
+  // Host is live but has not proved a listener.
   assert.equal(presenceState({
     kind: "agent", hasActiveSession: false,
     hostStatus: "online", hostLastSeenAt: NOW - 2 * min, lastCommandAt: NOW - 30 * min,
     now: NOW,
-  }), "listening");
+  }), "idle");
 });
 
-test("presenceState: watching -> listening", () => {
-  assert.equal(presenceState({ kind: "agent", watching: true, now: NOW }), "listening");
+test("presenceState: watching alone does not prove an agent listener", () => {
+  assert.equal(presenceState({ kind: "agent", watching: true, now: NOW }), "idle");
   assert.equal(presenceState({ kind: "human", watching: true, now: NOW }), "listening");
 });
 

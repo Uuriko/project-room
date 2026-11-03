@@ -228,6 +228,9 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(memberHandle({ kind: "human", displayName: "Maya" }), "Maya");
   assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }, "Codex (codex)"), "@Codex (codex)");
   assert.equal(presenceLabel("online"), "Online");
+  assert.equal(presenceLabel("idle", {kind:"agent", watching:true}), "Connection observed · listener unverified");
+  assert.equal(presenceLabel("idle", {kind:"agent", presence:{status:"online"}}), "Host recently seen · listener unverified");
+  assert.equal(presenceLabel("idle", {kind:"agent", presence:{status:"offline"}}), "Idle");
   const fromClick = addressMember("hello", 5, members[0]);
   assert.equal(fromClick.body, "hello @Instinct ");
   assert.equal(fromClick.toMemberId, "");

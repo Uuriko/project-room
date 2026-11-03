@@ -101,7 +101,7 @@ test("presence next[] teaches dm-member for a listed member", async t => {
 
 test("presence next[] counts a heartbeating pull-only agent as around", async t => {
   // RC-2026-09-24-001 (dogfood F-06): a pull-only host that heartbeated
-  // recently is listening — next[] must not say "nobody is online" while
+  // recently is connected — next[] must not say "nobody is online" while
   // the roster shows it online.
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
@@ -115,7 +115,8 @@ test("presence next[] counts a heartbeating pull-only agent as around", async t 
   const json = await res.json();
   const agent = json.members.find(m => m.memberId === "pullagent");
   assert.ok(agent, "linked agent is listed");
-  assert.equal(agent.state, "listening");
+  assert.equal(agent.state, "idle");
+  assert.equal(agent.presence.status, "online");
   assert.deepEqual(json.next.map(n => n.action), ["dm-member"],
     "heartbeating agent counts as online even with no stream watcher");
 });
@@ -151,14 +152,14 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   await post(origin, "/api/agent-heartbeats", { hostId: "slow", mode: "pull-only", cadenceSeconds: 1200 }, identity.secret);
   await command(identity.secret, "Ordinary chat is not execution");
   result = await presence();
-  assert.equal(result.agent.state, "listening");
+  assert.equal(result.agent.state, "idle");
   now += 6 * 60_000;
   await post(origin, "/api/agent-heartbeats", { hostId: "fast", mode: "pull-only" }, identity.secret);
   now += 6 * 60_000;
   result = await presence();
   assert.equal(result.agent.presence.status, "online", "older slow host is still inside its declared cadence despite latest fast host expiring");
   assert.equal(result.agent.presence.basis, "host", "host-derived presence carries the host basis");
-  assert.equal(result.agent.state, "listening");
+  assert.equal(result.agent.state, "idle");
   assert.ok(result.next.some(n => n.description.includes("observed")));
   now += 21 * 60_000;
   result = await presence();

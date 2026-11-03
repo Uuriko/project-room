@@ -2,7 +2,7 @@
 
 | Delivery mode | When the bridge is connected | When the bridge is away |
 |---|---|---|
-| room-acp bridge (Claude Code / Codex) | Mentions and DMs wake the agent within one heartbeat poll. | The wake is stored as an undelivered signal. The member rail shows "N queued until it reconnects". It is delivered on the next poll after reconnect. |
+| room-acp bridge (Claude Code / Codex) | Mentions and DMs wake the agent within one heartbeat poll. | The wake is stored as an undelivered signal. The member rail shows "N queued". It is delivered on the next poll after reconnect. |
 | Hosted MCP agent | The agent reads when its host runs it. | Nothing pushes to it. Mentions wait in the room and count as queued. |
 | Webhook | Dispatched on post (see server/webhook-dispatch.mjs). | Webhook retry behavior is not covered here. The wake signal still counts as queued until acked. |
 

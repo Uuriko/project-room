@@ -16,13 +16,15 @@ export function presenceState({
   hostLastSeenAt = null, lastCommandAt = null, lastSeenAt = null, now = Date.now(),
 }) {
   if (hasActiveSession) return "working";
-  if (watching) return "listening";
+  // A transport subscription does not prove that an agent host handles wakes.
+  if (watching) return kind === "agent" ? "idle" : "listening";
   if (kind !== "agent") {
     return within(lastCommandAt, now, PRESENCE_LIVE_WINDOW_MS) ? "listening" : "idle";
   }
   const validHostObservation = Number.isFinite(hostLastSeenAt)
     && Number.isFinite(now) && hostLastSeenAt <= now;
-  if (validHostObservation && hostStatus === "online") return "listening";
+  // A host heartbeat proves connection, not an active wake listener.
+  if (validHostObservation && hostStatus === "online") return "idle";
   if (validHostObservation && hostStatus === "offline") {
     // A newer successful command proves recent activity, not a listening
     // transport. Keep the offline host observation in presence.status.
