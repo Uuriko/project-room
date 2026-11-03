@@ -264,8 +264,14 @@ export class PublicFace {
         ?new Intl.DateTimeFormat('en',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'UTC'}).format(date)+' UTC':'';
     };
     const items = face.messages.map(m => {
-      const body = m.body.length > 400
-        ? `<details><summary><span class="preview">${renderBody(m.body.slice(0, 280))}… </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${renderBody(m.body)}</p></details>`
+      // Keep the feed scannable while retaining every published message in
+      // the native disclosure. Collapse whitespace only in the preview.
+      const compact = m.body.replace(/\s+/gu, ' ').trim();
+      const preview = Array.from(compact);
+      let excerpt = preview.slice(0, 160).join('');
+      if (preview.length > 160 && excerpt.lastIndexOf(' ') > 100) excerpt = excerpt.slice(0, excerpt.lastIndexOf(' '));
+      const body = preview.length > 160 || m.body.split('\n').length > 3
+        ? `<details><summary><span class="preview">${renderBody(excerpt)}${preview.length > 160 ? '…' : ''} </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${renderBody(m.body)}</p></details>`
         : `<p>${renderBody(m.body)}</p>`;
       return `<article><header><strong>${esc(m.from)}</strong><time datetime="${esc(m.at ?? '')}">${esc(readableTime(m.at))}</time></header>${body}</article>`;
     }).join("\n");

@@ -176,6 +176,21 @@ test("long public messages have an expandable, escaped preview without scripts",
   assert.doesNotMatch(html, /Z{2000}/);
 });
 
+test("public activity previews stay compact and retain the complete message", () => {
+  const state = baseState();
+  const body = 'Update\n\n' + '😀'.repeat(170) + '\nFinal detail';
+  state.messages.push({ id: 'compact', authorId: 'alice', body, createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable('r1', 'owner');
+  const html = face.faceHtml(publicCode);
+  const preview = html.match(/<span class="preview">(.*?)<\/span>/s)?.[1];
+  assert.ok(preview);
+  assert.doesNotMatch(preview, /\n/);
+  assert.ok(Array.from(preview).length <= 162);
+  assert.ok(html.includes(body));
+  assert.match(html, /Show more/);
+});
+
 test("public message emphasis is readable without interpreting code or HTML", () => {
   const state = baseState();
   state.messages.push({ id: "format", authorId: "alice", body: '**Status:** ready `<b>**literal**</b>` **<img src=x onerror=alert(1)>**', createdAt: 20 });
