@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {event} from '../src/events.js';
+import {withCurrentReadContext,withCurrentRoomWriter} from '../server/current-room-repository.mjs';
 
 function fixture(t,extend=()=>{}){
  const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
@@ -16,6 +17,53 @@ function fixture(t,extend=()=>{}){
 test('normalized current requests list does not report an existing incoming obligation as empty',t=>{
  const {store,keys}=fixture(t),listed=store.replyRequests.list(keys.reader,'commons');
  assert.deepEqual(listed.requests.map(request=>request.id),['question']);
+});
+test('bounded witnessed refill finds an addressed request behind unrelated requests',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<18;i++)add('message.posted',{messageId:`a-noise-${String(i).padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Private'});
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ const result=store.replyRequests.list(keys.reader,'commons',{limit:8});
+ assert.deepEqual(result.requests.map(request=>request.id),['question']);
+ assert.equal(result.page.hasMore,false);
+});
+test('witnessed refill respects a nested 200-record context and returns every request',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<25;i++)add('message.posted',{messageId:`a-match-${String(i).padStart(2,'0')}`,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ let args={direction:'incoming',status:'open',limit:50},ids=[],pages=0;
+ do{
+  const {result,records}=withCurrentReadContext(store.db,'commons',b=>{
+   const result=store.replyRequests.list(keys.reader,'commons',args);
+   return {result,records:b.records};
+  },{maxRecords:200});
+  assert.ok(records<=200);
+  ids.push(...result.requests.map(request=>request.id));args=result.nextRead?.arguments;
+  assert.ok(++pages<20);
+ }while(args);
+ assert.equal(ids.length,26);assert.equal(new Set(ids).size,26);assert.equal(ids.at(-1),'question');
+});
+for(const [field,value] of [['recipientId','other'],['status','answered']])test(`witnessed refill fails closed when ${field} is corrupted`,t=>{
+ const {store,keys}=fixture(t);
+ store.transaction(()=>withCurrentRoomWriter(store.db,'commons',()=>store.db.prepare(
+  "UPDATE current_room_records SET payload=json_set(payload,?,?) WHERE room_id='commons' AND domain='replyRequests' AND record_key='question'"
+ ).run(`$.${field}`,value)));
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ assert.throws(()=>store.replyRequests.list(keys.reader,'commons',{direction:'incoming',status:'open'}),/current_room_corrupt/);
+});
+test('large cancelled requests keep a bounded continuation',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<8;i++){
+   const id=`budget-${i}`;
+   add('message.posted',{messageId:id,toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1,body:'Question'});
+   add('reply_request.cancelled',{requestMessageId:id,expectedRequestRevision:0,reason:'\u0001'.repeat(4096)});
+  }
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ let args={direction:'incoming',status:'cancelled',limit:8},ids=[],pages=0;
+ do{const result=store.replyRequests.list(keys.reader,'commons',args);ids.push(...result.requests.map(r=>r.id));args=result.nextRead?.arguments;assert.ok(++pages<10);}while(args);
+ assert.ok(pages>1);assert.deepEqual(ids,Array.from({length:8},(_,i)=>`budget-${i}`));
 });
 test('normalized selected request is readable through the existing reader and supplies exact answer basis',t=>{
  const {store,keys}=fixture(t),read=store.replyRequests.selected(keys.reader,'commons','question');
@@ -123,8 +171,8 @@ test('same-member active credentials cannot transfer selected, list, or history 
  assert.equal(store.authenticate(keys.reader,'commons').member.id,store.authenticate(second,'commons').member.id);
  const selected=store.replyRequests.selected(keys.reader,'commons','question',{limit:1});
  const history=store.replyRequests.history(keys.reader,'commons',{limit:1});
- // Add one excluded request so the list also has a continuation.
- store.command(keys.owner,'commons',{id:'excluded-bound',type:'message.posted',data:{messageId:'excluded-bound',toMemberId:'other',requestKind:'reply',body:'Excluded'}});
+ // A second addressed request ensures the one-result list has a continuation.
+ store.command(keys.owner,'commons',{id:'excluded-bound',type:'message.posted',data:{messageId:'excluded-bound',toMemberId:'reader',requestKind:'reply',body:'Second'}});
  const list=store.replyRequests.list(keys.reader,'commons',{limit:1});
  assert.ok(list.nextRead);assert.ok(selected.nextRead);assert.ok(history.nextRead);
  for(const read of [selected,history,list]){

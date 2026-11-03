@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {Miniflare} from 'miniflare';import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {fileURLToPath} from 'node:url';
+test('native witnessed request refill follows bounded pages after restart',{timeout:60000},async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'request-refill-native-'));const script=(await build({entryPoints:[fileURLToPath(new URL('./request-refill-qualification-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
+ const create=()=>new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:dir,durableObjects:{ROOM:{className:'RequestIndexRoom',useSQLite:true}}});let mf=create();
+ const read=async(path)=>{let r=await mf.dispatchFetch('https://room.example.test'+path),body=await r.json();assert.equal(r.status,200,JSON.stringify(body));return body};
+ const drain=async(status)=>{let cursor=null,ids=[],pages=0;do{const p=await read('/list?status='+status+(cursor?'&cursor='+encodeURIComponent(cursor):''));ids.push(...p.requests.map(x=>x.id));cursor=p.nextRead?.arguments.cursor??null;assert.ok(++pages<20)}while(cursor);return {ids,pages}};
+ try{await read('/seed2');await mf.dispose();mf=create();const open=await drain('open');assert.deepEqual(open.ids,['zz-open']);const cancelled=await drain('cancelled');assert.deepEqual(cancelled.ids,Array.from({length:8},(_,i)=>'budget-'+i));assert.ok(cancelled.pages>1)}finally{await mf.dispose();await rm(dir,{recursive:true,force:true})}
+});

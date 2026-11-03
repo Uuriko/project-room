@@ -1,5 +1,5 @@
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
-import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,currentRoomAuthority,withCurrentReadContext,chargeCurrentReadBudget} from './current-room-repository.mjs';
+import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,currentRoomAuthority,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId,ownMember} from '../src/events.js';
 import {messageInHistory} from './history-visibility.mjs';
 import {charterContext} from '../src/room-charter.js';
@@ -80,9 +80,17 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   if(mode==='list'){
    const saved=args.cursor==null?null:decodeBound(crypto,args.cursor,binding);
    if(saved&&typeof saved.after!=='string')fail('invalid_reply_cursor','Invalid request source continuation');
-   const source=readCurrentReplyRequestWindow(store,roomId,{after:saved?.after??'',limit:Math.min(limit,WINDOW)});
-   for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
-   const selected=source.requests.filter(r=>directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status));
+   // Refill a few witnessed source windows while there is space. The ceiling
+   // remains explicit; an empty page with hasMore still means keep reading.
+   let source,after=saved?.after??'',windows=0;const selected=[];
+   do{
+    source=readCurrentReplyRequestWindow(store,roomId,{after,limit:Math.min(limit-selected.length,WINDOW)});
+    for(const r of source.requests){if(!validId(r.id)||!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||!['open','answered','declined','cancelled'].includes(r.status)||r.revision!==(r.status==='open'?0:1)||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();requests.set(r.id,r);}
+    selected.push(...source.requests.filter(r=>directionMatches(r,auth.member.id,direction)&&messageInHistory({id:r.id,createdAt:r.createdAt},floor)&&(status==='all'||r.status===status)));
+    after=source.examinedAfter;windows++;
+   }while(source.hasMore&&selected.length<limit&&windows<4
+    &&remainingCurrentReadBytes(b)>144*1024+384*(selected.length+WINDOW)
+    &&(b.maxRecords??200)-b.records>100+3*(selected.length+WINDOW));
    for(const request of selected)noteRequest(request);
    const nextCursor=source.hasMore?crypto.encode({...binding,after:source.examinedAfter}):null;
    const nextRead=nextCursor?{tool:'room_list_requests',arguments:{direction,status,limit,cursor:nextCursor}}:null;
