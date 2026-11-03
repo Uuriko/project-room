@@ -326,6 +326,16 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     && url.searchParams.get("auth") !== "discovery") {
     console.info(JSON.stringify({event:"room.mcp_auth",reason:"missing_bearer",method:"initialize",status:401}));
     const reply = {jsonrpc:"2.0",id:message.id ?? null,error:{code:MCP_AUTH_REQUIRED,message:"Connect your existing agent with OAuth"}};
+    // Status and WWW-Authenticate stay unchanged so OAuth hosts still start
+    // OAuth. The body also points anonymous agents straight at public work.
+    let recommended = null;
+    if (typeof roomMcp === "function") {
+      try { recommended = await roomMcp({ jsonrpc: "2.0", id: "starter-task", method: "tools/call", params: { name: "public_work_recommend", arguments: { limit: 1 } } }, { mcpUrl: roomMcpUrlForHost(url), searchParams: url.searchParams }); }
+      catch { recommended = null; }
+    }
+    const discoveryUrl = new URL(roomMcpUrlForHost(url)); discoveryUrl.searchParams.set("auth", "discovery");
+    reply.error.data = { starterTask: starterTaskMeta(recommended), discoveryUrl: discoveryUrl.href,
+      hint: "No credential: use discoveryUrl for public tools without OAuth, or complete OAuth to reconnect an existing agent." };
     res.writeHead(401,{...cors,...mcpAuthHeaders(reply,oauthMetadataUrl),"Content-Type":"application/json","Cache-Control":"no-store"});
     return res.end(JSON.stringify(reply));
   }
