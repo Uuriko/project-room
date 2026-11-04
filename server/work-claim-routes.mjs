@@ -153,7 +153,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["q", "queue", "auth", "limit", "cursor", "state", "view"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -442,8 +442,17 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
+      invalidInput(reject, "a single queue, state, q, limit, cursor, or view query parameter");
     }
+  }
+  // Literal search, same contract as MCP room_list_work query: at most 200
+  // UTF-16 code units, case-insensitive match on id, title, note and tags.
+  if (params.has("q")) {
+    const q = params.get("q").trim();
+    if (!q || q.length > 200) invalidInput(reject, "q of 1 to 200 characters");
+    const needle = q.toLowerCase();
+    items = items.filter(item => [item.id, item.title, item.note, ...(Array.isArray(item.tags) ? item.tags : [])]
+      .some(v => typeof v === "string" && v.toLowerCase().includes(needle)));
   }
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
