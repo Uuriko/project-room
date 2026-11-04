@@ -832,13 +832,13 @@ function replayClicksOnDemand(feature, selector) {
     if (!trigger || feature.view) return;
     event.preventDefault(); event.stopImmediatePropagation();
     if (held) return;
-    const ticket = held = { trigger, room: state };
+    const ticket = held = { trigger, session: client.session, generation: client.generation };
     trigger.setAttribute("aria-busy", "true");
     void feature.ensure().then(view => {
       trigger.removeAttribute("aria-busy");
       if (held !== ticket) return;
       held = null;
-      if (view && trigger.isConnected && ticket.room === state && !trigger.disabled) trigger.click();
+      if (view && trigger.isConnected && !trigger.disabled && ticket.session === client.session && ticket.generation === client.generation) trigger.click();
     });
   }, true);
   return { cancel() { held = null; } };
