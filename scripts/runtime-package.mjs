@@ -163,6 +163,7 @@ optional.push("src/mcp-server-card.mjs"); // one MCP server card rendered from t
 optional.push("src/mcp-tool-registry.js"); // one MCP tool registry: selection metadata (core/blurb/alias/focus) for every catalog tool (imported by src/room-mcp-join.js and server/mcp-discovery.mjs)
 optional.push("server/mcp-hosted-tools.mjs"); // hosted MCP tool definitions (imported by server/mcp-room-profile.mjs and server/mcp-discovery.mjs)
 optional.push("server/mcp-discovery.mjs"); // binds the server card to those live lists (imported by server/mcp-http.mjs and server/room-entry.mjs)
+optional.push("server/mcp-tool-annotations.mjs", "server/store-pages.mjs"); // Store-listing metadata and public pages imported by discovery and HTTP.
 optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-result-text.mjs"); // withholds minted credentials from MCP result text blocks (imported by server/mcp-identity-mint.mjs and server/mcp-room-profile.mjs)
