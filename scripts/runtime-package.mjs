@@ -336,6 +336,7 @@ optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (importe
 optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (imported by server/boot-options.mjs, cloudflare/room.mjs)
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
+optional.push("server/board-planning.mjs"); // #5889 Board planning fields (imported by server/work-claims.mjs)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
 optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/agent-signin-page.js; formerly src/app.js, RC-2026-09-23)
 optional.push("src/board-deeplink.js"); // Agent first-run board navigation (static browser import).

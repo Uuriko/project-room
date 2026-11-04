@@ -49,6 +49,7 @@ import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+import { storedPlanningOf } from "./board-planning.mjs";
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
@@ -897,7 +898,10 @@ export const workOf = value => {
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
-    owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
+    owner: value.owner ?? null,
+    ...(typeof value.delegate === "string" && value.delegate.length > 0 && value.delegate.length <= 128 ? { delegate: value.delegate } : {}),
+    ...(approvalHoldOf(value.approvalHold) ? { approvalHold: approvalHoldOf(value.approvalHold) } : {}),
+    history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
@@ -907,6 +911,7 @@ export const workOf = value => {
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
     acceptanceCriteria, delivery, verification,
+    ...(storedPlanningOf(value.planning) ? { planning: storedPlanningOf(value.planning) } : {}),
     // #3684: how many deliveries this claim round has frozen (0 = none
     // yet). In-flight approvals (basis generation 0) cover only the
     // round's first delivery; the counter is what makes "first" a fact
@@ -1241,6 +1246,11 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // work must occupy delivered and be verified by its reviewer.
 export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // Approval hold: a pending hold pauses delivery and completion until the
+  // named approver approves. Other moves (block, pause, notes) stay open.
+  if (item.approvalHold?.status === "pending" && (state === "delivered" || state === "done")) {
+    fail("work_approval_pending", `work "${item.id}" is on hold until ${item.approvalHold.approverId} approves: ${item.approvalHold.step}`);
+  }
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1255,7 +1265,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     if (verdict === "conflict") fail("work_claim_conflict",
       `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
   }
-  check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
+  // The delegate (#5876) does the work, so it may move the claim like the owner.
+  check(authority === true || item.owner === agent || (item.delegate !== undefined && item.delegate === agent),
+    `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner or its delegate can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   // The effective review policy for this transition: the caller (route)
   // resolves the room default and passes it in; the item's own policy is
@@ -1663,6 +1675,55 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
     atMs, agent, `reassigned:${target}`, note);
 }
+// Linear-parity delegation: the owner stays accountable while a delegate
+// (usually an agent) does the work, so stale or blocked work always has a
+// human or lead to escalate to. Only the owner (or room authority) sets or
+// clears the delegate; terminal claims are immutable. Pass null to clear.
+export function delegateWork(work, agentId, delegateId, { note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(authority === true || (item.owner !== null && item.owner === agent), `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can set its delegate`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  if (delegateId === null) {
+    const { delegate: _gone, ...rest } = item;
+    return withHistory(rest, atMs, agent, "undelegated", note);
+  }
+  const target = agentOf(delegateId);
+  return withHistory({ ...item, delegate: target }, atMs, agent, `delegated:${target}`, note);
+}
+// Approval hold (Linear has no equivalent; recent agent incidents are
+// destructive steps run without a person saying yes). The owner or
+// delegate names a risky step and an approver; the claim cannot be
+// delivered or finished until the approver approves. A denial clears the
+// pause but records the denial; the worker must re-request to proceed.
+const HOLD_STATUSES = ["pending", "approved", "denied"];
+function approvalHoldOf(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!HOLD_STATUSES.includes(value.status) || typeof value.approverId !== "string" || typeof value.step !== "string") return null;
+  return Object.freeze({ status: value.status, approverId: value.approverId, step: value.step,
+    requestedBy: typeof value.requestedBy === "string" ? value.requestedBy : null,
+    requestedAt: typeof value.requestedAt === "string" ? value.requestedAt : null,
+    decidedAt: typeof value.decidedAt === "string" ? value.decidedAt : null });
+}
+export function requestApproval(work, agentId, { approverId, step, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now), approver = agentOf(approverId);
+  check(item.owner === agent || item.delegate === agent, `only the owner or delegate of work "${item.id}" can request approval`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  check(approver !== agent, "the approver must be someone else");
+  check(typeof step === "string" && step.trim().length > 0 && step.length <= 500, "step must be a short description of the risky action");
+  check(item.approvalHold?.status !== "pending", `work "${item.id}" already has a pending approval`);
+  const hold = { status: "pending", approverId: approver, step, requestedBy: agent, requestedAt: isoOf(atMs), decidedAt: null };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_requested:${approver}`, step);
+}
+export function decideApproval(work, agentId, { decision, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.approvalHold?.status === "pending", `work "${item.id}" has no pending approval`);
+  check(item.approvalHold.approverId === agent, `only ${item.approvalHold.approverId} can decide this approval`);
+  check(decision === "approve" || decision === "deny", "decision must be approve or deny");
+  const hold = { ...item.approvalHold, status: decision === "approve" ? "approved" : "denied", decidedAt: isoOf(atMs) };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_${hold.status}`, note);
+}
+export const approvalHoldEnabled = (env = process.env) => env?.ROOM_APPROVAL_HOLD === "1";
+export const claimDelegateEnabled = (env = process.env) => env?.ROOM_CLAIM_DELEGATE === "1";
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
 export function isLeaseExpired(work, now) {
