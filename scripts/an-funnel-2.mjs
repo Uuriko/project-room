@@ -3,19 +3,21 @@
 // Usage: node scripts/an-funnel-2.mjs --db <path-to-room.sqlite> [--since <iso-date>]
 //
 // Opens the database read-only (PRAGMA query_only=ON) and reports the
-// activation loop funnel (entered -> directed/claimed -> reviewed ->
-// accepted -> receipt held; activation = first-receipt-held) using ONLY
-// already-recorded data: room events, member_accounts bindings, accounts,
-// the work-claims registry history of public tasks, public_work_receipts
-// and public_work_reviews state. No new event types, no schema changes,
-// no writes of any kind. Contents of submissions and reviews are never
-// read — only ids, actors, actions, verdicts and timestamps.
+// activation loop funnel (entered -> saw board -> directed/claimed ->
+// reviewed -> accepted -> receipt held; activation = first-receipt-held)
+// using ONLY already-recorded data: room events, member_accounts bindings,
+// accounts, the board_viewed analytics rows the board doors record
+// (#3588), the work-claims registry history of public tasks,
+// public_work_receipts and public_work_reviews state. No writes of any
+// kind. Contents of submissions and reviews are never read — only ids,
+// actors, actions, verdicts, counts and timestamps.
 //
 // Exit 0 with a JSON report on stdout. Exit 2 on bad arguments, exit 1 when
 // the database cannot answer (missing core tables), with the reason on
 // stderr. Missing PUBLIC-WORK tables degrade to coverage notes, not failure:
 // a store that never enabled public work still has a board funnel.
 import { DatabaseSync } from "node:sqlite";
+import { readBoardViews } from "../server/analytics/board-views.mjs";
 import { LOOP_FUNNEL_DEFINITIONS, loopFunnel } from "../server/analytics/loop-funnel.mjs";
 
 function parseArgs(argv) {
@@ -164,7 +166,12 @@ function loadRows(db, path) {
     ? db.prepare(`SELECT room_id AS roomId, member_id AS memberId, identity_id AS identityId FROM identity_links`).all()
     : [];
 
-  return { members, signups, memberships, claimEvents, publicTasks, identityLinks, coverage, dbPath: path };
+  // Board views (#3588): recorded by the board doors as board_viewed
+  // analytics rows; analytics_events is a required table above, and a
+  // store where no door has served a view yet simply has none.
+  const boardViews = readBoardViews(db);
+
+  return { members, signups, memberships, claimEvents, publicTasks, identityLinks, boardViews, coverage, dbPath: path };
 }
 
 function main() {
@@ -189,13 +196,15 @@ function main() {
     const members = since == null ? rows.members : rows.members.filter(row => row.at >= since);
     const claimEvents = since == null ? rows.claimEvents : rows.claimEvents.filter(row => row.at >= since);
     const publicTasks = since == null ? rows.publicTasks : rows.publicTasks.filter(task => task.createdAt >= since);
+    const boardViews = since == null ? rows.boardViews : rows.boardViews.filter(view => view.at >= since);
     const { actors, summary } = loopFunnel({
       members,
       signups: rows.signups,
       memberships: rows.memberships,
       claimEvents,
       publicTasks,
-      identityLinks: rows.identityLinks
+      identityLinks: rows.identityLinks,
+      boardViews
     });
     const report = {
       generatedAt: new Date().toISOString(),
@@ -207,7 +216,8 @@ function main() {
         memberEntries: rows.members.length,
         claimEvents: rows.claimEvents.length,
         publicTasks: rows.publicTasks.length,
-        sawBoard: "unmeasured — no surface records a board view; see definitions.sawBoard",
+        boardViews: rows.boardViews.length,
+        sawBoard: `measured from board_viewed analytics rows (#3588): ${boardViews.length} recorded view(s) in scope; see definitions.sawBoard`,
         note: summary.actors === 0
           ? "No actors in scope. The funnel reads recorded room events and public-work tables; a store with no member entries yet has no funnel to report."
           : "Cohort = actors with a recorded entry (member event, signup, or first public-board action)."
