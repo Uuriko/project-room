@@ -2994,11 +2994,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // not a silent success.
     let deferredProgressed = false;
     const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed), verifiedRooms: this.integrityVerifiedRooms() });
-    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
-    if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
+    // P1 §3.1 (L1): a deadline gate stands before every named stretch
+    // below. A stretch that cannot start inside the budget is deferred
+    // WHOLE — it is not started at all — and the tick returns
+    // budgetExceeded with the stretch named as deferredStretch. Every
+    // deferral return goes through finish(), so a tick that defers a
+    // pre-batch stretch (deferredProgressed still false) counts as a
+    // deferred-skip under the #3896 machinery above: after two such
+    // ticks the batch-first rule guarantees the deferred batch — parity
+    // included — its visit before the expensive legs retry. No verdict
+    // changes; only which work a dying tick spends itself on.
+    const expired = () => Date.now() > deadline;
+    const defer = (deferredStretch, partial = {}) => finish({
+      matched: 0, skipped: 0, verified: 0, ...partial,
+      budgetExceeded: 1, deferredStretch, failures: this.integrityFailures()
+    });
+    const batchFirst = this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT;
+    if (expired()) return defer(batchFirst ? "runDeferredIntegrityBatch" : "incrementalIntegrityCheck", { checked: 0, swept: 0 });
+    if (batchFirst) {
       const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = (first?.ran ?? 0) > 0;
-      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
+      if (expired()) return defer("incrementalIntegrityCheck", { checked: 0, swept: 0 });
     }
     let incremental;
     try {
@@ -3008,17 +3024,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (incremental.ok) {
       await yieldBetween();
-      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() });
+      if (expired()) return defer("runDeferredIntegrityBatch", { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
       return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures });
     }
+    // Gate before the first integrityChecksum call: at the base head
+    // the tick entered this full scan of every room's projection with
+    // no deadline check after incrementalIntegrityCheck, so a budget
+    // already spent by the proof legs was spent again here and the
+    // deferred batch never ran (design §2.1).
+    if (expired()) return defer("integrityChecksum");
     const before = this.integrityChecksum();
     const snapshotText = this.readIntegritySnapshot();
     const snapshot = parseIntegritySnapshot(snapshotText);
     if (snapshot?.format === "v2" && snapshotText === before.text) {
       await yieldBetween();
-      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
+      if (expired()) return defer("runDeferredIntegrityBatch", { matched: 1, skipped: 1, verified: 0, invitations: before.invitations });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
       return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures });
@@ -3062,7 +3084,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           WHERE s.room_id IS NULL OR s.projection_hash='' ORDER BY r.id`).all().map(row=>row.id)
       : [];
     await yieldBetween();
-    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+    // Gate before the invitation audit.
+    if (expired()) return defer("invitationAudit");
     // Per-record isolation for the full path's audits: one inconsistent
     // invitation or one room's help history is recorded durably and the
     // audit continues with every other record, instead of the first bad
@@ -3077,7 +3100,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
     for (const id of ids) {
-      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+      if (expired()) return defer("invitationAudit");
       try {
         this.verifyInvitationRecord(id);
         this.clearIntegrityFailure("invitation_audit", id);
@@ -3097,7 +3120,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     if (this.helpProjectionPresent()) {
-      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+      // Gate before verifyHelpHistory (its call site only — bounding
+      // that audit itself is a separate tranche, design §4).
+      if (expired()) return defer("verifyHelpHistory");
       const helpFailures = [];
       const help = this.verifyHelpHistory({ collect: helpFailures });
       const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
@@ -3116,7 +3141,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (row.step === "help_history") this.clearIntegrityFailure("help_history", row.recordId);
       }
     }
-    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+    // Gate before the reconcile/repair/drifted stretches below.
+    if (expired()) return defer("reconcileProjectionContentFailures");
     // The snapshot certifies a clean full pass. With isolated failures
     // outstanding it is NOT advanced, so the next tick re-runs the full
     // path and re-audits the failed records until they verify — the
@@ -3150,12 +3176,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     let after = before;
     let drifted = [];
     if (!outstanding.length) {
+      // Gate before repair: the reconcile stretch above is this
+      // cluster's first leg; repair and drifted each gain their own
+      // gate so a tick that dies between them starts neither.
+      if (expired()) return defer("repairProjectionProvenance", { invitations: before.invitations });
       try {
         this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
       } catch (error) {
         throw tagIntegritySubcheck(error, "snapshot");
       }
       await yieldBetween();
+      // Gate before driftedProjectionRooms.
+      if (expired()) return defer("driftedProjectionRooms", { invitations: before.invitations });
       // L05-C1: with the audits clean and this path's own repairs applied,
       // any room whose projection content still disagrees with its
       // remembered digest at an unchanged sequence is drift. It is
@@ -3172,6 +3204,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       blockedDrift = [...new Set([...blockedDrift, ...drifted])];
       if (!blockedDrift.length) {
+        // Gate before the certifying transaction — which is also the
+        // gate before the second integrityChecksum call, inside it:
+        // a tick that cannot start the transaction starts neither the
+        // checksum, the room-state rewrite, nor the snapshot write,
+        // so no partial certification can land.
+        if (expired()) return defer("certifyingTransaction", { invitations: before.invitations });
         try {
           this.transaction(() => {
             after = this.integrityChecksum();
@@ -3190,7 +3228,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const baselineUpgraded = untrustedBaseline && !outstanding.length && !blockedDrift.length ? { baselineUpgraded: 1 } : {};
     const contentDrift = blockedDrift.length ? { contentDrift: 1 } : {};
     const baselineUnverifiable = unverifiableRooms.length ? { baselineUnverifiable: 1 } : {};
-    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, ...baselineUpgraded, ...contentDrift, ...baselineUnverifiable, failures: this.integrityFailures() });
+    if (expired()) return defer("runDeferredIntegrityBatch", { verified, invitations: after.invitations, ...baselineUpgraded, ...contentDrift, ...baselineUnverifiable });
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
     return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, ...baselineUpgraded, ...contentDrift, ...baselineUnverifiable, failures: this.integrityFailures() });
