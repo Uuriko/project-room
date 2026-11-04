@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { JOBS, jobEnabled } from "../server/jobs.mjs";
-import { channelJournalSchema } from "../server/channel-journal.mjs";
+import { channelJournalSchema } from "../server/journal.mjs";
 import {
   CRON_JOBS, HEARTBEAT_STORAGE_KEY, OVERDUE_DEGRADE_TICKS, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
 } from "../cloudflare/job-heartbeat.mjs";

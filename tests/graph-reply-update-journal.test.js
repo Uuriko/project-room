@@ -12,7 +12,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { inboxLimits } from "../server/inbox.mjs";
-import { transitionReplyAttempt } from "../server/graph-reply-journal.mjs";
+import { transitionReplyAttempt } from "../server/journal.mjs";
 import { buildUpdateReview } from "../server/graph-reply-update-review.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";

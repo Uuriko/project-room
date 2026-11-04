@@ -2,7 +2,7 @@
 //
 // The 14-day shadow journals what WOULD have been held — one
 // receipt.shadowQuarantine decision per scored import (server/spam-shadow.mjs)
-// — while the durable spam_quarantine journal (server/spam-quarantine-journal.mjs)
+// — while the durable spam_quarantine journal (server/journal.mjs)
 // keeps the owner review backlog with the verdict vocabulary:
 //   dismissed = the owner confirmed it as spam (a true positive for the hold logic)
 //   released  = the owner judged it ham (a false positive for the hold logic)

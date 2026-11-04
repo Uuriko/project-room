@@ -8,7 +8,7 @@
 //
 // Pure: no I/O, no network, injected clock. The wiring in
 // server/work-claim-routes.mjs calls evaluateReceipt() on the done
-// transition, journals the verdict via server/jev-shadow-journal.mjs, and
+// transition, journals the verdict via server/journal.mjs, and
 // accepts anyway — shadow mode never enforces. Verdict thresholds are
 // defined below and documented in docs/JEV-GATES.md as proposed, NOT
 // enforced. Low-confidence accepts are flagged escalate:true so a human
