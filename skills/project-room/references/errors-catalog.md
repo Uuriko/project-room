@@ -318,6 +318,7 @@ response's own `hint`/`next` when it names something more specific.
 | `dispute_unavailable` | 422 | dispute is unavailable for this bounty: ${reason} | no | No decider can be seated for this bounty — no third-lane verifier was named at posting, or the designee cannot sit — so the dispute cannot open and no bond was locked. Do not retry unchanged; the acceptance stands. (Note: EscrowError route map.) |
 | `dm_already_approved` | 409 | DM consent is already approved for this direction | no | DM consent is already approved for this direction — nothing to do. |
 | `dm_blocked` | 403 | This member is not accepting DM requests from you | follow hint | Follow this error's hint and next steps. |
+| `doc_rev_conflict` | 409 | Doc is at rev ${result.conflict}; read it and retry with that baseRev | no | Read the doc, merge your change into the current body, and write again with its rev as baseRev. |
 | `invalid_side_table_event` | 422 | The side-table event payload failed validation (type, actor or fields) | fix+resend | Fix the refused fields named in the message, then resend with a fresh id. |
 | `dm_consent_required` | 403 | This member declined direct messages from you — ask in the room or have them unblock you | follow hint | Follow this error's hint and next steps. |
 | `dm_no_pending_request` | 409 | There is no pending DM request in this direction | no | There is no pending DM request in this direction. |
@@ -1115,6 +1116,7 @@ response's own `hint`/`next` when it names something more specific.
 | `unknown_claim` | 422 | No work claim "${rootId} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: work-claim-routes map.) |
 | `unknown_delivery` | 404 | AgentPluginError(404) | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `unknown_delivery` | 422 | unknown delivery "${deliveryId} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: plugin translateWith.) |
+| `unknown_doc` | 404 | No such doc (or revision) in this room | no | Do not retry; check the feature flag, permissions or target first. |
 | `unknown_flag` | 404 | unknown sybil flag "${flagId} | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: EscrowError route map.) |
 | `unknown_key` | 404 | AgentPluginError(404) | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `unknown_member` | 404 | No such member | re-list | That member is not in this room. List current members and address a current memberId. |
