@@ -70,7 +70,7 @@ export async function receiveCloudNotifications({connection,configFile,env=proce
   if(state&&!stateValid(state,scope,connection.roomId))throw invalid();
   if(!state){if(config.bootstrapAfter===undefined)throw Error('First notification start requires explicit bootstrapAfter; no history was selected');state={version:1,scope,after:config.bootstrapAfter,inFlight:null};journal.save(state);}
   const room=new RoomClient({apiBase:origin,roomId:connection.roomId,memberId:connection.memberId,credential:connection.credential,fetchImpl,signal});
-  const notify=notifierFactory({executable:config.executable,sessionId:config.sessionId,roomId:connection.roomId,stateRoot:root,env});
+  const notify=notifierFactory({executable:config.executable,sessionId:config.sessionId,roomId:connection.roomId,stateRoot:join(root,'source-'+scope),env});
   let lastStart=-Infinity,failures=0;
   const wait=async(after,timeoutSec)=>{
    const remaining=lastStart+2500-now();if(remaining>0)await delay(remaining,signal);signal?.throwIfAborted();lastStart=now();

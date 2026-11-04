@@ -9,6 +9,7 @@ import {createCloudNotifier} from '../room-acp/src/cloud-notify.mjs';
 import {saveConnection} from '../room-acp/src/credentials.mjs';
 import {run} from '../room-acp/src/run.mjs';
 import {parseArgs} from '../room-acp/src/args.mjs';
+import {openJoinJournal} from '../room-acp/src/private-state.mjs';
 const sessionId='session_'+'N'.repeat(24),roomId='commons',memberId='worker';
 function fixture(t,{bootstrapAfter=10}={}){
  const home=mkdtempSync(join(tmpdir(),'notification-receiver-'));t.after(()=>rmSync(home,{recursive:true,force:true}));
@@ -78,7 +79,8 @@ test('unknown batch retains exact pointers, commits discovery only, never resend
  journal.failAt(0);
  await receiveCloudNotifications({...f,signal:cancel.signal,openReceipt:journal.open,fetchImpl,notifierFactory:factory,print:line=>{if(line.startsWith('Notification unknown'))cancel.abort();}});
  assert.equal(calls,1);assert.equal(journal.state.after,11);
- const receipts=readdirSync(join(f.home,'notify-state')).filter(x=>x.startsWith('.join-cloud-notify-')).map(x=>JSON.parse(readFileSync(join(f.home,'notify-state',x,'receipt.json'))));
+ const scopedRoot=join(f.home,'notify-state',readdirSync(join(f.home,'notify-state')).find(x=>x.startsWith('source-')));
+ const receipts=readdirSync(scopedRoot).filter(x=>x.startsWith('.join-cloud-notify-')).map(x=>JSON.parse(readFileSync(join(scopedRoot,x,'receipt.json'))));
  assert.equal(receipts.length,1);assert.equal(receipts[0].phase,'unknown');assert.deepEqual(receipts[0].input,{roomId,items:[{messageId:'message-11',sequence:11}]});
 });
 
@@ -178,4 +180,21 @@ test('a newer re-mention of the same message across valid frames coalesces once 
  const f=fixture(t),cancel=new AbortController(),journal=memoryJournal(),batches=[];let frame=0;
  await receiveCloudNotifications({...f,signal:cancel.signal,openReceipt:journal.open,fetchImpl:fetcher(args=>result(args,{after:args.after+1,status:'ready',sourceComplete:++frame===2,items:[row(args.after+1,'same-message')]})),notifierFactory:()=>async batch=>{batches.push(batch);return{state:'accepted'};},print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
  assert.equal(frame,2);assert.deepEqual(batches,[{roomId,items:[{messageId:'same-message',sequence:12}]}]);assert.equal(journal.state.after,12);assert.equal(f.waits.length,1);
+});
+
+
+for(const dimension of ['origin','member'])test(`actuator namespaces isolate two ${dimension}s and exact-scope cold retry still sends once`,async t=>{
+ const f=fixture(t);let calls=0,failCursor=true;
+ const openReceipt=(...args)=>{const journal=openJoinJournal(...args);return{...journal,save:value=>{if(failCursor&&value.after===11&&value.inFlight===null)throw Error('synthetic cursor commit fault');journal.save(value);}};};
+ const notifierFactory=options=>createCloudNotifier({...options,runCli:async(_file,argv)=>{calls++;assert.deepEqual(JSON.parse(argv[1].split('\n')[1]),{roomId,items:[{messageId:'same-source',sequence:11}]});return good();}});
+ const connections=[{...f.connection},{...f.connection,...(dimension==='origin'?{apiBase:'https://different.test'}:{memberId:'other-worker'})}];
+ const fetchFor=connection=>async(url,options)=>{
+  if(new URL(url).pathname!== '/mcp')return Response.json({snapshotView:'identity',snapshotVersion:1,roomId,viewerId:connection.memberId,state:{members:{[connection.memberId]:{id:connection.memberId,kind:'agent',active:true}}}});
+  const q=JSON.parse(options.body),args=q.params.arguments;return Response.json({jsonrpc:'2.0',id:q.id,result:{structuredContent:{...result(args,{after:11,status:'ready',items:[row(11,'same-source')]}),memberId:connection.memberId}}});
+ };
+ for(const connection of connections)await assert.rejects(()=>receiveCloudNotifications({...f,connection,openReceipt,fetchImpl:fetchFor(connection),notifierFactory}),/cursor commit fault/);
+ assert.equal(calls,2,'different authenticated source scopes must not share an accepted actuator receipt');
+ failCursor=false;
+ for(const connection of connections){const cancel=new AbortController();assert.equal(await receiveCloudNotifications({...f,connection,openReceipt,fetchImpl:fetchFor(connection),notifierFactory,signal:cancel.signal,print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}}),0);}
+ assert.equal(calls,2,'same exact scope reuses its frozen accepted receipt after cursor-commit loss');
 });
