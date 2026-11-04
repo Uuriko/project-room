@@ -160,5 +160,5 @@ test('cancellation during recent503 Retry-After never makes an oldest request',a
  const calls=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
  b.freshWakeDiscovery=true;b.lease=async()=>true;
  b.room.poll=async({order='oldest'})=>{calls.push(order);setTimeout(()=>b.controller.abort(),10);throw new RoomError(503,'temporary_failure','Unavailable',1000);};
- await assert.rejects(()=>b.pollOnce(),error=>error.name==='AbortError');assert.deepEqual(calls,['newest']);
+ await b.pollOnce();assert.equal(b.controller.signal.aborted,true);assert.deepEqual(calls,['newest']);
 });

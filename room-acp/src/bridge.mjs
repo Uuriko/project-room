@@ -752,6 +752,7 @@ export class Bridge {
       // the identity-wide429 cooldown still take the normal outer retry path.
       if (!this.controller.signal.aborted && error instanceof RoomError && [0,502,503,504].includes(error.status)) {
         this.log('recent wake transport unavailable; continuing oldest recovery');
+        if (error.retryAfterMs !== null) await sleep(error.retryAfterMs, this.controller.signal);
         return;
       }
       throw error;
