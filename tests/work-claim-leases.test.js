@@ -230,7 +230,10 @@ const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quil
   const helpers = fakeHelpers();
   const store = {
     roomAuthority: roomId => ({ members: {
-      quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
+      // quill is this file's worker: UT2 05-03 F1 requires accept_work to
+      // claim and complete_work to complete, so the lifecycle handler tests
+      // grant both alongside the verify they already held.
+      quill: { id: "quill", kind: "agent", active: true, permissions: ["verify", "accept_work", "complete_work"] },
       grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
       vera: { id: "vera", kind: "agent", active: true, permissions: ["verify"] },
       ...storeMembers,

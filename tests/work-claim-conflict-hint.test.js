@@ -21,7 +21,9 @@ const fakeAuth = memberId => ({ member: { id: memberId, kind: "agent", permissio
 const runRoute = ({ route, id, body = {}, memberId = "quill", registry }) => handleWorkClaims({
   req: { method: "POST", body }, res: {}, url: {}, roomId: "room1",
   store: { roomAuthority: () => ({ members: {
-    quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
+    // quill is the holder in these tests: UT2 05-03 F1 requires accept_work
+    // to claim, so the holder fixture grants it alongside verify.
+    quill: { id: "quill", kind: "agent", active: true, permissions: ["verify", "accept_work", "complete_work"] },
     grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
   } }) },
   auth: fakeAuth(memberId), workClaimRoute: route, workClaimId: id,

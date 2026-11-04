@@ -145,11 +145,12 @@ const claimIdOf = (reject, id) => {
 // "explicitly null" (no lease).
 const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undefined);
 
-// Writes (create, claim, renew, update) need a contribute, review, or
-// collaborate profile, the room owner, or a human who holds contribute
-// rights. Reading stays open to every member. A room that names no owner
-// does not open the board: only an explicit member with one of those
-// profiles can mutate.
+// Writes (create, renew, non-completion updates) need a contribute, review,
+// or collaborate profile, the room owner, or a human who holds contribute
+// rights. Claiming and the completion exits carry the granular gates below
+// (mayClaimWorkClaims / mayCompleteWorkClaims, UT2 05-03 F1). Reading stays
+// open to every member. A room that names no owner does not open the board:
+// only an explicit member with one of those profiles can mutate.
 const WORK_CLAIM_PROFILES = Object.freeze({
   contribute: ["accept_work", "complete_work"],
   review: ["verify"],
@@ -276,7 +277,9 @@ function resolveWorkClaimAccess(store, roomId, auth) {
       ...auth.member,
       ...listed,
       id: memberId,
-      permissions: Array.isArray(listed.permissions) ? listed.permissions : (auth.member.permissions ?? []),
+      permissions: Array.isArray(listed.permissions)
+        ? listed.permissions
+        : (Object.hasOwn(listed, "permissions") ? [] : (auth.member.permissions ?? [])),
     }
     : null;
   return { authority, ownerId, member };
@@ -285,6 +288,8 @@ function resolveWorkClaimAccess(store, roomId, auth) {
 function holdsProfile(permissions, profile) {
   return WORK_CLAIM_PROFILES[profile].every(name => permissions.has(name));
 }
+
+const permissionList = member => (Array.isArray(member?.permissions) ? member.permissions : []);
 
 export function mayWriteWorkClaims(access) {
   const member = access.member;
@@ -295,11 +300,41 @@ export function mayWriteWorkClaims(access) {
   return holdsProfile(permissions, "contribute") || holdsProfile(permissions, "review") || holdsProfile(permissions, "collaborate");
 }
 
+// UT2 05-03 F1: the profile gate above admits ANY work profile, so a member
+// holding only [verify] (the review invite profile) could claim work and
+// self-close it to done — a self-attested receipt the granular permission
+// model says they never held. The claim and completion exits therefore
+// check the individual permissions the invite preview discloses: claiming
+// (including being assigned at create) requires accept_work, and the
+// holder's completion exits (update to delivered/done, close, cancel)
+// require complete_work. The room owner keeps the standing bypass every
+// gate in this file gives them. A reviewer's verify-to-done on delivered
+// work is a review action and keeps the verify gate, not this one.
+export function mayClaimWorkClaims(access) {
+  const member = access.member;
+  if (!member || member.active === false) return false;
+  if (access.ownerId && member.id === access.ownerId) return true;
+  return permissionList(member).includes("accept_work");
+}
+
+export function mayCompleteWorkClaims(access) {
+  const member = access.member;
+  if (!member || member.active === false) return false;
+  if (access.ownerId && member.id === access.ownerId) return true;
+  return permissionList(member).includes("complete_work");
+}
+
+// Closing or cancelling is a completion exit for the holder; claim managers
+// keep the administrative close authority retire() already gives them.
+function mayCloseWorkClaims(access) {
+  return mayCompleteWorkClaims(access) || mayManageAnyClaim(access);
+}
+
 // Reviewing does not grant Board write access. A human with the existing
 // verify right can record a verdict just like an agent review profile.
 function mayReviewWorkClaims(access) {
   return Boolean(access.member && access.member.active !== false
-    && (mayWriteWorkClaims(access) || (access.member.permissions ?? []).includes("verify")));
+    && (mayWriteWorkClaims(access) || permissionList(access.member).includes("verify")));
 }
 
 const reviewersOf = (store, roomId) => {
@@ -311,7 +346,7 @@ function mayManageAnyClaim(access) {
   const member = access.member;
   if (!member || member.active === false) return false;
   if (access.ownerId && member.id === access.ownerId) return true;
-  return (member.permissions ?? []).includes("manage_claims");
+  return permissionList(member).includes("manage_claims");
 }
 
 function mayOptOutOfLease(access) {
@@ -325,7 +360,7 @@ function mayAttestWorkClaims(access) {
   const member = access.member;
   if (!member || member.active === false) return false;
   if (access.ownerId && member.id === access.ownerId) return true;
-  const permissions = member.permissions ?? [];
+  const permissions = permissionList(member);
   return permissions.includes("verify") || permissions.includes("manage_claims");
 }
 
@@ -364,6 +399,19 @@ function refuseWorkClaims() {
   };
   throw error;
 }
+
+// Same shape as refuseWorkClaims(), naming the one permission the granular
+// gate found missing — the way the room's other per-permission refusals
+// name theirs ("lacks decide", "lacks manage_members").
+const refuseClaimPermission = () => refuseBoardAction(
+  "Claiming work claims needs the accept_work permission.",
+  "Ask the room owner for a contribute invite or the accept_work permission.");
+const refuseCompletePermission = () => refuseBoardAction(
+  "Completing or closing work claims needs the complete_work permission.",
+  "Ask the room owner for a contribute invite or the complete_work permission.");
+const refuseAssigneePermission = () => refuseBoardAction(
+  "Assigning a work claim needs the assignee to hold the accept_work permission.",
+  "Ask the room owner to grant the assignee accept_work, or assign the work to a member who holds it.");
 
 function refuseCap(code, message, hint) {
   const error = new Error(message);
@@ -548,7 +596,7 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
 const verifiersOf = (store, roomId) => {
   const members = store.roomAuthority(roomId).members;
   return Object.values(members)
-    .filter(member => member && member.active !== false && (member.permissions ?? []).includes("verify"))
+    .filter(member => member && member.active !== false && permissionList(member).includes("verify"))
     .map(member => member.id);
 };
 
@@ -693,7 +741,7 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
     if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
     if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
     const access = resolveWorkClaimAccess(store, roomId, current);
-    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
+    if (!mayCloseWorkClaims(access)) refuseCompletePermission();
     enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
       actor: access.member, action: `POST work-claim ${verb}`, fail: reject });
     if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; nothing was closed");
@@ -1013,6 +1061,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
+  const requireClaimer = () => { if (!mayClaimWorkClaims(access)) refuseClaimPermission(); };
+  const requireCompleter = () => { if (!mayCompleteWorkClaims(access)) refuseCompletePermission(); };
+  const requireCloser = () => { if (!mayCloseWorkClaims(access)) refuseCompletePermission(); };
+  // Holder-side update gate (UT2 05-03 F1): the completion exits (delivered,
+  // done) require complete_work; any other holder update requires holding
+  // at least one of the two work permissions (the profile gate alone would
+  // strand a granular holder — e.g. [accept_work] only — after claiming).
+  const requireHolderUpdate = data => {
+    if (data.state === "done" || data.state === "delivered") { requireCompleter(); return; }
+    if (!mayWriteWorkClaims(access) && !mayClaimWorkClaims(access) && !mayCompleteWorkClaims(access)) refuseWorkClaims();
+  };
   // Q3-A: with under 10% of the room's event budget left, Board writes from
   // members without claim authority get 409 room_event_budget_low.
   const requireEventBudget = () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
@@ -1224,6 +1283,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
       }
+      // Create-with-assignee performs a claim for the assignee in this same
+      // request (QA200 ch-2037 calls it an acquire path), so the claim
+      // gate applies to the assignee: they must hold accept_work.
+      if (!mayClaimWorkClaims({ ownerId: access.ownerId, member: { ...member, id: assignee } })) refuseAssigneePermission();
     }
     // plan-squads: a work offer can target a squad; the squad must exist and be active.
     if (data.squadId !== undefined && data.squadId !== null && !getActiveSquad(store.db, roomId, data.squadId)) {
@@ -1300,7 +1363,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(409, "work_claim_conflict",
         ownerHeldCopy(item) ?? `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
-    requireWriter();
+    requireClaimer();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
@@ -1476,7 +1539,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // rule (requireWriter).
     if ((verifyCall || sendBackCall) && item.owner !== caller) {
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
-    } else requireWriter();
+    } else requireHolderUpdate(data);
     // #3546/#3747: the reviewer's verify is a review action, not a board
     // write, so the board-write event-budget floor does not refuse it.
     // The exit it lands is cap-exempt at the emit layer (#3747); refusing
@@ -1525,6 +1588,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (policy === "self_attested") {
         const reviewer = data.reviewedBy ?? caller;
         if (reviewer !== caller) {
+          reject(403, "work_review_rejected",
+            `Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work`);
+        }
+        if (!canCloseWork(item, caller, { policy })) {
           reject(403, "work_review_rejected",
             `Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work`);
         }
@@ -1658,7 +1725,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // room_close_work_claim (server/work-claims.mjs closeWork).
     const data = body(req);
     if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
-    requireWriter();
+    requireCloser();
     const item = load(claimIdOf(reject, workClaimId));
     requireEventBudget();
     const reason = text("reason", data.reason, { multiline: true });
@@ -1736,6 +1803,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!targetMember || targetMember.active === false) {
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
+    }
+    // Reassign performs a claim for the new owner in this same request
+    // (an acquire path, like create-with-assignee), so the claim gate
+    // applies to the target: they must hold accept_work.
+    if (target !== item.owner
+      && !mayClaimWorkClaims({ ownerId: access.ownerId, member: { ...targetMember, id: target } })) {
+      refuseAssigneePermission();
     }
     // A handoff consumes the new owner's slot just like claim and
     // create-with-assignee do; otherwise reassign bypasses the per-member cap.

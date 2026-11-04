@@ -79,7 +79,22 @@ test("guests and chat-profile agents cannot create, claim, renew, or update; con
   assert.equal((await call(registry, "human", "create", null, { id: "human-item" })).status, 201);
 
   const held = registry.get("room1", "contrib");
-  await call(registry, "owner", "reassign", "contrib", { newOwner: "guest", expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length });
+  // Lane-08 adaptation (setup only, assertions untouched): the §4.1 cure
+  // refuses the owner reassign to a member lacking accept_work, so seed
+  // guest as holder directly in the shape reassignWork produces for a
+  // live round — owner changes, claimedAt/lease/claimRound are kept,
+  // attestations/reviews clear, and the `reassigned:guest` history stamp
+  // by "owner" is appended. The guest-denial assertions below are the
+  // test's subject and are unchanged.
+  const seedAt = new Date().toISOString();
+  registry.set("room1", {
+    ...held,
+    owner: "guest",
+    attestations: Object.freeze([]),
+    reviews: Object.freeze([]),
+    updatedAt: seedAt,
+    history: Object.freeze([...held.history, Object.freeze({ at: seedAt, agentId: "owner", action: "reassigned:guest", note: null })]),
+  });
   denied(await call(registry, "guest", "update", "contrib", { state: "in_progress" }));
   denied(await call(registry, "guest", "renew", "contrib", { progressMessageId: "msg-1" }));
   assert.equal(registry.get("room1", "contrib").state, "claimed");
