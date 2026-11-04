@@ -1,0 +1,83 @@
+  /api/rooms/{roomId}/inbound-hooks:
+    post:
+      summary: Create, list or revoke signed inbound task hooks
+      x-room-permission: owner
+      description: |
+        Off unless ROOM_INBOUND_HOOKS=1 (404 otherwise). Room owner only.
+        `{target}` creates a hook whose deliveries open Board tasks assigned to
+        that member (default: the caller); the `whsec_` signing secret is
+        returned once and stored encrypted at rest (AES-256-GCM, key derived
+        from the ROOM_INBOUND_HOOK_KEY Worker secret; 503 when unset).
+        `{revoke: hookId}` disables a hook. `{list: true}` lists the room's
+        hooks with delivery counts and never returns secrets.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                target: { type: string }
+                revoke: { type: string }
+                list: { type: boolean }
+      responses:
+        '201':
+          description: Hook created; secret shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  hookId: { type: string }
+                  secret: { type: string }
+                  path: { type: string }
+                  target: { type: string }
+        '200':
+          description: Revoke result, or `{hooks:[…]}` for list (no secrets)
+        '403':
+          description: Caller is not the room owner
+        '404':
+          description: Feature flag off
+        '422':
+          description: Target is not an active member
+  /api/inbound/{hookId}:
+    post:
+      summary: Deliver a signed MCP Events payload that opens a Board task
+      x-room-permission: webhook_signature
+      description: |
+        Off unless ROOM_INBOUND_HOOKS=1. Body is an MCP Events payload
+        `{eventId, name, timestamp, data: {title, body?, url?}}` signed with
+        Standard Webhooks headers (`webhook-id`, `webhook-timestamp` within 300 s,
+        `webhook-signature: v1,<base64 HMAC-SHA256>`). Opens one task per
+        eventId, assigns it to the hook target and wakes them. Redelivery of a
+        webhook-id is idempotent. Payload text is stored as data, never echoed.
+      parameters:
+        - name: hookId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: Task opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  claimId: { type: string }
+                  duplicate: { type: boolean }
+        '200':
+          description: Duplicate delivery or event
+        '401':
+          description: Missing, stale or bad signature
+        '404':
+          description: Flag off, unknown or revoked hook
+        '413':
+          description: Body over 64 KiB
+        '422':
+          description: Not an MCP Events payload
