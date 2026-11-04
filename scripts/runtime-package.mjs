@@ -276,6 +276,7 @@ optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escro
 optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1: bounty/credit HTTP routes (imported by server/http.mjs)
 optional.push("server/bounty-flag.mjs"); // bounty new-work pause flag (imported by server/bounty-escrow-routes.mjs and server/mcp-full-profile.mjs)
 optional.push("server/bounty-disputes.mjs"); // agent work exchange slice 1: dispute state machine (imported by server/bounty-escrow.mjs)
+optional.push("server/inbound-task-hooks.mjs", "server/routes/inbound-hooks.mjs"); // grok/inbound-task-hooks new modules
 optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed25519-signed, externally verifiable movement receipts (imported by server/bounty-escrow.mjs; pure, node:crypto only)
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-disputability.mjs"); // DA3-P3: computed disputability derivation for bounty reads (imported by server/bounty-escrow.mjs; pure, no imports)
@@ -306,6 +307,7 @@ optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on 
 optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware identity->seats enumeration for read surfaces (imported by server/needs-me.mjs, server/agent-rooms.mjs and server/capability-visibility.mjs; pure, no imports)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
+optional.push("server/event-automations.mjs", "server/routes/automations.mjs"); // grok/event-automations new modules
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
 optional.push("cloudflare/job-alarm-reconciler.mjs"); // coalesced alarm reconciliation

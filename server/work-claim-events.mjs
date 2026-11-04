@@ -20,7 +20,8 @@ import { ServiceError } from "./service-error.mjs";
 // referrals): store.mjs sits above this module in the import graph, so the
 // binding is only safe to dereference once modules are fully loaded.
 import { PILOT_LIMITS } from "./store.mjs";
-import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { resolveNamedReviewers, hasCurrentReview, createWork, claimWork } from "./work-claims.mjs";
+import { runAutomations } from "./event-automations.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -305,5 +306,9 @@ export function emitWorkClaimEvent(store, roomId, options) {
     try { postReceiptCard(store, roomId, item, stamp); }
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
+  // User automations (ROOM_AUTOMATIONS, off by default) read this same event.
+  // A failing rule never rolls back the claim write.
+  try { runAutomations(store, roomId, incoming, item, { createWork, claimWork, emitWorkClaimEvent, enqueueClaimWake }); }
+  catch (error) { console.error("room automations failed:", error?.message ?? error); }
   return { sequence, event: incoming };
 }
