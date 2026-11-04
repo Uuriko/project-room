@@ -40,3 +40,13 @@ node scripts/secret-scan-check.mjs --help
 Legacy ACK then cold reopen preserves implicit parent-author mentions. Current persisted mention chips and cold reopen also pass, but actual current `acknowledgeMention` fails: its transactional response calls `mentionView` → `store.room`, producing `current_room_context_required` and rolling back. The test preserves this observed refusal; no ACK port was smuggled into presentation work. Conservative full replies do not depend on ACK state or complete historical mention coverage.
 
 No Native Worker, broad browser, production or historical 277-test qualification is claimed. Default paging/auth/privacy stay with existing readers; no extra SQL, parent/history/name lookup or new tool was added.
+
+## Root final integration
+
+The optional digest changes only the existing message-read input schemas. The four catalog profile hashes are regenerated; tool counts and scopes are unchanged. Catalog/core/untrusted suites pass 20/20.
+
+Imported historical messages can have no mention-routing rows. Two executable hosted-reader regressions (legacy and normalized) fail before the exact canonical `<@viewer>` fallback, then the full digest file passes 12/12. This only preserves already-authorized text in full; it does not backfill notifications, read parents or alter inbox routing. A similarly prefixed different member remains a headline.
+
+The new module is registered in the localization scan scope. Baseline counts are unchanged. The PR declares the single agent-facing expansion instruction and headline concatenation as intentional English protocol text using the existing i18n-growth policy. Local scope/ratchet check passes with I18N_ALLOW_GROWTH=1. This is an explicit growth declaration, not a baseline waiver.
+
+Independent Claude Worker qualification at c12d66034a991acc10ed3ad64aa4f222491074bb reported 1/1 passing persisted Miniflare/SQLite cold-restart case, including privacy, since-join history, full/default parity, paging and exact headline expansion. This is a peer receipt in Room seq2105, not a Root replay. It did not cover HTTP/OAuth transport, revocation or the subsequent canonical-mention fallback.

@@ -13,6 +13,9 @@ export function addressedReason(message, viewerId) {
   if (message.requestKind === "reply") return "request";
   if (viewerId && message.toMemberId === viewerId) return "dm";
   if (viewerId && (message.mentions ?? []).some(m => m.memberId === viewerId)) return "mention";
+  // Imported visible messages may predate the persisted mention-routing index.
+  // Preserve their exact canonical mentions without fetching or inferring identity.
+  if (viewerId && String(message.body ?? "").includes(`<@${viewerId}>`)) return "mention";
   // This means preserved reply context, NOT a verified recipient assertion.
   if (message.replyToId) return "reply";
   if (message.private || message.toMemberId) return "dm";

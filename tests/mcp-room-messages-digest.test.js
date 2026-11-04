@@ -12,6 +12,36 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { headline, digestMessagePage } from "../src/message-digest.js";
+import { EVENT_TYPES, event } from "../src/events.js";
+
+for (const normalized of [false, true]) test(`imported direct mentions stay full without mention metadata (${normalized ? 'current' : 'legacy'})`, async t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  const events = initialRoom();
+  events.push(event({ roomId: 'commons', actorId: 'owner', type: EVENT_TYPES.MEMBER_ADDED,
+    data: { memberId: 'viewer', displayName: 'Viewer', kind: 'agent', permissions: [] } }));
+  events.push(event({ roomId: 'commons', actorId: 'owner', type: EVENT_TYPES.MESSAGE_POSTED,
+    data: { messageId: 'imported-ask', body: '<@viewer> review this imported request in full. ' + 'context '.repeat(30) } }));
+  events.push(event({ roomId: 'commons', actorId: 'owner', type: EVENT_TYPES.MESSAGE_POSTED,
+    data: { messageId: 'someone-else', body: '<@viewer-other> unrelated context' } }));
+  store.initialize(events, normalized ? { representation: 'normalized-current-v1' } : {});
+  const key = store.issueAccessKey('commons', 'viewer');
+  const read = async view => (await callHostedStdioTool(store, key, 'room_read_messages',
+    { roomId: 'commons', after: 0, limit: 10, ...(view ? { view } : {}) })).value;
+  const full = await read();
+  const imported = full.messages.find(m => m.messageId === 'imported-ask');
+  assert.ok(imported);
+  assert.equal((imported.mentions ?? []).some(m => m.memberId === 'viewer'), false, 'imported fixture has no persisted mention routing metadata');
+  const digest = await read('digest');
+  const kept = digest.addressed.find(m => m.messageId === 'imported-ask');
+  assert.ok(kept, 'a visible canonical direct mention must not be summarized');
+  assert.equal(kept.body, imported.body);
+  assert.equal(kept.why, 'mention');
+  assert.equal(kept.untrusted, true);
+  assert.ok(digest.others.flatMap(g => g.items).some(([, , id]) => id === 'someone-else'));
+  assert.equal(digest.next, full.next);
+  assert.equal(digest.hasMore, full.hasMore);
+});
 
 function fixture(t) {
   const store = new RoomStore(":memory:");

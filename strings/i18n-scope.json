@@ -80,6 +80,7 @@
   "src/mcp-server-card.mjs",
   "src/mcp-tool-registry.js",
   "src/member-display-names.js",
+  "src/message-digest.js",
   "src/message-reducers.js",
   "src/needs-attention.js",
   "src/operator-ui.js",
