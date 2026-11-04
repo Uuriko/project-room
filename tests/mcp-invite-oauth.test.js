@@ -420,7 +420,11 @@ test('public lobby consent requires current publication, open join and CSRF, wit
   const before=f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
   assert.equal((await submit('')).status,403);
   f.store.command(owner,room,{id:'close',type:'room.join_link_set',data:{enabled:false}});
-  assert.equal((await submit()).status,400);
+  const closed=await submit(); assert.equal(closed.status,400);
+  const closedBody=await closed.json();
+  assert.match(closedBody.error_description,/lobby is unavailable or not open for guest joining/i);
+  assert.match(closedBody.recovery,/ask the room owner/i);
+  assert.doesNotMatch(closedBody.recovery,/no invitation is required/i);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n,before);
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,0);
   f.store.command(owner,room,{id:'reopen',type:'room.join_link_set',data:{enabled:true}});
