@@ -12,6 +12,20 @@ export function currentPublicMetadata(store,roomId){
  if(typeof store.readTransaction!=='function'||!isCurrentRoom(store.db,roomId))return null;
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,()=>({room:readCurrentRecord(store.db,roomId,'metadata','room'),members:{}})));
 }
+// The directory's addressed facts for a current room: the room record
+// (owner controls read only its ownerId; the listing reads its public
+// fields) plus the head census member count other addressed readers
+// already trust. Null for non-current rooms, whose hydrated state the
+// directory reads as before.
+export function currentDirectoryMetadata(store,roomId){
+ if(typeof store.readTransaction!=='function'||!isCurrentRoom(store.db,roomId))return null;
+ return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
+  const room=readCurrentRecord(store.db,roomId,'metadata','room',b);
+  if(!room||room.id!==roomId)return null;
+  const head=readCurrentHead(store.db,roomId,b);
+  return {room,memberCount:head?.counts?.members??0};
+ }));
+}
 export function readCurrentPublicFace(store,roomId,{after=null,before=null,limit=CURRENT_PUBLIC_FACE_LIMIT,latest=false}={}){
  if(typeof store.readTransaction!=='function'||!isCurrentRoom(store.db,roomId))return null;
  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{

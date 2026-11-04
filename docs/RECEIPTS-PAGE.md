@@ -90,6 +90,11 @@ exception as the receipt card.
   other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
+- Native (current-format) rooms publish under the same recorded
+  `room.public_receipts_set` setting. A native work-item receipt
+  additionally requires the item's own `work.public_set` publish intent
+  and a confirmed independent verification pass, and opting out removes
+  the room's native rows in the toggle's own transaction.
 - The room title is shown when the room is in the public directory or has
   a public face. Otherwise the page omits the title. A private room's
   claims and work items never appear while the setting is off.

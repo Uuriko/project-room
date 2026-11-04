@@ -588,7 +588,7 @@ export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)?
   return {row,value};
 }
 
-const supported = new Set(['message.pinned','message.unpinned','member.sponsor_transferred','channel.created','work.public_set','capabilities.advertised','bond.propose','bond.accept','bond.decline','bond.revoke','bond.proposed','bond.activated','bond.revoked','dm.posted','claim.acquired','claim.renewed','claim.released','room.spend_pricing_set','room.spend_allowance_set','room.archived','room.exported','room.charter_updated','room.policy_set','room.trust_set','message.deleted','message.edited','work.superseded','ownership.transferred','reply_request.cancelled','work_claim.updated','message.posted','work.proposed','work.accepted','work.started','work.completed','work.handoff_recorded','work.halt_cleared','verification.recorded','owner.decision_recorded']);
+const supported = new Set(['message.pinned','message.unpinned','member.sponsor_transferred','channel.created','work.public_set','room.public_receipts_set','capabilities.advertised','bond.propose','bond.accept','bond.decline','bond.revoke','bond.proposed','bond.activated','bond.revoked','dm.posted','claim.acquired','claim.renewed','claim.released','room.spend_pricing_set','room.spend_allowance_set','room.archived','room.exported','room.charter_updated','room.policy_set','room.trust_set','message.deleted','message.edited','work.superseded','ownership.transferred','reply_request.cancelled','work_claim.updated','message.posted','work.proposed','work.accepted','work.started','work.completed','work.handoff_recorded','work.halt_cleared','verification.recorded','owner.decision_recorded']);
 const contextBudgets = new WeakMap();
 export function withCurrentServingWriter(db,roomId,operation) {
   if(!isCurrentRoom(db,roomId) && !db.prepare("SELECT 1 FROM current_room_record_proofs WHERE room_id=? AND domain='migrationFence' AND record_key='active' AND present=1").get(roomId))return operation();
@@ -721,7 +721,13 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
     else {if(!maps.has(key)||value!=='object')corrupt('unsupported map shape');state[key]??={};}
   }
   if(!state.room||state.room.id!==roomId)corrupt('missing room singleton');
-  if(state.room.publicReceipts?.enabled||state.room.starterSeeded)
+  // A recorded public-receipts setting no longer refuses: that dependency
+  // is now qualified — syncCurrentRoomPublication maintains the setting
+  // mirror and the receipt rows from the addressed changes of every
+  // current write, inside the same transaction, so an enabled room's
+  // writes cannot silently desync its publication. Starter-seeded rooms
+  // still refuse: no native sync maintains a starter room's mirror.
+  if(state.room.starterSeeded)
     refuse('Published/starter room dependencies require qualification');
   const assistantScalar=db.prepare('SELECT length(CAST(value AS BLOB)) bytes FROM room_assistant_config WHERE room_id=?').get(roomId);
   if(assistantScalar&&(!Number.isSafeInteger(assistantScalar.bytes)||assistantScalar.bytes<2||assistantScalar.bytes>4096))refuse('Assistant configuration exceeds bounded context');

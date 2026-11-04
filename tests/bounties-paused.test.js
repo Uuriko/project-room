@@ -40,6 +40,9 @@ test("REST: paused bounties refuse post and claim with 403 bounties_paused; list
     deadline: new Date(Date.now() + 86400000).toISOString() });
   assert.equal(created.status, 403);
   assert.equal(created.json?.error?.code ?? created.json?.code, "bounties_paused");
+  // The signpost must name the native path: the Board route it used to
+  // prescribe 409s legacy_work_retired in every current-format room.
+  assert.match(JSON.stringify(created.json), /work\.proposed/, "the served pause message names work.proposed");
   const claimed = await call("POST", `/api/rooms/${ROOM}/bounties/b-1/claim`, fixture.keys.producer, {});
   assert.equal(claimed.status, 403);
   assert.equal(claimed.json?.error?.code ?? claimed.json?.code, "bounties_paused");

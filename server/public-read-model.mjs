@@ -8,7 +8,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // rooms that opted in before the tables existed. It never runs from the
 // Durable Object constructor.
 import { createHash } from "node:crypto";
-import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
+import { publicPage, joinLink, publicName, publicTask, publicReceipts, hasConfirmedIndependentPass } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 import {
   OPERATOR_HIDDEN_RECEIPT_SQL,
@@ -539,11 +539,106 @@ function upsertPublicRoom(store, state, auth) {
     typeof setAt === "string" ? setAt : null, updatedAt);
 }
 
-// Native publication caches room metadata only. The current public-task reader
-// qualifies selected tasks independently; receipt listings remain unavailable.
+// The legacy wir_ row shape for one native work item, built from the
+// sparse command context: the addressed item plus the members the
+// command context loaded for it (its credited parties are swept in by
+// commandContextFromHead). A party the context did not load credits
+// nobody — fewer names, never wrong ones (credit() returns null).
+function nativeWorkItemRow(store, state, item) {
+  const roomId = state.room.id;
+  const room = listedRoomFields(state, isListed(store, roomId));
+  const href = startHref(credit(state, state.room?.ownerId)?.name);
+  const identityByMember = new Map();
+  try {
+    for (const link of store.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId)) {
+      if (!identityByMember.has(link.memberId)) identityByMember.set(link.memberId, link.identityId);
+    }
+  } catch { /* a store predating identity links credits nobody by id */ }
+  const creditedIds = memberIds => [...new Set(memberIds.map(id => identityByMember.get(id)).filter(id => typeof id === "string"))];
+  const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
+  const { agents, humans, agentIds } = creditsFrom(people);
+  const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
+    ? item.receipt.evidenceVersion : null;
+  return {
+    id: publicWorkItemReceiptId(roomId, item.id),
+    title: cleanName(item.title) ?? "Receipt",
+    source: "work-item",
+    originRoomId: roomId,
+    roomId: room.roomId,
+    roomTitle: room.roomTitle,
+    agents, humans, agentIds: creditedIds(agentIds),
+    pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
+    mergedAt: null,
+    verificationState: null,
+    hashes: hashList(version ? [version] : []),
+    at: iso(item.updatedAt) ?? new Date(0).toISOString(),
+    startHref: href,
+  };
+}
+
+// The receipts half of native publication, run on every current write
+// before the page/metadata half: receipt rows are not page-gated in the
+// legacy sync either, so a room with its public page off still projects
+// under its recorded receipts setting.
+//   Mirror: level-triggered on the room record's own change — the
+//   toggle and the archive both land there — rewritten to the recorded
+//   value with the legacy statements, so the stored-row opt-out leg
+//   (which reads only this mirror) stays truthful for native rooms.
+//   Purge: an opt-out (recorded on -> off) or an archive deletes the
+//   room's work-item rows in the toggle's own transaction, the native
+//   twin of replaceOptedInReceipts' delete-first step.
+//   Rows: edge-triggered on work-item transitions. The native rule is
+//   deliberately stricter than legacy wir_ parity (room setting alone):
+//   an item projects only when the recorded room setting is on, the
+//   item is completed with a receipt, the receipt carries a confirmed
+//   independent pass, and the item's own work.public_set publish intent
+//   is on — in the sparse native context that intent is the only
+//   per-item consent signal that is itself writer-qualified. Any
+//   transition that stops qualifying deletes the row (intent revoked,
+//   superseded completion, un-verify).
+function syncCurrentRoomReceipts(store, { roomId, previous, state, changes, charge }) {
+  const db = store.db;
+  const receiptsOn = publicReceipts(state).enabled === true;
+  const receiptsWas = publicReceipts(previous).enabled === true;
+  const roomChanged = changes.some(change => change.domain === "metadata" && change.key === "room");
+  if (roomChanged) {
+    const recorded = state.room.publicReceipts;
+    if (recorded && typeof recorded.enabled === "boolean") {
+      db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+        ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
+    } else {
+      db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+    }
+  }
+  const archived = Boolean(state.room.archivedAt) && !previous?.room?.archivedAt;
+  if ((receiptsWas && !receiptsOn) || archived) {
+    db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source='work-item'").run(roomId);
+  }
+  const workChanges = changes.filter(change => change.domain === "workItems");
+  const memberChange = changes.some(change => change.domain === "members");
+  if (!workChanges.length && !(memberChange && receiptsOn)) return;
+  for (const change of workChanges) {
+    const item = state.workItems?.[change.key];
+    const id = publicWorkItemReceiptId(roomId, change.key);
+    if (item && receiptsOn && item.state === "completed" && item.receipt && typeof item.receipt === "object"
+      && hasConfirmedIndependentPass(item) && publicTask(item).enabled === true) {
+      const row = nativeWorkItemRow(store, state, item);
+      insertReceipt(store, row);
+      charge(Buffer.byteLength(JSON.stringify(row)) + 256);
+    } else {
+      db.prepare("DELETE FROM public_receipts WHERE id=?").run(id);
+    }
+  }
+}
+
+// Native publication caches room metadata and, under the room's recorded
+// public-receipts setting, projects verified work-item receipts (see
+// syncCurrentRoomReceipts). The current public-task reader qualifies
+// selected tasks independently.
 // This hook runs after the protected transition, inside the originating writer TX.
 export function syncCurrentRoomPublication(store,{roomId,previous,state,event,changes,current,charge}) {
   const on=publicPage(state).enabled===true,was=publicPage(previous).enabled===true;
+  syncCurrentRoomReceipts(store,{roomId,previous,state,changes,charge});
   if(!on){if(was)store.db.prepare('DELETE FROM public_rooms WHERE slug=?').run(roomId);return;}
   const first=!was,memberChanges=changes.filter(change=>change.domain==='members');
   const roomChanged=changes.some(change=>change.domain==='metadata'&&change.key==='room');
@@ -577,9 +672,10 @@ export function syncCurrentRoomPublication(store,{roomId,previous,state,event,ch
   store.db.prepare(`INSERT INTO public_rooms(slug,title,purpose,humans,agents,names_json,tasks_json,members_json,receipts_enabled,join_mode,join_token,owner_member_id,set_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(slug) DO UPDATE SET title=excluded.title,purpose=excluded.purpose,
     humans=excluded.humans,agents=excluded.agents,names_json=excluded.names_json,members_json=excluded.members_json,
+    receipts_enabled=excluded.receipts_enabled,
     join_mode=excluded.join_mode,join_token=excluded.join_token,owner_member_id=excluded.owner_member_id,set_at=excluded.set_at,updated_at=excluded.updated_at`)
     .run(roomId,state.room.title??roomId,state.room.purpose??'',projected.length-agents,agents,JSON.stringify(projected.filter(m=>m.name).map(m=>m.name)),
-      '[]',JSON.stringify(projected),0,join.mode,join.token,join.ownerId,state.room.publicPage.setAt??null,at);
+      '[]',JSON.stringify(projected),publicReceipts(state).enabled===true?1:0,join.mode,join.token,join.ownerId,state.room.publicPage.setAt??null,at);
 }
 
 export function refreshLinkedDirectory(store, roomId) {
@@ -1329,14 +1425,14 @@ export function loadPublicRoom(store, slug, {workAfter = ''} = {}) {
   const currentWork = native ? readCurrentPublicWork(store, slug, {after:workAfter}) : null;
   if (native && !currentWork) return null;
   return {
-    ...(native?{openAdmission:row.join_mode==='open',coverage:{tasks:currentWork.coverage,receipts:{available:false}}}:{}),
+    ...(native?{openAdmission:row.join_mode==='open',coverage:{tasks:currentWork.coverage,receipts:{available:row.receipts_enabled === 1}}}:{}),
     slug: row.slug,
     title: row.title,
     purpose: row.purpose,
     counts: { humans: row.humans, agents: row.agents },
     names: parseJson(row.names_json, []),
     tasks: native?currentWork.tasks:parseJson(row.tasks_json, []),
-    receiptsEnabled: !native&&row.receipts_enabled === 1,
+    receiptsEnabled: row.receipts_enabled === 1,
     joinMode: native&&row.join_mode === "open" ? "open" : row.join_mode === "link" && row.join_token ? "link" : "request",
     joinToken: row.join_mode === "link" ? row.join_token : null,
     setAt: row.set_at,

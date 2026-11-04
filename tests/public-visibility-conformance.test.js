@@ -27,6 +27,7 @@ import {
   receiptVisible,
   lotReceiptVisible,
   lotVisibleFromFacts,
+  recordedReceiptsSetting,
 } from "../server/public-visibility.mjs";
 
 function makeDb() {
@@ -251,6 +252,33 @@ test("the lot rule across unpublish × recorded setting × toggle", () => {
       }
     }
   }
+});
+
+test("the recorded-setting leg reads the authoritative current record for native rooms", () => {
+  const db = makeDb();
+  // A current-format room: the rooms row carries only the fixed-size
+  // carrier projection (no $.room.publicReceipts leg at all); the
+  // recorded setting lives in the protected current record.
+  db.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY, projection TEXT)");
+  db.exec("CREATE TABLE current_room_head (room_id TEXT PRIMARY KEY)");
+  db.exec("CREATE TABLE current_room_records (room_id TEXT, domain TEXT, record_key TEXT, payload TEXT)");
+  const seedNative = (roomId, enabled) => {
+    db.prepare("INSERT INTO rooms (id, projection) VALUES (?, ?)").run(roomId, JSON.stringify({ normalizedCurrent: { v: 1 } }));
+    db.prepare("INSERT INTO current_room_head (room_id) VALUES (?)").run(roomId);
+    const room = enabled === null ? { id: roomId } : { id: roomId, publicReceipts: { enabled, revision: 1 } };
+    db.prepare("INSERT INTO current_room_records (room_id, domain, record_key, payload) VALUES (?, 'metadata', 'room', ?)").run(roomId, JSON.stringify(room));
+  };
+  seedNative("native-on", true);
+  seedNative("native-off", false);
+  seedNative("native-never", null);
+  assert.deepEqual(recordedReceiptsSetting(db, "native-on"), { status: "recorded", enabled: 1 });
+  assert.deepEqual(recordedReceiptsSetting(db, "native-off"), { status: "recorded", enabled: 0 });
+  assert.deepEqual(recordedReceiptsSetting(db, "native-never"), { status: "recorded", enabled: null });
+  // Lot verdicts follow the native recorded setting: recorded on
+  // serves, recorded off and never-recorded stay private (#3594).
+  assert.equal(lotReceiptVisible(db, { id: nextId("lot", "a"), roomId: "native-on" }), true);
+  assert.equal(lotReceiptVisible(db, { id: nextId("lot", "b"), roomId: "native-off" }), false);
+  assert.equal(lotReceiptVisible(db, { id: nextId("lot", "c"), roomId: "native-never" }), false);
 });
 
 test("the pure-data lot rule the packager's U5 filter must mirror", () => {

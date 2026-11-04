@@ -331,6 +331,36 @@ test("F-C5-1: minimal store without a rooms.projection column still lists via th
   assert.equal(nextCursor, null);
 });
 
+// ---- native (current-format) rooms: addressed reads, no hydration --------
+import { event } from "../src/events.js";
+
+test("native room: owner controls and listing work through addressed current reads", t => {
+  const store = new RoomStore(":memory:");
+  t.after(() => store.close());
+  const events = initialRoom("native-dir-room");
+  events.push(event({ roomId: "native-dir-room", actorId: "owner", type: "member.added",
+    data: { memberId: "alice", displayName: "Alice", kind: "agent", permissions: [] } }));
+  store.initialize(events, { representation: "normalized-current-v1" });
+  // The real store refuses whole-room hydration for current rooms; the
+  // directory must serve this room without it.
+  assert.throws(() => store.room("native-dir-room"), e => e.code === "current_room_context_required");
+  const dir = new RoomDirectory(store);
+  assert.equal(errOf(() => dir.status("native-dir-room", "alice")).code, "owner_only");
+  assert.equal(errOf(() => dir.set("native-dir-room", "alice", true)).code, "owner_only");
+  const on = dir.set("native-dir-room", "owner", true);
+  assert.equal(on.discoverable, true);
+  assert.equal(dir.status("native-dir-room", "owner").discoverable, true);
+  assert.deepEqual(dir.setReceiptsVisibility("native-dir-room", "owner", false), { roomId: "native-dir-room", publicReceipts: false });
+  assert.equal(dir.publicReceiptsVisible("native-dir-room"), false);
+  assert.equal(dir.receiptsVisibility("native-dir-room", "owner").publicReceipts, false);
+  assert.deepEqual(dir.setOpportunities("native-dir-room", "owner", false), { roomId: "native-dir-room", enabled: false });
+  const { rooms } = dir.list();
+  const entry = rooms.find(r => r.roomId === "native-dir-room");
+  assert.ok(entry, "the native room is listed");
+  assert.equal(entry.title, "Project Room Commons");
+  assert.equal(entry.memberCount, 2); // owner + alice, from the head census
+});
+
 test("public receipts column migrates onto pre-existing directory tables", () => {
   const store = makeStore({ r1: stateFor("r1") });
   store.db.exec("ALTER TABLE room_directory_settings DROP COLUMN public_receipts");

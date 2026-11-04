@@ -49,6 +49,18 @@ test('archiving a room withdraws its published work',t=>{
  const {task,send,page}=fixture(t);task('visible',true);send('archive','room.archived',{});assert.equal(page(),null);
 });
 
+test('coverage.receipts.available tracks the room public-receipts toggle',t=>{
+ const {send,page}=fixture(t);
+ assert.equal(page().document.coverage.receipts.available,false);
+ assert.equal(page().document.proofHref,null);
+ send('receipts-on','room.public_receipts_set',{enabled:true});
+ assert.equal(page().document.coverage.receipts.available,true);
+ assert.equal(page().document.proofHref,'/r/public-work-room/proof');
+ send('receipts-off','room.public_receipts_set',{enabled:false});
+ assert.equal(page().document.coverage.receipts.available,false);
+ assert.equal(page().document.proofHref,null);
+});
+
 test('an untrusted payload cannot publish private task text or alter a selected public task',t=>{
  for(const wasPublic of [false,true]){
   const {store,task,page}=fixture(t);task('target',wasPublic);

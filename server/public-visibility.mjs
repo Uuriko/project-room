@@ -453,6 +453,27 @@ export function receiptVisible(db, id) {
 //     back to the write-time mirror, the only record such a store
 //     can hold.
 export function recordedReceiptsSetting(db, roomId) {
+  // A current-format room's authoritative record is its protected
+  // current record, not the rooms row: the native rooms.projection is
+  // a fixed-size carrier with no $.room.publicReceipts leg, so the
+  // projection extraction below would read "never recorded" forever
+  // and a native room's lot receipts would stay private under a
+  // recorded opt-in. The recorded value maps through the same
+  // recorded / 1 / 0 / null contract; absent current-room relations
+  // (a predating store) fall through to the projection leg unchanged.
+  if (relationExists(db, "current_room_head") && relationExists(db, "current_room_records")) {
+    let head = null;
+    try { head = db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(roomId); } catch { head = null; }
+    if (head) {
+      let current;
+      try {
+        current = db.prepare(`SELECT json_extract(payload, '$.publicReceipts.enabled') AS enabled
+          FROM current_room_records WHERE room_id=? AND domain='metadata' AND record_key='room'`).get(roomId);
+      } catch { return { status: "absent", enabled: null }; } // a store that cannot answer recorded no opt-in
+      if (!current) return { status: "absent", enabled: null };
+      return { status: "recorded", enabled: current.enabled === 1 ? 1 : current.enabled === 0 ? 0 : null };
+    }
+  }
   let row;
   try {
     row = db.prepare(`SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS enabled

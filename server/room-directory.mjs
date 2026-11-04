@@ -26,6 +26,7 @@
 
 import { isUnpublished } from "./legal-store.mjs";
 import { refreshListedRoom, refreshDirectoryForRoom } from "./public-read-model.mjs";
+import { currentDirectoryMetadata } from "./current-public-face.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -90,8 +91,32 @@ export class RoomDirectory {
     return room.state;
   }
 
-  _requireOwner(state, memberId) {
-    if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change public discovery settings");
+  // Addressed facts for a current-format room, whose state cannot be
+  // hydrated (store.room refuses it with current_room_context_required):
+  // the owner controls need only the room record's ownerId, and the
+  // listing needs the room record plus a member count. Null for legacy
+  // rooms (and for stores that cannot serve an addressed read), whose
+  // hydrated state stays the authority below.
+  _currentFacts(roomId) {
+    try { return currentDirectoryMetadata(this.store, roomId); } catch { return null; }
+  }
+
+  _ownerId(roomId) {
+    const facts = this._currentFacts(roomId);
+    if (facts) return facts.room?.ownerId ?? null;
+    return this._roomState(roomId)?.room?.ownerId ?? null;
+  }
+
+  _entryFacts(roomId) {
+    const facts = this._currentFacts(roomId);
+    if (facts) return { room: facts.room, memberCount: facts.memberCount };
+    const state = this._roomState(roomId);
+    const members = state?.members && typeof state.members === "object" ? state.members : {};
+    return { room: state?.room, memberCount: Object.values(members).filter(m => m && m.active !== false).length };
+  }
+
+  _requireOwner(roomId, memberId) {
+    if (memberId !== this._ownerId(roomId)) fail(403, "owner_only", "Only the room owner may change public discovery settings");
   }
 
   // Runs the additive public_receipts migration at most once per instance.
@@ -103,8 +128,7 @@ export class RoomDirectory {
 
   // ---- owner controls ------------------------------------------------------
   status(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     this._ensureReceiptsColumn();
     const row = this.db.prepare("SELECT discoverable, listed_at, public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
     return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null,
@@ -113,8 +137,7 @@ export class RoomDirectory {
 
   set(roomId, memberId, discoverable) {
     if (typeof discoverable !== "boolean") fail(422, "invalid_directory", "discoverable (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     return this.store.transaction(() => {
       const at = nowMs();
       const existing = this.db.prepare("SELECT discoverable, listed_at FROM room_directory_settings WHERE room_id=?").get(roomId);
@@ -133,16 +156,14 @@ export class RoomDirectory {
   // Existing discoverable rooms default to feed-on, preserving prior behavior;
   // turning the feed off does not unlist the room or change its work items.
   opportunityStatus(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     const row = this.db.prepare("SELECT opportunities_enabled AS enabled FROM room_directory_settings WHERE room_id=?").get(roomId);
     return { roomId, enabled: row?.enabled !== 0 };
   }
 
   setOpportunities(roomId, memberId, enabled) {
     if (typeof enabled !== "boolean") fail(422, "invalid_opportunities", "enabled (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     return this.store.transaction(() => {
       // A room can opt out before it is listed. Upsert preserves the existing
       // listing bit and timestamp on every subsequent owner change.
@@ -170,15 +191,13 @@ export class RoomDirectory {
   }
 
   receiptsVisibility(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     return { roomId, publicReceipts: this.publicReceiptsVisible(roomId) };
   }
 
   setReceiptsVisibility(roomId, memberId, enabled) {
     if (typeof enabled !== "boolean") fail(422, "invalid_public_receipts", "publicReceipts (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._requireOwner(roomId, memberId);
     return this.store.transaction(() => {
       this._ensureReceiptsColumn();
       // A room can go private before it is listed. Upsert preserves the
@@ -211,6 +230,17 @@ export class RoomDirectory {
     }
   }
 
+  // Whether the current-room head table can be probed here. A store
+  // predating the current format has no head rows to admit, so the
+  // list() title leg keeps its legacy-only shape there.
+  _currentRoomHeadReadable() {
+    try {
+      return !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='current_room_head'").get();
+    } catch {
+      return false;
+    }
+  }
+
   // ---- public listing ------------------------------------------------------
   list({ after = null, limit = DIRECTORY_DEFAULT_LIMIT } = {}) {
     // An absent or blank limit means the default; a non-numeric one does too.
@@ -238,10 +268,18 @@ export class RoomDirectory {
     //       by JS after consuming window).
     // _publicEntry's JS checks stay in place below as the final
     // authority (defence in depth, and the minimal-store fallback path).
+    // A current-format room's projection is the fixed-size carrier
+    // with no $.room.title, so the title leg admits it on its head row
+    // instead; _publicEntry's addressed read remains the title
+    // authority for those rooms — the same defence-in-depth split the
+    // minimal-store case uses.
+    const currentLeg = this._currentRoomHeadReadable()
+      ? ` OR EXISTS (SELECT 1 FROM current_room_head h WHERE h.room_id = s.room_id)`
+      : "";
     const titleFilter = this._roomsProjectionReadable()
-      ? `AND json_valid(r.projection)
+      ? `AND ((json_valid(r.projection)
           AND json_type(r.projection, '$.room.title') = 'text'
-          AND TRIM(json_extract(r.projection, '$.room.title'), '${JS_TRIM_CHARS}') <> ''`
+          AND TRIM(json_extract(r.projection, '$.room.title'), '${JS_TRIM_CHARS}') <> '')${currentLeg})`
       : "";
     const rows = this.db.prepare(`
         SELECT s.room_id AS roomId, s.listed_at AS listedAt
@@ -270,23 +308,21 @@ export class RoomDirectory {
   // Returns null when the room vanished or its state is unusable (the
   // listing silently skips it rather than 500ing the whole page).
   _publicEntry(roomId, listedAt) {
-    let state;
+    let facts;
     try {
-      state = this._roomState(roomId);
+      facts = this._entryFacts(roomId);
     } catch {
       return null;
     }
     if (isUnpublished(this.db, "room", roomId)) return null;
-    const title = cleanText(state?.room?.title, MAX_TITLE_CHARS);
+    const title = cleanText(facts?.room?.title, MAX_TITLE_CHARS);
     if (!title) return null;
-    const members = state?.members && typeof state.members === "object" ? state.members : {};
-    const memberCount = Object.values(members).filter(m => m && m.active !== false).length;
     return {
       roomId,
       title,
-      purpose: cleanText(state?.room?.purpose, MAX_PURPOSE_CHARS),
-      kind: cleanText(state?.room?.kind, 64),
-      memberCount,
+      purpose: cleanText(facts?.room?.purpose, MAX_PURPOSE_CHARS),
+      kind: cleanText(facts?.room?.kind, 64),
+      memberCount: facts.memberCount,
       listedAt,
     };
   }

@@ -12,7 +12,7 @@ export const BOUNTY_NEW_WORK_TOOLS = new Set(["bounty_post", "bounty_fund", "bou
 
 export const BOUNTIES_PAUSED_CODE = "bounties_paused";
 export const BOUNTIES_PAUSED_MESSAGE =
-  "New bounty work is paused: bounties are cut from the MVP. Existing bounties can still be read, accepted, disputed, finalized and transferred. For new work use the Board: POST /api/rooms/{roomId}/work-claims.";
+  "New bounty work is paused: bounties are cut from the MVP. Existing bounties can still be read, accepted, disputed, finalized and transferred. For new work, propose canonical work through work.proposed; in rooms that still use the legacy Board, POST /api/rooms/{roomId}/work-claims.";
 
 export function bountyNewWorkEnabled(env = globalThis.process?.env ?? {}) {
   if (env.ROOM_BOUNTY_WORK === "1") return true;
