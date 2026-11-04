@@ -7,14 +7,23 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { readResumablePreparation } from "../client/work-context-cache.mjs";
 import { createWorkBrief } from "../client/work-brief.mjs";
 
+const identityFields = ["roomId", "viewerId", "viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"];
+const identityScope = value => JSON.stringify(identityFields.map(key => value[key] ?? null));
+const scopeChanged = () => { throw Object.assign(new Error("Preparation context scope changed; read again"), { code: "context_scope_changed" }); };
+
 export async function readPreparation(client, workItemId, since = 0) {
   if (!Number.isSafeInteger(since) || since < 0) throw new Error("Invalid checkpoint");
   const initial = await client.workContext(workItemId);
+  if (initial.work?.id !== workItemId || !initial.roomId || !initial.viewerId
+    || initial.viewer?.id !== initial.viewerId || !Number.isSafeInteger(initial.viewer.revision)
+    || initial.viewer.revision < 0) scopeChanged();
+  const scope = identityScope(initial), viewerRevision = initial.viewer.revision;
   const items = [], seen = new Set();
   let cursor, checkpoint = null;
   for (let pages = 0; pages < 100; pages++) {
     const result = await client.workDiscussion(workItemId, cursor
       ? { cursor, limit: 50 } : { since, limit: 50 });
+    if (result.workItemId !== workItemId || identityScope(result) !== scope) scopeChanged();
     const page = result.discussion;
     items.push(...page.items);
     if (!page.hasMore) { checkpoint = page.checkpoint; break; }
@@ -24,6 +33,8 @@ export async function readPreparation(client, workItemId, since = 0) {
   }
   if (checkpoint === null) throw new Error("Discussion exceeds preparation limit; read it explicitly before proceeding");
   const current = await client.workContext(workItemId);
+  if (current.work?.id !== workItemId || identityScope(current) !== scope
+    || current.viewer?.id !== initial.viewerId || current.viewer.revision !== viewerRevision) scopeChanged();
   return {
     roomId: current.roomId,
     work: current.work,
