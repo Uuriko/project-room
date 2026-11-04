@@ -13,6 +13,7 @@ import { squadMentionTargets } from "./squads.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/;
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("base64url");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export function conversationCursorCodec(store) {
@@ -79,6 +80,12 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     || messageId !== null && !validId(messageId)
     || channelId !== null && !validId(channelId)
     || peerMemberId !== null && (!validId(peerMemberId) || channelId !== null)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+  // `since` is a checkpoint token, never a timestamp. A timestamp-shaped
+  // value is a client contract error, not a stale checkpoint: name it with a
+  // 422 instead of silently answering an empty reset. Checkpoint tokens are
+  // base64url ciphertext and never match this full-string date shape.
+  if (typeof since === "string" && ISO_TIMESTAMP.test(since) && !Number.isNaN(Date.parse(since)))
+    fail(422, "invalid_conversation_since", "since must be a conversation checkpoint token, not a timestamp");
   return store.readTransaction(() => withCurrentReadContext(store.db,roomId,() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const current = isCurrentRoom(store.db,roomId);
@@ -99,7 +106,19 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
     const sameHead = saved?.sequence === head.sequence && saved?.anchor === anchor;
     const privateAppend = peerMemberId !== null && !sameHead && publicOnlyAppend(store, roomId, saved, head.sequence);
-    if (cursor !== null && ((!sameHead && !privateAppend) || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
+    // R-33: current-format pages are keyset pages over (seq, message_id) and
+    // the keyset is head-independent: appends carry higher sequences and can
+    // never enter an in-progress backward walk, and not-yet-read records are
+    // read live by keyset, so a head change alone must not reset a
+    // public/channel walk. Mid-walk semantics: an edit to a not-yet-read
+    // message is served in its current form and a delete as its tombstone;
+    // already-served pages never change, and appended messages join only a
+    // fresh walk from page 1. DM pair walks keep the conservative same-head /
+    // proven-public-append contract, and legacy storage domains keep
+    // reset-on-head-change (their projection offsets are not head-independent).
+    const keysetCarry = peerMemberId === null && current
+      && Number.isSafeInteger(saved?.before) && saved.before >= 0 && typeof saved?.beforeId === "string";
+    if (cursor !== null && ((!sameHead && !privateAppend && !keysetCarry) || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
     // Certification covers the full record and query columns at this exact
     // head. Never replay or perform a full parity scan on a read request.
     const canonicalMarker = store.db.prepare("SELECT json_extract(projection,'$.messageAuthority') AS marker FROM rooms WHERE id=?").get(roomId)?.marker;
@@ -202,7 +221,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // after a proven short public-only append. Other changes invalidate older pages.
     const version = peerMemberId !== null ? digest([indexed, archiveMerged, messages]) : digest([head.sequence, anchor, messages]);
     const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version, sequence: head.sequence, anchor }) : null;
-    if (since !== null && saved.version === version && (peerMemberId === null || sameHead || privateAppend)) return { ...base, mode: "not_modified", nextCursor, checkpoint };
+    if (since !== null && saved.version === version && (peerMemberId === null || sameHead || privateAppend)) return { ...base, mode: "not_modified", messages: [], nextCursor, checkpoint };
     return withContentTrust({
       ...base, mode: "replace",
       ...(addressing ? { addressing } : {}),

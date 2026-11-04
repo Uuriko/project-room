@@ -509,6 +509,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_connection` | 422 | Invalid connection request | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_context_version` | 422 | since_version is the only context query parameter | follow hint | Follow this error's hint and next steps. |
 | `invalid_conversation_selection` | 422 | Choose a bounded conversation page or one message | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_conversation_since` | 422 | since must be a conversation checkpoint token, not a timestamp | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

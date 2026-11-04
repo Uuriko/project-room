@@ -64,7 +64,7 @@ test(`${indexed ? 'certified index' : 'projection fallback'}: bounded HTTP conve
   assert.equal(last.value.nextCursor, null);
   const unchanged = await f.get({ limit: 3, since: first.value.checkpoint });
   assert.equal(unchanged.value.mode, 'not_modified');
-  assert.equal(Object.hasOwn(unchanged.value, 'messages'), false);
+  assert.deepEqual(unchanged.value.messages, [], 'not_modified carries an empty messages array (R-33 contract)');
   assert.equal((await f.get({ messageId: 'public-0' })).value.messages[0].body, 'text 0');
   assert.equal((await f.get({ messageId: 'private-0' })).status, 404);
   assert.equal((await f.get({ messageId: 'private-0' }, f.bob)).value.messages[0].body, 'secret 0');
