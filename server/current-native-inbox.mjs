@@ -1,3 +1,4 @@
+import {recordInboxSkipStop} from './inbox-skip-diagnostics.mjs';
 import {readCurrentEventEnvelope} from './current-event-envelope.mjs';
 import {inboxNext} from './inbox-next.mjs';
 import {readCurrentInboxDiscovery} from './current-inbox-discovery.mjs';
@@ -24,7 +25,7 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
  // Only bounded numeric scalars cross this first boundary. Never fetch raw
  // event IDs or route strings before their size has been admitted.
  const count=Math.min(SKIP_WINDOW,records(),Math.floor(remainingCurrentReadBytes(b)/64));
- if(!count)return {after,skipped:0};
+ if(!count)return {after,skipped:0,stopReason:'budget'};
  const rows=db.prepare(`SELECT sequence,length(CAST(id AS BLOB)) AS idBytes,length(CAST(body AS BLOB)) AS bodyBytes,
    CASE WHEN length(CAST(body AS BLOB)) BETWEEN 2 AND ${SKIP_EVENT_BYTES} AND json_valid(body)
     THEN length(CAST(CASE WHEN json_extract(body,'$.type') IN ('message.posted','message.edited')
@@ -32,11 +33,12 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
    FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?`).all(roomId,after,headSequence,count);
  chargeCurrentReadBudget(b,rows.length*64,rows.length);
  const fields=['message_id','seq','channel_id','thread_root_id','reply_to_id','to_member_id','work_item_id','author_id','created_at','deleted_at'];
- const cache=new Map();
+ const cache=new Map();let headerStopReason='row_bound';
  const header=id=>{
+  headerStopReason='row_bound';
   if(typeof id!=='string'||!id||Buffer.byteLength(id)>200)return undefined;
   if(cache.has(id))return cache.get(id);
-  if(records()<1||remainingCurrentReadBytes(b)<64)return undefined;
+  if(records()<1||remainingCurrentReadBytes(b)<64){headerStopReason='budget';return undefined;}
   const size=db.prepare(`SELECT length(CAST(r.payload AS BLOB)) AS payloadBytes,
     length(CAST(a.counts_json AS BLOB)) AS receiptBytes
     FROM current_room_record_proofs p LEFT JOIN current_room_records r
@@ -47,14 +49,15 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
   // readCurrentRecord charges1024+payload and at most one full uncached
   // receipt+256. Reserve that exact upper bound, sharing its real cache/budget.
   if(!size||!Number.isSafeInteger(size.payloadBytes)||size.payloadBytes<1||size.payloadBytes>131072
-    ||!Number.isSafeInteger(size.receiptBytes)||size.receiptBytes<1||size.receiptBytes>131072
-    ||records()<4||remainingCurrentReadBytes(b)<1024+size.payloadBytes+size.receiptBytes+256)return undefined;
+    ||!Number.isSafeInteger(size.receiptBytes)||size.receiptBytes<1||size.receiptBytes>131072)return undefined;
+  if(records()<4||remainingCurrentReadBytes(b)<1024+size.payloadBytes+size.receiptBytes+256){headerStopReason='budget';return undefined;}
   const witness=readCurrentRecord(db,roomId,'messageWitness',id,b),value=witness?.header;
   if(!value||Object.keys(value).sort().join(',')!==[...fields].sort().join(','))return undefined;
-  if(records()<1||remainingCurrentReadBytes(b)<64)return undefined;
+  if(records()<1||remainingCurrentReadBytes(b)<64){headerStopReason='budget';return undefined;}
   const scalar=db.prepare(`SELECT ${[...fields,'entity_hash'].map(key=>`coalesce(length(CAST(${key} AS BLOB)),0)`).join('+')} AS bytes FROM messages WHERE room_id=? AND message_id=?`).get(roomId,id);
   chargeCurrentReadBudget(b,64);
-  if(!scalar||scalar.bytes>SKIP_EVENT_BYTES||records()<1||remainingCurrentReadBytes(b)<scalar.bytes+64)return undefined;
+  if(!scalar||scalar.bytes>SKIP_EVENT_BYTES)return undefined;
+  if(records()<1||remainingCurrentReadBytes(b)<scalar.bytes+64){headerStopReason='budget';return undefined;}
   const row=db.prepare(`SELECT ${fields.join(',')},entity_hash FROM messages WHERE room_id=? AND message_id=?`).get(roomId,id);
   chargeCurrentReadBudget(b,scalar.bytes+64);
   // Projection scalars can deny a skip, never authorize one on their own.
@@ -62,23 +65,24 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
   if(witness.sequence!==row.seq||witness.entityHash!==row.entity_hash||fields.some(key=>value[key]!==row[key]))return undefined;
   cache.set(id,value);return value;
  };
- let last=after;
+ let last=after,stopReason='window';
  for(const row of rows){
   if(!Number.isSafeInteger(row.idBytes)||row.idBytes<1||row.idBytes>512
     ||!Number.isSafeInteger(row.bodyBytes)||row.bodyBytes<2||row.bodyBytes>SKIP_EVENT_BYTES
-    ||!Number.isSafeInteger(row.envelopeBytes)||row.envelopeBytes<2
-    ||records()<1||remainingCurrentReadBytes(b)<row.idBytes+32+row.envelopeBytes)break;
+    ||!Number.isSafeInteger(row.envelopeBytes)||row.envelopeBytes<2){stopReason='row_bound';break;}
+  if(records()<1||remainingCurrentReadBytes(b)<row.idBytes+32+row.envelopeBytes){stopReason='budget';break;}
   try{
    const {id,event:e}=readCurrentEventEnvelope(db,roomId,row,b);
    if(e.type==='message.posted'){
     const own=header(e.data.messageId??id);
     if(!own||own.author_id!==e.actorId||own.to_member_id!==(e.data.toMemberId??null)
-       ||own.reply_to_id!==(e.data.replyToId??null)||own.seq!==row.sequence)break;
+       ||own.reply_to_id!==(e.data.replyToId??null)||own.seq!==row.sequence){stopReason=headerStopReason;break;}
     if(e.actorId!==memberId){
-     if(e.data.toMemberId===memberId||records()<1||remainingCurrentReadBytes(b)<64)break;
+     if(e.data.toMemberId===memberId){stopReason='addressed';break;}
+     if(records()<1||remainingCurrentReadBytes(b)<64){stopReason='budget';break;}
      const mention=db.prepare('SELECT 1 FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? LIMIT 1').get(roomId,id,memberId);
-     chargeCurrentReadBudget(b,64);if(mention)break;
-     if(own.reply_to_id!==null){const parent=header(own.reply_to_id);if(!parent||parent.author_id===memberId)break;}
+     chargeCurrentReadBudget(b,64);if(mention){stopReason='addressed';break;}
+     if(own.reply_to_id!==null){const parent=header(own.reply_to_id);if(!parent){stopReason=headerStopReason==='budget'?'budget':'parent_unverified';break;}if(parent.author_id===memberId){stopReason='addressed';break;}}
     }
    }
    last=row.sequence;
@@ -86,11 +90,11 @@ function firstAddressedSequence(db,roomId,memberId,after,headSequence,b){
    // Optional progress must not withhold the already verified page. Leave the
    // failing row unconsumed: its next normal window retains the original error.
    if(error?.code==='current_room_context_unavailable'
-     ||typeof error?.message==='string'&&error.message.startsWith('current_room_corrupt: '))break;
+     ||typeof error?.message==='string'&&error.message.startsWith('current_room_corrupt: ')){stopReason='error';break;}
    throw error;
   }
  }
- return {after:last,skipped:rows.filter(row=>row.sequence<=last).length};
+ return {after:last,skipped:rows.filter(row=>row.sequence<=last).length,stopReason};
 }
 // Conversation delivery and standing obligations are separate cursors. Reading
 // a source window neither acknowledges conversation nor clears formal work.
@@ -153,7 +157,10 @@ export function readCurrentNativeInbox(store,secret,roomId,{limit=50,after,older
   // Complete the baseline page and all standing-obligation reads first.
   // Optional progress can spend only what is left, never starve useful items.
   if(!recent&&skipUnaddressed&&page.hasMore){
-   const skip=firstAddressedSequence(store.db,roomId,memberId,page.next,head.sequence,b);
+   let skip;
+   try{skip=firstAddressedSequence(store.db,roomId,memberId,page.next,head.sequence,b);}
+   catch(error){recordInboxSkipStop(store.db,'error');throw error;}
+   recordInboxSkipStop(store.db,skip.stopReason);
    skippedUnaddressed=skip.skipped;page={...page,next:skip.after,hasMore:skip.after<head.sequence};
   }
   const conversationNext=page.hasMore?{tool:'room_read_inbox',arguments:{roomId,limit,after:page.next}}:null;

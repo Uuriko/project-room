@@ -1,6 +1,19 @@
 import test from'node:test';import assert from'node:assert/strict';import{build}from'esbuild';import{Miniflare}from'miniflare';import{mkdtemp,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join}from'node:path';import{fileURLToPath}from'node:url';
-test('actual Worker native inbox bounds private backlog costs and retains exact obligations and continuation',{timeout:120000},async()=>{const built=await build({entryPoints:[fileURLToPath(new URL('./current-native-inbox-worker.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']}),directory=await mkdtemp(join(tmpdir(),'native-inbox-'));const create=()=>new Miniflare({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:directory,durableObjects:{ROOM:{className:'NativeInboxProbe',useSQLite:true}}});let mf=create();const receipts=[];const call=async(surface,path)=>{const response=await mf.dispatchFetch('http://localhost'+path+(path.includes('?')?'&':'?')+'surface='+surface),body=await response.json();assert.equal(response.status,200,path+JSON.stringify(body));return body;};
+const operatorLogs=[];let emitted;
+const observedEmission=new Promise(resolve=>{emitted=resolve;});
+function captureOperatorLog(stdout,stderr){
+ for(const stream of [stdout,stderr]){let pending='';stream.on('data',chunk=>{pending+=chunk.toString();let newline;while((newline=pending.indexOf('\n'))>=0){const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(line.startsWith('{')&&line.includes('room.inbox_skip_stops')){operatorLogs.push(JSON.parse(line));emitted();}}});stream.pipe(stream===stdout?process.stdout:process.stderr);}
+}
+test('actual Worker native inbox bounds private backlog costs and retains exact obligations and continuation',{timeout:120000},async()=>{const built=await build({entryPoints:[fileURLToPath(new URL('./current-native-inbox-worker.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']}),directory=await mkdtemp(join(tmpdir(),'native-inbox-'));const create=()=>new Miniflare({handleRuntimeStdio:captureOperatorLog,modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:directory,durableObjects:{ROOM:{className:'NativeInboxProbe',useSQLite:true}}});let mf=create();const receipts=[];const call=async(surface,path)=>{const response=await mf.dispatchFetch('http://localhost'+path+(path.includes('?')?'&':'?')+'surface='+surface),body=await response.json();assert.equal(response.status,200,path+JSON.stringify(body));return body;};
  try{
+ const diagnosticSeed=await call('diagnostics','/seed?count=32');
+ const diagnosticPath='/inbox?after='+diagnosticSeed.result.beforeSignals;
+ const expected=await call('diagnostics',diagnosticPath);
+ for(let i=0;i<62;i++){const observed=await call('diagnostics',diagnosticPath);assert.deepEqual(observed.result,expected.result);assert.equal(observed.cost.rowsWritten,0);}
+ assert.equal(operatorLogs.length,0);
+ const finalDiagnostic=await call('diagnostics',diagnosticPath);assert.deepEqual(finalDiagnostic.result,expected.result);assert.equal(finalDiagnostic.cost.rowsWritten,0);
+ let deadline;try{await Promise.race([observedEmission,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(Error('Missing aggregate operator log')),2000);})]);}finally{clearTimeout(deadline);}
+ assert.equal(operatorLogs.length,1);assert.deepEqual(Object.keys(operatorLogs[0]),['event','version','attempts','stops']);assert.equal(operatorLogs[0].attempts,64);assert.deepEqual(Object.keys(operatorLogs[0].stops),['addressed','window','budget','parent_unverified','row_bound','error']);assert.equal(Object.values(operatorLogs[0].stops).reduce((a,b)=>a+b,0),64);
  const skipReceipts=[];
  for(const first of [true,false]){
   const surface='skip-'+first,seed=await call(surface,'/seed-skip?first='+(first?1:0));
