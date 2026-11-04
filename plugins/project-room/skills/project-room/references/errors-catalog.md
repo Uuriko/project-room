@@ -101,6 +101,7 @@ response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `work_delegate_unknown_member` | 422 | Delegate is not an active member of this room | fix+resend | Fix the refused input and resend. |
 | `current_thread_index_unavailable` | 409 | Thread visibility indexes require reconciliation | no | Ask the room operator to reconcile the visibility indexes; do not infer missing messages. |
 | `current_thread_too_large` | 413 | Selected thread exceeds bounded context | fix+resend | Request a smaller selected message or thread context. |
 | `current_thread_changed` | 409 | Selected thread proof changed | re-read | Re-read the selected thread and discard the stale snapshot. |

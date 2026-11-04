@@ -37,7 +37,7 @@ import { messageRepository } from "./message-repository.mjs";
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, releaseWork, delegateWork, claimDelegateEnabled, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
@@ -69,7 +69,7 @@ import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived, publicReceipts } from "../src/events.js";
+import { isRoomArchived, ownMember, publicReceipts } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -1001,7 +1001,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // and is acting on someone else's claim. The claim holder takes the
   // ordinary path. Fixtures that do not name an owner stay holder-only.
   const authorityOver = item => {
-    if (item.owner === caller) return false;
+    if (item.owner === caller || (item.delegate !== undefined && item.delegate === caller)) return false;
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
@@ -1359,7 +1359,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const sendBackCall = item.state === "delivered" && data.state === "in_progress";
     const reviewerOutcome = item.owner !== caller && data.requestId !== undefined
       ? reviewerRequestOutcome(item, data.requestId, caller) : null;
-    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) {
+    const delegateCall = item.delegate !== undefined && item.delegate === caller;
+    if (item.owner !== caller && !delegateCall && !verifyCall && !sendBackCall && !reviewerOutcome) {
       reject(403, "work_not_owner", ownerHeldCopy(item)
         ?? `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     }
@@ -1709,6 +1710,29 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       wakeMemberId: target, wakeReason: "assigned"
     });
     return json(res, 200, reassigned);
+  }
+  if (workClaimRoute === "delegate" && req.method === "POST") {
+    if (!claimDelegateEnabled()) reject(404, "not_found", "Claim delegation is not enabled on this server");
+    const data = body(req);
+    if (!shape(data, { required: ["delegate"], optional: ["note"] })) invalidInput(reject, "{delegate: memberId|null, note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    const authority = authorityOver(item);
+    const target = data.delegate;
+    if (target !== null) {
+      const members = store.roomAuthority(roomId).members ?? {};
+      const member = typeof target === "string" ? ownMember(members, target) : null;
+      if (!member || member.active === false) {
+        reject(422, "work_delegate_unknown_member", `delegate "${typeof target === "string" ? target : "?"}" is not an active member of this room`);
+      }
+    }
+    requireEventBudget();
+    const note = text("note", data.note, { multiline: true });
+    let delegated;
+    try { delegated = delegateWork(item, caller, target, { note, now: nowMs, authority }); }
+    catch (error) { if (error instanceof ClaimError) reject(422, error.code, error.message); throw error; }
+    commit(delegated, "delegated", target === null ? {} : {
+      attention: "assigned", attentionMemberId: target, wakeMemberId: target, wakeReason: "assigned" });
+    return json(res, 200, delegated);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
     // Lease-renewal check-ins: the owner extends their claim's lease only by

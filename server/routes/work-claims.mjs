@@ -89,6 +89,16 @@ export async function closeRoute(ctx) {
     helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
 }
 
+// Linear-parity delegate: owner stays accountable, delegate does the work.
+// 404 unless ROOM_CLAIM_DELEGATE=1 (checked in handleWorkClaims).
+export async function delegateRoute(ctx) {
+  const { roomId, auth } = authenticateRead(ctx, true);
+  return handleWorkClaims({ req: ctx.req, res: ctx.res, url: ctx.url, store: ctx.store,
+    roomId, auth, workClaimRoute: "delegate", workClaimId: ctx.params.claimId,
+    registry: ctx.store.workClaims, reauthorize: () => authenticateRead(ctx, true).auth,
+    helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
+}
+
 // #5378: the claim thread, one ordered record per Board claim. Same
 // visibility as the claim read: any active room member who may read the
 // claim reads its thread. Entries are board events and the claim's own
@@ -124,6 +134,10 @@ export const WORK_CLAIM_ROUTES = Object.freeze([
     schema: { params: claimParameters, response: { type: "object" } }, events: [] })),
   Object.freeze({ id: "work-claim-close", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/close",
     auth: "room", capability: null, scope: "room", handler: closeRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
+  Object.freeze({ id: "work-claim-delegate", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/delegate",
+    parity: "exempt:delegate is a Board REST write behind ROOM_CLAIM_DELEGATE (off by default); no MCP tool yet",
+    auth: "room", capability: null, scope: "room", handler: delegateRoute,
     schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
   Object.freeze({ id: "work-claim-cancel", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/cancel",
     auth: "room", capability: null, scope: "room", handler: closeRoute,
