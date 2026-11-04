@@ -4,6 +4,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createOAuthProvider } from './oauth-provider.mjs';
 import { AccessRequests } from './access-requests.mjs';
+import { ServiceError } from './service-error.mjs';
 import { PUBLIC_LOBBY_ROOM_ID, currentPublicMetadata } from './current-public-face.mjs';
 import { publicPage, joinLink, isRoomArchived } from '../src/events.js';
 import { isUnpublished } from './legal-store.mjs';
@@ -141,7 +142,7 @@ export function createMcpInviteOAuth({ store, clients, resource, issuer = new UR
       if (pending.approval_hash !== approvalHash) throw new Error('This connection was already confirmed with different settings');
       grant = db.prepare('SELECT * FROM oauth_invite_grants WHERE id=?').get(pending.grant_id);
     } else {
-      if (!publicLobbyAvailable()) throw new Error('The public lobby is unavailable or not open for guest joining');
+      if (!publicLobbyAvailable()) throw new ServiceError(400, 'public_lobby_unavailable', 'The public lobby is unavailable or not open for guest joining');
       const identity = store.identities.create(name, { anonymous: { address: String(address ?? ''), proof } });
       const admission = new AccessRequests(store).request(PUBLIC_LOBBY_ROOM_ID, { identityId: identity.identityId, displayName: name,
         requestedPermissions: [], requestId: `native-${hash(nonce).slice(0, 56)}` }, identity.secret);
