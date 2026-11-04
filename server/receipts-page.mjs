@@ -89,7 +89,7 @@ export function readableUtc(value) {
 
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
-  const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
+  const description = "Public receipts of work done in Project Room: merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts.";
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
