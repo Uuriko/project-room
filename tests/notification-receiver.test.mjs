@@ -111,7 +111,7 @@ test('bootstrap is mandatory only without journal; cancellation preserves fronti
  assert.equal(await receiveCloudNotifications({...f,signal:cancel.signal,fetchImpl:()=>{throw Error('No HTTP');}}),0);
 });
 
-test('actual Node HTTP + fake CLI sees fixed source-only argv, stdin EOF and no adapter/Room mutation',async t=>{
+for(const prefix of ['', '/room'])test(`actual Node HTTP ${prefix||'root'} + fake CLI preserves fixed paths, source-only argv and stdin EOF`,async t=>{
  const f=fixture(t),cancel=new AbortController(),calls=[],output=join(f.home,'argv.json'),executable=join(f.home,'fake-cli');
  writeFileSync(executable,'#!'+process.execPath+'\n'+`import fs from 'node:fs';let input='';for await(const c of process.stdin)input+=c;if(input)process.exit(3);fs.writeFileSync(${JSON.stringify(output)},JSON.stringify(process.argv.slice(2)));const session=process.argv[5];console.log(JSON.stringify({ok:true,session_id:session,url:'https://claude.ai/code/'+session}));`,{mode:0o700});
  writeFileSync(f.configFile,JSON.stringify({executable,sessionId,bootstrapAfter:10}),{mode:0o600});
@@ -119,15 +119,15 @@ test('actual Node HTTP + fake CLI sees fixed source-only argv, stdin EOF and no 
   calls.push(req.method+' '+req.url);res.setHeader('content-type','application/json');
   if(req.method==='GET'){res.end(JSON.stringify(identity()));return;}
   let raw='';for await(const c of req)raw+=c;const q=JSON.parse(raw);const args=q.params.arguments;
-  assert.equal(q.params.name,'room_wait_for_attention');assert.equal(req.url,'/mcp');
+  assert.equal(q.params.name,'room_wait_for_attention');assert.equal(req.url,prefix+'/mcp');
   const value=result(args,++frames===1?{after:11,status:'ready',items:[row(11)]}:{});
   res.end(JSON.stringify({jsonrpc:'2.0',id:q.id,result:{structuredContent:value}}));
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
- f.connection.apiBase='http://127.0.0.1:'+server.address().port;
+ f.connection.apiBase='http://127.0.0.1:'+server.address().port+prefix;
  await receiveCloudNotifications({...f,signal:cancel.signal,print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
  const argv=JSON.parse(readFileSync(output));assert.equal(argv[0],'-p');assert.deepEqual(JSON.parse(argv[1].split('\n')[1]),{roomId,items:[{messageId:'message-11',sequence:11}]});assert.deepEqual(argv.slice(2),['--cloud',sessionId,'--output-format','json']);
- assert.deepEqual(calls,['POST /mcp','GET /api/rooms/commons?view=identity']);assert.equal(JSON.stringify(argv).includes('DO NOT FORWARD'),false);
+ assert.deepEqual(calls,['POST '+prefix+'/mcp','GET '+prefix+'/api/rooms/commons?view=identity']);assert.equal(JSON.stringify(argv).includes('DO NOT FORWARD'),false);
 });
 
 test('one private owner excludes simultaneous couriers and cancellation releases the exact owner',async t=>{
@@ -183,18 +183,26 @@ test('a newer re-mention of the same message across valid frames coalesces once 
 });
 
 
-for(const dimension of ['origin','member'])test(`actuator namespaces isolate two ${dimension}s and exact-scope cold retry still sends once`,async t=>{
+for(const dimension of ['origin','member','prefix'])test(`actuator namespaces isolate two ${dimension==='prefix'?'prefixes':dimension+'s'} and exact-scope cold retry still sends once`,async t=>{
  const f=fixture(t);let calls=0,failCursor=true;
  const openReceipt=(...args)=>{const journal=openJoinJournal(...args);return{...journal,save:value=>{if(failCursor&&value.after===11&&value.inFlight===null)throw Error('synthetic cursor commit fault');journal.save(value);}};};
  const notifierFactory=options=>createCloudNotifier({...options,runCli:async(_file,argv)=>{calls++;assert.deepEqual(JSON.parse(argv[1].split('\n')[1]),{roomId,items:[{messageId:'same-source',sequence:11}]});return good();}});
- const connections=[{...f.connection},{...f.connection,...(dimension==='origin'?{apiBase:'https://different.test'}:{memberId:'other-worker'})}];
+ const connections=[{...f.connection,...(dimension==='prefix'?{apiBase:'https://example.test/room-a'}:{})},{...f.connection,...(dimension==='origin'?{apiBase:'https://different.test'}:dimension==='prefix'?{apiBase:'https://example.test/room-b'}:{memberId:'other-worker'})}];
  const fetchFor=connection=>async(url,options)=>{
-  if(new URL(url).pathname!== '/mcp')return Response.json({snapshotView:'identity',snapshotVersion:1,roomId,viewerId:connection.memberId,state:{members:{[connection.memberId]:{id:connection.memberId,kind:'agent',active:true}}}});
+  if(!new URL(url).pathname.endsWith('/mcp'))return Response.json({snapshotView:'identity',snapshotVersion:1,roomId,viewerId:connection.memberId,state:{members:{[connection.memberId]:{id:connection.memberId,kind:'agent',active:true}}}});
   const q=JSON.parse(options.body),args=q.params.arguments;return Response.json({jsonrpc:'2.0',id:q.id,result:{structuredContent:{...result(args,{after:11,status:'ready',items:[row(11,'same-source')]}),memberId:connection.memberId}}});
  };
  for(const connection of connections)await assert.rejects(()=>receiveCloudNotifications({...f,connection,openReceipt,fetchImpl:fetchFor(connection),notifierFactory}),/cursor commit fault/);
  assert.equal(calls,2,'different authenticated source scopes must not share an accepted actuator receipt');
  failCursor=false;
- for(const connection of connections){const cancel=new AbortController();assert.equal(await receiveCloudNotifications({...f,connection,openReceipt,fetchImpl:fetchFor(connection),notifierFactory,signal:cancel.signal,print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}}),0);}
+ for(const saved of connections){const connection=dimension==='prefix'?{...saved,apiBase:saved.apiBase+'/'}:saved;const cancel=new AbortController();assert.equal(await receiveCloudNotifications({...f,connection,openReceipt,fetchImpl:fetchFor(connection),notifierFactory,signal:cancel.signal,print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}}),0);}
  assert.equal(calls,2,'same exact scope reuses its frozen accepted receipt after cursor-commit loss');
+});
+
+
+test('saved prefix compatibility still rejects credentials, query, fragment and non-loopback HTTP before fetch',async t=>{
+ const f=fixture(t);
+ for(const apiBase of ['https://user:placeholder@example.test/room','https://example.test/room?query=1','https://example.test/room#fragment','http://example.test/room']){
+  await assert.rejects(()=>receiveCloudNotifications({...f,connection:{...f.connection,apiBase},fetchImpl:()=>{throw Error('No fetch allowed');},notifierFactory:()=>{throw Error('No actuator allowed');}}),e=>e.code==='notification_context_unavailable');
+ }
 });

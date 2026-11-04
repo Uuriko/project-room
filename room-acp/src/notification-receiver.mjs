@@ -5,6 +5,7 @@ import {performance} from 'node:perf_hooks';
 import {setTimeout as pause} from 'node:timers/promises';
 import {RoomClient, RoomError} from './room.mjs';
 import {configDir} from './credentials.mjs';
+import {normalizeBase} from './link.mjs';
 import {readPrivateJson} from './private-files.mjs';
 import {openJoinJournal} from './private-state.mjs';
 import {createCloudNotifier} from './cloud-notify.mjs';
@@ -60,16 +61,16 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
 export async function receiveCloudNotifications({connection,configFile,env=process.env,fetchImpl=fetch,print=()=>{},signal,
  openReceipt=openJoinJournal,notifierFactory=createCloudNotifier,now=()=>performance.now(),delay=sleep}){
  const config=configuration(configFile);
- let origin;try{const u=new URL(connection.apiBase);if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||u.protocol!=='https:'&&!(u.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname)))throw Error();origin=u.origin;}catch{throw invalid();}
+ let apiBase;try{const u=new URL(connection.apiBase);if(u.username||u.password||u.search||u.hash)throw Error();apiBase=normalizeBase(connection.apiBase);}catch{throw invalid();}
  if(!id(connection.roomId,64)||!id(connection.memberId,128)||typeof connection.credential!=='string'||!connection.credential)throw invalid();
- const scope=hash([origin,connection.roomId,connection.memberId,config.executable,config.sessionId]);
+ const scope=hash([apiBase,connection.roomId,connection.memberId,config.executable,config.sessionId]);
  const root=join(configDir(env),'notify-state');
  const journal=openReceipt(root,'receiver-'+scope); // Held for entire receiver lifetime.
  try{
   let state=journal.read();
   if(state&&!stateValid(state,scope,connection.roomId))throw invalid();
   if(!state){if(config.bootstrapAfter===undefined)throw Error('First notification start requires explicit bootstrapAfter; no history was selected');state={version:1,scope,after:config.bootstrapAfter,inFlight:null};journal.save(state);}
-  const room=new RoomClient({apiBase:origin,roomId:connection.roomId,memberId:connection.memberId,credential:connection.credential,fetchImpl,signal});
+  const room=new RoomClient({apiBase,roomId:connection.roomId,memberId:connection.memberId,credential:connection.credential,fetchImpl,signal});
   const notify=notifierFactory({executable:config.executable,sessionId:config.sessionId,roomId:connection.roomId,stateRoot:join(root,'source-'+scope),env});
   let lastStart=-Infinity,failures=0;
   const wait=async(after,timeoutSec)=>{
