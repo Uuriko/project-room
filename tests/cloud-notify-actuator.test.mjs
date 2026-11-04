@@ -78,3 +78,15 @@ test('actual process exit after durable intent is recovered as unknown without r
  let calls=0;const notify=createCloudNotifier({executable,sessionId,roomId:'commons',stateRoot:root,runCli:async()=>{calls++;return good();}});
  assert.equal((await notify(pointer)).reason,'recovered_intent');assert.equal(calls,0);
 });
+
+test('actual private journal excludes a concurrent identical send while first invocation is pending',async t=>{
+ let calls=0,release;
+ const f=fixture(t,()=>{calls++;return new Promise(resolve=>{release=resolve;});});
+ const pending=f.notify(pointer);
+ assert.equal(calls,1);
+ await assert.rejects(f.notify({...pointer,signalIds:['wake-a','wake-b']}),/Another join owns/);
+ assert.equal(calls,1);
+ release(good());
+ const first=await pending;assert.equal(first.state,'accepted');
+ assert.deepEqual(await f.notify(pointer),{...first,duplicate:true});assert.equal(calls,1);
+});
