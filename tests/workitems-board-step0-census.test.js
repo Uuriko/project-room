@@ -40,6 +40,8 @@ import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 const WORKITEMS_REFERENCE_SITES = [
   "server/agent-fleet.mjs",
   "server/agent-orientation.mjs",
+  "server/assignment-deadline-schedule.mjs",
+  "server/assignment-deadlines.mjs",
   "server/available-work.mjs",
   "server/claim-scopes.mjs",
   "server/content-trust.mjs",

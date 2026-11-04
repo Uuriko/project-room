@@ -3,6 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
+import { deadlineScheduleDueAt, runDeadlineSchedule } from "./assignment-deadline-schedule.mjs";
 import { staleSweepDueAt, syncClaimPullRequests, publicNamespaceSqlExclusion } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
@@ -469,6 +470,18 @@ export const JOBS = Object.freeze([
       store.landQueue.configure({ env: ctx.env });
       return store.landQueue.refreshDue({ deadline: ctx.deadline, now: ctx.now?.() });
     }
+  }),
+  defineJob({
+    // Assignment deadline ladder (ROOM_ASSIGNMENT_DEADLINES, default off).
+    // Due time is the persisted earliest next rung, so the alarm fires for a
+    // proposed-only room with no other job waiting, and re-arms after.
+    name: "assignment-deadlines",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(env, store) { return store ? deadlineScheduleDueAt(store, store.featureEnv ?? env) != null : false; },
+    disabledReason: () => "No assignment deadline is scheduled",
+    nextDueAt: store => deadlineScheduleDueAt(store),
+    async run(store) { return runDeadlineSchedule(store, Date.now()); }
   }),
   defineJob({
     name: "claim-prs",

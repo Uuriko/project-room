@@ -36,6 +36,7 @@ import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
+import { installDeadlineScheduler } from '../server/assignment-deadline-schedule.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyAttempts, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, jobRetryCadence, lastRanFrom, scheduledPatrolEnabled } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
@@ -207,6 +208,7 @@ export class ProjectRoom extends DurableObject {
       });
     });
     this.store.featureEnv = env;
+    installDeadlineScheduler(this.store);
     this.store.agentPlugin.setWakeAdapters?.(createWakeAdapters({ env }));
     if(!restoring) { bootstrapRoom(this.store, env);this.store.landQueue.configure({ env }); }
     // Google sign-in is optional: unconfigured or misconfigured credentials
