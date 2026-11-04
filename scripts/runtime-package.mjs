@@ -55,6 +55,8 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // Historical v8 packages predate these files. Literal-import closure below makes
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/account-agent-enrollment.mjs", "server/agent-sponsor-transfer.mjs", "server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
+// Pure digest presentation shared by hosted and stdio message readers.
+optional.push("src/message-digest.js");
 optional.push("server/historical-replay-contract.mjs"); // Shared exact-prefix historical receipt evidence.
 optional.push("src/workspace-navigation.js");
 // Historical release packaging still verifies these files when the selected

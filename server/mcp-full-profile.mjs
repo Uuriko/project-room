@@ -1,3 +1,4 @@
+import { digestMessagePage } from "../src/message-digest.js";
 import {redactSelectedEventPage} from './current-room-events.mjs';
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
@@ -118,11 +119,12 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   // woken agent can skip history it already handled. Uses the saved
   // marker point lookup; no counts, no new summary, and reading does not acknowledge.
   const catchUp = args.after === undefined && !latest ? catchUpHint(store, roomId, memberId) : null;
-  return withContentTrust({
+  const page = withContentTrust({
     roomId, messages: mapped,
     next: cursor.next, hasMore: cursor.hasMore,
     ...(catchUp ? { catchUp } : {}),
   });
+  return args.view === "digest" ? digestMessagePage(page, memberId) : page;
 }
 
 // Bounded: one cursors point lookup plus the protected history floor. No
