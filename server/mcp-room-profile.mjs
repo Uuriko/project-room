@@ -1,3 +1,4 @@
+import { withMcpCallLog } from "./mcp-call-log.mjs";
 import {publishedLobbyContext} from './current-public-face.mjs';
 import {waitForAttention} from './attention-wait.mjs';
 import {redactSelectedEventPage} from './current-room-events.mjs';
@@ -1313,7 +1314,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
 
 export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthProvider, inviteOAuthProvider, oauthResource, nativeHandler, nativeStatus } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
-  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal } = {}) {
+  return withMcpCallLog(async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal } = {}) {
     if (typeof authorization === "string" && /^bearer (?:oat|iat)_/i.test(authorization)) {
       const token = authorization.slice(7);
       const provider = token.startsWith("iat_") ? inviteOAuthProvider : oauthProvider;
@@ -1349,5 +1350,5 @@ export function createHostedRoomMcp(store, { agentRooms, spendCredential, oauthP
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
     return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential, signal });
-  };
+  });
 }
