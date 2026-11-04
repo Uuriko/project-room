@@ -3,6 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
+import { runAssignmentDeadlinesAll } from "./assignment-deadlines.mjs";
 import { staleSweepDueAt, syncClaimPullRequests, publicNamespaceSqlExclusion } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
@@ -482,6 +483,9 @@ export const JOBS = Object.freeze([
     disabledReason: () => "No open pull request or stale board sweep is waiting",
     nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
     async run(store, ctx) {
+      // Assignment deadline ladder (ROOM_ASSIGNMENT_DEADLINES, default off).
+      try { runAssignmentDeadlinesAll(store, Date.now()); }
+      catch (error) { console.error(`assignment deadlines failed: ${error?.message ?? "failed"}`); }
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
       // plan-pr-autolink: poll fallback for repos without the webhook, and
