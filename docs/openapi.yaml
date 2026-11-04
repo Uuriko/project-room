@@ -18949,6 +18949,40 @@ paths:
         '403': { description: not_view_creator or access_denied }
         '404': { description: not_found (flag off) or unknown_view }
         '422': { description: invalid_body, invalid_name or invalid_query }
+  /api/rooms/{roomId}/board-import:
+    post:
+      x-room-permission: owner
+      operationId: postBoardImport
+      summary: Import Board tasks from GitHub, Jira or Asana (ROOM_BOARD_IMPORT=1 only)
+      description: |
+        Room owner pastes exported items (GitHub issues API JSON, Jira issue
+        JSON, or Asana task JSON) and gets unclaimed Board tasks tagged
+        `imported` and the source. Up to 100 items per call. Task ids derive
+        from (room, source, external key), so re-importing skips existing
+        tasks. Closed/done items and GitHub pull requests are skipped.
+        `dryRun: true` returns the plan without writing. No outbound fetch.
+        404 while the flag is off.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [source, items]
+              properties:
+                source: { type: string, enum: [github, jira, asana] }
+                items: { type: array, minItems: 1, maxItems: 100, items: { type: object } }
+                dryRun: { type: boolean }
+      responses:
+        '200': { description: Nothing created (dry run, duplicates or skips) }
+        '201': { description: One or more tasks created }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied (not the room owner) }
+        '404': { description: not_found (flag off) }
+        '422': { description: invalid_body }
 components:
   securitySchemes:
     operatorToken:
