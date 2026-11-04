@@ -116,3 +116,32 @@ test('an advertised idle host retains the existing oldest long wait after its bo
  b.room.poll=async options=>{polls.push({order:options.order??'oldest',waitMs:options.waitMs,cursor:options.cursor});return{pendingWakes:[],more:false};};
  await b.pollOnce();assert.deepEqual(polls,[{order:'newest',waitMs:0,cursor:undefined},{order:'oldest',waitMs:12345,cursor:null}]);
 });
+
+for(const status of [0,502,503,504])test(`optional recent transport failure ${status} cannot starve oldest continuation`,async()=>{
+ const calls=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;b.wakeCursor='old-cursor';
+ let cycle=0;
+ b.room.poll=async({order='oldest',cursor})=>{
+  calls.push(order);
+  if(order==='newest')throw new RoomError(status,'temporary_failure','Unavailable');
+  assert.equal(cursor,cycle===0?'old-cursor':null);cycle++;return{pendingWakes:[],more:false};
+ };
+ for(let i=0;i<3;i++)await b.pollOnce();
+ assert.equal(cycle,3);assert.equal(b.wakeCursor,null);
+ assert.deepEqual(calls,['newest','oldest','newest','oldest','newest','oldest']);
+});
+for(const [status,code]of [[401,'authentication_failed'],[403,'access_denied'],[409,'wake_scope_unavailable'],[429,'rate_limited']])test(`recent ${status} ${code} does not bypass access, binding or shared cooldown`,async()=>{
+ const calls=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;b.wakeCursor='old-cursor';
+ const expected=new RoomError(status,code,'Refused',status===429?5000:null);
+ b.room.poll=async({order='oldest'})=>{calls.push(order);throw expected;};
+ await assert.rejects(()=>b.pollOnce(),error=>error===expected);
+ assert.deepEqual(calls,['newest']);assert.equal(b.wakeCursor,'old-cursor');
+});
+test('a recent wake acceptance failure is not hidden as a failed optional transport',async()=>{
+ const b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;
+ b.room.poll=async()=>({pendingWakes:[{signalId:'protected'}]});
+ const expected=new RoomError(503,'context_unavailable','Protected context refused');b.accept=async()=>{throw expected;};
+ await assert.rejects(()=>b.pollOnce(),error=>error===expected);
+});
