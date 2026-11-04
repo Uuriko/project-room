@@ -743,7 +743,19 @@ export class Bridge {
 
   async discoverRecent() {
     if (!this.freshWakeDiscovery || !(await this.pacePoll())) return;
-    const recent = await this.room.poll({hostId:this.connection.hostId, waitMs:0, order:'newest', signal:this.controller.signal});
+    let recent;
+    try {
+      recent = await this.room.poll({hostId:this.connection.hostId, waitMs:0, order:'newest', signal:this.controller.signal});
+    } catch (error) {
+      // Head selection is optional. A transport outage on this path must not
+      // prevent the independent oldest traversal. Access/binding refusals and
+      // the identity-wide429 cooldown still take the normal outer retry path.
+      if (!this.controller.signal.aborted && error instanceof RoomError && [0,502,503,504].includes(error.status)) {
+        this.log('recent wake transport unavailable; continuing oldest recovery');
+        return;
+      }
+      throw error;
+    }
     // A bounded head peek is not a completion frontier. Keep the oldest cursor
     // independent; only its original traversal accounts for the entire journal.
     for (const signal of recent.pendingWakes ?? []) {
