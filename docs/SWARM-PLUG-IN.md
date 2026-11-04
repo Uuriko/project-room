@@ -1243,7 +1243,9 @@ its bytes. Do not use signed URLs containing secrets. The service validates HTTP
 known; never supply `reportedById` or `actorId` in a command.
 
 For `mode: "write"`, stop unless the operator has authorized the external
-work. The domain also requires `write_external` and a current claim held by
+work. The domain also requires `write_external` — or the item's one-item
+grant, stamped on the item when the room owner or a `write_external`
+holder proposed it to its accountable member — and a current claim held by
 the accountable member before start/completion. Acquiring that claim follows
 the board writer profile (contribute, review, or collaborate), not
 `write_external`. Claims record coordination,

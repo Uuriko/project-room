@@ -187,7 +187,7 @@ export function workActions(item, member, now = Date.now()) {
   const actions = [], own = item.accountableMemberId === member.id;
   const can = permission => member.permissions.includes(permission);
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
-  const writable = item.mode === "read" || (claim && can("write_external"));
+  const writable = item.mode === "read" || (claim && (can("write_external") || (Boolean(item.externalWriteGrantBy) && item.externalWriteGrantFor === member.id)));
   if (own && item.state === S.PROPOSED && can("accept_work")) actions.push(["accept", "Accept"]);
   if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && mayWriteBoardClaims(member)) actions.push(["claim", "Record write scope"]);
   if (own && item.state === S.ACCEPTED && can("accept_work") && writable) actions.push(["start", "Start"]);
