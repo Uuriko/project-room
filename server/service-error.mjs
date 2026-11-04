@@ -1,7 +1,7 @@
 // Shared typed-error primitive for the server layer.
 //
 // server/store.mjs used to own ServiceError, which created import cycles:
-// server/jev-shadow-journal.mjs and server/spam-quarantine-journal.mjs are
+// server/journal.mjs is
 // imported BY store.mjs but also imported ServiceError FROM it. The cycle
 // resolves in ESM today, but it is fragile (evaluation order decides which
 // side sees an uninitialized binding first). ServiceError now lives here;

@@ -181,7 +181,7 @@ export function createSenderReputation({ store } = {}) {
 //
 // NOTE: the live import path no longer files quarantined mail here — it
 // journals to the restart-surviving SpamQuarantineJournal
-// (server/spam-quarantine-journal.mjs, store.spamQuarantine), whose review()
+// (server/journal.mjs, store.spamQuarantine), whose review()
 // speaks the same release|confirm_spam vocabulary. This queue remains for
 // tests and callers that want a caller-owned in-memory store; it loses its
 // queue on restart.

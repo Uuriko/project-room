@@ -1,6 +1,7 @@
 // Scripted writes against a journal API. The on-disk rows and the JSON
 // stored for graph-reply transitions are what the round-trip fixture locks.
-// Both the historical per-kind modules and server/journal.mjs can supply `api`.
+// server/journal.mjs supplies `api`; the fixture rows it is checked against
+// were captured from the per-kind modules it superseded (now removed).
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 

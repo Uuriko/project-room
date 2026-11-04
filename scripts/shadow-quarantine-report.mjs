@@ -3,7 +3,7 @@
 // Reads a room store READ-ONLY (PRAGMA query_only) and joins the shadow
 // would-be-hold records (receipt.shadowQuarantine on source.import receipts,
 // server/spam-shadow.mjs) to the review outcomes in the durable
-// spam_quarantine journal (server/spam-quarantine-journal.mjs), using the join
+// spam_quarantine journal (server/journal.mjs), using the join
 // and labeling logic in server/spam-shadow-report.mjs.
 //
 // Usage:
