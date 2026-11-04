@@ -27,8 +27,13 @@ test("message.posted names data.body when text is sent or body is missing", () =
   refusesBody({ text: "hello", body: "also sent" });
   refusesBody({ messageId: "m1" });
   refusesBody({});
-  refusesBody({ body: "  " });
   refusesBody({ body: null });
+  assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "  " } }), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "invalid_command");
+    assert.equal(error.message, "body must contain text");
+    return true;
+  });
   assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: 7 } }), /Invalid field: body/);
   assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_POSTED, text: "hello", data: { body: "hello" } }), /Supply only id, type, data/);
   assert.throws(() => validateCommand({ id: randomUUID(), type: T.MESSAGE_EDITED, data: { text: "hello" } }), /Unexpected field: text/);
