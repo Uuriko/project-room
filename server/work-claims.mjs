@@ -899,6 +899,7 @@ export const workOf = value => {
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null,
     ...(typeof value.delegate === "string" && value.delegate.length > 0 && value.delegate.length <= 128 ? { delegate: value.delegate } : {}),
+    ...(approvalHoldOf(value.approvalHold) ? { approvalHold: approvalHoldOf(value.approvalHold) } : {}),
     history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
@@ -1243,6 +1244,11 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // work must occupy delivered and be verified by its reviewer.
 export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // Approval hold: a pending hold pauses delivery and completion until the
+  // named approver approves. Other moves (block, pause, notes) stay open.
+  if (item.approvalHold?.status === "pending" && (state === "delivered" || state === "done")) {
+    fail("work_approval_pending", `work "${item.id}" is on hold until ${item.approvalHold.approverId} approves: ${item.approvalHold.step}`);
+  }
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1682,6 +1688,39 @@ export function delegateWork(work, agentId, delegateId, { note, now, authority =
   const target = agentOf(delegateId);
   return withHistory({ ...item, delegate: target }, atMs, agent, `delegated:${target}`, note);
 }
+// Approval hold (Linear has no equivalent; recent agent incidents are
+// destructive steps run without a person saying yes). The owner or
+// delegate names a risky step and an approver; the claim cannot be
+// delivered or finished until the approver approves. A denial clears the
+// pause but records the denial; the worker must re-request to proceed.
+const HOLD_STATUSES = ["pending", "approved", "denied"];
+function approvalHoldOf(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!HOLD_STATUSES.includes(value.status) || typeof value.approverId !== "string" || typeof value.step !== "string") return null;
+  return Object.freeze({ status: value.status, approverId: value.approverId, step: value.step,
+    requestedBy: typeof value.requestedBy === "string" ? value.requestedBy : null,
+    requestedAt: typeof value.requestedAt === "string" ? value.requestedAt : null,
+    decidedAt: typeof value.decidedAt === "string" ? value.decidedAt : null });
+}
+export function requestApproval(work, agentId, { approverId, step, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now), approver = agentOf(approverId);
+  check(item.owner === agent || item.delegate === agent, `only the owner or delegate of work "${item.id}" can request approval`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  check(approver !== agent, "the approver must be someone else");
+  check(typeof step === "string" && step.trim().length > 0 && step.length <= 500, "step must be a short description of the risky action");
+  check(item.approvalHold?.status !== "pending", `work "${item.id}" already has a pending approval`);
+  const hold = { status: "pending", approverId: approver, step, requestedBy: agent, requestedAt: isoOf(atMs), decidedAt: null };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_requested:${approver}`, step);
+}
+export function decideApproval(work, agentId, { decision, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.approvalHold?.status === "pending", `work "${item.id}" has no pending approval`);
+  check(item.approvalHold.approverId === agent, `only ${item.approvalHold.approverId} can decide this approval`);
+  check(decision === "approve" || decision === "deny", "decision must be approve or deny");
+  const hold = { ...item.approvalHold, status: decision === "approve" ? "approved" : "denied", decidedAt: isoOf(atMs) };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_${hold.status}`, note);
+}
+export const approvalHoldEnabled = (env = process.env) => env?.ROOM_APPROVAL_HOLD === "1";
 export const claimDelegateEnabled = (env = process.env) => env?.ROOM_CLAIM_DELEGATE === "1";
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.

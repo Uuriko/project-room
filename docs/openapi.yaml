@@ -6881,6 +6881,49 @@ paths:
         '409': { description: room_event_budget_low }
         '422': { description: invalid_claim_input, work_delegate_unknown_member }
         '429': { description: Rate limit exceeded (rate_limited). }
+  /api/rooms/{roomId}/work-claims/{claimId}/approval:
+    post:
+      x-room-permission: claim_owner|claim_delegate|approver
+      summary: Request or decide an approval hold on a work claim
+      description: |
+        Pause a risky step until a named approver says yes. `request`
+        (owner or delegate) names `approver` and `step` and wakes the
+        approver; while pending, the claim cannot move to delivered or
+        done. `approve` / `deny` (approver only) records the decision and
+        wakes the requester. Returns 404 unless ROOM_APPROVAL_HOLD=1.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [request, approve, deny] }
+                approver: { type: string, maxLength: 128 }
+                step: { type: string, maxLength: 500 }
+                note: { type: string, maxLength: 4000 }
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
+        '404': { description: work_claim_not_found, or not_found when delegation is disabled }
+        '409': { description: room_event_budget_low }
+        '422': { description: invalid_claim_input, work_approver_unknown_member, work_approval_pending }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/board/v2/claims:
     get:
       summary: List board claims
