@@ -446,6 +446,7 @@ response's own `hint`/`next` when it names something more specific.
 | `identity_revoked` | 409 | This identity's secret is revoked; it cannot rotate | no | This identity's secret is revoked and cannot rotate. Use a current credential; do not retry with this one. |
 | `illegal_transition` | 422 | acceptance track: ${bounty.state} -> ${to} is not a legal verdict transition | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: EscrowError route map.) |
 | `illegal_transition` | 500 | cannot leave state "${task.state}" for "${want}". | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `inbound_hooks_unavailable` | 503 | Inbound hooks are not configured | no | Do not retry; check the feature flag, permissions or target first. |
 | `inbox_attachment_not_found` | 404 | Attachment not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `inbox_limit` | 409 | Private inbox pilot capacity reached. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `inbox_reply_already_sent` | 409 | This saved reply already has a send attempt. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
