@@ -686,6 +686,11 @@ for (const mobile of [false, true]) test(`result feedback preserves another repl
     "selected work completes while generic older history is held");
   assert.equal(await f.page.locator('[data-message-record-id="native-draft"]').count(), 0,
     "the protected-reply setup starts with its source outside the recent window");
+  await step("reveal-older-history", async () => {
+    await f.page.locator("[data-timeline-earlier]").click();
+    releaseHistory();
+    await f.page.locator('[data-message-record-id="native-draft"]').waitFor({ state: "visible" });
+  });
   await step("root-reply", () => messageAction(f.page, "native-draft", "reply"));
   await step("other-reply", () => messageAction(f.page, "other-feedback", "reply"));
   await step("other-draft", () => f.page.locator("#message-input").fill("My answer to the separate question"));
