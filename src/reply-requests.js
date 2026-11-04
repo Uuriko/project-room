@@ -212,7 +212,12 @@ export function recordReplyPost(state, incoming, mode) {
     });
   } else if (state.replyRequests) {
     const requestId = replyContextOwners(state).get(messageId), request = requestId && state.replyRequests[requestId];
-    if (request?.status === "open") Object.assign(request, { contextEventId: incoming.id, contextMessageId: messageId });
+    if (request?.status === "open") {
+      Object.assign(request, { contextEventId: incoming.id, contextMessageId: messageId });
+      // First post by the recipient in this conversation is its acknowledgment
+      // (read by server/request-states.mjs; ROOM_REQUEST_STATES).
+      if (incoming.actorId === request.recipientId && !request.acknowledgedAt) request.acknowledgedAt = incoming.at;
+    }
   }
 }
 

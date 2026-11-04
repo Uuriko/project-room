@@ -10,7 +10,7 @@ import { validId } from "../src/events.js";
 import { replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 import { messageInHistory, visibleSequenceHorizon } from "./history-visibility.mjs";
-import { withRequestState } from "./request-states.mjs";
+import { withRequestState, publicRequestRecord } from "./request-states.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -253,7 +253,7 @@ export class ReplyRequests {
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
           externalExecution: false
         };
-        Object.assign(result, { request: structuredClone(request), current: { evaluatedThrough: room.sequence,
+        Object.assign(result, { request: publicRequestRecord(request), current: { evaluatedThrough: room.sequence,
           requesterAvailable: state.members[request.requesterId]?.active === true, recipientAvailable: state.members[request.recipientId]?.active === true,
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),

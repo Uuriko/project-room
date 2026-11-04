@@ -43,3 +43,12 @@ export function withRequestState(compact, request, options = {}) {
   if (!requestStatesEnabled(options.env)) return compact;
   return { ...compact, lifecycle: deriveRequestState(request, options) };
 }
+
+// The selected-read `request` object is key-exact for shipped clients
+// (client/reply-actions.mjs). Lifecycle signals stay internal to the record.
+const INTERNAL_SIGNALS = ["acknowledgedAt"];
+export function publicRequestRecord(request) {
+  const copy = structuredClone(request);
+  for (const key of INTERNAL_SIGNALS) delete copy[key];
+  return copy;
+}

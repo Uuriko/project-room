@@ -1,3 +1,4 @@
+import {publicRequestRecord} from './request-states.mjs';
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
 import {isCurrentRoom,readCurrentHead,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,readCurrentReplyRequestWindow,readCurrentWorkItem,withCurrentReadContext,chargeCurrentReadBudget,remainingCurrentReadBytes} from './current-room-repository.mjs';
 import {validId} from '../src/events.js';
@@ -244,7 +245,7 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   const canReply=!denied&&requester?.active===true&&recipient?.active===true;
   const answerBasis = request.status === 'open' && auth.member.id === request.recipientId && canReply && !hasMore && context.row.seq <= horizon ? {expectedRequestRevision: request.revision, contextEventId: contextEvent.id, contextSequence: context.row.seq} : null;
   const instructions=charterContext(room),work=request.workItemId?readCurrentWorkItem(db,roomId,request.workItemId):null;
-  return stampReplyRead({...base,evaluatedThrough,selection:{direction:null,requestMessageId},request:structuredClone(request),roomCreatedEventId:created.id,sourceWindow:{complete:!hasMore,consistency:'frozen-conversation-current-preparation'},page:{cursor:args.cursor??null,checkpoint:null,items,rowBytes,limit,hasMore,nextCursor,completedCheckpoint:null,nextRead},nextRead,
+  return stampReplyRead({...base,evaluatedThrough,selection:{direction:null,requestMessageId},request:publicRequestRecord(request),roomCreatedEventId:created.id,sourceWindow:{complete:!hasMore,consistency:'frozen-conversation-current-preparation'},page:{cursor:args.cursor??null,checkpoint:null,items,rowBytes,limit,hasMore,nextCursor,completedCheckpoint:null,nextRead},nextRead,
    ...shape.responseTemplates(roomId,auth.member.id,request,answerBasis),
    current:{evaluatedThrough,requesterAvailable:requester?.active===true,recipientAvailable:recipient?.active===true,contextEventId:contextEvent.id,contextSequence:context.row.seq,answerBasis,actions:{reply:canReply,answer:Boolean(answerBasis),decline:Boolean(answerBasis),cancel:request.status==='open'&&(auth.member.id===request.requesterId||auth.member.kind==='human'&&auth.member.id===room.ownerId)},blockedBy:denied?[denied]:[],workItemId:request.workItemId,instructionsRevision:room.charter?.revision??0},
    preparation:{version:1,evaluatedThrough,room:{id:room.id,title:room.title,purpose:instructions.charter?.purpose??room.purpose??''},instructions,previousExchanges,work:work?currentWorkRecord(work):null,omitted:['other_work','other_messages','private_inbox','external_resources'],externalExecution:false}},auth.member.id);

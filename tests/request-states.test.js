@@ -55,3 +55,21 @@ test("missing or bad createdAt degrades to pending", () => {
   assert.equal(deriveRequestState(null).state, "pending");
   assert.equal(deriveRequestState({ status: "open", createdAt: "nope" }).state, "pending");
 });
+
+test("the recipient's first post in the conversation records acknowledgedAt once", async () => {
+  const { recordReplyPost } = await import("../src/reply-requests.js");
+  const state = { messages: [], replyRequests: {}, members: {} };
+  recordReplyPost(state, { id: "e1", actorId: "a", at: at(0), data: { messageId: "m1", toMemberId: "b", workItemId: null } }, "open");
+  state.messages.push({ id: "m1", replyToId: null, workItemId: null });
+  const post = (id, actorId, ms) => {
+    state.messages.push({ id, replyToId: "m1", workItemId: null });
+    recordReplyPost(state, { id: `e-${id}`, actorId, at: at(ms), data: { messageId: id, replyToId: "m1" } }, null);
+  };
+  post("m2", "a", 2000);
+  assert.equal(state.replyRequests.m1.acknowledgedAt, undefined);
+  post("m3", "b", 4000);
+  post("m4", "b", 9000);
+  assert.equal(state.replyRequests.m1.acknowledgedAt, at(4000));
+  const s = deriveRequestState(state.replyRequests.m1, { now: t0 + 60_000 });
+  assert.deepEqual([s.state, s.unresponsive], ["active", false]);
+});
