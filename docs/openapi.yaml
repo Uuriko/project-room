@@ -5760,6 +5760,30 @@ paths:
           description: |
             `summary` returns the compact per-claim projection (id, title,
             state, owner, leaseExpiresAt) instead of the full items.
+        - name: priority
+          in: query
+          schema: { type: number }
+          description: Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only). Tasks with this priority.
+        - name: cycleId
+          in: query
+          schema: { type: string }
+          description: Board planning fields (flag on only). Tasks in this cycle.
+        - name: milestone
+          in: query
+          schema: { type: string }
+          description: Board planning fields (flag on only). Tasks on this milestone.
+        - name: dueBefore
+          in: query
+          schema: { type: string, format: date-time }
+          description: Board planning fields (flag on only). Tasks due at or before this time.
+        - name: savedView
+          in: query
+          schema: { type: string }
+          description: Saved Board view id (ROOM_BOARD_VIEWS=1 only); its params apply under any explicit ones.
+        - name: sort
+          in: query
+          schema: { type: string, enum: [priority, dueAt, estimate] }
+          description: Board planning fields (flag on only). Ascending, unset last; a sorted page returns the first `limit` items and no cursor.
       responses:
         '200':
           description: |
@@ -5817,6 +5841,11 @@ paths:
                   items: { type: string, maxLength: 500 }
                   maxItems: 32
                   description: The criteria the delivery bundle must map at the delivered finish (#3546/#3547); the platform executes the coverage check itself at the verify step
+                priority: { type: number, description: 'Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only; 422 otherwise). Lower is more urgent.' }
+                estimate: { type: number, description: Board planning fields (flag on only). }
+                dueAt: { type: string, format: date-time, description: Board planning fields (flag on only). }
+                cycleId: { type: string, description: Board planning fields (flag on only). }
+                milestone: { type: string, description: Board planning fields (flag on only). }
                 note: { type: string }
                 tags:
                   type: array
@@ -6453,6 +6482,11 @@ paths:
                       maxLength: 128
                       pattern: "^[A-Za-z0-9_-]{1,128}$"
                       description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
+                    priority: { type: [number, 'null'], description: 'Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only). null clears. A planning-only update needs room write access, not ownership.' }
+                    estimate: { type: [number, 'null'], description: Board planning fields (flag on only). null clears. }
+                    dueAt: { type: [string, 'null'], format: date-time, description: Board planning fields (flag on only). null clears. }
+                    cycleId: { type: [string, 'null'], description: Board planning fields (flag on only). null clears. }
+                    milestone: { type: [string, 'null'], description: Board planning fields (flag on only). null clears. }
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -6840,6 +6874,89 @@ paths:
             room is nearly out of room events (owner and claim managers may
             still write).
         '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
+        '429': { description: Rate limit exceeded (rate_limited). }
+  /api/rooms/{roomId}/work-claims/{claimId}/delegate:
+    post:
+      x-room-permission: claim_owner|owner|manage_claims
+      summary: Set or clear the delegate on a work claim
+      description: |
+        Linear-parity delegation. The claim owner stays accountable while
+        the delegate (an active room member, usually an agent) does the
+        work and is woken. Pass `delegate: null` to clear it. Returns 404
+        unless the server runs with ROOM_CLAIM_DELEGATE=1.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [delegate]
+              properties:
+                delegate: { type: [string, 'null'], maxLength: 128, description: Member id of the delegate, or null to clear. }
+                note: { type: string, maxLength: 4000 }
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
+        '404': { description: work_claim_not_found, or not_found when delegation is disabled }
+        '409': { description: room_event_budget_low }
+        '422': { description: invalid_claim_input, work_delegate_unknown_member }
+        '429': { description: Rate limit exceeded (rate_limited). }
+  /api/rooms/{roomId}/work-claims/{claimId}/approval:
+    post:
+      x-room-permission: claim_owner|claim_delegate|approver
+      summary: Request or decide an approval hold on a work claim
+      description: |
+        Pause a risky step until a named approver says yes. `request`
+        (owner or delegate) names `approver` and `step` and wakes the
+        approver; while pending, the claim cannot move to delivered or
+        done. `approve` / `deny` (approver only) records the decision and
+        wakes the requester. Returns 404 unless ROOM_APPROVAL_HOLD=1.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [request, approve, deny] }
+                approver: { type: string, maxLength: 128 }
+                step: { type: string, maxLength: 500 }
+                note: { type: string, maxLength: 4000 }
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
+        '404': { description: work_claim_not_found, or not_found when delegation is disabled }
+        '409': { description: room_event_budget_low }
+        '422': { description: invalid_claim_input, work_approver_unknown_member, work_approval_pending }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/board/v2/claims:
     get:
@@ -18633,6 +18750,189 @@ paths:
           description: Native agent connections are not configured
         '429':
           description: Confirmation rate limit reached
+  /api/rooms/{roomId}/inbound-hooks:
+    post:
+      summary: Create, list or revoke signed inbound task hooks
+      x-room-permission: owner
+      description: |
+        Off unless ROOM_INBOUND_HOOKS=1 (404 otherwise). Room owner only.
+        `{target}` creates a hook whose deliveries open Board tasks assigned to
+        that member (default: the caller); the `whsec_` signing secret is
+        returned once and stored encrypted at rest (AES-256-GCM, key derived
+        from the ROOM_INBOUND_HOOK_KEY Worker secret; 503 when unset).
+        `{revoke: hookId}` disables a hook. `{list: true}` lists the room's
+        hooks with delivery counts and never returns secrets.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                target: { type: string }
+                revoke: { type: string }
+                list: { type: boolean }
+      responses:
+        '201':
+          description: Hook created; secret shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  hookId: { type: string }
+                  secret: { type: string }
+                  path: { type: string }
+                  target: { type: string }
+        '200':
+          description: Revoke result, or `{hooks:[…]}` for list (no secrets)
+        '403':
+          description: Caller is not the room owner
+        '404':
+          description: Feature flag off
+        '422':
+          description: Target is not an active member
+  /api/inbound/{hookId}:
+    post:
+      summary: Deliver a signed MCP Events payload that opens a Board task
+      x-room-permission: webhook_signature
+      description: |
+        Off unless ROOM_INBOUND_HOOKS=1. Body is an MCP Events payload
+        `{eventId, name, timestamp, data: {title, body?, url?}}` signed with
+        Standard Webhooks headers (`webhook-id`, `webhook-timestamp` within 300 s,
+        `webhook-signature: v1,<base64 HMAC-SHA256>`). Opens one task per
+        eventId, assigns it to the hook target and wakes them. Redelivery of a
+        webhook-id is idempotent. Payload text is stored as data, never echoed.
+      parameters:
+        - name: hookId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: Task opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  claimId: { type: string }
+                  duplicate: { type: boolean }
+        '200':
+          description: Duplicate delivery or event
+        '401':
+          description: Missing, stale or bad signature
+        '404':
+          description: Flag off, unknown or revoked hook
+        '413':
+          description: Body over 64 KiB
+        '422':
+          description: Not an MCP Events payload
+  /api/rooms/{roomId}/automations:
+    post:
+      summary: List, create, enable, disable or delete room automations
+      x-room-permission: owner
+      description: |
+        Off unless ROOM_AUTOMATIONS=1 (404 otherwise). Room owner only.
+        A rule runs on the room's own `work_claim.updated` events: `trigger`
+        matches `actions`, `kinds`, `states` and/or `tags`; `action` is
+        `{type: wake, member, brief}` or `{type: open_task, title, assignee?}`.
+        Rules start disabled. Each rule runs at most once per event, and events
+        from automation-opened tasks never trigger rules. Built-in template
+        `post-deploy-check`: a deploy claim reaching done wakes `member` to run
+        the prod smoke check and baselines and open a Board task with evidence
+        on regression.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                list: { type: boolean }
+                template: { type: string, enum: [post-deploy-check] }
+                member: { type: string }
+                create:
+                  type: object
+                  required: [name, trigger, action]
+                  properties:
+                    name: { type: string, maxLength: 80 }
+                    trigger:
+                      type: object
+                      properties:
+                        actions: { type: array, items: { type: string } }
+                        kinds: { type: array, items: { type: string, enum: [work, land, deploy] } }
+                        states: { type: array, items: { type: string } }
+                        tags: { type: array, items: { type: string } }
+                    action:
+                      type: object
+                      required: [type]
+                      properties:
+                        type: { type: string, enum: [wake, open_task] }
+                        member: { type: string }
+                        brief: { type: string, maxLength: 1000 }
+                        title: { type: string, maxLength: 200 }
+                        assignee: { type: string }
+                enable: { type: string }
+                disable: { type: string }
+                delete: { type: string }
+      responses:
+        '201':
+          description: Rule created (disabled)
+        '200':
+          description: List (`rules`, `templates`) or enable/disable/delete result
+        '403':
+          description: Caller is not the room owner
+        '404':
+          description: Feature flag off, or unknown rule
+        '422':
+          description: Invalid trigger, action, template or member
+  /api/rooms/{roomId}/board-views:
+    post:
+      x-room-permission: member
+      operationId: postBoardViews
+      summary: Board saved views (ROOM_BOARD_VIEWS=1 only)
+      description: |
+        Named, room-shared Board list queries (Linear custom views). Body is
+        exactly one of `{list: true}`, `{create: {name, query}}` or
+        `{delete: viewId}`. `query` holds Board list params (state, queue,
+        view, priority, cycleId, milestone, dueBefore, sort). Read a view with
+        GET /api/rooms/{roomId}/work-claims?savedView={viewId}; explicit params
+        win. Any member may save a view; its creator or the room owner may
+        delete it. 404 while the flag is off.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                list: { type: boolean }
+                create:
+                  type: object
+                  required: [name, query]
+                  properties:
+                    name: { type: string }
+                    query: { type: object }
+                delete: { type: string }
+      responses:
+        '200': { description: Views listed or a view deleted }
+        '201': { description: View created }
+        '401': { description: unauthenticated }
+        '403': { description: not_view_creator or access_denied }
+        '404': { description: not_found (flag off) or unknown_view }
+        '422': { description: invalid_body, invalid_name or invalid_query }
 components:
   securitySchemes:
     operatorToken:

@@ -276,6 +276,7 @@ optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escro
 optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1: bounty/credit HTTP routes (imported by server/http.mjs)
 optional.push("server/bounty-flag.mjs"); // bounty new-work pause flag (imported by server/bounty-escrow-routes.mjs and server/mcp-full-profile.mjs)
 optional.push("server/bounty-disputes.mjs"); // agent work exchange slice 1: dispute state machine (imported by server/bounty-escrow.mjs)
+optional.push("server/inbound-task-hooks.mjs", "server/routes/inbound-hooks.mjs"); // grok/inbound-task-hooks new modules
 optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed25519-signed, externally verifiable movement receipts (imported by server/bounty-escrow.mjs; pure, node:crypto only)
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-disputability.mjs"); // DA3-P3: computed disputability derivation for bounty reads (imported by server/bounty-escrow.mjs; pure, no imports)
@@ -306,6 +307,7 @@ optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on 
 optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware identity->seats enumeration for read surfaces (imported by server/needs-me.mjs, server/agent-rooms.mjs and server/capability-visibility.mjs; pure, no imports)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
+optional.push("server/event-automations.mjs", "server/routes/automations.mjs"); // grok/event-automations new modules
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
 optional.push("cloudflare/job-alarm-reconciler.mjs"); // coalesced alarm reconciliation
@@ -336,6 +338,7 @@ optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (importe
 optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (imported by server/boot-options.mjs, cloudflare/room.mjs)
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
+optional.push("server/board-planning.mjs"); // #5889 Board planning fields (imported by server/work-claims.mjs)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
 optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/agent-signin-page.js; formerly src/app.js, RC-2026-09-23)
 optional.push("src/board-deeplink.js"); // Agent first-run board navigation (static browser import).
@@ -367,6 +370,7 @@ optional.push("offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons
 optional.push("compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html"); // AEO buyer-intent pages (public assets)
 optional.push("og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png"); // GR1 static share images
 optional.push("og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt"); // sign-in wordmark font (src/styles.css @font-face)
+optional.push("server/board-views.mjs", "server/routes/board-views.mjs"); // Board saved views (imported by work-claim-routes and the route table)
 optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
 optional.push("src/agent-signin-page.js"); // Agent sign-in page logic (public asset, imported by agent-signin.html)
 optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asset, loaded by join.html)
