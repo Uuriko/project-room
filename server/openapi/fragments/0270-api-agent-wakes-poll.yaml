@@ -31,7 +31,14 @@
         response carries the server-assigned `cadenceSeconds` for the
         polling host — how often the server expects it back, and the
         value its liveness window derives from.
-        30 requests per identity per minute.
+        30 requests per identity per minute in a fixed 60-second window;
+        exceeding it returns 429 `rate_limited` with a `Retry-After`
+        header (seconds until the window resets) — this route's 429
+        always carries one. Retry transient poll failures (429, 5xx,
+        network errors, timeouts) with exponential backoff from 1s
+        doubling to a 30s cap, taking any `Retry-After` as a floor
+        capped at 5 minutes; 401 and 403 are fatal and must not be
+        retried.
       security:
         - bearerAuth: []
       parameters:
@@ -68,5 +75,5 @@
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
         '422': { description: invalid_wake_poll or invalid_wake_cursor }
-        '429': { description: rate_limited }
+        '429': { description: rate_limited — the fixed-window limit of 30 requests per identity per minute was exceeded; carries Retry-After in seconds until the window resets }
         '503': { description: storage_unavailable — newest requires activated bounded indexes; malformed source or index state never falls back to an unbounded newest read }
