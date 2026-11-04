@@ -4179,9 +4179,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const current = currentRoomOwnerAuthority(this.db, roomId);
     return current ? current.ownerId : this.roomAuthority(roomId)?.ownerId;
   }
-  roomAuthority(roomId, { includeHistory = false, memberId = null } = {}) {
+  roomAuthority(roomId, { includeHistory = false, memberId = null, activeOnly = false } = {}) {
     if(!this._restoreOpening)assertRestoreAdmitted(this.db);
-    const current = currentRoomAuthority(this.db, roomId, { memberId });
+    const current = currentRoomAuthority(this.db, roomId, { memberId, activeOnly });
     if (current) return { sequence: current.sequence, ownerId: current.ownerId, members: current.members,
       ...(includeHistory ? {historyVisibility: current.historyVisibility, historyDefaultsVersion: current.historyDefaultsVersion} : {}) };
     // History policy travels in the same validated prefix as membership. This
@@ -5806,7 +5806,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // so watching reads false there).
   currentPresenceMembers(roomId,watcherMemberIds){
     return withCurrentReadContext(this.db,roomId,()=>{
-      const {members,ownerId}=this.roomAuthority(roomId),watching=new Set(watcherMemberIds??[]);
+      // W3200 R-01: presence serves the ACTIVE roster only, so it reads the
+      // active-only authority — the total-record census bricked presence in
+      // churn-heavy rooms past 101 total records at <=100 active members.
+      const {members,ownerId}=this.roomAuthority(roomId,{activeOnly:true}),watching=new Set(watcherMemberIds??[]);
       return Object.values(members).filter(m=>m.active!==false).map(m=>{
         const link=m.kind==='agent'?this.db.prepare('SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=?').get(roomId,m.id):null;
         const host=link?this.agentHeartbeats.statusWindow(link.identity_id):null,observed=host&&host.status!=='unregistered'&&Number.isFinite(host.lastSeenAt)&&host.lastSeenAt<=this.now();

@@ -494,9 +494,10 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
     return roomId;
   });
 }
-export function currentRoomAuthority(db,roomId,{memberId=null}={}) {
+export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}={}) {
   const b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  return memberId===null?currentAuthorityFromHead(db,roomId,head,b):currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  if(memberId!==null)return currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  return activeOnly?currentActiveAuthorityFromHead(db,roomId,head,b):currentAuthorityFromHead(db,roomId,head,b);
 }
 // Owner-only authority: protected head and room record, no member census.
 // For callers that need only ownerId/sequence; cost is constant in member count.
@@ -521,6 +522,29 @@ function currentMemberAuthorityFromHead(db,roomId,head,b,memberId) {
     }
   }
   if(!Object.hasOwn(members,room.ownerId))corrupt('missing owner authority');
+  return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
+}
+// Active-roster authority (W3200 R-01): the roster presence serves. The full
+// census above counts TOTAL member records and refuses past 100, so a room
+// that churned past 101 records (join, deactivate, replace) lost presence
+// even at <=100 active members, although admission caps ACTIVE members at
+// 100. This variant selects active records in SQL (bounded: at most 101 keys
+// are ever read, deactivated records are never loaded or charged), then
+// verifies each selected record through readCurrentRecord's proof/hash
+// checks exactly like the census. The cap and refusal are unchanged: more
+// than 100 ACTIVE members refuses with the census's error shape.
+function currentActiveAuthorityFromHead(db,roomId,head,b) {
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);
+  if(!room||!validId(room.ownerId))corrupt('missing owner authority');
+  const keys=db.prepare(`SELECT r.record_key FROM current_room_records r
+    JOIN current_room_record_proofs p ON p.room_id=r.room_id AND p.domain=r.domain AND p.record_key=r.record_key AND p.present=1
+    WHERE r.room_id=? AND r.domain='members' AND COALESCE(json_extract(r.payload,'$.active'),1)!=0
+    ORDER BY r.record_key LIMIT 101`).all(roomId);
+  charge(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+  if(keys.length>100)refuse('Room authority requires bounded membership');
+  const members={};
+  for(const {record_key:key} of keys)Object.defineProperty(members,key,{value:readCurrentRecord(db,roomId,'members',key,b),enumerable:true,writable:true,configurable:true});
+  if(!Object.hasOwn(members,room.ownerId)&&readCurrentRecord(db,roomId,'members',room.ownerId,b)===undefined)corrupt('missing owner authority');
   return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
 }
 function currentAuthorityFromHead(db,roomId,head,b) {
