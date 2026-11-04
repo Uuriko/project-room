@@ -90,3 +90,13 @@ test('actual private journal excludes a concurrent identical send while first in
  const first=await pending;assert.equal(first.state,'accepted');
  assert.deepEqual(await f.notify(pointer),{...first,duplicate:true});assert.equal(calls,1);
 });
+
+test('default invocation closes stdin with zero bytes before child reads to EOF',{skip:process.platform==='win32'},async t=>{
+ const root=mkdtempSync(join(tmpdir(),'cloud-notify-stdin-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const file=join(root,'stdin-reader');
+ const code=`let bytes=0;process.stdin.on('data',chunk=>{bytes+=chunk.length;});process.stdin.on('end',()=>{if(bytes!==0)process.exit(9);const a=process.argv.slice(2);process.stdout.write(JSON.stringify({ok:true,session_id:a[3],url:'https://claude.ai/code/'+a[3]}));});`;
+ writeFileSync(file,'#!'+process.execPath+'\n'+code,{mode:0o700});
+ const notify=createCloudNotifier({executable:file,sessionId,roomId:'commons',stateRoot:join(root,'state'),timeoutMs:500});
+ const first=await notify(pointer);assert.equal(first.state,'accepted');
+ assert.deepEqual(await notify(pointer),{...first,duplicate:true});
+});
