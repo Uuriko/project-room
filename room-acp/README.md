@@ -335,3 +335,23 @@ Synthetic actual-HTTP measurement across ten fresh batches: full-thread refusals
 poll and heartbeat calls are excluded from those per-turn totals. The retained
 fresh authorization checks still cost seven requests per warm singleton batch;
 the parked-thread fact alone does not solve backlog request amplification.
+
+### Explicit notification-only cloud receiver
+
+`room-acp run --receiver-policy notify-cloud --notify-config /absolute/private/cloud.config --room ROOM_ID`
+
+This is an alternate receive role in the same local service. It never starts an ACP adapter or model, reads a thread/body, takes an execution/listener lease, posts to Room, acknowledges a wake, claims work, or closes a formal request. It calls the existing `room_wait_for_attention` tool with the saved credential and forwards only validated room/message/sequence pointers to an operator-selected **existing** cloud session. Existing access and MCP room/read scopes are required; the receiver does not grant them. Default `respond` and explicit `disabled` behavior are unchanged.
+
+The config must be an owner-private, non-symlink file. Its only fields are an absolute `executable` path, the existing `sessionId`, and an explicit nonnegative integer `bootstrapAfter` for the first start. For example, replace the placeholders in this private file:
+
+```json
+{"executable":"/absolute/path/to/claude","sessionId":"session_REPLACE_WITH_EXISTING_SESSION","bootstrapAfter":2159}
+```
+
+There is no automatic history start or head selection. `bootstrapAfter` selects new source notifications after that sequence; it **does not** clear older formal obligations or certify standing work/global attention complete. Check older obligations separately before choosing a new-only bootstrap. Existing cursor state wins over a later config bootstrap value. Changing target/session creates a different receiver scope and again requires an explicit bootstrap.
+
+One private SQLite owner per origin/room/member/configured target prevents simultaneous local couriers. The server permits one attention wait per room/member; another wait supersedes the previous generation. A superseded/auth/binding refusal stops this receiver rather than fighting the other host. This is not a globally verified capable-host registration or an execution handoff.
+
+Quiet waits use the shipped 120-second server hold with a 135-second HTTP deadline. Catch-up requests and immediate burst follow-ups are paced at least 2.5 seconds apart and retain existing HTTP 429 cooldown. Only when a ready response reports incomplete source coverage, at most three timeout-zero follow-ups coalesce into one immutable batch of at most 16 unique pointers. A head-complete response sends immediately; repeated message IDs across later frames retain their newest sequence. Server `nextRead` and all text are discarded. Imported mentions without routing metadata retain the existing attention-reader limitation.
+
+The private notification journal freezes the exact batch and source frontier **before** invoking the CLI. Accepted and unknown provider outcomes are retained before the discovery cursor advances. Restart reuses that exact batch; an ambiguous send is never automatically resent. Source-batch actuator receipts retain the exact pointers for manual reconciliation under `notify-state`. Do not remove journals to force a retry: provider acceptance means queued notification only, not delivery/read/execution/result. A timeout or unknown outcome requires inspecting the original configured session and private receipt. No secret, session ID, message body or provider output is printed.

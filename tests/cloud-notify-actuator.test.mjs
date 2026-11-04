@@ -100,3 +100,12 @@ test('default invocation closes stdin with zero bytes before child reads to EOF'
  const first=await notify(pointer);assert.equal(first.state,'accepted');
  assert.deepEqual(await notify(pointer),{...first,duplicate:true});
 });
+
+test('source-pointer batch is closed, bounded, canonical and durably retained without synthetic signal IDs',async t=>{
+ let calls=0;const f=fixture(t,async(_file,args)=>{calls++;assert.deepEqual(JSON.parse(args[1].split('\n')[1]),{roomId:'commons',items:[{messageId:'first',sequence:1},{messageId:'second',sequence:2}]});return good();});
+ const batch={roomId:'commons',items:[{messageId:'second',sequence:2},{messageId:'first',sequence:1}]};
+ const first=await f.notify(batch);assert.equal(first.state,'accepted');assert.equal((await f.notify({...batch,items:[...batch.items].reverse()})).duplicate,true);assert.equal(calls,1);
+ const receipt=JSON.parse(readFileSync(join(f.stateRoot,readdirSync(f.stateRoot)[0],'receipt.json')));assert.equal(receipt.version,2);assert.deepEqual(receipt.input.items.map(x=>x.messageId),['first','second']);
+ for(const bad of [{...batch,signalIds:['invented']},{...batch,items:[]},{...batch,items:[{messageId:'bad',sequence:0}]},{...batch,items:[{messageId:'same',sequence:1},{messageId:'same',sequence:2}]},{...batch,items:[{messageId:'body',sequence:1,body:'PRIVATE'}]},{...batch,items:Array.from({length:17},(_,i)=>({messageId:'m'+i,sequence:i+1}))}])await assert.rejects(f.notify(bad),/Invalid notification pointer/);
+ assert.equal(calls,1);
+});

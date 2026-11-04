@@ -1,3 +1,4 @@
+import { receiveCloudNotifications } from "./notification-receiver.mjs";
 // `room-acp run`: load the saved connection, pick the agent, run the bridge.
 import { candidates, probe } from "./agents.mjs";
 import { loadConnection, saveConnection } from "./credentials.mjs";
@@ -18,13 +19,19 @@ export async function selectAgent(options, { env = process.env, onFailure = () =
 
 export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null } = {}) {
   const receiverPolicy = options.receiverPolicy === undefined ? 'respond' : options.receiverPolicy;
-  if (!['respond', 'disabled'].includes(receiverPolicy)) throw Error('Receiver policy must be respond or disabled');
+  if (!['respond', 'disabled', 'notify-cloud'].includes(receiverPolicy)) throw Error('Receiver policy must be respond, disabled or notify-cloud');
   if (receiverPolicy === 'disabled') {
     print('Room receiver disabled. No host or receiver was started; no wakes or formal requests were accepted, answered or acknowledged. Existing Room work and local retry state are unchanged.');
     return 0;
   }
   const connection = loadConnection({ roomId: options.room }, env);
   if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
+  if (receiverPolicy === 'notify-cloud') {
+    const controller = new AbortController(), stop = () => controller.abort();
+    process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    try { return await receiveCloudNotifications({connection, configFile:options.notifyConfig, env, fetchImpl, print, signal:controller.signal}); }
+    finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+  }
   if (options.permissionApprover !== undefined) {
     connection.permissionApproverId = options.permissionApprover === "none" ? null : options.permissionApprover;
     saveConnection(connection, env);

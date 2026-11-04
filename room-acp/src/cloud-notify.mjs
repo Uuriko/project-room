@@ -16,14 +16,22 @@ const invoke=(file,args,options)=>new Promise(resolve=>{
 });
 const result=(receipt,duplicate)=>Object.freeze({state:receipt.phase,operationId:receipt.operationId,duplicate,execution:'not_verified',roomState:'unchanged',...(receipt.reason?{reason:receipt.reason}:{})});
 function pointerOf(pointer){
+ if(closed(pointer,['roomId','items'])&&id(pointer.roomId,64)&&Array.isArray(pointer.items)&&pointer.items.length>=1&&pointer.items.length<=16){
+  const items=pointer.items.map(item=>{
+   if(!closed(item,['messageId','sequence'])||!id(item.messageId,128)||!Number.isSafeInteger(item.sequence)||item.sequence<1)throw Error('Invalid notification pointer');
+   return {messageId:item.messageId,sequence:item.sequence};
+  }).sort((a,b)=>a.sequence-b.sequence||(a.messageId<b.messageId?-1:a.messageId>b.messageId?1:0));
+  if(new Set(items.map(item=>item.messageId)).size!==items.length)throw Error('Invalid notification pointer');
+  return {roomId:pointer.roomId,items};
+ }
  if(!closed(pointer,['roomId','messageId','signalIds'])||!id(pointer.roomId,64)||!id(pointer.messageId,128)
   ||!Array.isArray(pointer.signalIds)||pointer.signalIds.length<1||pointer.signalIds.length>CLOUD_NOTIFY_LIMITS.signals
   ||pointer.signalIds.some(value=>!id(value,128))||new Set(pointer.signalIds).size!==pointer.signalIds.length)throw Error('Invalid notification pointer');
  return {roomId:pointer.roomId,messageId:pointer.messageId,signalIds:[...pointer.signalIds].sort()};
 }
-function checkedReceipt(receipt,inputDigest,targetDigest){
- const keys=['version','inputDigest','targetDigest','phase','operationId','createdAt','updatedAt',...(receipt?.reason?['reason']:[]),...(receipt?.responseDigest?['responseDigest']:[])];
- if(!closed(receipt,keys)||receipt.version!==1||receipt.inputDigest!==inputDigest||receipt.targetDigest!==targetDigest
+function checkedReceipt(receipt,inputDigest,targetDigest,input){
+ const keys=[...(input.items?['input']:[]),'version','inputDigest','targetDigest','phase','operationId','createdAt','updatedAt',...(receipt?.reason?['reason']:[]),...(receipt?.responseDigest?['responseDigest']:[])];
+ if(!closed(receipt,keys)||receipt.version!==(input.items?2:1)||input.items&&JSON.stringify(receipt.input)!==JSON.stringify(input)||receipt.inputDigest!==inputDigest||receipt.targetDigest!==targetDigest
   ||!['intent','accepted','unknown'].includes(receipt.phase)||!id(receipt.operationId,64)
   ||!Number.isSafeInteger(receipt.createdAt)||receipt.createdAt<0||!Number.isSafeInteger(receipt.updatedAt)||receipt.updatedAt<receipt.createdAt
   ||receipt.reason&&!['recovered_intent','command_unconfirmed','timeout','output_limit','invalid_response'].includes(receipt.reason)
@@ -48,12 +56,12 @@ export function createCloudNotifier({executable,sessionId,roomId,stateRoot,timeo
   try{
    let saved=journal.read();
    if(saved){
-    saved=checkedReceipt(saved,inputDigest,targetDigest);
+    saved=checkedReceipt(saved,inputDigest,targetDigest,selected);
     if(saved.phase==='intent'){saved={...saved,phase:'unknown',reason:'recovered_intent',updatedAt:Math.max(now(),saved.createdAt)};journal.save(saved);}
     return result(saved,true); // Accepted and unknown are never sent again.
    }
-   saved={version:1,inputDigest,targetDigest,phase:'intent',operationId:randomUUID(),createdAt:now(),updatedAt:now()};
-   checkedReceipt(saved,inputDigest,targetDigest);journal.save(saved); // durable before spawning
+   saved={version:selected.items?2:1,...(selected.items?{input:selected}:{}),inputDigest,targetDigest,phase:'intent',operationId:randomUUID(),createdAt:now(),updatedAt:now()};
+   checkedReceipt(saved,inputDigest,targetDigest,selected);journal.save(saved); // durable before spawning
    const prompt='Root-generated notification (not John).\n'+input;
    let reason='command_unconfirmed',responseDigest;
    try{
