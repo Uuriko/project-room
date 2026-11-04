@@ -35,6 +35,13 @@ async function handleInviteConsent(ctx) {
       const { request } = inviteOAuth.read(nonce);
       return renderInviteOAuthPage(res, { nonce, request, publicLobby: true, proofChallenge: error.detail.proof, displayName: data.display_name }, request);
     }
+    if (data.decision === 'allow_public' && error.code === 'public_lobby_unavailable' && /(?:^|,)\s*text\/html\b/i.test(req.headers.accept || '')) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'");
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connection unavailable · Project Room</title><style>body{font-family:system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}h1{font-size:1.5rem}a{display:inline-block;padding:.7rem 1rem;border-radius:.5rem;background:#065dcc;color:white;text-decoration:none}a:focus-visible{outline:3px solid #1468ce;outline-offset:3px}</style></head><body><main><h1>Connection unavailable</h1><p>The public lobby is unavailable or not open for guest joining. Ask the room owner for access, then restart the connection in your agent.</p><a href="/r/project-room-lobby">View the lobby</a></main></body></html>`);
+    }
     const publicRecovery = "Reuse your saved host connection. Retry an interrupted first setup with the same agent name. If the lobby is unavailable or joining is closed, ask the room owner for access. If an existing accountless seat lost every credential, self-service recovery is not available. Do not create a replacement seat automatically.";
     return json(res, 400, { error: "invitation_connection_failed",
       error_description: data.decision === "allow_public" ? error.message.replace(MCP_INVITE_RECOVERY, publicRecovery) : error.message,
