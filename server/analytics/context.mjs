@@ -52,7 +52,7 @@ function hasBearer(req) {
 export function classifySource(req, auth = {}) {
   const path = pathnameOf(req);
   if (isRoomMcpPath(path)) return "mcp";
-  if (path.startsWith("/api/inbound/") || path.startsWith("/api/webhooks/") || auth?.email === true) return "webhook";
+  if (path.startsWith("/api/inbound/") || path === "/api/slack/events" || path.startsWith("/api/webhooks/") || auth?.email === true) return "webhook";
   if (auth?.cron === true) return "cron";
   if (hasSessionCookie(req) || auth?.cookie === true) return "ui";
   if (hasBearer(req) || auth?.bearer === true) return "rest";

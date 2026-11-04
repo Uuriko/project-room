@@ -1,0 +1,64 @@
+  /api/rooms/{roomId}/slack-link:
+    post:
+      x-room-permission: owner
+      operationId: postSlackLink
+      summary: Link a Slack channel to the room (ROOM_SLACK_BRIDGE=1 only)
+      description: |
+        Room owner only. Body is exactly one of `{get: true}`,
+        `{link: {teamId, channelId, memberId}}` or `{unlink: true}`. memberId
+        is the active room member that Slack posts appear as; its own room
+        messages are not relayed back. Responses list `missingSecrets` by name
+        (SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN) until the server owner sets
+        them. Outbound relay starts at the room's current head. 404 while the
+        flag is off.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                get: { type: boolean }
+                unlink: { type: boolean }
+                link:
+                  type: object
+                  required: [teamId, channelId, memberId]
+                  properties:
+                    teamId: { type: string }
+                    channelId: { type: string }
+                    memberId: { type: string }
+      responses:
+        '200': { description: Link read or removed }
+        '201': { description: Channel linked }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied (not the room owner) }
+        '404': { description: not_found (flag off) }
+        '409': { description: slack_channel_taken }
+        '422': { description: invalid_body }
+  /api/slack/events:
+    post:
+      x-room-permission: webhook_signature
+      operationId: postSlackEvents
+      summary: Slack Events API receiver (ROOM_SLACK_BRIDGE=1 only)
+      description: |
+        Point the Slack app's Event Subscriptions Request URL here and
+        subscribe to message.channels. Requests must carry a valid Slack v0
+        signature (SLACK_SIGNING_SECRET, 5-minute window). Answers
+        url_verification. Human messages in a linked channel become room
+        messages from the bridge member, deduplicated by event_id; bot
+        messages and subtypes are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Handled, ignored or challenge answered }
+        '401': { description: webhook_signature }
+        '404': { description: not_found (flag off) }
+        '413': { description: too_large }
+        '422': { description: invalid_json }
+        '503': { description: slack_not_configured }

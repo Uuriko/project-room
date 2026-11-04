@@ -24,6 +24,7 @@ import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
+import { relayToSlack, slackOutboundDue } from "./slack-bridge.mjs";
 
 // One cooperative budget for every job on both runtimes: each job gets
 // this long per tick, measured from the job's own start and enforced at
@@ -943,6 +944,19 @@ export const JOBS = Object.freeze([
     nextDueAt: (store, now) => (projectMapPending(store) ? now : null),
     async run(store, ctx) {
       return drainProjectMapQueue(store, ctx?.env);
+    }
+  }),
+  defineJob({
+    name: "slack-outbound",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // Only while ROOM_SLACK_BRIDGE=1, SLACK_BOT_TOKEN is set and a linked
+    // room has messages past its relay cursor (server/slack-bridge.mjs).
+    enabled: (env, store) => slackOutboundDue(store, env),
+    disabledReason: () => "No Slack relay is waiting",
+    nextDueAt: (store, now) => (slackOutboundDue(store) ? now : null),
+    async run(store, ctx = {}) {
+      return relayToSlack(store, { env: ctx.env ?? process.env, fetchImpl: ctx.fetchImpl ?? globalThis.fetch });
     }
   }),
   defineJob({

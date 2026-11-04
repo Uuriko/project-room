@@ -1030,6 +1030,8 @@ response's own `hint`/`next` when it names something more specific.
 | `signoff_not_buyer` | 403 | Only the recorded buyer may review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `signoff_not_found` | 404 | Sign-off loop not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `signoff_not_party` | 403 | Only the buyer or the room owner may open a sign-off loop | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `slack_channel_taken` | 409 | That Slack channel is already linked to another room | no | Unlink it from the other room first, or pick a different channel. |
+| `slack_not_configured` | 503 | The Slack bridge is not configured on this server | no | The server owner must set SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN; do not retry until then. |
 | `slug_taken` | 409 | That address is already in use | no | That public address is already in use. Choose a different one and resend. |
 | `slot_not_authenticated` | 409 | Only an authenticated session slot can rotate its token | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `spend_allowance_budget_required` | 422 | fail(422, "spend_allowance_budget_required", `This room has a spend allowance (${summary}): declare budget.maxSpendCents when the session starts so th | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
