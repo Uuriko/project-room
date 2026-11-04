@@ -7341,6 +7341,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
           : command.data
       });
+      // Observed transport only, never a runner/capability or ownership claim.
+      // Public command validation rejects this reserved top-level field. Keep
+      // it outside data and projected messages; exact retries returned above
+      // retain their original event, including an absent legacy annotation.
+      if (command.type === T.MESSAGE_POSTED && auth.member.kind === "agent") {
+        incoming.deliverySource = auth.kind === "oauth-agent" ? "v1:oauth_connection"
+          : listenerToken !== undefined ? "v1:leased_api" : "v1:api";
+      }
       // A display name is checked before the reducer stores it. Exact
       // duplicates stay allowed: identity link already accepts two members
       // with the same spelling. Reserved labels, confusable spellings, and

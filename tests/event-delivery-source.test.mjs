@@ -35,10 +35,12 @@ test('real request-local OAuth classifies only verified OAuth writes and rejects
  const bad=await mcp({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'room_post_message',arguments:{body:'Spoofed',deliverySource:source('leased_api')}}},{authorization: "Bearer "+saved.token});
  assert.ok(bad.error||bad.result?.isError,JSON.stringify(bad));assert.equal(s.db.prepare("SELECT count(*) n FROM events WHERE room_id='commons'").get().n,beforeSpoof);
  assert.throws(()=>s.command(saved.token,'commons',{id:'outside',type:'message.posted',data:{messageId:'outside',body:'No ambient OAuth'}}),e=>e.code==='unauthenticated');
+ const claimed=await mcp({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'room_post_message',arguments:{id:'claimed-host',messageId:'claimed-host',roomId:'commons',body:'No verified runtime label'}}},{authorization:'Bearer '+saved.identitySecret,userAgent:'interactive-cloud-room-acp-claimed'});
+ assert.equal(claimed.error,undefined,JSON.stringify(claimed));assert.equal(claimed.result?.isError,undefined,JSON.stringify(claimed));assert.equal(JSON.parse(s.db.prepare("SELECT body FROM events WHERE room_id='commons' AND json_extract(body,'$.data.messageId')='claimed-host'").get().body).deliverySource,source('api'));
  const ordinary=s.command(saved.identitySecret,'commons',{id:'ordinary',type:'message.posted',data:{messageId:'ordinary',body:'API origin'}});assert.deepEqual(ordinary.event.deliverySource,source('api'));
 });
 
-for(const representation of [undefined,'normalized-current-v1'])test('channel copies and edit/delete retain first transport without exposing a DM in '+(representation??'legacy'),async t=>{
+for(const representation of [undefined,'normalized-current-v1'])test('channel copies and edit/delete retain first transport without exposing a DM in '+(representation??'legacy'),t=>{
  const {s,owner,identity}=fixture(t,representation);
  s.command(owner,'commons',{id:'root',type:'message.posted',data:{messageId:'root',body:'Public root'}});
  s.command(identity.secret,'commons',{id:'reply',type:'message.posted',data:{messageId:'reply',body:'Response',replyToId:'root',alsoSendToChannel:true}});
