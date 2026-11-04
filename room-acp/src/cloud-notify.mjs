@@ -9,7 +9,11 @@ export const CLOUD_NOTIFY_LIMITS=Object.freeze({signals:50,outputBytes:8192,time
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const closed=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 const id=(value,max)=>typeof value==='string'&&value.length<=max&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value)&&!['constructor','prototype','__proto__'].includes(value);
-const invoke=(file,args,options)=>new Promise(resolve=>execFile(file,args,options,(error,stdout)=>resolve({error,stdout})));
+const invoke=(file,args,options)=>new Promise(resolve=>{
+ const child=execFile(file,args,options,(error,stdout)=>resolve({error,stdout}));
+ // The prompt is argv-only. Never allow ambient input or leave the CLI awaiting EOF.
+ child.stdin?.end();
+});
 const result=(receipt,duplicate)=>Object.freeze({state:receipt.phase,operationId:receipt.operationId,duplicate,execution:'not_verified',roomState:'unchanged',...(receipt.reason?{reason:receipt.reason}:{})});
 function pointerOf(pointer){
  if(!closed(pointer,['roomId','messageId','signalIds'])||!id(pointer.roomId,64)||!id(pointer.messageId,128)
