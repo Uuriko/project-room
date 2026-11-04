@@ -59,9 +59,9 @@ async function setup(t, { mobile = false, review = false, viewport = null, onPag
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }), isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
-  onPage?.(page);
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
+  await onPage?.(page);
   await page.goto(origin); await signInFixture(page, f.keys[review ? "human-checker" : "owner"]); await page.locator("#main").waitFor({ state: "visible" });
   await openWorkFromSearch(page, workItemId, "A quiet room");
   const open = async () => {
@@ -666,9 +666,26 @@ for (const mobile of [false, true]) test(`result feedback preserves another repl
     console.log(JSON.stringify({ test: `protected-reply-${label}`, failure: evidence }));
     await diagnosticPage?.screenshot({ path: prefix + ".png", timeout: 1000 }).catch(() => {});
   });
-  f = await step("setup", () => setup(t, { mobile, onPage: page => { diagnosticPage = page; }, body: "A detailed result for review.\n".repeat(60) }));
+  // Keep incidental history hydration from satisfying this case's setup.
+  // Selected work reads still reach the real server; only generic conversation
+  // pages wait for the explicit reader gesture below. No response is fabricated.
+  let releaseHistory;
+  const historyRevealed = new Promise(resolve => { releaseHistory = resolve; });
+  t.after(() => releaseHistory());
+  f = await step("setup", () => setup(t, { mobile, onPage: async page => {
+    diagnosticPage = page;
+    await page.route("**/api/rooms/commons/conversation?*", async route => {
+      const query = new URL(route.request().url()).searchParams;
+      if (!query.has("messageId") && !query.has("threadId")) await historyRevealed;
+      await route.fallback();
+    });
+  }, body: "A detailed result for review.\n".repeat(60) }));
   f.complete();
   f.send(T.MESSAGE_POSTED, { messageId: "other-feedback", body: "A separate question", replyToId: "native-draft" });
+  assert.equal(await f.page.locator('[data-work-record-id="native-human"]').isVisible(), true,
+    "selected work completes while generic older history is held");
+  assert.equal(await f.page.locator('[data-message-record-id="native-draft"]').count(), 0,
+    "the protected-reply setup starts with its source outside the recent window");
   await step("root-reply", () => messageAction(f.page, "native-draft", "reply"));
   await step("other-reply", () => messageAction(f.page, "other-feedback", "reply"));
   await step("other-draft", () => f.page.locator("#message-input").fill("My answer to the separate question"));
