@@ -17,6 +17,12 @@ export async function selectAgent(options, { env = process.env, onFailure = () =
 }
 
 export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null } = {}) {
+  const receiverPolicy = options.receiverPolicy === undefined ? 'respond' : options.receiverPolicy;
+  if (!['respond', 'disabled'].includes(receiverPolicy)) throw Error('Receiver policy must be respond or disabled');
+  if (receiverPolicy === 'disabled') {
+    print('Room receiver disabled. No host or receiver was started; no wakes or formal requests were accepted, answered or acknowledged. Existing Room work and local retry state are unchanged.');
+    return 0;
+  }
   const connection = loadConnection({ roomId: options.room }, env);
   if (!connection) { print("Not joined. Run: room-acp <invite link>"); return 1; }
   if (options.permissionApprover !== undefined) {

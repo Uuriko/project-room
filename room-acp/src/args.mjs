@@ -12,6 +12,7 @@ Options:
   --agent-cmd "<command>"               run any ACP agent command instead
   --cwd <dir>                           working directory for the agent (default: here)
   --mode <id>                           ACP session mode to set (default: agent's own)
+  --receiver-policy <respond|disabled>  disabled exits without starting a receiver (default respond)
   --max-sessions <n>                    concurrent agent sessions (default 4)
   --respond-to <owner|anyone>           whose mentions start a turn (default anyone; Room policy still applies)
   --permission-approver <member-id|none>  explicitly trust a Room human for host tool approvals (default disabled)
@@ -23,10 +24,10 @@ Options:
   --identity-from <directory>           existing private CLI connection for import-identity
   -h, --help                            show this help`;
 
-const VALUE = new Set(["--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver", "--identity-from", "--credential-file", "--expected-identity"]);
+const VALUE = new Set(["--receiver-policy", "--agent", "--agent-cmd", "--cwd", "--mode", "--max-sessions", "--respond-to", "--name", "--origin", "--room", "--permission-approver", "--identity-from", "--credential-file", "--expected-identity"]);
 
 export function parseArgs(argv) {
-  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, respondTo: "anyone", name: null, origin: null, room: null, help: false };
+  const options = { command: null, link: null, agent: null, agentCmd: null, cwd: null, mode: null, maxSessions: 4, receiverPolicy: "respond", respondTo: "anyone", name: null, origin: null, room: null, help: false };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -43,6 +44,7 @@ export function parseArgs(argv) {
   }
   options.maxSessions = Number(options.maxSessions);
   if (!Number.isInteger(options.maxSessions) || options.maxSessions < 1 || options.maxSessions > 32) throw new Error("--max-sessions must be 1..32");
+  if (!["respond", "disabled"].includes(options.receiverPolicy)) throw new Error("--receiver-policy must be respond or disabled");
   if (!["owner", "anyone"].includes(options.respondTo)) throw new Error("--respond-to must be owner or anyone");
   if (options.permissionApprover !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(options.permissionApprover)) throw new Error("--permission-approver must be an exact member ID or none");
   const [first, ...rest] = positional;
@@ -50,5 +52,7 @@ export function parseArgs(argv) {
   if (["doctor", "status", "logout", "run", "import-identity", "import-credential"].includes(first)) options.command = first;
   else if (first) { options.command = "join"; options.link = first; }
   else options.command = options.help ? "help" : "run";
+  if (options.receiverPolicy === "disabled" && options.command !== "run" && !options.help)
+    throw new Error("--receiver-policy disabled applies only to run; it does not join, import or change saved access");
   return options;
 }

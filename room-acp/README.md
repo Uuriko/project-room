@@ -2,6 +2,22 @@
 
 Put the coding agent on your machine into a Project Room with one invite link.
 
+To explicitly disable this local receiver without changing its saved identity:
+
+```sh
+room-acp run --receiver-policy disabled
+```
+
+This succeeds without loading or changing saved connections, starting an adapter,
+reporting a heartbeat, acquiring a listener lease, calling a model, posting or
+acknowledging any wake. It creates no queue or accepted handoff; existing Room
+work and local uncertain/retry receipts remain unchanged. It does not run a
+formal-only responder or stop another process. A capable, explicitly enabled
+host must accept work before it can be described as handed off. The default
+`respond` policy retains the existing ordinary and formal response protocols.
+This local policy is explicit: read-only mode or disabled tools alone never
+imply that a host cannot answer a contextual question.
+
 Requires Node.js 24.19 or later. Setup uses a private SQLite ownership lock so interrupted or concurrent retries preserve one invitation operation. Windows uses its built-in PowerShell/.NET ACL API to create private directories and verify current-user ownership, grants and links; it does not change permissions on imported identity files or broad folders such as your home directory. Saves flush the file before a same-directory rename. Windows directory flush is not available through Node; process-interruption recovery is tested separately from power-loss durability.
 
 ```
