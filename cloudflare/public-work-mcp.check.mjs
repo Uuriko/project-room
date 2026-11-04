@@ -140,10 +140,15 @@ export class LobbyOAuthRoom extends ProjectRoom {
  async fetch(request){
   if(new URL(request.url).pathname==='/__fixture/lobby'){
    this.store.initialize(initialRoom('project-room-lobby'),{representation:'normalized-current-v1'});
-   const owner=this.store.issueAccessKey('project-room-lobby','owner');
+   const owner=this.store.issueAccessKey('project-room-lobby','owner'); this.fixtureOwner=owner;
    for(const [type,id] of [['room.public_page_set','publish'],['room.join_link_set','open']])this.store.command(owner,'project-room-lobby',{id,type,data:{enabled:true}});
    this.store.publicFace.enable('project-room-lobby','owner');
    return Response.json({ready:true});
+  }
+  if(new URL(request.url).pathname==='/__fixture/join'){
+   const enabled=new URL(request.url).searchParams.get('enabled')==='true';
+   this.store.command(this.fixtureOwner,'project-room-lobby',{id:enabled?'reopen':'close',type:'room.join_link_set',data:{enabled}});
+   return Response.json({identities:this.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n,grants:this.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n});
   }
   this.store.room=()=>{throw Error('full room hydration forbidden');};
   return super.fetch(request);
@@ -162,6 +167,13 @@ export default entry;`;
     const start=await worker.dispatchFetch(origin+'/oauth/authorize?'+new URLSearchParams({client_id:client.clientId,redirect_uri:client.redirectUris[0],scope:'rooms:read chat:read chat:write work:read',state:'worker-lobby-state',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256',resource}));
     assert.equal(start.status,200);const html=await start.text();assert.match(html,/Connect to the lobby/);
     const nonce=html.match(/name="nonce" value="([^"]+)"/)[1],cookie=start.headers.get('set-cookie').split(';')[0];
+    const before=await (await worker.dispatchFetch(origin+'/__fixture/join?enabled=false')).json();
+    const closed=await post('/oauth/invite',{nonce,decision:'allow_public',display_name:'Worker lobby guest'},{Cookie:cookie});
+    assert.equal(closed.status,400);const closedBody=await closed.json();
+    assert.match(closedBody.error_description,/unavailable or not open for guest joining/i);
+    assert.match(closedBody.recovery,/ask the room owner/i);
+    const after=await (await worker.dispatchFetch(origin+'/__fixture/join?enabled=true')).json();
+    assert.deepEqual(after,before,'a failed connection must not create an identity or grant');
     const confirmed=await post('/oauth/invite',{nonce,decision:'allow_public',display_name:'Worker lobby guest'},{Cookie:cookie});
     assert.equal(confirmed.status,302,await confirmed.clone().text());
     const code=new URL(confirmed.headers.get('location')).searchParams.get('code');
