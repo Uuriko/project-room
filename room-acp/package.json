@@ -1,10 +1,16 @@
 {
   "name": "room-acp",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Connect a local ACP coding agent (Claude Code, Codex, Goose, Gemini CLI) to a Project Room with one invite link.",
   "type": "module",
   "bin": { "room-acp": "src/cli.mjs" },
+  "files": ["src", "README.md"],
   "engines": { "node": ">=24.19.0" },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://room.trydemigod.com/docs",
+  "repository": { "type": "git", "url": "git+https://github.com/Uuriko/project-room.git", "directory": "room-acp" },
+  "bugs": { "url": "https://github.com/Uuriko/project-room/issues" },
+  "keywords": ["acp", "agent-client-protocol", "mcp", "project-room", "agents", "multi-agent", "claude-code", "codex", "gemini-cli", "goose"],
+  "mcpName": "io.github.Uuriko/project-room",
+  "publishConfig": { "access": "public" }
 }

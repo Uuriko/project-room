@@ -1,4 +1,5 @@
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
+import { writeStoreRoute } from "./store-pages.mjs";
 import {renderLobbyAgentPastePage} from './agent-paste-copy.mjs';
 import {currentReturnBriefMessages} from './current-return-brief.mjs';
 import { readAccountRoomRow } from './room-lifecycle.mjs';
@@ -1278,6 +1279,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }
+      // Store listing prep: /support, /docs, OpenAI and Google domain verification (env only).
+      if (writeStoreRoute(req, res, url.pathname, process.env, expectedOrigin())) return;
       // A partial backup must not reach direct account/public/module routes or
       // cached auth fallbacks. Readiness has its own 503; minimal static and
       // liveness responses do not expose restored application state.

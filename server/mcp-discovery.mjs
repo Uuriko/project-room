@@ -9,7 +9,10 @@ import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";
 import { MCP_JOIN_TOOLS } from "./mcp-http.mjs";
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
 import { capabilityVisibleTo } from "./capability-visibility.mjs";
-import { withOpenWorldHint } from "./content-trust.mjs";
+import { withOpenWorldHint as openWorld } from "./content-trust.mjs";
+import { withToolAnnotations } from "./mcp-tool-annotations.mjs";
+// Every listed tool carries title, readOnlyHint and destructiveHint.
+const withOpenWorldHint = tool => withToolAnnotations(openWorld(tool));
 import { LEAN_MCP_TOOLS, actionMetaToolDefs } from "./mcp-action-search.mjs";
 import { withMcpToolContract } from "./mcp-tool-contracts.mjs";
 
