@@ -1576,6 +1576,16 @@
         "title": "Report blocker"
       }
     },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -2210,6 +2220,16 @@
         "title": "Assistant Context"
       }
     },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -2460,6 +2480,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Assistant Context"
+      }
+    },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
       }
     },
     "room_check_access": {
