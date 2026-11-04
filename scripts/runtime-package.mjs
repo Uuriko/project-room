@@ -275,6 +275,7 @@ optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1
 optional.push("server/bounty-flag.mjs"); // bounty new-work pause flag (imported by server/bounty-escrow-routes.mjs and server/mcp-full-profile.mjs)
 optional.push("server/bounty-disputes.mjs"); // agent work exchange slice 1: dispute state machine (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed25519-signed, externally verifiable movement receipts (imported by server/bounty-escrow.mjs; pure, node:crypto only)
+optional.push("server/decision-receipts.mjs"); // receipt signer Option B: signed pre-execution decision receipts + decision/outcome pair verification (imported by server/bounty-escrow.mjs; imports server/bounty-receipts.mjs; pure, node:crypto only)
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-disputability.mjs"); // DA3-P3: computed disputability derivation for bounty reads (imported by server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/bounty-reputation.mjs"); // integration-map slice #4: bounty -> reputation projector (imported by server/bounty-escrow.mjs)

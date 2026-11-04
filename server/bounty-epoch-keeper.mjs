@@ -106,7 +106,7 @@ export function progressEscrowEpochs(store, { now = Date.now(), escrow = null } 
     `SELECT DISTINCT b.room_id AS roomId FROM bounty_records b WHERE ${DUE_WHERE}`,
     [now, now, now, now, now]);
   const instance = escrow
-    ?? (store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store));
+    ?? (store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store, { receipts: store.receiptSigner ?? null }));
   for (const { roomId } of roomRows ?? []) {
     summary.rooms += 1;
     try {

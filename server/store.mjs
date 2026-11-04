@@ -119,6 +119,7 @@ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-sch
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
+import { receiptSignerFromEnv } from "./bounty-receipts.mjs"; // Option B receipt signer: seed only from ROOM_RECEIPT_SIGNER_SEED.
 import { selectedWorkContext, currentWorkRecord, workRoleHolder } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
@@ -1392,7 +1393,8 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto",
+    receiptSigner = receiptSignerFromEnv(globalThis.process?.env ?? {}) } = {}) {
     const initializationStarted = performance.now();
     this._restoreOpening = true;
     // Phase 1a: store large message bodies outside rooms.projection.
@@ -1509,7 +1511,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
-    this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
+    // Option B receipt signer (see server/bounty-receipts.mjs): null when
+    // unarmed — the default until the operator supplies the seed — in which
+    // case escrow transitions return `signed: []` exactly as before. An
+    // explicitly passed signer (either entry point) wins; otherwise the
+    // environment resolution above applies. Exposed for the fallback
+    // escrow constructions (routes, epoch keeper) so every escrow in the
+    // process signs — or doesn't — identically.
+    this.receiptSigner = receiptSigner ?? null;
+    this.bountyEscrow = new BountyEscrow(this, { now: () => this.now(), receipts: this.receiptSigner }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,

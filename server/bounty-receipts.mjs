@@ -13,13 +13,14 @@
 // chains, transactions, or cash value. Amounts say "credits moved", never
 // money.
 //
-// Key management: test keys only in this slice. Generate in-memory with
-// generateReceiptKeyPair() or import a local 0600 file with importSeed() —
-// the caller owns storage. The signer is injected into BountyEscrow via the
+// Key management: the signer is injected into BountyEscrow via the
 // `receipts` constructor option; when absent, transitions return
-// `signed: []` and no journal entries are stamped. Production key
-// provisioning (operator key registry, rotation, validity windows) is a
-// later slice — see docs/bounty-receipts.md for the trust statement.
+// `signed: []` and no journal entries are stamped. Production wiring
+// (receiptSignerFromEnv below) takes the seed only from the
+// ROOM_RECEIPT_SIGNER_SEED environment variable — never from a file or a
+// config value in this repo. Tests generate throwaway keys in-memory with
+// generateReceiptKeyPair(). Operator key registry, rotation, and validity
+// windows remain a later slice — see docs/bounty-receipts.md.
 //
 // Pure: node:crypto only, no I/O, no dependencies.
 import {
@@ -262,6 +263,28 @@ export function verifyBytes(bytes, signatureHex, pubkeyHex) {
   }
 }
 
+// --- operator signer from the environment (Option B wiring) ------------------
+//
+// Production takes the signer seed ONLY from the environment variable named
+// by RECEIPT_SIGNER_SEED_ENV — the name is public, the value never appears
+// in code, config files, or logs. Semantics:
+//   seed unset or blank  -> null (signer unarmed; transitions return
+//                           `signed: []`, the historical default);
+//   seed present, invalid -> createReceiptSigner throws (loud boot failure,
+//                           never a silently unsigned payout path);
+//   ref unset or blank   -> DEFAULT_RECEIPT_SIGNER_REF.
+export const RECEIPT_SIGNER_SEED_ENV = "ROOM_RECEIPT_SIGNER_SEED";
+export const RECEIPT_SIGNER_REF_ENV = "ROOM_RECEIPT_SIGNER_REF";
+export const DEFAULT_RECEIPT_SIGNER_REF = "escrow-keeper";
+
+export function receiptSignerFromEnv(env = {}) {
+  const seedHex = env?.[RECEIPT_SIGNER_SEED_ENV];
+  if (typeof seedHex !== "string" || seedHex.trim() === "") return null;
+  const refRaw = env?.[RECEIPT_SIGNER_REF_ENV];
+  const ref = typeof refRaw === "string" && refRaw.trim() !== "" ? refRaw : DEFAULT_RECEIPT_SIGNER_REF;
+  return createReceiptSigner({ seedHex, ref });
+}
+
 // Build the operator signer injected into BountyEscrow. Validates the seed
 // eagerly so a misconfigured key fails at boot, not at first payout.
 export function createReceiptSigner({ seedHex, ref }) {
@@ -390,6 +413,21 @@ const PAYLOAD_SCHEMAS = {
   },
 };
 
+const DECISION_ID = /^room-decision:[0-9a-f]{32}$/;
+
+// The binding pair is all-or-nothing: a lone decisionId (or a lone digest)
+// is a malformed binding, not a partial one.
+const checkDecisionBinding = payload => {
+  const hasId = "decisionId" in payload, hasDigest = "decisionDigest" in payload;
+  if (hasId !== hasDigest)
+    fail("invalid_receipt", "payload.decisionId and payload.decisionDigest must appear together");
+  if (!hasId) return;
+  if (typeof payload.decisionId !== "string" || !DECISION_ID.test(payload.decisionId))
+    fail("invalid_receipt", "payload.decisionId must be room-decision:<32 hex>");
+  if (typeof payload.decisionDigest !== "string" || !HEX64.test(payload.decisionDigest))
+    fail("invalid_receipt", "payload.decisionDigest must be a sha256 hex digest");
+};
+
 function validateShape(r) {
   if (!isPlainObject(r)) fail("invalid_receipt", "receipt must be an object");
   // Number ban first (dasha-receipt/1 §4): a JSON number has multiple legal
@@ -427,8 +465,14 @@ function validateShape(r) {
   if (!validIssuedAt(r.issuedAt)) fail("invalid_receipt", "issuedAt must be a real RFC 3339 UTC timestamp");
   if (!isPlainObject(r.payload)) fail("invalid_receipt", "payload must be an object");
   const schema = PAYLOAD_SCHEMAS[r.type];
-  exactKeys(r.payload, [...schema.keys, ...(schema.optional ?? [])].filter(k => k in r.payload || schema.keys.includes(k)), "payload");
+  // Option B binding keys: every payload may additionally carry the
+  // decisionId + decisionDigest pair binding this outcome to the signed
+  // pre-execution decision (server/decision-receipts.mjs). Optional, so
+  // unbound receipts stay shape-valid; the pair verifier requires them.
+  exactKeys(r.payload, [...schema.keys, ...(schema.optional ?? []), "decisionId", "decisionDigest"]
+    .filter(k => k in r.payload || schema.keys.includes(k)), "payload");
   schema.check(r.payload, r.amountMillis);
+  checkDecisionBinding(r.payload);
   if (typeof r.signature !== "string" || !HEX128.test(r.signature))
     fail("invalid_receipt", "signature must be 128 lowercase hex");
 }

@@ -68,6 +68,7 @@ import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
+import { issueDecisionReceipt, decisionDigest } from "./decision-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { disputabilityFor } from "./bounty-disputability.mjs";
 
@@ -752,12 +753,14 @@ export class BountyEscrow {
     this._arbiters = createArbiters();
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
+    this._settlementDecisions = null; // transient: decision receipts issued by a dispute settlement
     this._settlementDecidedEvent = null; // transient: bounty.decided event emitted by a dispute settlement
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
     this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
-    // server/bounty-receipts.mjs. When null (the default — production key
-    // provisioning is a later slice), transitions return `signed: []` and
+    // server/bounty-receipts.mjs (production wiring: receiptSignerFromEnv,
+    // seed from ROOM_RECEIPT_SIGNER_SEED only). When null (the default
+    // until the operator arms it), transitions return `signed: []` and
     // journal entries are not stamped.
     this._receipts = receipts;
   }
@@ -1117,17 +1120,43 @@ export class BountyEscrow {
   // verifiable receipt for the movement (bounty-receipts.mjs). Only journal
   // kinds in SIGNABLE_KINDS may carry one; when no signer is configured the
   // receipt comes back null and the movement proceeds unsigned.
+  //
+  // Option B (decision-receipts.mjs): when a signer IS configured, the
+  // movement is authorised BEFORE it executes — a decision receipt naming
+  // the act, target, disposition, and amount is signed first, and the
+  // outcome receipt issued after the appends binds itself to that decision
+  // via payload.decisionId + payload.decisionDigest. A fabricated outcome
+  // (an agent self-report with no genuine pre-execution decision behind
+  // it) cannot produce a verifiable pair.
   _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null }) {
     check(Number.isSafeInteger(amountMillis) && amountMillis > 0, "invalid_amount", "movement amount must be positive");
-    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor });
-    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor });
-    const movement = { debitEntryId: debit.entryId, creditEntryId: credit.entryId, lotId, receipt: null };
+    const movement = { debitEntryId: null, creditEntryId: null, lotId, receipt: null, decision: null };
+    let decisionBinding = null;
     if (receipt !== null && receipt !== undefined) {
       const expected = SIGNABLE_KINDS.get(kind);
       check(expected !== undefined, "invalid_input", `signed receipts are not issued for journal kind "${kind}"`);
       check(receipt.type === expected, "invalid_input", `receipt type "${receipt.type}" does not match journal kind "${kind}"`);
       check(actor !== null && typeof actor === "object", "invalid_input", "signed receipts require an actor");
-      movement.receipt = this._issueReceipt({ type: receipt.type, payload: receipt.payload ?? {},
+      if (this._receipts) {
+        // Pre-execution issuance: this signature precedes the journal
+        // appends below — that ordering is the design, not a detail.
+        movement.decision = issueDecisionReceipt({ act: receipt.type,
+          target: { roomId, bountyId, lotId },
+          disposition: `${kind}: ${from.account}/${from.state} -> ${to.account}/${to.state}`,
+          amountMillis: String(amountMillis), actor,
+          issuer: { pubkey: this._receipts.pubkeyHex, role: "escrow-keeper", ref: this._receipts.ref },
+          decidedAt: at, seedHex: this._receipts.seedHex });
+        decisionBinding = { decisionId: movement.decision.decisionId,
+          decisionDigest: decisionDigest(movement.decision) };
+      }
+    }
+    const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor });
+    const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor });
+    movement.debitEntryId = debit.entryId;
+    movement.creditEntryId = credit.entryId;
+    if (receipt !== null && receipt !== undefined) {
+      movement.receipt = this._issueReceipt({ type: receipt.type,
+        payload: { ...(receipt.payload ?? {}), ...(decisionBinding ?? {}) },
         roomId, bountyId, lotId, amountMillis, actor, at,
         entries: [debit.entryId, credit.entryId] });
     }
@@ -1154,8 +1183,14 @@ export class BountyEscrow {
   }
 
   // Spread into a transition receipt: { signed: [...] } — empty when the
-  // movement is unsigned (no signer configured).
-  _signed(movement) { return { signed: movement.receipt ? [movement.receipt] : [] }; }
+  // movement is unsigned (no signer configured). Option B, additive: when
+  // the movement carries a pre-execution decision, the spread also carries
+  // `decision: <decision receipt>`; unarmed returns are exactly what they
+  // were before (signed: [], no decision key).
+  _signed(movement) {
+    return { signed: movement.receipt ? [movement.receipt] : [],
+      ...(movement.decision ? { decision: movement.decision } : {}) };
+  }
 
   _balanceMillis(roomId, accountId, lotState) {
     const row = this.db.prepare(
@@ -2593,6 +2628,7 @@ export class BountyEscrow {
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
       this._settlementSigned = [];
+      this._settlementDecisions = [];
       this._settlementDecidedEvent = null;
       this._rubricCheckTransient = checkedRubric;
       // #3275: snapshot the in-memory dispute record before the machine
@@ -2624,6 +2660,8 @@ export class BountyEscrow {
         }
         const signed = this._settlementSigned ?? [];
         this._settlementSigned = null;
+        const decisions = this._settlementDecisions ?? [];
+        this._settlementDecisions = null;
         const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
         // The settlement itself emitted bounty.decided (in _settleDispute, so
         // keeper settlements emit it too); reuse that event for the receipt.
@@ -2641,10 +2679,14 @@ export class BountyEscrow {
               verifier: bounty.attestation?.recordedBy ?? null } });
         this._settlementDecidedEvent = null;
         return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
-          receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
+          receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed,
+            // Option B, additive: present only when the settlement issued
+            // decisions (signer armed); absent byte-for-byte when unarmed.
+            ...(decisions.length ? { decisions } : {}) } };
       } catch (error) {
         this._restoreDisputeRecord(bounty.disputeId, disputeBefore);
         this._settlementSigned = null;
+        this._settlementDecisions = null;
         this._settlementDecidedEvent = null;
         throw error;
       }
@@ -2714,7 +2756,11 @@ export class BountyEscrow {
         : { amount: 0, disposition: "none", from: worker ?? null, to: null };
     };
     const signed = [];
-    const collect = movement => { if (movement.receipt) signed.push(movement.receipt); };
+    const decisions = [];
+    const collect = movement => {
+      if (movement.receipt) signed.push(movement.receipt);
+      if (movement.decision) decisions.push(movement.decision);
+    };
     let splitWorkerMillis = 0, splitRefundMillis = 0; // free-miss record inputs, assigned in the split branch
 
     // Phase 1 — acceptance track: record the verdict first (evidence = the
@@ -2877,6 +2923,11 @@ export class BountyEscrow {
             // on trial — an "upheld" outcome overturns it (acceptance_overturned).
             verifier: bounty.attestation?.recordedBy ?? null } });
     }
+    // Option B: the settlement's decision receipts travel the same
+    // transient channel as its signed outcome receipts; decideDispute
+    // surfaces them next to `signed` (keeper callers keep the receipts
+    // return contract unchanged).
+    this._settlementDecisions = decisions;
     return signed;
   }
 
