@@ -145,3 +145,20 @@ test('a recent wake acceptance failure is not hidden as a failed optional transp
  const expected=new RoomError(503,'context_unavailable','Protected context refused');b.accept=async()=>{throw expected;};
  await assert.rejects(()=>b.pollOnce(),error=>error===expected);
 });
+test('a recent503 Retry-After is honored before the independent oldest request through the real client wrapper',async()=>{
+ const calls=[],started=Date.now(),b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;
+ b.room=new RoomClient({apiBase:'https://example.test',roomId:'r',fetchImpl:async input=>{
+  const order=new URL(input).searchParams.get('order')??'oldest';calls.push(order);
+  if(order==='newest')return Response.json({error:{code:'storage_unavailable',message:'Unavailable'}},{status:503,headers:{'retry-after':'1'}});
+  assert.ok(Date.now()-started>=900,'oldest request must respect the server wait');
+  return Response.json({roomId:'r',pendingWakes:[],more:false});
+ }});
+ await b.pollOnce();assert.deepEqual(calls,['newest','oldest']);
+});
+test('cancellation during recent503 Retry-After never makes an oldest request',async()=>{
+ const calls=[],b=new Bridge({connection:{apiBase:'https://example.test',roomId:'r',memberId:'m',hostId:'h'},minPollIntervalMs:0,persistSessions:false,host:{}});
+ b.freshWakeDiscovery=true;b.lease=async()=>true;
+ b.room.poll=async({order='oldest'})=>{calls.push(order);setTimeout(()=>b.controller.abort(),10);throw new RoomError(503,'temporary_failure','Unavailable',1000);};
+ await assert.rejects(()=>b.pollOnce(),error=>error.name==='AbortError');assert.deepEqual(calls,['newest']);
+});
