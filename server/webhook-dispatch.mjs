@@ -150,6 +150,25 @@ export function classifyHttpStatus(status) {
 
 export const MAX_REDIRECT_HOPS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+// Credential headers that must never be forwarded to a different origin
+// on a redirect (R1, PR #5461 recheck). Standard fetch strips
+// Authorization on cross-origin redirects; this hand-rolled engine must
+// do the same, and must also strip the room notification token, which
+// is a credential scoped to the registered receiver.
+const CREDENTIAL_HEADER_NAMES = new Set(["authorization", "x-room-notification-token"]);
+function stripCredentialHeaders(headers) {
+  if (typeof Headers !== "undefined" && headers instanceof Headers) {
+    const next = new Headers(headers);
+    for (const name of CREDENTIAL_HEADER_NAMES) next.delete(name);
+    return next;
+  }
+  if (Array.isArray(headers)) {
+    return headers.filter(([name]) => !CREDENTIAL_HEADER_NAMES.has(String(name).toLowerCase()));
+  }
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADER_NAMES.has(name.toLowerCase())),
+  );
+}
 // Cap on the response body the pinned transport buffers: deliveries only
 // need the status, the location header, and the first bytes of an error
 // body, so a hostile receiver cannot balloon memory.
@@ -261,6 +280,10 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   check(typeof allowCrossOriginRedirects === "boolean", "allowCrossOriginRedirects must be a boolean");
   const body = JSON.stringify(envelope);
   let current = url;
+  // Headers actually sent on the current hop. Starts as the caller's
+  // headers (never mutated); on the first cross-origin redirect the
+  // credential headers are dropped and are never re-added afterwards.
+  let currentHeaders = headers;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
     const checked = await checkDispatchTarget(current, dnsResolvers);
     if (!checked.ok) return checked.result;
@@ -270,7 +293,7 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
       // trusting the receiver's Location chain.
       const init = {
         method: "POST",
-        headers,
+        headers: currentHeaders,
         body,
         signal: AbortSignal.timeout(timeoutMs),
         redirect: "manual",
@@ -279,7 +302,7 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
         ? await fetchImpl(current, init)
         : isWorkersRuntime()
           ? await fetch(current, init)
-          : await pinnedDispatchPost(current, checked.addresses, { headers, body, timeoutMs });
+          : await pinnedDispatchPost(current, checked.addresses, { headers: currentHeaders, body, timeoutMs });
     } catch (error) {
       const reason = error?.name === "TimeoutError" ? "delivery timed out" : (error?.message ?? "network error");
       return { ok: false, status: 0, error: String(reason).slice(0, 500), classification: "retry" };
@@ -301,6 +324,14 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
       }
       if (!allowCrossOriginRedirects && next.origin !== new URL(current).origin) {
         return { ok: false, status, error: "redirect target must stay on the registered origin", classification: "dead" };
+      }
+      // Cross-origin hop (scheme/host/port change, including subdomains
+      // and relative Locations resolved against the current URL): drop
+      // credential headers before re-sending. Same-origin hops keep
+      // them. Once stripped they stay stripped for the rest of the
+      // chain, even if a later hop returns to the original origin.
+      if (next.origin !== new URL(current).origin) {
+        currentHeaders = stripCredentialHeaders(currentHeaders);
       }
       current = next.toString();
       continue;
