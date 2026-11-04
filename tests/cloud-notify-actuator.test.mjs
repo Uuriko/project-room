@@ -109,3 +109,20 @@ test('source-pointer batch is closed, bounded, canonical and durably retained wi
  for(const bad of [{...batch,signalIds:['invented']},{...batch,items:[]},{...batch,items:[{messageId:'bad',sequence:0}]},{...batch,items:[{messageId:'same',sequence:1},{messageId:'same',sequence:2}]},{...batch,items:[{messageId:'body',sequence:1,body:'PRIVATE'}]},{...batch,items:Array.from({length:17},(_,i)=>({messageId:'m'+i,sequence:i+1}))}])await assert.rejects(f.notify(bad),/Invalid notification pointer/);
  assert.equal(calls,1);
 });
+
+// Observed CLI2.1.259 returns this exact canonical navigation suffix.
+test('real CLI navigation URL is accepted while unknown original receipts remain fenced',async t=>{
+ const reply={stdout:JSON.stringify({ok:true,session_id:sessionId,url:'https://claude.ai/code/'+sessionId+'?from=cli&m=0'})};
+ const f=fixture(t,async()=>reply);
+ assert.equal((await f.notify(pointer)).state,'accepted');
+ const again=createCloudNotifier({executable,sessionId,roomId:'commons',stateRoot:f.stateRoot,runCli:()=>{throw Error('Must not repeat accepted notification');}});
+ assert.equal((await again(pointer)).state,'accepted');
+ const old=fixture(t,async()=>({stdout:'unknown response'}));
+ assert.equal((await old.notify(pointer)).state,'unknown');
+ const recovered=createCloudNotifier({executable,sessionId,roomId:'commons',stateRoot:old.stateRoot,runCli:()=>{throw Error('Must not repeat original unknown notification');}});
+ assert.equal((await recovered(pointer)).state,'unknown');
+});
+for(const suffix of ['?m=0&from=cli','?from=cli&m=0&extra=1','?from=cli&m=0&m=0','?from=cli&m=1','?from=cli&m=0#fragment','/different?from=cli&m=0'])test('unrecognized CLI URL suffix '+suffix+' remains unknown',async t=>{
+ const f=fixture(t,async()=>({stdout:JSON.stringify({ok:true,session_id:sessionId,url:'https://claude.ai/code/'+sessionId+suffix})}));
+ assert.equal((await f.notify(pointer)).state,'unknown');
+});

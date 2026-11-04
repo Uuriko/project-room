@@ -73,7 +73,7 @@ export function createCloudNotifier({executable,sessionId,roomId,stateRoot,timeo
      const value=JSON.parse(reply.stdout);
      // Exactly three JSON member tokens also rejects duplicate/shadowed keys.
      if((reply.stdout.match(/"(?:\\.|[^"\\])*"\s*:/g)||[]).length===3&&closed(value,['ok','session_id','url'])&&value.ok===true&&value.session_id===sessionId&&typeof value.url==='string'
-      &&value.url===`https://claude.ai/code/${sessionId}`)reason=null;
+      &&[`https://claude.ai/code/${sessionId}`,`https://claude.ai/code/${sessionId}?from=cli&m=0`].includes(value.url))reason=null;
     }
    }catch{/* A thrown transport/parse error is not proof that no send occurred. */}
    saved={...saved,phase:reason?'unknown':'accepted',updatedAt:Math.max(now(),saved.createdAt),...(reason?{reason}:{}),...(responseDigest?{responseDigest}:{})};
