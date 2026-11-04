@@ -50,3 +50,40 @@ export function disputabilityFor({ poster, verifier, disputeDecider, claimant } 
     return Object.freeze({ status: "undisputable", reason: "verifier_is_executor", decider: null });
   return Object.freeze({ status: "disputable", reason: null, decider: designated });
 }
+
+// Act-response warnings for the same derivation (W2-F2, register rows 2
+// and 4: RES-0003 / RES-0005). The computed field above made bounty READS
+// honest, but the W6-A production re-verification (build 1ab906c3) found
+// the residual silence: create and fund succeed with no warning, so the
+// poster still learns a bounty can never be disputed only from a
+// dispute_unavailable refusal after accepted, paid work. These warnings
+// ride the post / fund / claim act responses — the moments the
+// configuration is created, paid into, or (by the designee's own claim)
+// made undisputable. Warning-only: no act is refused and no money path
+// changes; disputeBounty remains the sole authority.
+//
+// The two-member leg is the pair trap of row 4: when the room's active
+// members are exactly the poster and the designated decider, the
+// designee is the only lane that can ever claim (a poster cannot claim
+// their own bounty), so the designation is disputable only on paper —
+// the moment they claim, the bounty is undisputable for good. The
+// warning names that at posting time, plus the remedy the product
+// already supports (a third member named as decider). memberLanes is
+// the room's canonical active-member lanes, or null when no membership
+// source exists (the leg is then skipped, never guessed).
+export function undisputableWarnings({ poster, verifier, disputeDecider, claimant, memberLanes } = {}) {
+  const derived = disputabilityFor({ poster, verifier, disputeDecider, claimant });
+  if (derived.status === "undisputable") {
+    if (derived.reason === "no_decider_named")
+      return ["warning: this bounty can never be disputed — no dispute decider (or verifier) was named at posting. A dispute needs a decider named at posting, a third lane distinct from the poster and from the worker; name a verifier or dispute decider at posting to keep disputes possible."];
+    if (derived.reason === "verifier_is_executor")
+      return ["warning: this bounty can never be disputed — the designated dispute decider is the worker. A decider must be independent of the worker, so no dispute can ever be opened on this bounty."];
+    return ["warning: this bounty can never be disputed — the designated dispute decider is the poster. A decider must be a third lane distinct from the poster."];
+  }
+  if ((claimant === null || claimant === undefined)
+    && Array.isArray(memberLanes) && memberLanes.length === 2
+    && derived.decider !== null
+    && memberLanes.includes(derived.decider) && memberLanes.includes(poster))
+    return ["warning: the designated dispute decider is the room's only other member — if they claim this bounty it can never be disputed, because a decider cannot be the worker. Invite a third member and name them as decider to keep disputes possible."];
+  return [];
+}

@@ -535,22 +535,22 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         { state: rest.state ?? null, since: rest.since ?? null }) };
     case "bounty_post": {
       return idem("bounty.post", 201, () => {
-        const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
+        const { bounty, receipt, warnings } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
           criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
           verifierId: rest.verifierId ?? null, approvalMode: rest.approvalMode ?? "human", rubric: rest.rubric ?? null, actor });
-        return { roomId, bounty, receipt };
+        return { roomId, bounty, receipt, warnings };
       });
     }
     case "bounty_fund": {
       return idem("bounty.fund", 200, () => {
-        const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
-        return { roomId, bounty, receipt };
+        const { bounty, receipt, warnings } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
+        return { roomId, bounty, receipt, warnings };
       });
     }
     case "bounty_claim": {
       return idem("bounty.claim", 200, () => {
-        const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
-        return { roomId, bounty, receipt };
+        const { bounty, receipt, warnings } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+        return { roomId, bounty, receipt, warnings };
       });
     }
     case "bounty_submit": {

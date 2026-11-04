@@ -69,7 +69,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
-import { disputabilityFor } from "./bounty-disputability.mjs";
+import { disputabilityFor, undisputableWarnings } from "./bounty-disputability.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -1432,6 +1432,18 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
+  // W2-F2 (RES-0003/RES-0005): act-response warnings derived from the
+  // bounty's post-act read view — the moments a bounty is born
+  // undisputable (post, fund) or becomes undisputable (the designee's
+  // claim) must say so on the act response itself, not only on later
+  // reads. Warning-only: callers still succeed exactly as before.
+  _openabilityWarnings(roomId, bounty) {
+    const memberLanes = this.memberLaneIds(roomId);
+    return undisputableWarnings({ poster: bounty.poster, verifier: bounty.verifier,
+      disputeDecider: bounty.disputeDecider, claimant: bounty.claimant,
+      memberLanes: memberLanes === null ? null : [...memberLanes] });
+  }
+
   postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, disputeDeciderId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -1505,7 +1517,8 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.proposed",
         { bountyId, actor: act, before: null, after: "proposed",
           data: { amount, title, rubricVersion: 1, rubricHash, approvalMode } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      const bounty = this._getBounty(roomId, bountyId);
+      return { bounty, warnings: this._openabilityWarnings(roomId, bounty),
         receipt: { kind: "propose", bountyId, at, actor: act, event } };
     });
   }
@@ -1596,7 +1609,8 @@ export class BountyEscrow {
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.funded",
         { bountyId, actor: act, before: "proposed", after: "funded", data: { amount: toCredits(bounty.amountMillis) } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      const fundedBounty = this._getBounty(roomId, bountyId);
+      return { bounty: fundedBounty, warnings: this._openabilityWarnings(roomId, fundedBounty),
         receipt: { kind: "fund", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });
@@ -1803,7 +1817,8 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.claimed",
         { bountyId, actor: act, before: "funded", after: "claimed",
           data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      const claimedBounty = this._getBounty(roomId, bountyId);
+      return { bounty: claimedBounty, warnings: this._openabilityWarnings(roomId, claimedBounty),
         receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });

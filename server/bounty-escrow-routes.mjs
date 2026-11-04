@@ -296,12 +296,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       const spend = typeof credential === "string" && credential.length > 0
         ? chargeSpendBeforeCall(store, credential, "bounty_post", { roomId })
         : null;
-      const { bounty, receipt } = escrow.postBounty(roomId,
+      const { bounty, receipt, warnings } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
           approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
       spend?.settle();
-      return { roomId, bounty, receipt };
+      return { roomId, bounty, receipt, warnings };
     });
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
@@ -321,8 +321,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
     return idem(payload, "bounty.fund", 200, () => {
-      const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
-      return { roomId, bounty, receipt };
+      const { bounty, receipt, warnings } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
+      return { roomId, bounty, receipt, warnings };
     });
   }
   if (escrowRoute === "decline" && req.method === "POST") {
@@ -365,8 +365,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
     return idem(payload, "bounty.claim", 200, () => {
-      const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
-      return { roomId, bounty, receipt };
+      const { bounty, receipt, warnings } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+      return { roomId, bounty, receipt, warnings };
     });
   }
   if (escrowRoute === "submit" && req.method === "POST") {
