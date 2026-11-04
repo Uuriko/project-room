@@ -1,3 +1,4 @@
+import { withPaletteExtras, firstClaimButton } from "./palette-destinations.js";
 import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
 import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
@@ -8520,6 +8521,18 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
+  const priorPaletteEntries = roomActionEntries, priorPaletteChoose = chooseRoomAction;
+  roomActionEntries = () => withPaletteExtras(priorPaletteEntries());
+  chooseRoomAction = id => {
+    if (id === "switch-room") { closeRoomActions(false); workspaceUI?.showRoomList(); return; }
+    if (id === "claim-task") {
+      const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener);
+      const focusClaim = () => { const button = firstClaimButton($("#board-dialog")); if (button) button.focus(); };
+      focusClaim(); requestAnimationFrame(focusClaim);
+      return;
+    }
+    priorPaletteChoose(id);
+  };
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
