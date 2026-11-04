@@ -10,6 +10,25 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR uses the macOS private per-user temporary directory or the worktree-local `.tmp/` on Linux. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Test environment diagnostics
+
+Run `node scripts/verify-preflight.mjs --full` before a full qualification run.
+The full profile also checks a real Unix-socket round trip under the effective
+temporary directory. If that fails, use a shorter private path or a private
+short alias to checkout-backed storage, then recheck with the same `TMPDIR`
+that the suite will use. The probe does not relocate files automatically.
+`npm test` selects this strict profile through its npm pretest lifecycle.
+Other package-manager entrypoints must run it explicitly; their lifecycle behavior
+is not inferred. It requires usable child-PATH Node 24.19+, npm, Git, GitHub CLI,
+jq, and Python 3 launchers. The default preflight used by affected tests warns
+about optional suite tools instead of blocking unrelated selections.
+
+Version probes execute trusted local tools with bounded time and output. They
+issue no install command, but arbitrary launchers may run hooks;
+`COREPACK_ENABLE_NETWORK=0` only constrains Corepack. pnpm module compatibility
+is not yet checked. Native Windows launcher qualification is not implemented;
+the full profile refuses it explicitly rather than reporting a false pass.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.

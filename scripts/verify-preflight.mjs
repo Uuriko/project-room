@@ -10,8 +10,9 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const started = performance.now();
 if (Number(process.versions.node.split(".")[0]) !== 24)
   console.warn(`qualification: Node ${process.versions.node}; CI qualifies Node 24. Use Node 24 for comparable results. package.json may permit other versions.`);
-for (const script of ["check-deps.mjs", "untested-modules-lint.mjs"]) {
-  const result = spawnSync(process.execPath, [join(root, "scripts", script)], { cwd: root, stdio: "inherit" });
+for (const script of ["check-test-environment.mjs", "check-deps.mjs", "untested-modules-lint.mjs"]) {
+  const flags = script === "check-test-environment.mjs" && (process.argv.includes("--full") || process.env.npm_lifecycle_event === "pretest") ? ["--full"] : [];
+  const result = spawnSync(process.execPath, [join(root, "scripts", script), ...flags], { cwd: root, stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 try {
