@@ -216,6 +216,7 @@ optional.push("server/matchmaking-routes.mjs", "server/work-matchmaking.mjs", "s
 optional.push("server/attention.mjs");
 optional.push("server/owner-attention.mjs"); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
 optional.push("server/owner-overview.mjs"); // #3342: cross-room owner overview read model (imported by server/http.mjs)
+optional.push("server/agent-session-state.mjs"); // grok/agent-session-states new modules
 optional.push("server/mention-lifecycle.mjs"); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs");
