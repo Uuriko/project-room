@@ -48,7 +48,7 @@ export const roomTools = [
     limit: { type: "integer", minimum: 1, maximum: 100, default: 25 },
     cursor: { type: "string", minLength: 1, maxLength: 1024 }, focus: { type: "string", enum: ["all", "needs_me", "help_wanted", "results"], default: "all" }, query: { type: "string", minLength: 1, maxLength: 200, pattern: "\\S", description: "Literal work query; nonblank, at most 200 UTF-16 code units before trimming. Searches titles, IDs, done criteria, current reported summaries/next steps and role names, not messages or external evidence." }, sort: { type: "string", enum: ["curiosity"], description: "Ranking for the returned work. Omit for the default order." } })),
   tool("room_read_board", "Project all current work onto board columns (handoff, proposed, accepted, working, blocked, review, done, superseded) with each card's exact next step, open handoff receipts (done/evidence/next/limit-reason) and any active halt-alls. Includes one separate live page of stored Board claims, without lifecycle housekeeping; use claimsPage.nextCursor with the same filter to continue. Claims do not change legacy columns or counts, and evaluatedThrough does not fence claims. A derived read model, never a grant or dispatch; read a card's task before acting. Never accepts, executes, approves or marks read.", schema({
-    queue: { type: "string", enum: ["ready"], description: "Ready claims only; cannot be combined with state." },
+    queue: { type: "string", enum: ["ready", "triage"], description: "ready: ready claims only. triage (when the room enables ROOM_BOARD_TRIAGE): untouched open tasks, oldest first. Cannot be combined with state." },
     state: { type: "string", enum: ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"], description: "Stored claim state; delivered is finished work awaiting its verification step; done includes older completed claims; closed is retired without delivery (closed or cancelled)." },
     limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
     cursor: { type: "string", minLength: 1, maxLength: 2048, description: "Opaque claimsPage.nextCursor from the same filter." }
@@ -127,7 +127,7 @@ function validArguments(tool, args) {
   if (tool.name === "room_list_work") return (args.roomId === undefined || validId(args.roomId)) && (args.focus === undefined || ["all", "needs_me", "help_wanted", "results"].includes(args.focus))
     && (args.query === undefined || validWorkSearchQuery(args.query))
     && (args.sort === undefined || args.sort === "curiosity") && validWorkPage(args);
-  if (tool.name === "room_read_board") return (args.queue === undefined || args.queue === "ready")
+  if (tool.name === "room_read_board") return (args.queue === undefined || args.queue === "ready" || args.queue === "triage")
     && (args.state === undefined || ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"].includes(args.state))
     && !(args.queue !== undefined && args.state !== undefined)
     && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 200)

@@ -1095,7 +1095,7 @@
       }
     },
     "room_read_board": {
-      "inputSchema": "7dac81175f92cec4",
+      "inputSchema": "361b12f8dbfb52a6",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

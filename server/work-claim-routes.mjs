@@ -60,6 +60,7 @@ import { notifyContractChanges } from "./contract-notices.mjs"; // contract-chan
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
+import { boardTriageEnabled, triageClaims } from "./board-triage.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims, withPullSettlement } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import {
@@ -481,8 +482,12 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
       claims: withAgentSessions(page.claims, nowMs).map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
+  if (params.has("queue") && params.get("queue") === "triage" && boardTriageEnabled()) {
+    if (params.has("state") || params.has("cursor") || planningSort !== null) invalidInput(reject, "queue=triage returns the oldest-first top-N page without state, cursor or sort");
+    return present({ claims: triageClaims(items, nowMs).slice(0, limit), nextCursor: null, queue: "triage", historyScope: "triage" });
+  }
   if (params.has("queue")) {
-    if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
+    if (params.get("queue") !== "ready") invalidInput(reject, boardTriageEnabled() ? "queue=ready or queue=triage" : "queue=ready");
     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
     if (cursor && (cursor.q !== "ready" || cursor.s !== undefined)) invalidInput(reject, "a cursor from a queue=ready page");
     return present({ ...pageReady(readyClaims(items), limit, cursor), queue: "ready", historyScope: "ready" });

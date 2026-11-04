@@ -11,10 +11,14 @@
         - $ref: '#/components/parameters/RoomId'
         - name: queue
           in: query
-          schema: { type: string, enum: [ready] }
+          schema: { type: string, enum: [ready, triage] }
           description: |
             `ready` lists claims nobody holds whose dependencies are all done.
             An empty dependency list is ready. A missing dependency is not.
+            `triage` (only when ROOM_BOARD_TRIAGE=1; otherwise refused with
+            422) lists unclaimed tasks nobody has acted on since they were
+            opened, oldest first, each with a derived `triage` note
+            (openedAt, waitingMs, missing). No cursor, state or sort.
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
