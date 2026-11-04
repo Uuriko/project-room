@@ -268,6 +268,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/robots.txt", auth: false, first: "AI crawler policy" }),
   Object.freeze({ path: "/agent.json", auth: false, first: "same bytes as machine card" }),
   Object.freeze({ path: "/agent-card.json", auth: false, first: "same bytes as A2A card" }),
+  Object.freeze({ path: "/ard.json", auth: false, first: "same bytes as ARD ai-catalog" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/join.txt", auth: false, first: "same bytes as /join.txt; prefix-preserving edge" }),
@@ -1759,6 +1760,9 @@ const ALIASES = Object.freeze({
   // probe the conventional filenames at the origin.
   ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),
   ...Object.fromEntries(withSlash("/agent-card.json").map(alias => [alias, AGENT_CARD_A2A_PATH])),
+  // ARD catalog root alias (same bytes as the normative well-known path),
+  // for agents that probe the conventional filename at the origin.
+  ...Object.fromEntries(withSlash("/ard.json").map(alias => [alias, "/.well-known/ard.json"])),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).
   // Bare /kits is the service-origin guess; www already has /room/kits.
   ...Object.fromEntries(withSlash("/kits").map(alias => [alias, KITS_CATALOG_PATH])),
