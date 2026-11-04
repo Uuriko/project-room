@@ -12,11 +12,25 @@
 // This is a bounded tolerance, not a retry or completed-result cache.
 export const HEALTH_PROBE_TIMEOUT_MS = 2500;
 
-export function createHealthProbe() {
+// Opt-in snapshot reuse (Speed): cacheMs > 0 lets a caller reuse the last
+// SUCCESSFUL snapshot for that long, skipping the Durable Object RPC. Default
+// 0 keeps the original behavior (completed snapshots are never reused).
+// Timeouts and errors are never cached. Clamped to HEALTH_CACHE_MAX_MS.
+export const HEALTH_CACHE_MAX_MS = 10_000;
+export function healthCacheMs(env) {
+  const raw = Number(env?.ROOM_HEALTH_JOBS_CACHE_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), HEALTH_CACHE_MAX_MS) : 0;
+}
+
+export function createHealthProbe({ now = () => performance.now() } = {}) {
   let inflight = null;
-  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil }) {
+  let cached = null;
+  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil, cacheMs = 0 }) {
     const started = performance.now();
     const timing = () => ({ elapsedMs: Math.round(performance.now() - started), timeoutMs });
+    if (cacheMs > 0 && cached && now() - cached.at < Math.min(cacheMs, HEALTH_CACHE_MAX_MS)) {
+      return onSnapshot(cached.snapshot, { ...timing(), cached: true });
+    }
     // A returned health response must not cancel the probe. The runtime drops
     // in-flight I/O that is not passed to waitUntil, which would abort the
     // constructor every 200 ms and never let the object become ready.
@@ -36,6 +50,7 @@ export function createHealthProbe() {
     const task = (async () => {
       try {
         const snapshot = await snapshotResponse(await start());
+        if (cacheMs > 0) cached = { snapshot, at: now() };
         settle({ error: false, snapshot });
         return { snapshot, timing: timing() };
       } catch (error) {

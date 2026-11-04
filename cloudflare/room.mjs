@@ -43,7 +43,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse, healthCacheMs } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -957,6 +957,7 @@ export default {
       const response = await durableObjectJobsHealth({
         start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        cacheMs: healthCacheMs(env),
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
         onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })
