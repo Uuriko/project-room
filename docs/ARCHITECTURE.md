@@ -24,7 +24,7 @@ Use this map to choose the owning boundary before investigating a report.
 Keep defect disposition in the existing work/issue record; link the original
 report, reproducer, fix revision, regression proof, deployment and retest there.
 An absent link is unknown evidence, not proof of a fix. The
-[backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) retains earlier audit sources;
+[backlog inventory](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md) retains earlier audit sources;
 its metadata inventory is not individual reconciliation. Do not create another
 status table here. The canonical KNOWN-ISSUES ledger is being composed separately;
 this map does not imply it has landed at the source revision above.
