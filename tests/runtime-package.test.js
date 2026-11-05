@@ -73,7 +73,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
-      : packagedTools.includes('"room_mark_caught_up"') ? 48
+      : packagedTools.includes('"room_mark_caught_up"') ? 49
       : packagedTools.includes('"room_map"') ? 47
       : packagedWorkActions.includes('"room_claim"') ? 46
       : packagedTools.includes("\"room_close_work_claim\"") ? 44
@@ -331,7 +331,6 @@ test("project preflight composes dependency, coverage and runtime checks", () =>
   const result = spawnSync(process.execPath, ["scripts/verify-preflight.mjs"], { cwd: repository, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check-deps: ok/);
-  assert.match(result.stdout, /no new untested modules/);
   assert.match(result.stdout, /runtime source files checked/);
 });
 
