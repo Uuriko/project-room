@@ -548,6 +548,8 @@ test("event helper creates the required Room-scoped envelope", () => {
 
 function proposal(id, workItemId, accountableMemberId, verifierMemberId, mode, actorId = "potter") {
   return fixedEvent(id, EVENT_TYPES.WORK_PROPOSED, actorId, {
+    // Live admission stamps the write grant policy on every new proposal.
+    writeGrantPolicyVersion: 1,
     workItemId,
     title: `Work ${workItemId}`,
     definitionOfDone: "Exact evidence is returned",

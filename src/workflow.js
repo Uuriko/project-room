@@ -43,7 +43,9 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
     && typeof receipt.duplicate === "boolean" && validId(entry?.id)
     && entry.type === T.WORK_PROPOSED && command?.type === T.WORK_PROPOSED
     && entry.roomId === roomId && entry.actorId === memberId
-    && data && Object.keys(data).length === Object.keys(command.data).length
+    // The server may add writeGrantPolicyVersion at admission; it is never in the command.
+    && data && Object.keys(data).filter(key => key !== "writeGrantPolicyVersion" || Object.hasOwn(command.data, key)).length === Object.keys(command.data).length
+    && (data.writeGrantPolicyVersion === undefined || Object.hasOwn(command.data, "writeGrantPolicyVersion") || data.writeGrantPolicyVersion === 1)
     && Object.keys(command.data).every(key => Object.hasOwn(data, key) && data[key] === command.data[key]);
 }
 

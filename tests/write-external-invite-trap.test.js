@@ -17,12 +17,15 @@ import assert from "node:assert/strict";
 import { EVENT_TYPES as T, PERMISSIONS, applyEvent, event, replay } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { agentAccessProfiles } from "../server/agent-connections.mjs";
+import { WRITE_GRANT_POLICY_VERSION } from "../src/work-reducers.js";
 
 const COLLABORATE = ["steer", "accept_work", "complete_work", "verify"];
 
 function fixture() {
   let state = replay(initialRoom());
+  // Proposals here model live admission, which stamps the write grant policy.
   const send = (actorId, type, data = {}) => {
+    if (type === T.WORK_PROPOSED) data = { ...data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION };
     state = applyEvent(state, event({ actorId, roomId: "commons", type, data }));
     return state;
   };
