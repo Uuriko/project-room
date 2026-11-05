@@ -54,6 +54,9 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /demo": [undefined, 200],
+  "GET /watch": [undefined, 200],
+  "GET /extensions/work-receipt/v1": [undefined, 200],
+  "HEAD /extensions/work-receipt/v1": [undefined, 200],
   "HEAD /demo": [undefined, 200],
   "GET /download": [undefined, 200],
   "HEAD /download": [undefined, 200],
@@ -102,6 +105,10 @@ const PROBES = {
   "POST /mcp": [{}, 200],
   "GET /room/mcp": [undefined, 200],
   "POST /room/mcp": [{}, 200],
+  // Native connection is disabled when no deployment OAuth client is configured.
+  "POST /oauth/invite": [{}, 404],
+  // Registration is public metadata only and unavailable without configured MCP clients.
+  "POST /oauth/register": [{}, 404],
   "POST /a2a": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],

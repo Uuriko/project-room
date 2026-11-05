@@ -1,6 +1,9 @@
+import { createWorkersMcpEventTransport } from './mcp-event-transport.mjs';
+import { createSchedulerDiagnostics, readSchedulerDiagnostics } from "./job-scheduler-diagnostics.mjs";
 import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
+import { downloadPageCsp } from "../server/download-page.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -34,21 +37,23 @@ import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyAttempts, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, jobRetryCadence, lastRanFrom, scheduledPatrolEnabled } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
-import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
+import { createWakeAdapters } from '../server/wake-adapters.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
 const durableObjectHealth = createHealthProbe();
+const durableObjectJobsHealth = createHealthProbe();
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -64,6 +69,7 @@ function cronDeadline() {
 // handler/RPC surface and cannot carry test-only exports — workerd
 // rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
+const WEBHOOK_RETENTION_CURSOR_KEY = 'retention-webhook-cursor';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -114,9 +120,66 @@ function splitBackupTokens(env) {
 // Reads that carry the job list: refresh the heartbeat snapshot first.
 const JOB_LIST_READS = new Set(['/api/owner/overview']);
 
+// Re-arm the job alarm after a request only when it ran a write statement.
+// An unknown counter (a database without writeStatements) keeps the old
+// always-arm path.
+export function shouldArmAfterRequest(before, after) {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return true;
+  return after !== before;
+}
+
+// Fixed diagnostic fields only. Runtime clocks advance on I/O: these are
+// local elapsed observations, never CPU time or cross-isolate queue latency.
+const READINESS_OBSERVATIONS = {
+  worker_wait_started: ['pending'], worker_rpc_started: ['pending'],
+  do_entered: ['pending'], sql_completed: ['ok', 'error'],
+  do_completed: ['ok', 'unready', 'error'],
+  worker_rpc_settled: ['ok', 'unready', 'error'],
+  worker_response: ['ready', 'timeout', 'error']
+};
+const isSourceStamp = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
+const isBuildStamp = value => typeof value === 'string'
+  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+  && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+const readinessStamps = Object.freeze({
+  sourceRevision: isSourceStamp(SOURCE_REVISION) ? SOURCE_REVISION : null,
+  buildId: isBuildStamp(BUILD_ID) ? BUILD_ID : null
+});
+const observedDuration = value => Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+function authorityObservation(result) {
+  const value = result?.readinessObservation;
+  if (value === undefined) return { authorityObservation: 'absent' };
+  const keys = ['sourceRevision', 'buildId', 'sqlOutcome', 'sqlElapsedMs', 'doElapsedMs'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length
+    || !keys.every(key => Object.hasOwn(value, key))
+    || !(value.sourceRevision === null || isSourceStamp(value.sourceRevision))
+    || !(value.buildId === null || isBuildStamp(value.buildId))
+    || !['ok', 'not_run'].includes(value.sqlOutcome)
+    || !observedDuration(value.sqlElapsedMs) || !observedDuration(value.doElapsedMs))
+    return { authorityObservation: 'invalid' };
+  return { authorityObservation: 'present', authoritySourceRevision: value.sourceRevision,
+    authorityBuildId: value.buildId, authoritySqlOutcome: value.sqlOutcome,
+    authoritySqlElapsedMs: value.sqlElapsedMs, authorityDoElapsedMs: value.doElapsedMs };
+}
+function logReadinessProbe(stage, outcome, details = {}) {
+  try {
+    if (!READINESS_OBSERVATIONS[stage]?.includes(outcome)) return;
+    const epochMs = Date.now();
+    if (!Number.isFinite(epochMs) || epochMs < 0) return;
+    const entry = { event: 'room.readiness_probe', ...runtimeTiming, ...readinessStamps, stage, outcome, epochMs };
+    if (stage === 'worker_rpc_settled') Object.assign(entry, authorityObservation(details.result));
+    for (const key of ['elapsedMs', 'probeWaitMs', 'timeoutMs']) {
+      if (Number.isFinite(details[key]) && details[key] >= 0) entry[key] = details[key];
+    }
+    if (stage === 'worker_response' && ['leader', 'joiner'].includes(details.probeRole)) entry.probeRole = details.probeRole;
+    console.info(JSON.stringify(entry));
+  } catch { /* Diagnostic failure must not replace the original probe result. */ }
+}
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    const initializationStarted = performance.now();
     // DurableObject stores the context on this.ctx. Keep this.state and this.env
     // as aliases so existing reads of either name stay valid.
     this.state = ctx;
@@ -132,7 +195,8 @@ export class ProjectRoom extends DurableObject {
       // Phase 1a: large message bodies at rest outside the projection row.
       bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
     // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
-    installGuideCommandHook(this.store);
+    const restoring=this.store.restoreStatus().pending;
+    if(!restoring)installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -144,8 +208,8 @@ export class ProjectRoom extends DurableObject {
       });
     });
     this.store.featureEnv = env;
-    bootstrapRoom(this.store, env);
-    this.store.landQueue.configure({ env });
+    this.store.agentPlugin.setWakeAdapters?.(createWakeAdapters({ env }));
+    if(!restoring) { bootstrapRoom(this.store, env);this.store.landQueue.configure({ env }); }
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
     let googleAuth = null;
@@ -168,6 +232,11 @@ export class ProjectRoom extends DurableObject {
     this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      accountAgentEnrollmentEnabled: env.ROOM_ACCOUNT_AGENT_ENROLLMENT_ENABLED === '1',
+      mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],
+      mcpEventTransport: env.ROOM_MCP_EVENT_CALLBACK_ORIGINS === undefined ? undefined
+        : createWorkersMcpEventTransport(JSON.parse(env.ROOM_MCP_EVENT_CALLBACK_ORIGINS)),
+      mcpEventExternalScheduler: true,
       jobHealth: () => this.jobHealthSnapshot,
       publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
@@ -208,8 +277,14 @@ export class ProjectRoom extends DurableObject {
       }
     });
     this.handler = httpServerHandler(this.server);
+    // Successful non-maintenance initialization, before the first RPC/fetch.
+    // Includes RoomStore, bootstrap, provider configuration and HTTP adapter.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.info(JSON.stringify({ event: 'room.do_initialized', ...runtimeTiming, initializationMs: this.initializationMs,
+      storeInitializationMs: this.store.initializationMs }));
   }
   #sqlScope(kind, operation, fn, options) {
+    if(kind!=='request' && kind!=='readiness' && !this.paused && this.store)this.store.assertRestoreAdmitted();
     if (!this.sqlCosts) return fn();
     // Flush unattributed counters separately; no subtraction or request ownership
     // inferred for constructor work, legacy RPCs or callbacks after scope close.
@@ -233,21 +308,22 @@ export class ProjectRoom extends DurableObject {
       if (cold && !this.coldStartRequestLogged) {
         this.coldStartRequestLogged = true;
         const line = {
-          event: 'room.cold_start', phase: 'first_request',
+          event: 'room.cold_start', phase: 'first_request', ...runtimeTiming,
           constructMs: cold.durationMs, firstRequestMs: appMs,
+          storeInitializationMs: this.store.initializationMs, durableObjectInitializationMs: this.initializationMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
         };
         if (cold.phases) line.phases = cold.phases;
         console.info(JSON.stringify(line));
       }
       console.info(JSON.stringify({
-        event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
+        event: 'room.do_request', ...runtimeTiming, method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
       return withServerTiming(response, 'app', appMs);
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
-    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
+
     // TM-2 split: the backup doors no longer share one credential.
     // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
     // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
@@ -263,7 +339,7 @@ export class ProjectRoom extends DurableObject {
     // Object's storage. Restore token only; fail-closed on a non-empty store
     // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
@@ -272,28 +348,71 @@ export class ProjectRoom extends DurableObject {
     if (url.pathname === '/api/operator/restore-from-backup') {
       return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
+    if(!this.store.restoreStatus().pending && JOB_LIST_READS.has(url.pathname))await this.refreshJobHealthSnapshot();
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
+      if(!this.store.restoreStatus().pending) {
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => this.store.humanPush.flush()));
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
       // A commit in this request may have queued webhook, land, or claim work.
-      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      // A request that wrote nothing cannot have: job state only changes
+      // through writes, alarm() re-arms after every run, and the cron
+      // ensureJobAlarm is the backstop. Skipping saves earliestFutureAlarm's
+      // ~20 statements (incl. a full work_claims scan) on every read.
+      // Acknowledge only successfully reconciled writes. A failed boot or
+      // post-write reconciliation must remain owed on the next read. A newer
+      // request also prevents an older completion from advancing its watermark.
+      const writes = this.store.db?.writeStatements;
+      if (!this.alarmArmedSinceBoot || shouldArmAfterRequest(this.requestAlarmWrites, writes)) {
+        const generation = this.requestAlarmGeneration = (this.requestAlarmGeneration ?? 0) + 1;
+        this.ctx.waitUntil(this.#armJobAlarm().then(() => {
+          if (generation !== this.requestAlarmGeneration) return;
+          this.alarmArmedSinceBoot = true;
+          this.requestAlarmWrites = writes;
+        }).catch(() => {}));
+      }
+      }
     }
   }
 
-  // Readiness is one statement. It does not open the room, replay events, or
+  // Readiness probes only fixed control metadata and the storage connection. It does not open the room, replay events, or
   // scan a table. A paused object has no database, so it is not ready.
-  probeStorage() {
-    return this.#sqlScope('readiness', 'storage-probe', () => this.#probeStorage());
+  probeStorage(observation) {
+    const observed = observation === 'readiness-observation-v1';
+    const started = performance.now();
+    let outcome = 'error';
+    logReadinessProbe('do_entered', 'pending');
+    try {
+      const result = this.#sqlScope('readiness', 'storage-probe', () => this.#probeStorage(observed));
+      outcome = result?.ok ? 'ok' : 'unready';
+      // Opt-in internal metadata is copied to the caller's existing settle log.
+      // Legacy no-argument callers retain their exact result shape.
+      return observed ? { ...result, readinessObservation: { ...result.readinessObservation,
+        doElapsedMs: Math.max(0, performance.now() - started) } } : result;
+    } finally {
+      logReadinessProbe('do_completed', outcome, { elapsedMs: Math.max(0, performance.now() - started) });
+    }
   }
-  #probeStorage() {
-    if (this.paused || !this.store) return { ok: false };
-    const row = this.store.db.prepare("SELECT 1 AS ok").get();
-    return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer' };
+  #probeStorage(observed) {
+    if (this.paused || !this.store) return observed ? { ok: false, readinessObservation: {
+      ...readinessStamps, sqlOutcome: 'not_run', sqlElapsedMs: 0 } } : { ok: false };
+    try { this.store.assertRestoreAdmitted(); } catch { return {ok:false,reason:'restore_incomplete'}; }
+    const started = performance.now();
+    let row, sqlElapsedMs, outcome = 'error';
+    try {
+      row = this.store.db.prepare("SELECT 1 AS ok").get();
+      outcome = 'ok';
+    } finally {
+      sqlElapsedMs = Math.max(0, performance.now() - started);
+      logReadinessProbe('sql_completed', outcome, { elapsedMs: sqlElapsedMs });
+    }
+    return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer',
+      ...(observed ? { readinessObservation: { ...readinessStamps, sqlOutcome: outcome, sqlElapsedMs } } : {}) };
   }
 
   async syncGmailMailboxes() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
     // The minute cron does not call this when Gmail is off. A direct call still
@@ -305,6 +424,7 @@ export class ProjectRoom extends DurableObject {
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     // Serialize the entire read/merge/write across alarms and cron RPCs.
     const persist = async () => {
       const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
@@ -340,13 +460,42 @@ export class ProjectRoom extends DurableObject {
     try { return await pending; }
     finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
   }
+  // Attempt-before-run: commit that a slow job was invoked BEFORE its body
+  // runs, so a run killed inside its own invocation — which never reaches
+  // recordCronTick — still leaves the trace the health view grades,
+  // instead of the previous success presenting as current. Serialized on
+  // the same tail as recordCronTick so attempt and outcome commits can
+  // never interleave.
+  async recordCronAttempt(jobName) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
+    // The attempt ID threads attempt -> run -> outcome: #runDueJobsBody
+    // stamps it onto this pass's outcomes, and applyOutcomes resolves
+    // the attempt only on an exact match, so a late completion from an
+    // older run can never erase a newer attempt's trace.
+    const attemptId = crypto.randomUUID();
+    const persist = async () => {
+      const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const next = applyAttempts(previous, [{ job: jobName, at: Date.now(), attemptId }]);
+      await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
+      return { attempted: jobName, attemptId };
+    };
+    const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
+    this.cronTickTail = pending;
+    try { return await pending; }
+    finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
+  }
   async refreshJobHealthSnapshot() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
     catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
-    return { ...view, publicReports: countOpenPublicReports(this.store) };
+    return { ...view, publicReports: countOpenPublicReports(this.store),
+      scheduler: await readSchedulerDiagnostics({ storage: this.ctx.storage, store: this.store, diagnostics: this.schedulerDiagnostics,
+        requestWriteWatermark: this.requestAlarmWrites, alarmArmedSinceBoot: this.alarmArmedSinceBoot }) };
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -366,6 +515,7 @@ export class ProjectRoom extends DurableObject {
   // every return shape recorded success while the real drain's failures
   // went to console only).
   async drainChannelBacklog() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
@@ -450,6 +600,7 @@ export class ProjectRoom extends DurableObject {
   // replays invitations and legacy projections in slices that yield the
   // input gate. Never called from the constructor.
   async verifyRoomIntegrity() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
@@ -457,6 +608,8 @@ export class ProjectRoom extends DurableObject {
   // ClueBot phase 1: tail new events and file invariant findings. The
   // patrol is read-only (patrol_* tables only); a paused room skips.
   async patrolTick() {
+    if (!scheduledPatrolEnabled(this.env)) return { skipped: 1, disabled: 1 };
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return runPatrolTick(this.store, { deadline: cronDeadline() });
@@ -466,7 +619,13 @@ export class ProjectRoom extends DurableObject {
   // now), POSTs each with a fresh timestamped HMAC signature, and advances
   // the pending -> delivered | failed -> dead_letter lifecycle with
   // exponential backoff. Runs in the DO so signing secrets never leave it.
+  async drainMcpEvents() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
+    if (this.paused || !this.store) return { skipped: "paused" };
+    return this.server.drainMcpEvents();
+  }
   async drainWebhookDeliveries() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     return this.store.agentPlugin.drainWebhookDeliveries();
@@ -476,6 +635,7 @@ export class ProjectRoom extends DurableObject {
   // waits until the reset. A missing token is counted, not thrown, and the
   // token itself is never logged.
   async refreshLandQueue() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
     await yieldToQueuedRequests();
     this.store.landQueue.configure({ env: this.env });
@@ -485,6 +645,7 @@ export class ProjectRoom extends DurableObject {
   // receiver; a merged pull completes the claim and a close releases it.
   // The poll is conditional, capped, and waits out a GitHub 403 or 429.
   async refreshClaimPullRequests() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
     // Same 5s budget as the other cron RPCs. The poll itself also stops
@@ -500,6 +661,7 @@ export class ProjectRoom extends DurableObject {
   // challenge-window approvals, approved sweeps, dispute timeouts, deadline
   // refunds — so no bounty waits on a human remembering to close an epoch.
   async progressEscrowEpochs() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return runEscrowEpochs(this.store, { now: Date.now() });
@@ -507,6 +669,7 @@ export class ProjectRoom extends DurableObject {
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.
   async backfillPublicReadModel() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { done: false, skipped: "paused", rooms: 0, receipts: 0, cards: 0 };
     await yieldToQueuedRequests();
     return fillPublicReadModel(this.store, { limit: 20, deadline: cronDeadline() });
@@ -514,6 +677,7 @@ export class ProjectRoom extends DurableObject {
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   async planRetention() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
     const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
@@ -530,7 +694,9 @@ export class ProjectRoom extends DurableObject {
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
     try {
-      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
+      const cursor = await this.ctx.storage.get(WEBHOOK_RETENTION_CURSOR_KEY);
+      webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries({ cursor: cursor ?? null });
+      await this.ctx.storage.put(WEBHOOK_RETENTION_CURSOR_KEY, webhookDeliveries.nextCursor);
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
     } finally {
@@ -554,17 +720,31 @@ export class ProjectRoom extends DurableObject {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
-    const selected = selectWorkerJobs(this.env, this.store).filter(job => {
-      if (onlyJob !== null && job.name !== onlyJob) return false;
-      if (job.slow && !includeSlow) return false;
-      return jobIsDue(job, this.store, now, lastRan[job.name]);
+    const selected = selectWorkerJobs(this.env, this.store, { onlyJob, includeSlow }).filter(job => {
+      return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name]));
     });
     const outcomes = [];
     for (const job of selected) {
+      // Each runCronJobs call below contains one job, so its own between-job
+      // yield never runs. Open the input gate before the next synchronous job.
+      if (outcomes.length) await yieldToQueuedRequests();
+      // Slow jobs run in their own invocation and can be killed inside it
+      // before any outcome reaches recordCronTick. Commit the attempt
+      // first, so the kill leaves a trace (attempt-before-run), and
+      // thread its ID onto this pass's outcomes so only they can
+      // resolve the attempt.
+      let attemptId = null;
+      if (job.slow) {
+        const attempt = await this.recordCronAttempt(job.name);
+        attemptId = attempt?.attemptId ?? null;
+      }
       const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
       })) });
+      if (attemptId) {
+        for (const outcome of result) if (outcome.job === job.name) outcome.attemptId = attemptId;
+      }
       // A later job may reset the object. Commit completed work before
       // starting it; a failed heartbeat write must not claim a healthy tick.
       await this.recordCronTick(result);
@@ -575,12 +755,14 @@ export class ProjectRoom extends DurableObject {
   // Set the alarm only when the new time is earlier than the one already set.
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
   #armJobAlarm(options) {
-    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options));
+    this.schedulerDiagnostics ??= createSchedulerDiagnostics();
+    return this.schedulerDiagnostics.reconcile(() => this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options)));
   }
   async #armJobAlarmBody({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
     this.jobAlarmReconciler ??= createJobAlarmReconciler({
       storage: this.ctx.storage,
+      observeStage: stage => this.schedulerDiagnostics?.observeStage(stage),
       calculate: async () => {
         const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
         return earliestFutureAlarm(JOBS, {
@@ -594,6 +776,7 @@ export class ProjectRoom extends DurableObject {
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
   async ensureJobAlarm() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
     const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
@@ -604,6 +787,7 @@ export class ProjectRoom extends DurableObject {
   // Separate RPC invocations give each slow job its own CPU budget. A reset
   // cannot erase outcomes already committed by another invocation.
   async runSlowJob(name) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (!JOBS.some(job => job.name === name && job.slow && job.runtimes.includes("worker"))) {
       throw new Error("Unsupported slow job");
     }
@@ -613,6 +797,7 @@ export class ProjectRoom extends DurableObject {
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) return;
     let retryDelayMs = 0;
     try {
@@ -632,6 +817,7 @@ export class ProjectRoom extends DurableObject {
   }
   // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
   exportRoomNdjson() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) throw new Error('Room paused');
     return exportNdjsonStream(this.store.db);
   }
@@ -642,7 +828,7 @@ export default {
     const started = Date.now();
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
-    let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalPublicPolicy = null, browserPublicPolicy = null, internalDownloadPolicy = null, browserDownloadPolicy = null;
     let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
@@ -653,6 +839,11 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserDownloadPolicy && response.headers.get('Content-Security-Policy') === internalDownloadPolicy) {
+        // /download adds one hashed copy script to the public policy.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserDownloadPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
         // /about carries its own path-pinned policy (see aboutPageCsp);
@@ -674,6 +865,14 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
+      // These public lobby pages must navigate on the canonical host: relative
+      // links on getdasha otherwise leave /room and enter the unrelated site.
+      const lobbyPage=inbound.pathname==='/room/watch'
+        ||inbound.pathname==='/room/docs/agents/paste'&&inbound.searchParams.get('room')==='project-room-lobby';
+      if(request.method==='GET'&&lobbyPage){
+        const canonical=new URL(inbound.pathname.slice('/room'.length)+inbound.search,roomOrigin(env).origin);
+        return finish(new Response(null,{status:302,headers:{Location:canonical.href,'Cache-Control':'no-store'}}),'worker');
+      }
       const pathname = rewriteRoomApiPrefix(inbound.pathname);
       const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
       // OAuth state is bound to a host-only account cookie. Start on the
@@ -701,6 +900,8 @@ export default {
     browserPublicPolicy = publicPageCsp(browserOrigin);
     internalAboutPolicy = aboutPageCsp(url.origin);
     browserAboutPolicy = aboutPageCsp(browserOrigin);
+    internalDownloadPolicy = downloadPageCsp(url.origin);
+    browserDownloadPolicy = downloadPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
@@ -753,7 +954,7 @@ export default {
         return finish(workerErrorResponse({ httpStatus: 403, code: 'origin_denied', message: 'Request origin is not allowed', headers: { 'Cache-Control': 'no-store' } }), 'worker');
       }
     }
-    // Liveness is the Worker. It does not construct or query the Durable Object.
+    // HTTP200 describes Worker liveness; bounded job health grades service health.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
       // #3272: report the mailer state exactly as the DO's server does —
       // magicLinkMailerFromEnv(env) non-null is the same derivation the
@@ -761,21 +962,53 @@ export default {
       // Worker liveness answer and the handler can never disagree about
       // whether email gates are enforced or relaxed.
       const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
-      return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
+      const response = await durableObjectJobsHealth({
+        start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        // ROOM_HEALTH_JOBS_CACHE_MS (off by default): skip the Durable Object RPC
+        // for that long after a good job-health read in this isolate.
+        cacheMs: healthCacheMs(env.ROOM_HEALTH_JOBS_CACHE_MS),
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
+        onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })
+      });
+      return finish(response, 'worker');
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.
     if (healthPath === '/api/ready' && (request.method === 'GET' || request.method === 'HEAD')) {
+      const started = performance.now();
+      let startedRpc = false;
+      logReadinessProbe('worker_wait_started', 'pending');
+      const observeResponse = (outcome, timing) => logReadinessProbe('worker_response', outcome, {
+        elapsedMs: Math.max(0, performance.now() - started), probeWaitMs: timing.elapsedMs,
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS, probeRole: startedRpc ? 'leader' : 'joiner'
+      });
       const probed = await durableObjectHealth({
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
         start: async () => {
-          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          startedRpc = true;
+          const rpcStarted = performance.now();
+          logReadinessProbe('worker_rpc_started', 'pending');
+          let result;
+          try { result = await env.ROOM.getByName('invite-only-pilot').probeStorage('readiness-observation-v1'); }
+          catch (error) {
+            logReadinessProbe('worker_rpc_settled', 'error', { elapsedMs: Math.max(0, performance.now() - rpcStarted) });
+            throw error;
+          }
+          logReadinessProbe('worker_rpc_settled', result?.ok ? 'ok' : 'unready', { result, elapsedMs: Math.max(0, performance.now() - rpcStarted) });
           if (!result?.ok) throw new Error('storage probe failed');
           return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         },
         waitUntil: ctx?.waitUntil?.bind(ctx),
-        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
-        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
+        onSnapshot: (snapshot, timing) => {
+          observeResponse('ready', timing);
+          return { response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' };
+        },
+        onUnready: (readiness, timing) => {
+          observeResponse(readiness, timing);
+          return { response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' };
+        }
       });
       return finish(probed.response, probed.servedBy);
     }

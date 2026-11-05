@@ -1,0 +1,34 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":51,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8232},"plugin":{"ms":24,"rowsRead":40866},"fence":{"ms":11,"rowsRead":44975},"verifies":{"ms":3,"rowsRead":20645},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":51,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":42,"integrity":"deferred","phases":{"schema":{"ms":10,"rowsRead":8232},"plugin":{"ms":19,"rowsRead":40866},"fence":{"ms":11,"rowsRead":44975},"verifies":{"ms":2,"rowsRead":20645},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":42,"clockSemantics":"io-bound","cpuMeasured":false}
+CURRENT_EVENTS_WORKER {"baseline":false,"samples":[{"count":1000,"cold":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":57257},"warm":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":57257},"hidden":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":56830},"late":{"statements":85,"rowsRead":194,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":67246},"filterPage":{"events":[],"next":16,"hasMore":true},"hiddenPage":{"events":[],"next":21,"hasMore":true},"latePage":{"events":[{"sequence":1006,"event":{"id":"public-event","idempotencyKey":"b465b3d6-15fe-4fcc-9b56-79d19b4e17d3","roomId":"commons","type":"message.posted","actorId":"owner","at":"2026-11-01T21:24:45.730Z","causationId":null,"data":{"messageId":"public","body":"Saved current"}}},{"sequence":1007,"event":{"id":"edited-public","idempotencyKey":"bddae0b5-c76f-43c8-8089-979cbc3c281c","roomId":"commons","type":"message.edited","actorId":"owner","at":"2026-11-01T21:24:45.730Z","causationId":null,"data":{"messageId":"public","body":"Saved current","expectedMessageRevision":0}}}],"next":1007,"hasMore":false},"plan":[{"id":7,"parent":0,"notused":49,"detail":"SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"}]},{"count":5000,"cold":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":49675},"warm":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":49675},"hidden":{"statements":90,"rowsRead":215,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":49248},"late":{"statements":85,"rowsRead":194,"rowsWritten":0,"unknown":0,"returnedSqlTextBytes":61035},"filterPage":{"events":[],"next":16,"hasMore":true},"hiddenPage":{"events":[],"next":21,"hasMore":true},"latePage":{"events":[{"sequence":5006,"event":{"id":"public-event","idempotencyKey":"d3d416ad-2d3e-46cc-a5bd-5dc62f78c4f6","roomId":"commons","type":"message.posted","actorId":"owner","at":"2026-11-01T21:24:45.944Z","causationId":null,"data":{"messageId":"public","body":"Saved current"}}},{"sequence":5007,"event":{"id":"edited-public","idempotencyKey":"7d4d52ed-0112-4b75-9321-288d8e52a260","roomId":"commons","type":"message.edited","actorId":"owner","at":"2026-11-01T21:24:45.944Z","causationId":null,"data":{"messageId":"public","body":"Saved current","expectedMessageRevision":0}}}],"next":5007,"hasMore":false},"plan":[{"id":7,"parent":0,"notused":49,"detail":"SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"}]}]}
+✖ actual Worker event candidates are bounded before filters and hidden backlog continues (1461.751792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1612.203458
+
+✖ failing tests:
+
+test at cloudflare/current-events-worker.check.mjs:6:1
+✖ actual Worker event candidates are bounded before filters and hidden backlog continues (1461.751792ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  49675 !== 57257
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/cloudflare/current-events-worker.check.mjs:20:74)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 49675,
+    expected: 57257,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

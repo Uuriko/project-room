@@ -1,5 +1,10 @@
 components:
   securitySchemes:
+    operatorToken:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Existing management credential, sent as Operator followed by a space and the configured secret. Room/account credentials do not grant this authority.
     accountBrowserSession:
       type: "apiKey"
       in: "cookie"
@@ -626,6 +631,26 @@ components:
         poster: { type: string }
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
+        disputeDecider: { type: string, nullable: true, description: "Designated dispute decider, or the designated verifier when no separate decider was chosen. Eligibility is checked when a dispute opens; this value does not confirm an active seat. Null when neither was designated." }
+        disputability:
+          type: object
+          description: |
+            DA3-P3 - computed at read time from the bounty's current state:
+            whether a dispute can ever be opened on this bounty, and who
+            would decide it. `decider` is the designated decider the dispute
+            path seats (the explicit dispute decider, else the verifier);
+            there is no fallback decider, so when none is designated the
+            status is `undisputable` with reason `no_decider_named` and
+            `decider` is null. `verifier_is_executor` is evaluated against
+            the current claimant, so it appears the moment the designee
+            claims the work. Dispute-time gates that depend on the future
+            challenger, or on the designee's then-current membership, can
+            still refuse an attempt this field reads `disputable`.
+          required: [status, reason, decider]
+          properties:
+            status: { type: string, enum: [disputable, undisputable] }
+            reason: { type: string, nullable: true, enum: [no_decider_named, verifier_is_executor, verifier_is_poster] }
+            decider: { type: string, nullable: true }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
@@ -904,7 +929,25 @@ components:
         roomId: { type: string }
         sequence: { type: integer, description: Room sequence the list was read at }
         limit: { type: integer, description: Maximum pins per room (50) }
-        count: { type: integer }
+        count: { type: integer, description: Visible pins in this page; not a global total for contractVersion 2 }
+        contractVersion: { type: integer, enum: [2], description: Present for bounded normalized pages }
+        sourceWindow:
+          type: object
+          required: [complete, sourceBound]
+          properties:
+            complete: { type: boolean, description: This continuation reached the end of its pin source }
+            sourceBound: { type: integer, const: 4 }
+        page:
+          type: object
+          required: [hasMore, nextCursor, nextRead]
+          properties:
+            hasMore: { type: boolean }
+            nextCursor: { type: [string, 'null'] }
+            nextRead:
+              type: [object, 'null']
+              properties:
+                method: { type: string, const: GET }
+                path: { type: string }
         pins:
           type: array
           items:
@@ -1090,7 +1133,7 @@ components:
                   headSha: { type: [string, 'null'], pattern: '^[0-9a-f]{40}$' }
         pullRequest:
           type: [object, 'null']
-          description: Linked GitHub pull request. outcome merged completes the claim; closed releases it. A land or deploy claim records the merge and stays open until the live revision matches.
+          description: Linked GitHub pull request. outcome merged completes the claim; closed releases it. A land or deploy claim records the merge and stays open until the live revision matches, and closes then only while held (claimed, in progress, blocked or delivered) on an unlapsed lease.
           properties:
             url: { type: string }
             repo: { type: string }

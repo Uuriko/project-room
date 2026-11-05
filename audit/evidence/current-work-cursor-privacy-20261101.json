@@ -1,0 +1,22 @@
+{
+  "baseline": "184ad47210eae55760d4c9a42aa638c61fa59ece",
+  "causalRed": {
+    "exit": 1,
+    "recoveredExcludedSyntheticId": "request-03",
+    "log": "/tmp/current-work-cursor-holder-exact-red.log"
+  },
+  "green": {
+    "nodeTests": 9,
+    "log": "/tmp/current-work-cursor-holder-green.log",
+    "actualWorkerTests": 1,
+    "actualWorkerLog": "/tmp/current-work-cursor-worker-green.log"
+  },
+  "keyOwnership": "random32-byte server-owned per RoomStore WeakMap; HMAC domain plus exact caller credential",
+  "restart": "old continuation refuses invalid_work_cursor; caller restarts without cursor",
+  "sameViewerOtherCredential": "refuses without changing identity or grants",
+  "limits": [
+    "No persisted secret or new permission",
+    "Prior payload body/title redaction is distinct from the previously false cursor secrecy claim"
+  ],
+  "deployed": false
+}

@@ -1,0 +1,11 @@
+# Addressed native browser inspections and identity room titles
+
+Source `f7a7543337e765d818989e443673594d13da52d9`, base `f02132a1c921af7953368a7340f6d03b87a78d28`. The four assigned existing Chromium scripts reproduce six failures (10/16 pass): whole-room fixture reads on newly normalized rooms, a legacy projection title lookup, and an actual shared helper returning generated room IDs instead of titles.
+
+Login recovery now takes the actual successful command's message ID and checks its protected current message/body and original account binding. Start-room checks the complete protected roster with the same exact one-member assertion. Lifecycle finds the created room through the browser URL, verifies protected metadata title/kind/archival owner/time and independent SQL archived_at/sequence, and retains exact room-count, ownership, failed-archive, disabled-compose and unchanged-read-sequence checks. Its newly reached archived-note assertion is updated to exact current source copy: explicit owner erasure remains available; ordinary coordination is closed.
+
+The only production change is AgentIdentities.roomsForIdentity: selected principal authority plus the existing protected current metadata accessor supplies normalized titles; legacy projection behavior and inactive/failed-read filtering remain. Existing agent-signin script is unchanged, preserving its exact identity count, room count, title and lost-response assertions. The new helper/HTTP/MCP regression proves correct title, caller isolation, no full room hydration, wrong-secret refusal and unchanged identity count.
+
+Final actual browser result: 16/16 pass, zero skips. Node identity/MCP neighbors: 31/31 pass, zero skips. ESLint, secret scan, candidate manifest and diff checks exit zero. Intermediate receipts are retained: the first revised browser run reached a stale archive-copy assertion (14/16); the new direct helper test initially also compared SQLite null-prototype rows to plain objects, corrected by copying row properties without changing expected fields/values. No skipped behavior or count/identity waiver.
+
+These are local executable qualifications, not human research, hosted CI, deployment or live verification. No scope expansion or source changes beyond the assigned methods and fixture reads.

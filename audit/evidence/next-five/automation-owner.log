@@ -1,0 +1,3 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":29577608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"currentOwner":"owner","creatorNotMember":true,"result":"opened","recordedActor":"former-owner","replayRuns":0,"scope":"Synthetic persisted rule attributed to absent former owner; actual state helpers and SQLite registry, event emitter stubbed, no provider"}

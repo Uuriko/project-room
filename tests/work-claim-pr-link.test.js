@@ -2,18 +2,32 @@
 // receiver, so POST /work-claims/sweep and the claim-pr cron poll the pull.
 // A merge completes the claim; a close without a merge releases it. Either
 // path appends one work_claim.updated event that names the pull and the outcome.
-// applyPullRequestWebhook is the same settlement a pull_request webhook would call.
+// applyPullRequestWebhook is the same settlement a pull_request webhook would
+// call; it verifies the delivery's HMAC itself (RES-0140), so the tests
+// below present signed deliveries with a fixture secret.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims, closeWorkClaim } from "../server/work-claim-routes.mjs";
 import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
+import { PR_WEBHOOK_SECRET_ENV } from "../server/claim-autolink.mjs";
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";
+
+const WEBHOOK_SECRET = "pr-link-test-secret";
+const signedDelivery = payload => {
+  const rawBody = JSON.stringify(payload);
+  return {
+    rawBody,
+    signature256: "sha256=" + createHmac("sha256", WEBHOOK_SECRET).update(rawBody).digest("hex"),
+    env: { [PR_WEBHOOK_SECRET_ENV]: WEBHOOK_SECRET },
+  };
+};
 
 function githubFetch(body, status = 200) {
   const calls = [];
@@ -122,7 +136,7 @@ test("a closing webhook releases the claim, and a second delivery does not settl
   await call("create", null, { id: "lane", files: ["docs/a.md"], pullRequest: URL_A });
   await call("claim", "lane", {});
   const payload = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
-  const first = applyPullRequestWebhook(store, payload);
+  const first = await applyPullRequestWebhook(store, payload, signedDelivery(payload));
   assert.deepEqual(first.applied, [{ roomId: "commons", claimId: "lane", outcome: "closed" }]);
   const item = store.workClaims.get("commons", "lane");
   assert.equal(item.state, "unclaimed");
@@ -134,7 +148,7 @@ test("a closing webhook releases the claim, and a second delivery does not settl
   assert.equal(settled.data.previousOwnerId, "owner");
   assert.deepEqual(settled.data.pullRequest, { url: URL_A, outcome: "closed" });
   assert.deepEqual(settled.data.paths, ["docs/a.md"]);
-  assert.deepEqual(applyPullRequestWebhook(store, payload).applied, []);
+  assert.deepEqual((await applyPullRequestWebhook(store, payload, signedDelivery(payload))).applied, []);
 });
 
 test("a batch stays claimed until every linked pull is merged or closed", async t => {
@@ -392,10 +406,11 @@ test("re-linking a settled PR URL in a new round resets the link for re-polling"
   assert.equal(linked.pullRequest.outcome, null);
 
   // Round 1 ends: the PR closes unmerged, the claim is released (pr_closed).
-  applyPullRequestWebhook(store, {
+  const round1Payload = {
     action: "closed",
     pull_request: { html_url: URL_A, merged: false, state: "closed" },
-  });
+  };
+  await applyPullRequestWebhook(store, round1Payload, signedDelivery(round1Payload));
   const released = store.workClaims.get("commons", "relink-pr");
   assert.equal(released.state, "unclaimed");
   assert.equal(released.pullRequests[0].outcome, "closed");
@@ -429,7 +444,8 @@ test("re-linking resets a settled PR even when syncedAt equals claimedAt", async
   await call("create", null, { id: "relink-same-ms", title: "relink" });
   const claimed = (await call("claim", "relink-same-ms", {})).value;
   await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
-  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const sameMsPayload = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
+  await applyPullRequestWebhook(store, sameMsPayload, { nowMs: now, ...signedDelivery(sameMsPayload) });
   const released = store.workClaims.get("commons", "relink-same-ms");
   assert.equal(released.pullRequests[0].outcome, "closed");
   const round2 = (await call("claim", "relink-same-ms", {})).value;
@@ -455,7 +471,8 @@ test("re-linking resets a same-ms tie when the first round began via reassign", 
   assert.equal(assigned.history.at(-1).action, "reassigned:owner");
   assert.ok(!assigned.history.some(entry => entry.action === "claimed"), "reassign starts the round without a claimed stamp");
   await call("update", "relink-reassign-ms", { appendPullRequest: URL_A, expectedClaimedAt: assigned.claimedAt, expectedHistoryLength: assigned.history.length });
-  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const reassignPayload = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
+  await applyPullRequestWebhook(store, reassignPayload, { nowMs: now, ...signedDelivery(reassignPayload) });
   const released = store.workClaims.get("commons", "relink-reassign-ms");
   assert.equal(released.pullRequests[0].outcome, "closed");
   assert.equal(released.pullRequests[0].syncedAt, released.claimedAt, "fixture must force syncedAt == claimedAt");
@@ -484,7 +501,8 @@ test("re-linking resets a same-ms tie even when early claimed stamps were trimme
   const trimmed = store.workClaims.list("commons").find(item => item.id === "relink-trimmed-ms");
   assert.ok(trimmed.historyOmitted > 0, "fixture must trim history");
   assert.ok(!trimmed.history.some(entry => entry.action === "claimed"), "round-1 claimed stamp must be trimmed away");
-  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const trimmedPayload = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
+  await applyPullRequestWebhook(store, trimmedPayload, { nowMs: now, ...signedDelivery(trimmedPayload) });
   const released = store.workClaims.get("commons", "relink-trimmed-ms");
   assert.equal(released.pullRequests[0].outcome, "closed");
   const round2 = (await call("claim", "relink-trimmed-ms", {})).value;
@@ -506,11 +524,11 @@ test("re-linking resets same-ms ties across three claim rounds", async t => {
   const r1 = (await call("claim", "relink-three-ms", {})).value;
   await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r1.claimedAt, expectedHistoryLength: r1.history.length });
   const webhook = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
-  applyPullRequestWebhook(store, webhook, { nowMs: now });
+  await applyPullRequestWebhook(store, webhook, { nowMs: now, ...signedDelivery(webhook) });
   const r2 = (await call("claim", "relink-three-ms", {})).value;
   const relinked2 = (await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r2.claimedAt, expectedHistoryLength: r2.history.length })).value;
   assert.equal(relinked2.pullRequests[0].outcome, null, "round-2 re-link resets");
-  applyPullRequestWebhook(store, webhook, { nowMs: now });
+  await applyPullRequestWebhook(store, webhook, { nowMs: now, ...signedDelivery(webhook) });
   assert.equal(store.workClaims.get("commons", "relink-three-ms").pullRequests[0].outcome, "closed");
   const r3 = (await call("claim", "relink-three-ms", {})).value;
   const relinked3 = (await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r3.claimedAt, expectedHistoryLength: r3.history.length })).value;
@@ -549,8 +567,8 @@ test("same-ms ties in two rooms reset independently", async t => {
   await callB("create", null, { id: "relink-xroom", title: "relink" });
   const b1 = (await callB("claim", "relink-xroom", {})).value;
   await callB("update", "relink-xroom", link(b1));
-  const applied = applyPullRequestWebhook(store,
-    { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const xroomPayload = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
+  const applied = await applyPullRequestWebhook(store, xroomPayload, { nowMs: now, ...signedDelivery(xroomPayload) });
   assert.equal(applied.applied.length, 2, "webhook settles both rooms");
   const a2 = (await callA("claim", "relink-xroom", {})).value;
   const relinkedA = (await callA("update", "relink-xroom", link(a2))).value;

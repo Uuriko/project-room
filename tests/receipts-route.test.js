@@ -79,7 +79,7 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   const page = await raw(origin, `/receipts/${id}`);
   assert.equal(page.status, 200);
   assert.equal(page.headers.get("content-security-policy"), publicPolicy);
-  assert.match(page.text, /<main>/);
+  assert.match(page.text, /<main[ >]/);
   assert.match(page.text, /<footer>/);
   assert.match(page.text, /Made in Project Room — start your own room/);
   assert.match(page.text, /ref=Room(\+|%20)owner/);

@@ -1,0 +1,15 @@
+{
+  "base": "b342974b4b510f7bdace52db51dc3f682abe1b7b",
+  "firstCheckpoint": "794962cc1",
+  "scope": "Offline actual browser app on normalized synthetic canonical storage; not onboarding/deployment/user acceptance",
+  "causalFailures": [
+    {"log": "/tmp/current-room-browser-import.log", "failure": "Actual app cannot import src/current-record-context.js: public asset404 before any API calls"},
+    {"failure": "Actual app requests auditView activity; former normalized snapshot rejects it409; missing channels/eventLog would not render correctly"},
+    {"log": "/tmp/current-browser-neighborhood.log", "failure": "Composed100-roster snapshot exceeds existing reservation when event reader unnecessarily reloads full roster"}
+  ],
+  "qualification": {"nodePassed":29,"nodeFailed":0,"nodeLog":"/tmp/current-browser-node-frozen.log","browserPassed":1,"browserLog":"/tmp/current-browser-stage2-actual.log","lintErrors":0,"inheritedLintWarnings":1},
+  "actualBrowserJourney": ["Real app activity configuration startup and protected channels", "More→Settings→History", "Load earlier source windows explicitly; no automatic full history", "Open direct conversation and formal request", "Consume selected request v2 qualified context", "Type and save real canonical answer; protected request status answered", "Reload", "Deep-link older event using addressed event read"],
+  "coverage": {"snapshotChannels":"Complete protected catalog, max50", "snapshotEvents":"16 unfiltered source candidates before audience/privacy filters; explicit partial source window", "snapshotRequests":"Only protected request records addressed by visible message IDs/response pointers; explicitly NOT full census", "recordContinuation":"Explicit user action; one bounded16-source event page", "eventDeepLink":"Indexed addressed event ID→single source candidate→existing visibility/current-body reader; private/missing both404", "eventEnvelope":"Opt-in view=browser only; viewer/account/session-bound; ordinary events API unchanged", "catchUp":"Stored cursor or protected history floor only; no scan or acknowledgement of own/unexamined run"},
+  "remainingBackgroundFailures": ["request-runs500","needs-attention500","conversations409","assistant500","presence500","files500","thread-mutes500","return-brief500","updates500","notifications500"],
+  "limits": ["Visible main and tested action journey are not whole product completion", "Background route failures remain concrete blockers; browser test logs them rather than suppressing them", "Root owns runtime packaging publicAssets entry for the pure leaf", "Selected request context uses existing bounded per-page cursor preparation; legacy v1 remains unchanged", "Full-map history and request counts are not inferred from loaded slices", "Latest root composition and actual Native/production qualification still required", "No schema/floor/grant changes"]
+}

@@ -11,6 +11,9 @@
 // never started). Webhook retries of an existing delivery are unchanged.
 
 import { WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs";
+import { mayWake, readTalkPolicy } from "./agent-talk-policy.mjs";
+import { firstBlockedWakeTarget, isMutedBy } from "../src/events.js";
 
 const FLAG = "ROOM_OWNER_ASLEEP_WAKE";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -104,10 +107,51 @@ function selectMissedWakes(store, now, limit) {
   }
 }
 
+// The sender of the message a signal points at, when that message is still
+// in the room projection. Peer-DM signals name a message held outside the
+// room projection; those return null and only sender-independent guards
+// (a "nobody" talk policy bars every sender) can be re-taken for them.
+function senderOfSignal(state, row) {
+  const messages = Array.isArray(state?.messages) ? state.messages : [];
+  const message = messages.find(entry => entry?.id === row.messageId);
+  return typeof message?.authorId === "string" && message.authorId ? message.authorId : null;
+}
+
+// T2-L03a-C1: a queued signal can be up to 24h old at replay, so the
+// delivery decision must be re-taken at replay time with the same guards
+// the live wake path applies when the signal is fresh (maybeWakeOnMention
+// in store.mjs, work-wakes.permitted): the target must still be a seated,
+// active member of a room that is not archived, its wakes must not be
+// paused, and the sender must still be allowed to wake it (talk policy,
+// room-trust block, mute). Anything that cannot be checked fails closed.
+function replayStillPermitted(store, row) {
+  if (!row.roomId) return true; // room-less signal: no room guards exist for it
+  if (!store?.db?.prepare || typeof store.room !== "function") return false;
+  const memberId = memberIdForWakeIdentity(store.db, row.roomId, row.agentId, nowOf(store));
+  if (!memberId) return false; // no longer seated in this room (or guest seat ended)
+  let state;
+  try { state = store.room(row.roomId)?.state; } catch { return false; }
+  if (!state) return false;
+  if (state.room?.archivedAt) return false;
+  const member = state.members?.[memberId];
+  if (!member || member.active === false) return false;
+  try {
+    if (store.wakeQueue?.pauseStatus?.(row.roomId, memberId)) return false;
+    if (store.agentHeartbeats?.pausedRoomsOf?.(row.agentId)?.some(paused => paused.roomId === row.roomId)) return false;
+  } catch { return false; }
+  const senderId = senderOfSignal(state, row);
+  if (!senderId) return readTalkPolicy(store.db, row.roomId, memberId).policy !== "nobody";
+  if (senderId === memberId) return true;
+  if (firstBlockedWakeTarget(state, senderId, [memberId])) return false;
+  if (isMutedBy(state, memberId, senderId)) return false;
+  return mayWake(store.db, state, row.roomId, senderId, memberId);
+}
+
 function deliverable(store, row) {
   if (!row?.signalId || !SLEEPER_KINDS.has(row.kind)) return false;
   if (!sleeperWakeEnabled(store, row.roomId)) return false;
   if (store.agentPlugin?.identityRevoked?.(row.agentId)) return false;
+  if (!replayStillPermitted(store, row)) return false;
   return hasWakeSubscription(store, row.agentId);
 }
 

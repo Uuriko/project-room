@@ -68,3 +68,14 @@ test('coalesced retry requests preserve the earliest requested recovery deadline
   const p = f.request({ retryDelayMs: 80 }); const q = f.request({ retryDelayMs: 20 });
   await Promise.all([p, q]); assert.equal(f.alarm(), 120);
 });
+
+for (const alarmAgeMs of [514797148, 0]) test('expired durable alarm is replaced instead of treated as a future wake: age=' + alarmAgeMs, async () => {
+  const now = 1793422867094, future = now + 1000;
+  let alarm = now - alarmAgeMs; const writes = [];
+  const storage = { getAlarm: async () => alarm, setAlarm: async value => { alarm = value; writes.push(value); }, deleteAlarm: async () => assert.fail('queued work must retain an alarm') };
+  const request = createJobAlarmReconciler({ storage, calculate: async () => future, now: () => now, yieldTurn: async () => {} });
+  assert.deepEqual(await request(), { armed: true, alarmAt: future });
+  assert.deepEqual(writes, [future]);
+  assert.deepEqual(await request(), { armed: false, alarmAt: future });
+  assert.deepEqual(writes, [future], 'subsequent reconciliation does not repeatedly arm a future deadline');
+});

@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 // NR-B: the action dialog's async exact-text load must not leave the focused
 // review-notes textarea clipped by the dialog's bottom edge at 320x900.
 // Regression: without the post-load focus re-assert in loadActionText, a slow
@@ -57,6 +58,7 @@ for (const theme of ["light", "dark"]) {
     await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
     await page.evaluate(th => document.documentElement.setAttribute("data-theme", th), theme);
+    await openConversationWork(page, workItemId);
     const decide = page.locator(`button[data-action="decide"][data-work-id="${workItemId}"]`);
     await decide.waitFor({ state: "visible" });
     await decide.click();

@@ -1,0 +1,61 @@
+{
+  "runtimeCommit": "2054a93db",
+  "redCommit": "240a85598",
+  "auditProtocol": 11,
+  "replayCursorVersion": 3,
+  "writerFormat": "normalized-current-v1-native-work-3",
+  "focusedLeafAndExistingOverlapTests": {
+    "pass": 28,
+    "fail": 0
+  },
+  "operatorTests": {
+    "pass": 7,
+    "fail": 0
+  },
+  "native": {
+    "pass": 1,
+    "sourceCheckpointSequence": 322,
+    "tailClaimEvents": 1,
+    "workItems": 157,
+    "steps": 128,
+    "durableScanCalls": 2,
+    "elapsedMs": 13512.622833,
+    "clockOnly": true,
+    "coldRestart": true,
+    "foldedScratchWarningsExact": true,
+    "readinessBarrier503": true
+  },
+  "plainHistoryOperator": {
+    "workItems": 157,
+    "claimEvents": 7,
+    "steps": 130,
+    "durableScanCalls": 14,
+    "processExitBeforeCommit": true,
+    "latestReceiptRetryExact": true,
+    "independentFoldedScratchCompared": true
+  },
+  "sameOriginalSemantics": [
+    "shared claim path/repository/lease predicate",
+    "Object.values canonical uint32 numeric-first then insertion order",
+    "first10 overlapping work items and first16 matching paths",
+    "scoped callback cannot be serialized as state/client authority",
+    "ordinary reducer permissions and CAS unchanged"
+  ],
+  "oldRuntimeRefusal": [
+    "genuine1d83cold",
+    "genuine1d83preopened operator",
+    "genuine1d83 exact guard suspension"
+  ],
+  "requiredNewRuntimePackageFiles": [
+    "src/claim-overlap.js",
+    "server/recovery-replay-order.mjs"
+  ],
+  "limits": [
+    "Full original audit remains mandatory",
+    "Other global event plans remain explicitly deferred",
+    "Whole recovery is not bounded",
+    "Per-table SQLite engine atoms remain internally atomic",
+    "No measured physical SQL/CPU/memory improvement claimed",
+    "Native fixture is synthetic local qualification, not a real provider/account journey"
+  ]
+}

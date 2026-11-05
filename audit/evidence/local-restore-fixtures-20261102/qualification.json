@@ -1,0 +1,54 @@
+{
+  "sourceHead": "565476045a9c51e78f758dec177c48068ec5e932",
+  "base": "197df722d6cd5b6a6e2a1177a3e4e29e046e09f2",
+  "before": {
+    "command": "node --test --test-name-pattern \"current schema marker prevents|replay skips Durable\" tests/room-backup-export.test.js tests/restore-legacy-write-proofs.test.mjs",
+    "exitCode": 1,
+    "tests": 2,
+    "fail": 2
+  },
+  "after": {
+    "command": "node --test tests/restore-legacy-write-proofs.test.mjs tests/room-backup-export.test.js",
+    "exitCode": 0,
+    "tests": 63,
+    "pass": 63,
+    "fail": 0,
+    "skip": 0
+  },
+  "changes": [
+    "Current-writer export assertion follows STORE_SCHEMA_VERSION (45) and requires>=44; explicitly attestedlegacy42/43 behavior remainsseparate.",
+    "Skipreport includes target-owned current_room_writer_permit/current_restore_admission originalexportrows and explicit forgedopen/pendingrows, thenchecks restoredtargetclosedpermit/clearadmission."
+  ],
+  "preserved": [
+    "All3file/buffered/streamcurrentmissingproofrefusals.",
+    "Conflicting42attestationrefusals andgenuine42/43legacyprooffixtures.",
+    "Badtrailer,unknown-table,identity/secret-preservation,recoveryauditrefusals remain."
+  ],
+  "runtimeEdits": false,
+  "lintExitCode": 0,
+  "secretScanExitCode": 0,
+  "sources": {
+    "tests/restore-legacy-write-proofs.test.mjs": "1be0dc3888b696d02041daa8ee7ff579b3672ee665e3145a906c1936dd5c1fba",
+    "tests/room-backup-export.test.js": "c095ca9bacfe4998df894713321f22d69cea60881410199184d450f78ebcc4c7",
+    "server/room-export.mjs": "7808d0ccdf7cc3251d502d4d376c8b1da18b73bc277e7f145f723ad24d3278e7",
+    "server/writer-fence.mjs": "138866f6c5a6f06b3dd6654802dc81bdf10e7994541a0b56323cadc8243903cf"
+  },
+  "artifacts": {
+    "before.log": {
+      "bytes": 3824,
+      "sha256": "de5c97dcd82e541d62f93205e562e62191cbef48d8e40578906415b0c3ac1f60"
+    },
+    "after.log": {
+      "bytes": 53242,
+      "sha256": "7899c117e8d107b00774e1c46d23b149905041b92dc8491cbf1b80ba20b21fbc"
+    },
+    "lint.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret.log": {
+      "bytes": 53,
+      "sha256": "7498bda6f9de4b457c226f50ff76764956d0a7549b148281bb6951e4f65d645a"
+    }
+  }
+}

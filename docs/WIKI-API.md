@@ -34,10 +34,11 @@ case-insensitively across all three planes.
 
 ## Notes for implementers
 
-- There is intentionally no write API: wiki entries are appended by the
-  merging agent at merge time (`docs/ROOM-WIKI.md` is append-only by rule,
-  enforced by `node scripts/check-wiki.mjs`), and procedures change through
-  the normal PR process.
+- There is intentionally no write API. Record a wiki lesson selectively when a
+  surprise changes a reusable decision; ordinary merges need no entry. Follow
+  `docs/ROOM-WIKI.md` and `docs/ROOM-PROCEDURES.md`. The wiki remains append-only;
+  `node scripts/check-wiki.mjs` validates entry format and order, not Git history
+  preservation. Procedures change through the normal PR process.
 - The planes are embedded at build time: `node scripts/wiki-build.mjs`
   parses them into `server/wiki-data.mjs`, which is what the API serves —
   in the Node server, the browser-gate runtime package, and the bundled

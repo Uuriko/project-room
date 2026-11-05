@@ -7,9 +7,16 @@
         a plain leaderboard ranked by successful referrals, and the caller's
         own referral rows and count. A referral counts only on actual join
         (invite redemption or approved access request); ids and display names
-        only, no credential data.
+        only. With view=invitation, returns only the caller's own private
+        invitation and any verification blocker, without loading the board
+        or settling reward activations from message history. The invitation
+        token grants its stated access and must not be logged or published.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - in: query
+          name: view
+          schema: { type: string, enum: [invitation] }
+          description: Select only the invitation needed by the Invite dialog; omit for the full referral board.
       responses:
         '200':
           description: The room's referral board
@@ -19,6 +26,9 @@
                 type: object
                 properties:
                   roomId: { type: string }
+                  contractVersion: { type: integer, enum: [1], description: Present for the invitation-only view. }
+                  invite: { type: object, nullable: true, description: Caller-owned invitation with token, hash, expiry, join limits, status and message. }
+                  inviteBlocked: { type: string, enum: [email_unverified] }
                   referrals:
                     type: array
                     description: Newest first

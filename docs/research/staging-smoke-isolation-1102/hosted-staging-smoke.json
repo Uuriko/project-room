@@ -1,0 +1,172 @@
+{
+  "ok": true,
+  "origin": "https://project-room-stage.getdasha.workers.dev",
+  "liveRevision": "e850efefee13d7db118a77cdca511b014837b4f0",
+  "deploy": {
+    "status": "current",
+    "mainRevision": "e850efefee13d7db118a77cdca511b014837b4f0",
+    "aheadBy": 0,
+    "lagHours": 0
+  },
+  "p95Ms": 241,
+  "findings": [
+    {
+      "code": "advertised_url",
+      "detail": "https://room.trydemigod.com/extensions/work-receipt/v1 -> 404 (tested https://project-room-stage.getdasha.workers.dev/extensions/work-receipt/v1; isolated environment only)",
+      "severity": "warn",
+      "known": "AUDIT P3: A2A extension URIs do not resolve to a spec page"
+    }
+  ],
+  "discoveryScope": "isolated-environment-endpoints; canonical availability not tested",
+  "advertisedChecks": [
+    {
+      "advertisedUrl": "https://project-room-stage.getdasha.workers.dev/",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/.well-known/agent-card.json",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/.well-known/agent-card.json",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/.well-known/agent.json",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/.well-known/agent.json",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/.well-known/governance.json",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/.well-known/governance.json",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/a2a",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/a2a",
+      "scope": "environment-endpoint",
+      "status": 405
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/agents.json",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/agents.json",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/access-requests",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/access-requests",
+      "scope": "environment-endpoint",
+      "status": 401
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/agent-identities",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/agent-identities",
+      "scope": "environment-endpoint",
+      "status": 405
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/agent-invites/redeem",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/agent-invites/redeem",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/agent-rooms",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/agent-rooms",
+      "scope": "environment-endpoint",
+      "status": 401
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/health",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/health",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/identity-create",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/identity-create",
+      "scope": "environment-endpoint",
+      "status": 405
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/needs-me",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/needs-me",
+      "scope": "environment-endpoint",
+      "status": 401
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/api/version",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/api/version",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/extensions/work-receipt/v1",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/extensions/work-receipt/v1",
+      "scope": "environment-endpoint",
+      "status": 404
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/icon.svg",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/icon.svg",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/llms-full.txt",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/llms-full.txt",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/llms.txt",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/llms.txt",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/mcp",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/mcp",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/openapi.json",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/openapi.json",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/room/mcp/server-card",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/room/mcp/server-card",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://room.trydemigod.com/skills",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/skills",
+      "scope": "environment-endpoint",
+      "status": 200
+    },
+    {
+      "advertisedUrl": "https://www.getdasha.com/compute",
+      "testedUrl": null,
+      "scope": "outside-isolated-service"
+    },
+    {
+      "advertisedUrl": "https://www.getdasha.com/room",
+      "testedUrl": "https://project-room-stage.getdasha.workers.dev/",
+      "scope": "environment-endpoint",
+      "status": 200
+    }
+  ]
+}

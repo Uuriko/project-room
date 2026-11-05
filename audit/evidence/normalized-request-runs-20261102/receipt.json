@@ -1,0 +1,124 @@
+{
+  "sourceHead": "19b3f36fb21c0f6fae8a7d2c357d1bbfd4e0ebe8",
+  "runtimeHead": "5c8fa9e176b25b23b1f261f90f2c39ed576b7c27",
+  "sourceSha256": {
+    "server/request-runs.mjs": "cdd6834dc59fa363601b0e9ffcebfe9d4d4975834c8a6f75c2d5518c4485de6e",
+    "server/current-room-repository.mjs": "3757bf9c65257ba1cc88528041333510da6f441c0a4fab4bbacfc46e9c032d05",
+    "tests/current-request-runs.test.mjs": "bcd97338655b666429bf9669fb8a271a660d92f981aa72a812f2892c2f637a0b",
+    "cloudflare/current-request-runs.test-fixture.mjs": "ce4829b00252457a62fa3abeb7764bab3ff4d5557baa0f74fb8b6f06e86939b6",
+    "cloudflare/current-request-runs.check.mjs": "b0cb635b10355c126b9612c5135d7c42ed9a173914eaae175c334129e6bd15bc"
+  },
+  "node": "v24.22.1",
+  "nativeCompatibilityDate": "2026-07-30",
+  "results": {
+    "originalRed": {
+      "exit": 1,
+      "tests": 2,
+      "pass": 0
+    },
+    "hiddenCapRed": {
+      "exit": 1
+    },
+    "nodeFinal": {
+      "exit": 0,
+      "tests": 20,
+      "pass": 20,
+      "skip": 0
+    },
+    "nativeFinal": {
+      "exit": 0,
+      "tests": 1,
+      "pass": 1,
+      "skip": 0
+    },
+    "oldCompositionResume": {
+      "exit": 1,
+      "reason": "Advanced through request run workflow, then old composition unlink failed; not a current-root failure."
+    },
+    "nativeStrictWholeReadEquality": {
+      "exit": 1,
+      "before": 1265,
+      "after": 1269,
+      "reason": "Whole adapter metadata cost is not exactly equal; source probes separately attributed."
+    },
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 4
+    }
+  },
+  "nativeHidden33": {
+    "before": {
+      "statements": 60,
+      "rowsRead": 1265,
+      "rowsWritten": 0,
+      "partyStatements": 4,
+      "partyRowsRead": 0,
+      "unknown": 0
+    },
+    "after": {
+      "statements": 64,
+      "rowsRead": 1269,
+      "rowsWritten": 0,
+      "partyStatements": 4,
+      "partyRowsRead": 0,
+      "unknown": 0
+    }
+  },
+  "logs": [
+    {
+      "file": "current-request-runs-before-1102.log.gz",
+      "bytes": 4618,
+      "sha256": "8e08cac7eb2d824d3bbe3d8eb189b214c95504d1e64bed7c9ed184017d7170cc",
+      "compressedSha256": "b0a91829cbab30736676f44ab5fa9c8cede4435764c1eb9bb38a7a3f9fd4e83c"
+    },
+    {
+      "file": "current-request-runs-hidden-cap-red-1102.log.gz",
+      "bytes": 2041,
+      "sha256": "9bd0417bca8453c460800d24d064b97b672ee0f9e6f908676f1f1d4ee0008b91",
+      "compressedSha256": "50537a748a63cb23bb5b3c47d4fbaff80bf1637e5e01b606a4d41b6fbe12408f"
+    },
+    {
+      "file": "current-request-runs-final-1102.log.gz",
+      "bytes": 6872,
+      "sha256": "c26c844426c6042a3f32109701d1684d362f3c1638dc8e3d357ed061cbec4c30",
+      "compressedSha256": "db69e30b7ed8e32f1a49310441d881fbda72104337c1dc44d3773cd8f56844e2"
+    },
+    {
+      "file": "current-request-runs-resume-1102.log.gz",
+      "bytes": 2166,
+      "sha256": "10a27dee1208e92c72f64e36dd423d4ff5f660d1f71f82ea2e6b016a58459a4a",
+      "compressedSha256": "392f374965592941f738d6cea9d9d24761c45ff410d044638eb7a90cb844414d"
+    },
+    {
+      "file": "current-request-runs-focused-1102.log.gz",
+      "bytes": 7214,
+      "sha256": "342b30f21ea34c794c11f43428f32a2a33e6dbc2de50e1bb366ebecc64fa5991",
+      "compressedSha256": "d97998a9ab37638e6f195c023a463a7035263fef77128a3ed7878cf07a8fd398"
+    },
+    {
+      "file": "current-request-runs-party-final-1102.log.gz",
+      "bytes": 8583,
+      "sha256": "112414f9317c65aab7e63c84915ff1d4e62f5460434d0c38face17b100932b11",
+      "compressedSha256": "42c294293769736de663bd0433f52b06ef1361fc0d3534d93594cd3423128787"
+    },
+    {
+      "file": "current-request-runs-party-native-final-1102.log.gz",
+      "bytes": 1946,
+      "sha256": "cf2e7115ff3ed5fa4a9b08278153653283a9210303feed47b053607a48266a83",
+      "compressedSha256": "deb10ec15fe045de4b0d55dd1c0c7df79fdaf56a577c7f9fdbc61bbcc3aa84b6"
+    },
+    {
+      "file": "current-request-runs-party-native-final-v2-1102.log.gz",
+      "bytes": 1471,
+      "sha256": "f3c60509db13e70c7f3d1fe39eedb7d428496e3945dd630f40b08926b20d5d7e",
+      "compressedSha256": "ee39758530aa0d83ed9ee0834254c9e89efd32e21df4a04838ec07fb05aa013d"
+    },
+    {
+      "file": "current-request-runs-party-lint-1102.log.gz",
+      "bytes": 1030,
+      "sha256": "057103fd6c009e2b8d1ba65da892ef3a7fac6d6d9297beaac9d0b72aa360d127",
+      "compressedSha256": "40723a79b900cb91174f8b7db84e73eda4165d6fbd95c97eb637a367ccd73c46"
+    }
+  ]
+}

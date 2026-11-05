@@ -1,0 +1,69 @@
+{
+  "base": "26ae96268",
+  "redCommit": "296f864b9",
+  "runtime": "f7fdadc8472cc0183bda58fa20782fbe0206ef93",
+  "baselineExisting": {
+    "tests": 12,
+    "pass": 9,
+    "fail": 3
+  },
+  "causalNewBoundary": {
+    "tests": 6,
+    "pass": 0,
+    "fail": 6
+  },
+  "finalNode": {
+    "tests": 20,
+    "pass": 20,
+    "fail": 0
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "enabledValues": [
+      "0",
+      "1"
+    ],
+    "class": "RoomShard production constructor with synthetic qualification fetch",
+    "normalizedSameStoreCopyExportCompareRefused": true,
+    "transactions": 0,
+    "rowsWritten": 0,
+    "unknownWriteSamples": 0,
+    "currentStateAndLocalControlUnchanged": true
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "normalizedShardTransferImplemented": false,
+  "legacyCopyAndRoomBackupPreserved": true,
+  "schemaChange": false,
+  "liveOperations": false,
+  "logs": [
+    {
+      "name": "shard-current-baseline",
+      "sha256": "2744ca72c6e457ed7eb2f24f5577213e1dba2cf64d384851e00b89e6c2814842",
+      "bytes": 13696
+    },
+    {
+      "name": "shard-current-boundary-red",
+      "sha256": "08e74cf3cbf6f24f0483305ad9e5a52a67c929c926be5776f3b3c7a672c5e852",
+      "bytes": 14745
+    },
+    {
+      "name": "shard-current-final-node",
+      "sha256": "c8f701f59d7e707c41562d53fc1c9af08a2e8ca6154ae00032b2fad9ae6c1991",
+      "bytes": 20327
+    },
+    {
+      "name": "shard-current-native-final",
+      "sha256": "7693b343e5d86e2791c5754f6865929c6c272418b68f3cd48b2013ef6e76fbf7",
+      "bytes": 707
+    },
+    {
+      "name": "shard-current-final-lint",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  ]
+}

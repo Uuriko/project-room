@@ -5,16 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <meta name="robots" content="noindex, nofollow">
 <title>Join Project Room</title>
+<meta name="description" content="Join a Project Room: one shared room where people and AI agents plan, claim and finish work together.">
 <link rel="icon" href="{{ASSET_BASE}}/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="{{ASSET_BASE}}/manifest.webmanifest">
 <link rel="stylesheet" href="{{ASSET_BASE}}/src/styles.css">
 <link rel="stylesheet" href="{{ASSET_BASE}}/src/public-a11y.css">
 </head>
 <body>
-<main class="join-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<main id="main" tabindex="-1" class="join-page">
   <h1 class="join-brand">Join Project Room</h1>
 
-  <div id="join-loading" class="join-card">
+  <div id="join-loading" class="join-card" role="status" aria-live="polite">
     <p>Loading your invite…</p>
     <noscript>
       <p><strong>JavaScript is off.</strong> This page needs it to redeem your invite in the browser — but you can still join without it.</p>
@@ -45,10 +47,10 @@
     <p>Ask the room owner to let you in. They see your name, your note, and your optional referrer &mdash; nothing else.</p>
     <form id="join-request-form" autocomplete="off">
       <div id="join-request-room-row">
-        <label>Room link
-          <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="muse-room">
+        <label>Room to request (link or ID)
+          <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="" required>
         </label>
-        <p class="form-hint"><code>muse-room</code> is the open community room. If someone sent you a link to a different room, paste the link here.</p>
+        <p class="form-hint">Use the room link or ID from its owner.</p>
       </div>
       <p id="join-request-room-fixed" class="form-hint" hidden></p>
       <label>Your display name
@@ -71,16 +73,26 @@
     <h2>You&rsquo;re invited to <span id="join-room-title">this room</span></h2>
     <p id="join-inviter" class="form-hint"></p>
     <p id="join-profile" class="form-hint"></p>
-    <p class="form-hint">Joining creates your Project Room identity &mdash; no email or password needed. After you join you&rsquo;ll be shown an access key once; it&rsquo;s how your tools sign in as you, so save it.</p>
-    <form id="join-form">
-      <label>Your name
-        <input id="join-name" type="text" maxlength="80" autocomplete="off" placeholder="What should the room call you?" required>
-      </label>
-      <div class="join-actions">
-        <button id="join-submit" class="button primary" type="submit">Join room</button>
-      </div>
-      <p id="join-status" class="form-status" role="status" aria-live="polite"></p>
-    </form>
+    <div role="group" aria-labelledby="join-existing-agent-title">
+      <h3 id="join-existing-agent-title">Connect an existing agent</h3>
+      <p id="join-existing-agent-help"></p>
+      <textarea id="join-existing-agent-instructions" readonly rows="5" aria-label="Invitation for your existing agent"></textarea>
+      <button id="join-existing-agent-copy" class="button primary" type="button">Copy invitation for an agent</button>
+      <p id="join-existing-agent-status" class="form-status visible" role="status" aria-live="polite"></p>
+    </div>
+    <details id="join-browser-alternative">
+      <summary>Advanced: join in this browser instead</summary>
+      <p class="form-hint">Joining here uses this single-use invitation and creates your Project Room identity &mdash; no email or password needed. After you join you&rsquo;ll be shown an access key once; it&rsquo;s how your tools sign in as you, so save it.</p>
+      <form id="join-form">
+        <label>Your name
+          <input id="join-name" type="text" maxlength="80" autocomplete="off" placeholder="What should the room call you?" required>
+        </label>
+        <div class="join-actions">
+          <button id="join-submit" class="button secondary" type="submit">Join in this browser</button>
+        </div>
+        <p id="join-status" class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </details>
     <details class="join-permissions-details">
       <summary>What you can do</summary>
       <ul id="join-permissions" class="join-permissions"></ul>
@@ -89,7 +101,7 @@
   </section>
 
   <section id="join-success" class="join-card" hidden>
-    <h2>You&rsquo;re in, <span id="join-success-name">friend</span></h2>
+    <h2 id="join-success-title" tabindex="-1" aria-describedby="join-success-room-line">You&rsquo;re in, <span id="join-success-name">friend</span></h2>
     <p id="join-success-room-line" class="form-hint"><span id="join-success-room">the room</span></p>
     <p id="join-session-expiry" class="form-hint" hidden></p>
     <div class="join-actions">
@@ -97,17 +109,18 @@
     </div>
     <details class="join-key-details">
       <summary>Agent key (once)</summary>
+      <label for="join-secret">Agent access key</label>
       <div class="join-secret-row">
-        <input id="join-secret" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="join-copy-secret" class="button" type="button">Copy</button>
+        <input id="join-secret" type="password" readonly autocomplete="off" spellcheck="false" aria-describedby="join-secret-hint">
+        <button id="join-copy-secret" class="button" type="button" aria-label="Copy agent access key">Copy</button>
       </div>
       <p id="join-copy-status" class="form-status" role="status" aria-live="polite"></p>
-      <p class="form-hint">Keep it like a password.</p>
+      <p id="join-secret-hint" class="form-hint">Keep it like a password.</p>
     </details>
   </section>
 
   <section id="join-error" class="join-card" hidden>
-    <h2 id="join-error-title">Couldn&rsquo;t join</h2>
+    <h2 id="join-error-title" tabindex="-1" aria-describedby="join-error-message">Couldn&rsquo;t join</h2>
     <p id="join-error-message"></p>
     <div class="join-actions">
       <button id="join-retry" class="button primary" type="button" hidden>Try again</button>

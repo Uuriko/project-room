@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, MAX_HEALTH_CACHE_MS, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -28,40 +28,62 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(firstBody, secondBody);
   assert.equal(secondBody.status, 'degraded');
   assert.deepEqual(secondBody.durableObject, { ready: false, status: 'timeout' });
-  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
+  assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: HEALTH_PROBE_TIMEOUT_MS });
 });
 
-test('a joined probe bounds its own start() by the remaining timeout budget', async () => {
-  const probe = createHealthProbe();
-  let keptAlive = 0;
-  const waitUntil = promise => { keptAlive += 1; promise.then(() => {}, () => {}); };
-  const onSnapshot = (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging', elapsedMs: timing.elapsedMs });
-  const onUnready = (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness, ...timing });
-  // Leader wakes the object quickly, settling the shared gate well inside
-  // the budget. The joiner then runs its own start(), which hangs for
-  // 1000 ms: without a race against the (remaining) budget it would answer
-  // ready after ~1000 ms instead of timing out at 50 ms.
-  const leaderStart = () => new Promise(resolve => {
-    setTimeout(() => resolve(Response.json({ status: 'ok' })), 10);
-  });
-  const joinerStart = () => new Promise(resolve => {
-    setTimeout(() => resolve(Response.json({ status: 'ok' })), 1000);
-  });
-  const startedAt = performance.now();
-  const [leader, joiner] = await Promise.all([
-    probe({ start: leaderStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil }),
-    probe({ start: joinerStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil })
-  ]);
-  const elapsedMs = performance.now() - startedAt;
-  assert.equal(leader.status, 200);
-  assert.equal(joiner.status, 503);
-  const joinerBody = await joiner.json();
-  assert.equal(joinerBody.status, 'degraded');
-  assert.deepEqual(joinerBody.durableObject, { ready: false, status: 'timeout' });
-  assert.equal(joinerBody.do.status, 'timeout');
-  assert.equal(joinerBody.do.timeoutMs, 50);
-  assert.ok(elapsedMs < 400, `joined probe took ${Math.round(elapsedMs)}ms, expected it to time out near 50ms`);
-  assert.ok(keptAlive >= 1, 'timed-out joined start() must be passed to waitUntil so its I/O is not dropped');
+test('concurrent probes share storage but shape separate GET/HEAD responses and do not cache completion', async () => {
+  const probe = createHealthProbe(); let starts = 0, complete;
+  const start = () => { starts++; return new Promise(resolve => { complete = resolve; }); };
+  const options = method => ({ start, timeoutMs: 200,
+    onSnapshot: (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(method), { mode: method, elapsedMs: timing.elapsedMs }),
+    onUnready: () => { throw new Error('unexpected timeout'); } });
+  const get = probe(options('GET')), head = probe(options('HEAD'));
+  complete(Response.json({ emailVerification: 'enforced' }));
+  const [getResponse, headResponse] = await Promise.all([get, head]);
+  assert.equal(starts, 1);
+  const body = await getResponse.json();
+  assert.equal(body.mode, 'GET'); assert.equal(body.emailVerification, 'enforced');
+  assert.equal(headResponse.status, 200); assert.equal(await headResponse.text(), '');
+  const fresh = probe(options('GET'));
+  assert.equal(starts, 2, 'completed snapshots are not cached');
+  complete(Response.json({ emailVerification: 'relaxed-no-mailer' }));
+  assert.equal((await (await fresh).json()).emailVerification, 'relaxed-no-mailer');
+});
+
+test('a shorter joiner deadline does not cancel or duplicate its leader', async () => {
+  const probe = createHealthProbe(); let complete, starts = 0, keptAlive = 0;
+  const start = () => { starts++; return new Promise(resolve => { complete = resolve; }); };
+  const options = { start, waitUntil: promise => { keptAlive++; promise.catch(() => {}); },
+    onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe({ ...options, timeoutMs: 500 });
+  assert.equal(await probe({ ...options, timeoutMs: 10 }), 'timeout');
+  assert.equal(starts, 1); assert.equal(keptAlive, 1);
+  complete(Response.json({ status: 'ok' }));
+  assert.equal(await leader, 'ready');
+});
+
+test('a timed-out leader can still supply an active joiner within its own deadline', async () => {
+  const probe = createHealthProbe(); let complete, starts = 0;
+  const options = { start: () => { starts++; return new Promise(resolve => { complete = resolve; }); },
+    waitUntil: promise => promise.catch(() => {}), onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe({ ...options, timeoutMs: 10 });
+  const joiner = probe({ ...options, timeoutMs: 500 });
+  assert.equal(await leader, 'timeout');
+  complete(Response.json({}));
+  assert.equal(await joiner, 'ready');
+  assert.equal(starts, 1);
+});
+
+test('shared failures reach every caller and a later request retries freshly', async () => {
+  const probe = createHealthProbe(); let reject, starts = 0;
+  const options = { timeoutMs: 200, start: () => { starts++; return new Promise((_, fail) => { reject = fail; }); },
+    onSnapshot: () => 'ready', onUnready: reason => reason };
+  const leader = probe(options), joiner = probe(options);
+  reject(new Error('RPC failed'));
+  assert.deepEqual(await Promise.all([leader, joiner]), ['error', 'error']);
+  assert.equal(starts, 1);
+  assert.equal(await probe({ ...options, start: async () => { starts++; return Response.json({}); } }), 'ready');
+  assert.equal(starts, 2);
 });
 
 test('a ready probe reports storage readiness', async () => {
@@ -107,4 +129,36 @@ test('HEAD liveness has an empty body', async () => {
   const response = healthLivenessResponse(healthRequest('HEAD'), { mode: 'cloudflare-staging', readiness: 'timeout' });
   assert.equal(response.status, 503);
   assert.equal(await response.text(), '');
+});
+
+test('unknown or malformed job health cannot claim service health while Worker liveness stays explicit', async () => {
+  for (const value of ['', '{bad', JSON.stringify({ status: 'ok' }), JSON.stringify({ schema: 'room.job-health/1', status: 'unexpected' })]) {
+    const status = jobHealthSnapshotStatus({ body: new TextEncoder().encode(value) });
+    assert.equal(status, 'unknown');
+    const response = workerLivenessResponse(healthRequest(), { mode: 'test', jobsStatus: status });
+    assert.equal(response.status, 200);
+    const body = await response.json(); assert.equal(body.status, 'degraded'); assert.equal(body.liveness, 'ok'); assert.equal(body.jobs.status, 'unknown');
+  }
+});
+
+test('job-health cache is off by default and reuses only a good snapshot within cacheMs', async () => {
+  assert.equal(healthCacheMs(undefined), 0);
+  assert.equal(healthCacheMs('abc'), 0);
+  assert.equal(healthCacheMs('-5'), 0);
+  assert.equal(healthCacheMs('5000'), 5000);
+  assert.equal(healthCacheMs('999999'), MAX_HEALTH_CACHE_MS);
+  const run = async (cacheMs, status = 200) => {
+    const probe = createHealthProbe(); let starts = 0;
+    const start = async () => { starts++; return Response.json({ ok: true }, { status }); };
+    const opts = { start, timeoutMs: 200, cacheMs, onSnapshot: s => new Response(null, { status: s.status }), onUnready: () => new Response(null, { status: 503 }) };
+    await probe(opts); await probe(opts); await probe(opts);
+    return starts;
+  };
+  assert.equal(await run(0), 3);
+  assert.equal(await run(5000), 1);
+  assert.equal(await run(5000, 500), 3);
+  const probe = createHealthProbe(); let starts = 0;
+  const opts = { start: async () => { starts++; return Response.json({}); }, timeoutMs: 200, cacheMs: 20, onSnapshot: () => new Response(null), onUnready: () => new Response(null) };
+  await probe(opts); await new Promise(r => setTimeout(r, 40)); await probe(opts);
+  assert.equal(starts, 2);
 });

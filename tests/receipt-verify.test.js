@@ -195,8 +195,14 @@ test("public work: record + artifact re-validate; a forged artifact contradicts"
 
 test("public work: a pruned delivery record is no longer verifiable", async t => {
   const { store, receiptId } = servePublicWork(t);
+  // Resolve before pruning, as the HTTP route does within one request:
+  // since the A6 fail-closed cure, publicReceiptById itself resolves a
+  // pruned-source receipt to null (the face 404s), so the verify seam
+  // is exercised on the already-resolved receipt — its contract.
+  const receipt = publicReceiptById(store, receiptId);
+  assert.ok(receipt);
   store.db.prepare("DELETE FROM public_work_receipts WHERE receipt_id=?").run(receiptId);
-  const verification = await verify(store, receiptId);
+  const verification = await verifyPublicReceipt(store, receipt, { fetchImpl: downFetch, nowMs: NOW });
   assert.equal(check(verification, "source-record").status, "missing");
   assert.equal(verification.verdict, "no-longer-verifiable");
 });

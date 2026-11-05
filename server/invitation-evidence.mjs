@@ -2,6 +2,15 @@ import { createHash } from "node:crypto";
 import { event, EVENT_TYPES as T, ownMember, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { canonicalInvitationData } from "./journal.mjs";
 
+// Projection agreement is distinct from journal replay and membership evidence.
+// Both the original full oracle and its resumable reader use this exact leaf.
+export function assertInvitationJournalProjection(stored, audits, replayed) {
+  if (canonicalInvitationData(stored) !== canonicalInvitationData(replayed.record)
+    || canonicalInvitationData(audits) !== canonicalInvitationData(replayed.audits)) {
+    throw new Error("Projection differs from journal");
+  }
+}
+
 // One complete receipt contract is shared by issuance of the joined event and audit.
 // Keep private account IDs and token material out of the shared event.
 export function invitationJoinedEvent(record) {

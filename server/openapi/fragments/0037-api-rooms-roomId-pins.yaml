@@ -5,9 +5,18 @@
         Issue #6 B2. The room's pinned messages in the order they were pinned,
         joined with the live message (author, body, createdAt). Members only;
         membership is re-checked on every call. Deleted messages (tombstones)
-        never appear. At most 50 pins per room.
+        never appear. At most 50 pins per room. Legacy rooms return the complete
+        list. Normalized rooms return contractVersion 2: at most four source
+        candidates per read, filtered by DM participation and history floor.
+        count describes this visible page, not a total. Follow page.nextRead
+        while page.hasMore, including after an empty page. Cursors are opaque,
+        viewer/head-bound and invalid after a restart; restart without cursor.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - in: query
+          name: cursor
+          schema: { type: string, maxLength: 4096 }
+          description: Normalized pin-page continuation from page.nextRead
       responses:
         '200':
           description: Ordered pinned list
@@ -17,6 +26,8 @@
                 $ref: '#/components/schemas/PinnedList'
         '401':
           description: No room credential, or membership ended (unauthenticated)
+        '422':
+          description: Invalid, stale, cross-viewer or restart-expired cursor
     post:
       summary: Pin or unpin one message
       description: |

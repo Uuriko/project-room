@@ -41,11 +41,23 @@ export class ArchiveRoom extends DurableObject {
       const projection = stored(db);
       delete projection.messages.find(m => m.id === 'card').receiptId;
       projection.messages.find(m => m.id === 'm1').reactions = { '👀': ['owner'] };
-      db.prepare(`UPDATE rooms SET projection=? WHERE id='${ROOM}'`).run(JSON.stringify(projection));
+      // Stage a valid old reducer shape through the registered writer. A raw
+      // overwrite of a current projection is corruption, not legacy data.
+      store.transaction(() => {
+        const encoded = store.storedProjection(ROOM, projection);
+        db.prepare(`UPDATE rooms SET projection=? WHERE id='${ROOM}'`).run(encoded);
+      });
       store._projectionCache?.clear?.();
       return Response.json({ projectionBytes: bytes(db), messages: projection.messages.length, sequence: store.room(ROOM).sequence, legacy: legacyLeft(db) });
     }
     if (path === '/state') return Response.json({ legacy: legacyLeft(db), audit: audit(db), projectionBytes: bytes(db) });
+    if (path === '/tamper') {
+      const projection = stored(db);
+      projection.title = 'Unregistered overwrite';
+      db.prepare(`UPDATE rooms SET projection=? WHERE id='${ROOM}'`).run(JSON.stringify(projection));
+      store._projectionCache?.clear?.();
+      return Response.json({ tampered: true });
+    }
     const REQUEST = { roomId: ROOM, keepNewest: Number(url.searchParams.get('keep') ?? 500), reason: 'r59 workerd check' };
     if (path === '/plan') return Response.json(this.call(REQUEST));
     if (path === '/upgrade') return Response.json({ result: store.upgradeLegacyMessageShapes(), audit: audit(db) });

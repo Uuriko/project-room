@@ -1,0 +1,984 @@
+{
+  "runtimeHead": "16bf23220e26815738afecb2820365e19222202e",
+  "baselineHead": "64d7a3e8964729933651fc363335964a803f1888",
+  "sourceSha256": {
+    "server/current-room-events.mjs": "35d104fa436c413084a103e9029b7b8b525179e8ddbdc7d4be7519587c057c5b",
+    "server/store.mjs": "5b6fb8dca8b325ffc3563d2f2c694a5193e58569903a8633a87fc526560de6a1",
+    "server/http.mjs": "54e926b85fb41f5afd9a2bcc1868a6d070d7a17e3fd1539d3af34ce82b4128c4",
+    "server/mcp-room-profile.mjs": "cd1c5224a3c641b7979f752ebca75510c2ded8db967db3478d88a344349c202e",
+    "server/mcp-full-profile.mjs": "187a34425579772be2ecb05235029ddaeba345ade907e2295a8860b19e7f9ecd",
+    "server/updates.mjs": "392686d723f0b2b1df7804b4199040e07a293ee476b47225479bc94c795775d7",
+    "cloudflare/current-events-worker.check.mjs": "c075146c97d850e0ceca470c1989f544851fc5e31e8cb1ef72ef6bd839d57424",
+    "cloudflare/current-events-worker.test-fixture.mjs": "7e44002e70195fd9435812ffa228b3ccc1edcf63024e1765ba901cef4baa96f8",
+    "tests/current-room-events.test.mjs": "57a48e1de26446c6eaa5cdb0bbf0802bc6ba210cc1ffd83c4d0af4a9abf6b259"
+  },
+  "logs": {
+    "current-events-original-red": {
+      "path": "audit/evidence/current-events-original-red-20261101.log",
+      "sha256": "a515c73581d550827d2989ed126b94c6b12dc5ade7534c7089521cad565b05d4"
+    },
+    "current-events-worker-initial-byte-equality-red": {
+      "path": "audit/evidence/current-events-worker-initial-byte-equality-red-20261101.log",
+      "sha256": "80b9b44c15c3f0daccae60060a65b4215e75517a913d306da7aef7b81c51e80e"
+    },
+    "current-events-worker": {
+      "path": "audit/evidence/current-events-worker-20261101.log",
+      "sha256": "7185e3cd06f48c23cf106d89d5fff5c7b8f41f7af3e001213e4033b243a70ba0"
+    },
+    "current-events-baseline-worker": {
+      "path": "audit/evidence/current-events-baseline-worker-20261101.log",
+      "sha256": "74a52f42aa7d22575cee2effb9185a39370464838edfda22f2b6f765c20af3aa"
+    },
+    "current-events-affected": {
+      "path": "audit/evidence/current-events-affected-20261101.log",
+      "sha256": "0e486b58949a31cc205e95b7d4c4e27fcc87ad09bfec1ac5cf33aa7100e28d1c"
+    },
+    "current-events-inherited-package-red": {
+      "path": "audit/evidence/current-events-inherited-package-red-20261101.log",
+      "sha256": "35c9770ba0247e2f761309a8fb133007115ee7c802a65448a334d65ebb4f6cb1"
+    },
+    "current-events-lint": {
+      "path": "audit/evidence/current-events-lint-20261101.log",
+      "sha256": "4f80aca1b9fe4cc0d97fb36e653fe93cf73c1cbd6f9a1c638826348561525783"
+    }
+  },
+  "commands": [
+    {
+      "command": "node --test tests/events-cursor-paging.test.js tests/events-after-sequence.test.js tests/dm-consent-events.test.js tests/read-redaction.test.js tests/mcp-room-messages-paging.test.js tests/current-room-events.test.mjs",
+      "exitCode": 0,
+      "pass": 33,
+      "fail": 0
+    },
+    {
+      "command": "node --test cloudflare/current-events-worker.check.mjs",
+      "exitCode": 0,
+      "pass": 1,
+      "fail": 0
+    },
+    {
+      "command": "CURRENT_EVENTS_BASELINE=1 node --test cloudflare/current-events-worker.check.mjs (same fixture, isolated baseline tree)",
+      "exitCode": 0,
+      "pass": 1,
+      "note": "measurement mode deliberately records original late409, not qualification of old behavior"
+    },
+    {
+      "command": "node --test tests/runtime-package.test.js tests/candidate-manifest.test.js (before manifest regeneration/package reconciliation)",
+      "exitCode": 1,
+      "pass": 9,
+      "fail": 7
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js [nine affected source/test files; exact list in memo]",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 36
+    }
+  ],
+  "metrics": {
+    "before": {
+      "baseline": true,
+      "samples": [
+        {
+          "count": 1000,
+          "cold": {
+            "statements": 83,
+            "rowsRead": 1379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 138830,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "warm": {
+            "statements": 83,
+            "rowsRead": 1379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 138830,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "hidden": {
+            "statements": 83,
+            "rowsRead": 472,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 165400,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "late": {
+            "statements": 87,
+            "rowsRead": 385,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 140223,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "http": {
+            "statements": 173,
+            "rowsRead": 3282,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 279186,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "httpStatus": 409,
+          "httpPage": {
+            "error": {
+              "code": "current_room_context_required",
+              "message": "Use an addressed current Room read"
+            },
+            "status": "action_required",
+            "reason": "current_room_context_required",
+            "hint": "Unknown error 'current_room_context_required'. Re-check access and current work; if it repeats, report the code and full message to the room owner.",
+            "next": [
+              {
+                "tool": "room_check_access"
+              },
+              {
+                "tool": "room_list_work"
+              },
+              {
+                "command": "If it repeats, report error.code 'current_room_context_required' with the full message to the room owner \u2014 this code has no known recovery."
+              }
+            ],
+            "operationId": "op_ZehiI7CL",
+            "category": "conflict"
+          },
+          "lateError": {
+            "code": "current_room_context_required",
+            "message": "Use an addressed current Room read"
+          },
+          "filterPage": {
+            "events": [],
+            "next": 1007,
+            "hasMore": false
+          },
+          "hiddenPage": {
+            "events": [],
+            "next": 105,
+            "hasMore": true
+          },
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ],
+          "restartCold": {
+            "statements": 83,
+            "rowsRead": 2965,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 138830,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          },
+          "restartWarm": {
+            "statements": 83,
+            "rowsRead": 1379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 138830,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          }
+        },
+        {
+          "count": 5000,
+          "cold": {
+            "statements": 83,
+            "rowsRead": 5379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 116066,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "warm": {
+            "statements": 83,
+            "rowsRead": 5379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 116066,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "hidden": {
+            "statements": 83,
+            "rowsRead": 472,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 142636,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "late": {
+            "statements": 87,
+            "rowsRead": 385,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 117459,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "http": {
+            "statements": 173,
+            "rowsRead": 3282,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 233658,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "httpStatus": 409,
+          "httpPage": {
+            "error": {
+              "code": "current_room_context_required",
+              "message": "Use an addressed current Room read"
+            },
+            "status": "action_required",
+            "reason": "current_room_context_required",
+            "hint": "Unknown error 'current_room_context_required'. Re-check access and current work; if it repeats, report the code and full message to the room owner.",
+            "next": [
+              {
+                "tool": "room_check_access"
+              },
+              {
+                "tool": "room_list_work"
+              },
+              {
+                "command": "If it repeats, report error.code 'current_room_context_required' with the full message to the room owner \u2014 this code has no known recovery."
+              }
+            ],
+            "operationId": "op_KFu07vAo",
+            "category": "conflict"
+          },
+          "lateError": {
+            "code": "current_room_context_required",
+            "message": "Use an addressed current Room read"
+          },
+          "filterPage": {
+            "events": [],
+            "next": 5007,
+            "hasMore": false
+          },
+          "hiddenPage": {
+            "events": [],
+            "next": 105,
+            "hasMore": true
+          },
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ],
+          "restartCold": {
+            "statements": 83,
+            "rowsRead": 6965,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 116066,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          },
+          "restartWarm": {
+            "statements": 83,
+            "rowsRead": 5379,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 116066,
+            "eventPayloadBytes": 0,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          }
+        }
+      ]
+    },
+    "after": {
+      "baseline": false,
+      "samples": [
+        {
+          "count": 1000,
+          "cold": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 57257,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "warm": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 57257,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "hidden": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 56830,
+            "eventPayloadBytes": 4472,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "late": {
+            "statements": 85,
+            "rowsRead": 194,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 67246,
+            "eventPayloadBytes": 533,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "http": {
+            "statements": 166,
+            "rowsRead": 566,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 206076,
+            "eventPayloadBytes": 533,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "httpStatus": 200,
+          "httpPage": {
+            "events": [
+              {
+                "sequence": 1006,
+                "event": {
+                  "id": "public-event",
+                  "idempotencyKey": "0a98833f-ff01-45b7-ae6e-365f9b34ea26",
+                  "roomId": "commons",
+                  "type": "message.posted",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.124Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current"
+                  }
+                }
+              },
+              {
+                "sequence": 1007,
+                "event": {
+                  "id": "edited-public",
+                  "idempotencyKey": "7267655b-c4ea-4887-8748-7d6d70b288c9",
+                  "roomId": "commons",
+                  "type": "message.edited",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.124Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current",
+                    "expectedMessageRevision": 0
+                  }
+                }
+              }
+            ],
+            "next": 1007,
+            "hasMore": false
+          },
+          "filterPage": {
+            "events": [],
+            "next": 16,
+            "hasMore": true
+          },
+          "hiddenPage": {
+            "events": [],
+            "next": 21,
+            "hasMore": true
+          },
+          "latePage": {
+            "events": [
+              {
+                "sequence": 1006,
+                "event": {
+                  "id": "public-event",
+                  "idempotencyKey": "0a98833f-ff01-45b7-ae6e-365f9b34ea26",
+                  "roomId": "commons",
+                  "type": "message.posted",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.124Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current"
+                  }
+                }
+              },
+              {
+                "sequence": 1007,
+                "event": {
+                  "id": "edited-public",
+                  "idempotencyKey": "7267655b-c4ea-4887-8748-7d6d70b288c9",
+                  "roomId": "commons",
+                  "type": "message.edited",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.124Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current",
+                    "expectedMessageRevision": 0
+                  }
+                }
+              }
+            ],
+            "next": 1007,
+            "hasMore": false
+          },
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ],
+          "restartCold": {
+            "statements": 90,
+            "rowsRead": 1801,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 57257,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          },
+          "restartWarm": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 57257,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          }
+        },
+        {
+          "count": 5000,
+          "cold": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 49675,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "warm": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 49675,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "hidden": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 49248,
+            "eventPayloadBytes": 4472,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "late": {
+            "statements": 85,
+            "rowsRead": 194,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 61035,
+            "eventPayloadBytes": 533,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "http": {
+            "statements": 166,
+            "rowsRead": 566,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 177101,
+            "eventPayloadBytes": 533,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 628,
+              "rowsRead": 116402,
+              "rowsWritten": 416,
+              "unknown": 1,
+              "returnedSqlTextBytes": 92382,
+              "eventPayloadBytes": 0
+            }
+          },
+          "httpStatus": 200,
+          "httpPage": {
+            "events": [
+              {
+                "sequence": 5006,
+                "event": {
+                  "id": "public-event",
+                  "idempotencyKey": "fb77d789-7c06-4f21-a69b-771c5f182db6",
+                  "roomId": "commons",
+                  "type": "message.posted",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.389Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current"
+                  }
+                }
+              },
+              {
+                "sequence": 5007,
+                "event": {
+                  "id": "edited-public",
+                  "idempotencyKey": "e4ee09c5-4f7a-4176-9907-c20ef50f1149",
+                  "roomId": "commons",
+                  "type": "message.edited",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.389Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current",
+                    "expectedMessageRevision": 0
+                  }
+                }
+              }
+            ],
+            "next": 5007,
+            "hasMore": false
+          },
+          "filterPage": {
+            "events": [],
+            "next": 16,
+            "hasMore": true
+          },
+          "hiddenPage": {
+            "events": [],
+            "next": 21,
+            "hasMore": true
+          },
+          "latePage": {
+            "events": [
+              {
+                "sequence": 5006,
+                "event": {
+                  "id": "public-event",
+                  "idempotencyKey": "fb77d789-7c06-4f21-a69b-771c5f182db6",
+                  "roomId": "commons",
+                  "type": "message.posted",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.389Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current"
+                  }
+                }
+              },
+              {
+                "sequence": 5007,
+                "event": {
+                  "id": "edited-public",
+                  "idempotencyKey": "e4ee09c5-4f7a-4176-9907-c20ef50f1149",
+                  "roomId": "commons",
+                  "type": "message.edited",
+                  "actorId": "owner",
+                  "at": "2026-11-01T21:29:17.389Z",
+                  "causationId": null,
+                  "data": {
+                    "messageId": "public",
+                    "body": "Saved current",
+                    "expectedMessageRevision": 0
+                  }
+                }
+              }
+            ],
+            "next": 5007,
+            "hasMore": false
+          },
+          "plan": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH events USING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ],
+          "restartCold": {
+            "statements": 90,
+            "rowsRead": 1801,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 49675,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          },
+          "restartWarm": {
+            "statements": 90,
+            "rowsRead": 215,
+            "rowsWritten": 0,
+            "unknown": 0,
+            "returnedSqlTextBytes": 49675,
+            "eventPayloadBytes": 4899,
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "startup": {
+              "statements": 34,
+              "rowsRead": 4225,
+              "rowsWritten": 4,
+              "unknown": 0,
+              "returnedSqlTextBytes": 1464,
+              "eventPayloadBytes": 0
+            }
+          }
+        }
+      ]
+    }
+  },
+  "limits": [
+    "No deployment or live activation",
+    "Private-only numeric next/hasMore retains prior existence disclosure compatibility; no opaque cursor privacy claim",
+    "16 candidates, individual event <=131072 bytes; shared current context admits <=256KiB and200 records including proofs/dependencies",
+    "Returned SQL text bytes are measured outputs, not all bytes examined internally by SQLite JSON predicates",
+    "EventPayloadBytes counts new addressed SELECT id,body queries only; baseline zero is not zero old input bytes",
+    "Cold restart query and constructor are separate: adapter startup4225 rows/4writes in both fixtures; native startup permit writes not included in that adapter startup field",
+    "No whole-product bounded-cost claim: HTTP metadata/authority checks and full-profile message aggregation remain separate costs",
+    "10 focused tests included in33 affected; actual Worker reads native runtime permit flips0; no hidden request acknowledgment",
+    "Initial exact total SQL text equality assumption failed and is retained; receipt envelopes vary with initialization pages. New source event bytes and physical row counts are fixed across scales"
+  ]
+}

@@ -6,8 +6,10 @@ to discover work; use `packet WORK_ID` for a deliberately narrower portable
 proposal. This task view may contain current evidence references and is not a
 public share packet.
 
-Requires this local candidate's server and Node 24.19+. It is not deployed yet.
-Configure your own permitted member using [the client guide](SWARM-PLUG-IN.md).
+Requires Node 24.19+ and a service supporting the selected context options.
+Check the connected service's response; a checked-in implementation does not
+establish the version or capabilities of a particular deployment. Configure
+your own permitted member using [the client guide](SWARM-PLUG-IN.md).
 
 ```sh
 node scripts/agent-inbox.mjs work WORK_ID
@@ -179,6 +181,26 @@ Missing or malformed browser offer context shows no offer actions; known retaine
 offers remain represented by an unavailable notice rather than an empty queue.
 See [human offer controls](../archive/docs/history/HUMAN-HELP-OFFERS-2026-09-08.md).
 
+## Choose the existing workflow
+
+Use [coordination guidance](ROOM-COORDINATION.md#getting-someones-attention)
+for the distinction between ordinary updates, formal requests and work. An old
+open request can remain actionable outside the recent-message window; the
+selected task's bounded request pointers above are not a complete inbox.
+
+For a recorded browser failure, the [development loop](DEVELOPMENT-LOOP.md)
+connects existing failure evidence to work and an addressed reproduction request.
+It does not turn a successful reproduction or delivered response into accepted
+work or a deployed fix. Keep those outcomes tied to their own result and release
+receipts instead of maintaining another status plan.
+
+For evaluating restart guidance or a living-document experiment, use the
+[collaboration measurement protocol](COLLABORATION-EXPERIMENTS.md). Include
+failed and abandoned trials and upkeep costs. The brief and cache below are
+existing delivery mechanisms; their availability is not evidence that more
+context improves productivity. Historical experiment packets remain evidence,
+not instructions to inject a whole handbook into each task.
+
 ## Restarting with a brief
 
 `node scripts/agent-inbox.mjs work WORK_ID --brief` prints a compact authenticated restart record. Add `--include-source` or `--include-offers` only when needed. MCP clients use `room_read_work` with `{ "workItemId": "WORK_ID", "brief": true }`. Normal reads retain their existing shape and add `resume`.
@@ -235,3 +257,42 @@ A continuation is valid only for its unchanged frozen selection. On
 token. Store text and token together only after every page and current viewer
 scope have been checked. The preflight consumer implements that storage flow;
 MCP's numeric discussion checkpoint remains unchanged.
+
+### Task prerequisites
+
+`room_propose_work` accepts optional `dependsOn`: up to 16 existing Board claim
+IDs in the same room. These are the IDs returned by the Board, which can differ
+from canonical work IDs containing punctuation. Accept a prerequisite first so
+its Board card exists. Self references, missing claims and cyclic dependencies
+are refused. Acceptance rechecks existence if a prerequisite was deleted after
+proposal.
+
+`room_read_work` returns `dependencies`, a bounded list of `{id, state, satisfied}`
+observations. Only a done, non-superseded, non-invalidated prerequisite satisfies
+the existing Board rule. Claiming or starting canonical work checks that same
+rule inside the command transaction. Finishing a prerequisite makes dependent
+work eligible through existing available-work reads; it does not start work or
+resolve a separately reported blocker. Board deletion retains its existing
+explicit dependency-waiver behavior. Reads grant no execution authority.
+
+### Conditional source reads
+
+With `includeSource: true`, selected work returns the visible source's `observation`
+(room, work, viewer, message, revision and SHA-256 of body), `editedAt` and an
+executable `nextRead`. Pass `sourceObservation` on a subsequent single-work read
+with `includeSource: true`. First reads report `freshness: observed`; changed
+reads report `changed` and carry the current body. Matching reads report
+`freshness: unchanged`, `status: not_modified` and `message: null`.
+
+Authorization and source visibility are checked again before every comparison.
+Missing, deleted, private and pre-history-floor sources all report unavailable
+without an observation. The observation is a content comparison, not an access
+or execution grant; foreign room/work/viewer observations are refused. An edit
+followed by a revert still changes the message revision. Omitted source remains
+unknown, and older services without observations cannot certify a comparison.
+
+Compact reads and derived briefs omit source bodies. Brief source section hashes
+include the stable observation; relative freshness and whether a body was delivered
+are in `observed`, outside version comparison. `contentObserved` means the current
+source was eligible for comparison, including `not_modified`; it does not mean
+that a body was delivered in this read. This API does not add a human updated-since-view UI.

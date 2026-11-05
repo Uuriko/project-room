@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openConversationWork } from "./room-chrome.mjs";
 // Simulated human journeys. Clipboard outcomes are controlled; no user text or
 // system clipboard is read/written and no live service is involved.
 import test from "node:test";
@@ -48,9 +48,13 @@ async function setup(t, mobile = false) {
   const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); if (initialLogin) { await signInFixture(page, f.keys.owner); initialLogin = false; }
     else await signInFixtureInPlace(page, f.store, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); };
   await login(); posts.length = 0;
+  const beforeNavigation = snapshot();
+  await openConversationWork(page, "test-handoff");
+  assert.deepEqual(posts, [], "opening contextual work does not publish");
+  assert.deepEqual(snapshot(), beforeNavigation, "opening contextual work does not mutate room state");
   const card = page.locator('[data-work-record-id="test-handoff"]'), dialog = page.locator("#result-copy-dialog"), input = page.locator("#result-copy-preview"), copy = page.locator("#result-copy-button");
   const open = async () => {
-    await card.waitFor();
+    await openConversationWork(page, "test-handoff");
     assert.equal(await card.locator("[data-copy-result]").isVisible(), true, "summary copying is directly discoverable");
     await card.locator("[data-copy-result]").click(); await dialog.waitFor({ state: "visible" });
   };
@@ -212,4 +216,14 @@ test("result copy: superseded work retains reported history and close returns to
   await f.card.locator(".work-details").evaluate(node => node.open = false);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.dataset.copyResult === "test-handoff"); assert.deepEqual(f.errors, []);
+  await f.card.locator(".work-details > summary").click();
+  const beforeFollow = f.snapshot();
+  await f.card.getByRole("link", { name: "Open replacement", exact: true }).click();
+  await page.locator('[data-work-record-id="replacement"]').waitFor({ state: "visible" });
+  assert.deepEqual(f.snapshot(), beforeFollow, "following replacement does not transfer acceptance or mutate evidence");
+  await openConversationWork(page, "test-handoff");
+  assert.ok(f.snapshot().state.workItems["test-handoff"].receipt, "historical result remains available after navigating back");
+  if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
+  await f.card.getByRole("link", { name: "Open replacement", exact: true }).scrollIntoViewIfNeeded();
+  await f.capture("replacement-navigation");
 });

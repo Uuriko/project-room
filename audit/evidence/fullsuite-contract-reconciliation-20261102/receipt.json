@@ -1,0 +1,234 @@
+{
+  "originalFullSuite": {
+    "source": "a8729b406",
+    "tests": 14788,
+    "pass": 14741,
+    "fail": 13,
+    "skip": 34,
+    "exit": 1,
+    "elapsedSeconds": 505,
+    "failures": [
+      {
+        "location": "test at tests/candidate-manifest.test.js:89:1",
+        "name": "\u2716 committed candidate manifest has zero drift from the tree (43.121083ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:19:45",
+        "name": "\u2716 pending deferred constructor publishes then preserves message/metadata proofs and exact cold retry (1622.401375ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:19:45",
+        "name": "\u2716 pending eager constructor publishes then preserves message/metadata proofs and exact cold retry (1770.8445ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:20:1",
+        "name": "\u2716 cold after publication paired control retains existing registration behavior (1895.148791ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:22:1",
+        "name": "\u2716 read-only pending constructor remains read-only and does not clear admission (2001.532ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:23:1",
+        "name": "\u2716 post-publication save fault rolls back proofs and cold original retry creates one proved message (1872.827125ms)"
+      },
+      {
+        "location": "test at tests/pending-constructor-write-protocol.test.mjs:24:1",
+        "name": "\u2716 pending constructor publication keeps work mutation metadata proof current (1528.833584ms)"
+      },
+      {
+        "location": "test at tests/recovery-replay-value.test.mjs:33:1",
+        "name": "\u2716 existing guarded SQLite scratch atomically checkpoints large replay value and survives cold reopen (178.359542ms)"
+      },
+      {
+        "location": "test at tests/restore-durable-coverage.test.mjs:25:1",
+        "name": "\u2716 operator coverage persists bounded progress across cold stores and only admits after full audit (18638.644667ms)"
+      },
+      {
+        "location": "test at tests/restore-durable-coverage.test.mjs:49:1",
+        "name": "\u2716 same original snapshot measures repeated old work against durable new process advancement (11892.2145ms)"
+      },
+      {
+        "location": "test at tests/restore-durable-coverage.test.mjs:239:1",
+        "name": "\u2716 checkpoint reverse ancestry is compressed in linear units and drift still refuses final admission (11051.32475ms)"
+      },
+      {
+        "location": "test at tests/runtime-package.test.js:327:1",
+        "name": "\u2716 project preflight composes dependency, coverage and runtime checks (1115.467292ms)"
+      },
+      {
+        "location": "test at tests/runtime-package.test.js:408:1",
+        "name": "\u2716 verified offline archive runs the actual Native durable restore qualification (72851.067125ms)"
+      }
+    ],
+    "logSha256": "a1dc80015c4bd8f5fb7f01c4c480831c761d5daf5a9cbc379567d99c85415464",
+    "nestedProbeFailuresExcluded": true
+  },
+  "source": {
+    "replayAndDirectAuthorityTests": "818484715bfbdf2517dcde369e8abab46482ede6",
+    "durableCoverageTests": "aff7ad4807ca601f1fe80a24712b0c9758bc3ee1",
+    "nativeFixture": "3f5ce26d902dbc1d71c2b2a62b72d4d66575fc2c",
+    "manifestPrerequisite": "3d04e68dc"
+  },
+  "targeted": {
+    "replayValuePass": 7,
+    "directAuthorityPass": 7,
+    "durableCoveragePass": 70,
+    "preflightPass": 1,
+    "packagedNativePass": 1,
+    "allExit": 0,
+    "fail": 0,
+    "skip": 0
+  },
+  "packagedNative": {
+    "sourceCommit": "3f5ce26d902dbc1d71c2b2a62b72d4d66575fc2c",
+    "package": {
+      "verified": true,
+      "sourceCommit": "3f5ce26d902dbc1d71c2b2a62b72d4d66575fc2c",
+      "sourceTree": "f6f4cc8020f1a302d009f7bd82f55bbf36e7d295",
+      "schemaVersion": 45,
+      "files": 721,
+      "assets": 144,
+      "manifestSha256": "b796703dad2b9df530ddbf81720ed222059b9d8e2d242cc7cce68c2fd11eb9f3"
+    },
+    "qualification": {
+      "runtimeSource": "retained-checkpoint-seed",
+      "auditProtocol": 20,
+      "actualNative": true,
+      "importedPartialEvents": 1000,
+      "sourceSeal": true,
+      "coverageSteps": 1118,
+      "cleanupSteps": 144,
+      "cleanupGuardCount": 0,
+      "coverageRows": 6096,
+      "maxPayloadRowsPerStep": 128,
+      "coldDuringCoverage": true,
+      "preopenedPreparedDenied": true,
+      "ordinaryReady503UntilAudit": true,
+      "finalUnboundedAuditRequired": true,
+      "coldReady": true,
+      "exactRetry": true,
+      "wholeRecoveryBounded": false,
+      "acceptedNativeWorkCapacity": true,
+      "nativeWorkExactRetry": true,
+      "privateWorkRequestPreserved": true,
+      "messageAncestryCensus": true,
+      "historyFloorCensus": true,
+      "mandatoryBatchedEngine": true,
+      "strictEventHistory": true,
+      "legalHistoryTimestampBytes": 160029,
+      "engineChecks": {
+        "version": 2,
+        "stage": "complete",
+        "tableAfter": "",
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "lastBatch": {
+          "fromStage": "foreign_key_check",
+          "fromTable": "web_research_log",
+          "atoms": 6,
+          "largeTable": null
+        }
+      },
+      "replayContinuation": {
+        "rooms": 1,
+        "deferred": 0,
+        "originalFullOracleRequired": true
+      },
+      "retainedCheckpoint": null,
+      "reportVersion": 1
+    },
+    "fixturesOutsideArchive": [
+      "durable-coverage.check.mjs",
+      "durable-coverage-seed.test-fixture.mjs",
+      "durable-coverage-native.test-fixture.mjs",
+      "current-room-serving.test-fixture.mjs"
+    ],
+    "productionSource": "verified offline archive",
+    "archiveUnchanged": true
+  },
+  "retainedFailure": {
+    "inner120msDeadline": 120000,
+    "outcome": "cancelled despite final semantic completion afterdeadline",
+    "elapsedMs": 129853.87725,
+    "notGreen": true
+  },
+  "deadlinePolicy": {
+    "approvedInnerMs": 160000,
+    "unchangedOuterMs": 180000,
+    "noRuntimeOrSLAFix": true
+  },
+  "lintExit": 0,
+  "scanExit": 0,
+  "runtimeChanges": false,
+  "fullSuiteNotRerun": true,
+  "productionCalls": false,
+  "artifacts": [
+    {
+      "artifact": "a872-final13-triage-1102.json.gz",
+      "bytes": 3044,
+      "sha256": "e58d0a13698975dda06864ea0dcf06f3feae7997f874334b85e7142d8abfcdc0",
+      "gzipSha256": "30e6c7576f2b6aa92a98129fb395905213f5e387bfa66e8eef5424857f2863e0"
+    },
+    {
+      "artifact": "replay-value-warm-readmission-1102.log.gz",
+      "bytes": 1810,
+      "sha256": "7062b14cde1039f9dc804e3469b39ddb20cfc169f4cfe9e25ff689974c40f531",
+      "gzipSha256": "8174d175a666d4db48ab22740a776e57851cb804d7fa2aed8ca620ab37e55932"
+    },
+    {
+      "artifact": "report-authority-direct-negatives-1102.log.gz",
+      "bytes": 4269,
+      "sha256": "88971db1bac96c7da7b42c442d18aca1cb0f04bfc99440974558eb1503f9760f",
+      "gzipSha256": "c9c62963a352f28d72819fc6d3c3da2a24d388af07357bf8bd39530d4500f16f"
+    },
+    {
+      "artifact": "report-authority-empty-delete-fixture-red-1102.log.gz",
+      "bytes": 5305,
+      "sha256": "1e8e73f8568b53912e3e71258db10075870f8cc83eeb2cb8dd3f37962bef14ef",
+      "gzipSha256": "46e836acc02d3347e32f13547f44f07b04a8268b2b64e2bd5c10486dc6b879f1"
+    },
+    {
+      "artifact": "durable-coverage-contract-repair-1102.log.gz",
+      "bytes": 124704,
+      "sha256": "6be4ff829f227830b243a1f65a74fc7d11d06a8ee7d19a3950ad94ce186293c0",
+      "gzipSha256": "93955395ede242eb3a6287342c38f845ef2c9684fb1edbc8cef910934fd725c3"
+    },
+    {
+      "artifact": "report-direct-coverage-preflight-1102.log.gz",
+      "bytes": 1183,
+      "sha256": "0f3d5d5f51485ef479ec9478a44a25b81b0956bcd82bb0304354ec6e237f7f5f",
+      "gzipSha256": "d6b26fa6fa68df53ca9964d0e4be22a9590eb0d064b7a9edf541a0b3b6e4d5b4"
+    },
+    {
+      "artifact": "report-direct-coverage-preflight-manifest-fixed-1102.log.gz",
+      "bytes": 200,
+      "sha256": "3cc0731e9404c7dc21ec26bfea79bb4f9507b5a81a75989611c5081413000e1c",
+      "gzipSha256": "a23035a32610426eb6d51b6012faeee90df63ca59e33b7a92c02f2106cd0113e"
+    },
+    {
+      "artifact": "native-durable-inner120-timeout-1102.log.gz",
+      "bytes": 805673,
+      "sha256": "310b3ca3f49625b1aee6b3b1c6936bbbec261dff6bd5fcc8ba0ba8bf6181a88f",
+      "gzipSha256": "3c0f1a2c0b8c75fcb73e2388b4ec59c60a3a80db73f77b2c3466178a09b7fde9"
+    },
+    {
+      "artifact": "packaged-native-durable-contract-final-1102.log.gz",
+      "bytes": 1859,
+      "sha256": "22f5b96ec7cd5a3cea352a8917fb6a92adc4e065c9a39b558d4f5606673144d8",
+      "gzipSha256": "36f8eb8fdfc1d1ce4cf3bd849aa398c7738931943f55b6ffaeeee78c8ca1c3a5"
+    },
+    {
+      "artifact": "fullsuite-contract-final-lint-1102.log.gz",
+      "bytes": 71502,
+      "sha256": "585719479ffd2ca8be58720f4cfb02a0e6605000e416a5361109e0de91518bee",
+      "gzipSha256": "9c58cba3c6618be8c069bd6570cc4f1d0fd82b0d5ea9d3feb2579630417de297"
+    },
+    {
+      "artifact": "fullsuite-contract-final-scan-1102.log.gz",
+      "bytes": 53,
+      "sha256": "0aef2bd77e5bb6988196580c4cd8614e9d1c33a477135501d4bd26e108447e5f",
+      "gzipSha256": "17234512edc86968ac33abab93b8c8f40efa636402d9e0bcb6dba3812663166f"
+    }
+  ]
+}

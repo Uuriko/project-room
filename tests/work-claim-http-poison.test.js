@@ -4,6 +4,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { createWork, claimWork } from '../server/work-claims.mjs';
+import { recordPullOutcome } from '../server/claim-coordination.mjs';
 import { SOURCE_REVISION } from '../server/version.mjs';
 
 async function fixture(t) {
@@ -44,7 +45,12 @@ test('HTTP maintenance skips invalid expired rows, releases valid leases, and pe
 test('HTTP live-close isolates malformed land rows while closing a valid matching revision', async t => {
   const f = await fixture(t), warnings = [];
   t.mock.method(console, 'warn', line => warnings.push(JSON.parse(line)));
-  const valid = createWork({ id: 'valid-land', kind: 'land', revision: SOURCE_REVISION }, { now: Date.now(), agentId: 'owner' });
+  // L04-C4: the valid row must be legitimately closable — held, with its
+  // pull recorded merged — not merely a preset revision matching live.
+  const PR = 'https://github.com/Uuriko/project-room/pull/77';
+  let valid = createWork({ id: 'valid-land', kind: 'land', revision: SOURCE_REVISION, pullRequest: PR }, { now: Date.now(), agentId: 'owner' });
+  valid = claimWork(valid, 'owner', { now: Date.now(), leaseHours: 6 });
+  valid = recordPullOutcome(valid, PR, 'merged', Date.now());
   const poisoned = { ...valid, id: 'invalid-land', repo: 'https://github.com/Uuriko/project-room' };
   f.store.workClaims.set('commons', poisoned); f.store.workClaims.set('commons', valid);
   const before = f.store.workClaims.get('commons', poisoned.id);

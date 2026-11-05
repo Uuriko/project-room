@@ -7,6 +7,7 @@
 // the room, and a returning agent (card seen) goes straight in.
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
+import { withBoardDeepLink } from "./board-deeplink.js";
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;
@@ -26,13 +27,15 @@ const ui = createAgentSigninUI({
   firstRunActions: {
     greet: () => location.assign(roomTarget),
     discover: () => location.assign(roomTarget),
+    // No workspace is mounted on this page, so the board step lands in the room
+    // with ?board=1 and the wall opens the work board once on arrival.
+    board: () => { location.assign(withBoardDeepLink(roomTarget)); return true; },
     baseUrl: location.origin
   }
 });
 ui.mount(document.getElementById("agent-signin-ui"));
-// The wall's step focused the first field on open; the page does the
-// same so keyboard and agent browsers land in the form.
-document.querySelector("#agent-signin-ui input:not([type=hidden])")?.focus();
+// Keep initial keyboard navigation at the page start so the skip link is
+// reachable first. Explicit form interactions retain their own focus behavior.
 
 // Leaving mid-mint or with unsaved created credentials goes through
 // the component's own guard (it prompts for the unsaved case and

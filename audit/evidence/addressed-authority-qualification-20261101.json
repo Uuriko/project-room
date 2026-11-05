@@ -1,0 +1,220 @@
+{
+  "sourceHead": "0464543e5054bf873911a2a6b55e0cda1b87bed9",
+  "runtimeHead": "a03e0be73da678e465775a348571c5ecf4930355",
+  "nodeTestHead": "af90c5bdb956bc69109ecadf91855dfe694c6ec4",
+  "base": "3f1e947c7f752cbe2f81e1aaf693eddad2598dad",
+  "status": "Offline auth/selected-read qualification only; not whole100member product support",
+  "change": "Explicit normalized roomAuthority {memberId} uses existing protected room+owner+principal records; default full roster contract remains unchanged. Existing key/account/session/identity lookups opt in to addressed authority.",
+  "node": {
+    "passed": 82,
+    "failed": 0,
+    "skipped": 0,
+    "newTests": 10,
+    "command": "node --test tests/addressed-member-authority.test.mjs tests/join-session-1522.test.js tests/mcp-oauth.test.js tests/mcp-oauth-http.test.js tests/agent-plugin-api-keys.test.js tests/account-sessions-route.test.js tests/agent-identities.test.js"
+  },
+  "actualWorker": {
+    "passed": 1,
+    "failed": 0,
+    "samples": [
+      {
+        "surface": "small",
+        "count": 2,
+        "cold": {
+          "statements": 24,
+          "rowsRead": 1730,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 29572,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "warm": {
+          "statements": 24,
+          "rowsRead": 144,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 29572,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "selected": {
+          "statements": 67,
+          "rowsRead": 191,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 36217,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        }
+      },
+      {
+        "surface": "large",
+        "count": 100,
+        "cold": {
+          "statements": 24,
+          "rowsRead": 1730,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 38984,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "warm": {
+          "statements": 24,
+          "rowsRead": 144,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 38984,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "selected": {
+          "statements": 67,
+          "rowsRead": 191,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 45641,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        }
+      },
+      {
+        "surface": "maxmeta",
+        "count": 100,
+        "cold": {
+          "statements": 24,
+          "rowsRead": 1730,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 75673,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "warm": {
+          "statements": 24,
+          "rowsRead": 144,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 75673,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "selected": {
+          "statements": 67,
+          "rowsRead": 191,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 155708,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        }
+      }
+    ],
+    "costScope": "Request cost starts after constructor. Cold is first request after reconnect, not whole startup. Adapter writes and separately raw runtime permit writes observed; no unobserved total-native-writes claim."
+  },
+  "metadataBoundary": {
+    "roomPayloadBytes": 36885,
+    "selectedInput": {
+      "bytes": 171671,
+      "records": 101
+    },
+    "maxInputBytes": 262144,
+    "maxInputUnits": 200,
+    "globalLimitUnchanged": true
+  },
+  "logs": {
+    "original": {
+      "path": "audit/evidence/addressed-authority-original-20261101.log",
+      "sha256": "23aab28e0d5813f5699f8c8d81abbcd712cb8ae72358c876a3c5708ce89dba93",
+      "exitCode": 1
+    },
+    "node": {
+      "path": "audit/evidence/addressed-authority-node-20261101.log",
+      "sha256": "06747eb915ea3af7095ba794e8fa06c01e59650eab4012e06d52a98de6e0d862",
+      "exitCode": 0
+    },
+    "worker": {
+      "path": "audit/evidence/addressed-authority-worker-20261101.log",
+      "sha256": "b5d2f7a116afc1744e07b3224570fdb16eb9b4441755b9f25fab433fdbc534d0",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/addressed-authority-lint-20261101.log",
+      "sha256": "4ebe5ad392c71b69df0601d789b98e503c4b94693ccd2600624a8b2539f64e2e",
+      "exitCode": 0
+    },
+    "secretScan": {
+      "path": "audit/evidence/addressed-authority-secretScan-20261101.log",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    }
+  },
+  "checks": {
+    "eslint": {
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 32
+    },
+    "secretScan": {
+      "exitCode": 0,
+      "result": "clean"
+    }
+  },
+  "sourceDigests": {
+    "server/current-room-repository.mjs": "5473aaeaf3f1ff38eed10c9eda323c3d5549114c127b67b956be997070f6812d",
+    "server/store.mjs": "cc0bebc07e3722a639dd3735f7071b922a613f0673332e5bcdd9c2269108573e",
+    "server/agent-identities.mjs": "b2f8aa54e96d197710b98e489ec13631fe728080f816f7125dfca2f358efc48a",
+    "tests/addressed-member-authority.test.mjs": "4a9787160b18daba49693fa34cba15029c7fd6736acfa904b3941e4a165c922b",
+    "cloudflare/addressed-authority-worker.test-fixture.mjs": "64a804c0742e6445dbdcdb0cc7f03a5c44222bfe2cd5dfd352b907bebd91873e",
+    "cloudflare/addressed-authority-worker.check.mjs": "07e12d7a63941a3043c3981eabc742a60e88dee008fa8473bca23de10d1e9557"
+  },
+  "authorityControls": [
+    "Original three legal100member failures retained, now passing. Large unrelated profiles use existing capabilities.advertised30\u00d780char envelope, not fabricated padding.",
+    "Credential/identity link fixtures were legitimately issued and holder-proved in legacy source, then existing auth tables preserved as migration does; no new auth store/domain or grant.",
+    "Selected member/owner payload deletion under explicit code-owned fixture permit refuses after prior successful authentication; no authority payload cache.",
+    "Roomscope,parent credential revocation,human account/session binding,identitysecret/API revocation remain enforced.",
+    "Known maximum room title/purpose4096BMP each andcharter4\u00d71000BMP fit measured selectedinput171671B/101units withprotectedroom36885B. A single128KBpurpose is source-invalid4096char limit; no legal128KB metadata failure was established."
+  ],
+  "limitations": [
+    "Default full roster/currentCommandContext consumers still exceed200inputunits forlegal100members. Root is separately reconciling snapshot reservations and next command scopedmember dependencies; this patch is not a roster cap increase.",
+    "The legacy/canonical OAuth compatibility suite passes. Normalized OAuth positive route was not qualified; validateMcpOAuthBinding still uses a separate room() fallback for normalized carrier outside this patch.",
+    "Read physical row counts are flat144warm auth/191selected/1730coldrequest across2\u2192100members; SQL returnedtext grows with bounded immutable receipt envelopes and knownroom metadata.",
+    "No live mutations, provider/model runs, push/deploy/schema activation/newpermissions or identity replacement."
+  ]
+}

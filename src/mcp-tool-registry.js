@@ -1,3 +1,6 @@
+import { uiText } from './strings.js';
+const flagEnv = name => String(globalThis.process?.env?.[name] ?? "").trim();
+const boardClaimToolsOn = () => /^(1|true|on)$/i.test(flagEnv("ROOM_BOARD_CLAIM_TOOLS"));
 // MCP tool registry — the single metadata source for catalog selection.
 //
 // Before this module, a tool's catalog identity was hand-declared in up to
@@ -28,7 +31,11 @@
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
   { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Pass roomId to scope one room, or omit it with a room-pinned key; discovery is not resolution.", focus: ["common"] },
-  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
+  // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): core when on, so a default
+  // catalog can take and finish a Board task (harness 2026-11-03: 0/10 on main).
+  ...(boardClaimToolsOn() ? [
+    { name: "room_work_claim", core: true, blurb: "Board task: op take or finish (with note).", focus: ["work"] }] : []),
+  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns newest messages; view:digest retains directed/reply context and groups other headlines, same cursor. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass replyToId and body; requestId is optional and derived when omitted. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
@@ -36,17 +43,17 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add body, and preserve all fixed arguments; requestId is optional and derived when omitted. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },
   { name: "dm_posted", core: true, blurb: "Send a peer DM. Requires an active bond that includes peer.dm. Pass roomId, to, body, and messageId.", alias: "dm.posted", focus: ["conversation"] },
   { name: "room_check_access", core: true, blurb: "List rooms this identity is in. Pass roomId to check one room.", focus: ["common"] },
-  { name: "room_create", core: true, blurb: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites." },
-  { name: "room_join", core: true, blurb: "Join a room with a share-link token or an invite code." },
-  { name: "room_put_file", core: true, blurb: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.", focus: ["work"] },
-  { name: "room_commit_file", core: true, blurb: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.", focus: ["work"] },
-  { name: "add_land_item", core: true, blurb: "Add a pull request to this room's land queue. Pass roomId, repo (owner/name), and prNumber." },
-  { name: "list_land_queue", core: true, blurb: "List this room's land queue.", focus: ["review"] },
-  { name: "wake_pause", core: true, blurb: "Pause your queued wakes in this room.", alias: "wake.pause", focus: ["automation"] },
-  { name: "wake_resume", core: true, blurb: "Resume your queued wakes in this room.", alias: "wake.resume", focus: ["automation"] },
-  { name: "bond_propose", core: true, blurb: "Request a bond. Pass roomId and to. They answer with bond_accept; then peer.dm opens.", alias: "bond.propose" },
+  { name: "room_create", blurb: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites." },
+  { name: "room_join", core: true, blurb: "Join the specified room or invitation; otherwise join the public lobby." },
+  { name: "room_put_file", blurb: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.", focus: ["work"] },
+  { name: "room_commit_file", blurb: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.", focus: ["work"] },
+  { name: "add_land_item", blurb: "Add a pull request to this room's land queue. Pass roomId, repo (owner/name), and prNumber." },
+  { name: "list_land_queue", blurb: "List this room's land queue.", focus: ["review"] },
+  { name: "wake_pause", blurb: "Pause your queued wakes in this room.", alias: "wake.pause", focus: ["automation"] },
+  { name: "wake_resume", blurb: "Resume your queued wakes in this room.", alias: "wake.resume", focus: ["automation"] },
+  { name: "bond_propose", blurb: "Request a bond. Pass roomId and to. They answer with bond_accept; then peer.dm opens.", alias: "bond.propose" },
   { name: "get_room_context", focus: ["common"] },
-  { name: "room_list_work", focus: ["work", "review"] },
+  { name: "room_list_work", core: true, blurb: uiText("mcp.core.room_list_work"), focus: ["work", "review"] },
   { name: "bond_accept", alias: "bond.accept", focus: ["conversation"] },
   { name: "bond_decline", alias: "bond.decline", focus: ["conversation"] },
   { name: "bond_revoke", alias: "bond.revoke", focus: ["conversation"] },
@@ -55,6 +62,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_list_files", focus: ["work", "review"] },
   { name: "room_get_file", focus: ["work", "review"] },
   { name: "room_work_claim_provenance", focus: ["work"] },
+  { name: "room_work_claim_thread", focus: ["work", "review"] },
   { name: "wake_register", alias: "wake.register", focus: ["automation"] },
   { name: "wake_clear", alias: "wake.clear", focus: ["automation"] },
   { name: "heartbeat_set", alias: "heartbeat.set", focus: ["automation"] },
@@ -66,10 +74,11 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
   { name: "room_read_result", focus: ["work", "review"] },
-  { name: "room_read_work", focus: ["work", "review"] },
+  { name: "room_read_work", core: true, blurb: uiText("mcp.core.room_read_work"), focus: ["work", "review"] },
   { name: "room_read_work_discussion", focus: ["work", "review"] },
   { name: "room_post_draft", focus: ["work"] },
   { name: "room_read_inbox", focus: ["conversation"] },
+  { name: "room_wait_for_attention", focus: ["conversation", "automation"] },
   { name: "room_link_work_claim_pr", focus: ["work"] },
   { name: "room_begin_work", focus: ["work"] },
   { name: "room_submit_text_result", focus: ["work"] },
@@ -84,11 +93,12 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_release_claim", focus: ["work"] },
   { name: "room_renew_claim", focus: ["work"] },
   { name: "room_record_handoff", focus: ["work"] },
-  { name: "room_claim", focus: ["work"] },
+  { name: "room_claim", core: true, blurb: uiText("mcp.core.room_claim"), focus: ["work"] },
   { name: "room_handoff", focus: ["work"] },
   { name: "room_request_history", focus: ["conversation"] },
   { name: "room_request_reply", focus: ["common"] },
-  { name: "room_cancel_request", focus: ["conversation"] },
+  { name: "room_cancel_request", focus: ["common", "conversation"] },
+  { name: "room_progress_request", focus: ["common", "conversation"] },
   { name: "room_map", focus: ["work"] }
 ]);
 

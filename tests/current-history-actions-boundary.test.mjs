@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {RoomStore} from '../server/store.mjs';
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+import {setPin} from '../server/pins.mjs';
+import {setReadHorizon} from '../server/activity.mjs';
+test('selected actions preserve since-join time and source order',t=>{
+ const s=new RoomStore(':memory:'),events=initialRoom(),add=(type,data,at)=>events.push(event({roomId:'commons',actorId:'owner',type,data,at}));t.after(()=>s.close());
+ add('room.history_visibility_set',{historyVisibility:'since_join'},'2026-11-03T08:00:00.000Z');
+ add('message.posted',{messageId:'hidden-large',body:'界'.repeat(65536)},'2026-11-03T08:00:01.000Z');
+ add('message.posted',{messageId:'hidden-small',body:'hidden'},'2026-11-03T08:00:01.000Z');
+ add('message.posted',{messageId:'tie-before',body:'hidden'},'2026-11-03T08:00:02.000Z');
+ add('member.added',{memberId:'late',displayName:'Late',kind:'agent',permissions:[]},'2026-11-03T08:00:02.000Z');
+ add('message.posted',{messageId:'tie-after',body:'visible'},'2026-11-03T08:00:02.000Z');
+ add('message.posted',{messageId:'visible-reply',body:'visible',replyToId:'hidden-small'},'2026-11-03T08:00:03.000Z');
+ add('message.posted',{messageId:'offset-after',body:'visible'},'2026-11-03T00:00:03.000-08:00');
+ s.initialize(events,{representation:'normalized-current-v1'});const token=s.issueAccessKey('commons','late');
+ const actions=id=>[()=>setPin(s,token,'commons',{messageId:id,pinned:false}),()=>s.threadMutes.set(token,'commons',{threadId:id,muted:false}),()=>setReadHorizon(s,token,'commons',{lastReadMessageId:id}),()=>s.roomAttachments.listCurrent(token,'commons',{messageIds:[id]})];
+ for(const id of ['hidden-large','hidden-small','tie-before','missing'])for(const action of actions(id))assert.throws(action,e=>e.status===404);
+ assert.throws(()=>s.threadMutes.set(token,'commons',{threadId:'visible-reply',muted:true}),e=>e.status===404);
+ for(const id of ['tie-after','offset-after'])for(const action of actions(id))assert.doesNotThrow(action);
+});

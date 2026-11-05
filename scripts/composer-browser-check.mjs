@@ -49,6 +49,41 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
+    const openPrivate = async name => {
+      if (!await page.locator('#composer-options').evaluate(node => node.open)) await page.locator('#composer-options-toggle').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
+      await page.locator('#new-direct-search').fill(name);
+      await page.locator('#new-direct-people').getByRole('button', { name, exact: true }).click();
+    };
+    const openPublic = async () => {
+      if (viewport.width === 320 && await page.locator('#sidebar-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#sidebar-toggle').click();
+      await page.locator('#channel-list [data-channel="general"]').click();
+      if (viewport.width === 320 && await page.locator('#sidebar-toggle').getAttribute('aria-expanded') === 'true') await page.locator('#sidebar-toggle').click();
+    };
+
+
+    // Ordinary chat stays quiet; a real keyboard path reveals private delivery.
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    assert.equal(await page.locator("#new-direct-search").evaluate(el => el === document.activeElement), true);
+    await page.locator("#new-direct-search").press("Escape");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    assert.equal(await input.inputValue(), "Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    await page.locator("#new-direct-search").fill("Maya");
+    await page.locator("#new-direct-people").getByRole("button", { name: "Maya", exact: true }).click();
+    assert.equal(await page.locator("#audience-note").isVisible(), true);
+    assert.match(await page.locator("#audience-note").innerText(), /Private conversation/);
+    assert.equal(await input.getAttribute("placeholder"), "Private message to Maya");
+    assert.equal(await page.getByRole("textbox", { name: "Private message to Maya", exact: true }).count(), 1);
+    assert.equal(await input.inputValue(), "", "public draft never moves into a private conversation");
+    await page.screenshot({ path: `test-results/composer-private-audience-${label}.png` });
+    await openPublic();
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("");
 
     // A committed write must remain visible when subsequent history reads fail.
     const failRead = route => route.fulfill({ status: 503, contentType: "application/json",
@@ -191,29 +226,27 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
 
     // An explicit agent request stays discoverable without making ordinary Send a request.
     const recipient = page.locator("#message-to-select"), requestButton = page.locator("#request-reply");
-    await recipient.selectOption("nova", { force: true });
-    assert.equal(await requestButton.isVisible(), true);
-    assert.equal(await requestButton.evaluate(node => node.parentElement.id), "composer-toolbar");
+    await openPrivate("Nova");
+    assert.equal(await requestButton.evaluate(node => node.parentElement.className), "composer-options-panel");
     await input.fill("Ordinary chat to Nova");
     await page.locator('#message-form button[type="submit"]').click();
     await page.waitForFunction(() => document.querySelector("#message-input").value === "");
     const ordinary = store.room("commons").state.messages.find(message => message.body === "Ordinary chat to Nova");
     assert.equal(ordinary.toMemberId, "nova");
     assert.equal(Object.hasOwn(store.room("commons").state.replyRequests ?? {}, ordinary.id), false);
+    await page.locator('#composer-options-toggle').click();
     await requestButton.click();
     assert.equal(await page.locator("#request-mode-bar").isVisible(), true);
     assert.equal(await requestButton.isVisible(), false);
-    await page.locator("#request-exit").click();
-    await recipient.selectOption("", { force: true });
-    assert.equal(await requestButton.isVisible(), false);
-    assert.equal(await requestButton.evaluate(node => node.parentElement.className), "composer-options-panel");
-    await recipient.selectOption("owner", { force: true });
-    assert.equal(await requestButton.isVisible(), false);
-    await recipient.selectOption("nova", { force: true });
+    await recipient.selectOption("");
+    assert.equal(await recipient.evaluate(node => node.checkValidity()), false);
+    await recipient.selectOption("owner");
+    assert.equal(await recipient.evaluate(node => node.checkValidity()), false);
+    await recipient.selectOption("nova");
     send(T.MEMBER_ACCESS_CHANGED, { memberId: "nova", expectedMemberRevision: 0, permissions: [], active: false });
     await page.waitForFunction(() => document.querySelector('#message-to-select option[value="nova"]')?.disabled);
-    assert.equal(await requestButton.isVisible(), false);
-    await recipient.selectOption("", { force: true });
+    await page.locator("#request-exit").click();
+    await openPublic();
 
     // @-mention autocomplete is a real listbox: rows are options, the textarea points at the active one.
     // aria-expanded is not allowed on a textbox, so the open state is the list plus aria-activedescendant.
@@ -306,7 +339,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
     // A live membership change must never turn a private draft into a public post.
-    await page.locator("#message-to-select").selectOption("maya", { force: true });
+    await openPrivate("Maya");
     await input.fill("Private draft retained while Maya is unavailable");
     send(T.MEMBER_ACCESS_CHANGED, { memberId: "maya", expectedMemberRevision: 0, permissions: [], active: false });
     await page.waitForFunction(() => document.querySelector('#message-to-select option[value="maya"]')?.disabled);
@@ -329,12 +362,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await waitForSaved();
     const recoveredPrivate = store.room("commons").state.messages.filter(message => message.body === "Private draft retained while Maya is unavailable");
     assert.equal(recoveredPrivate.length, 1); assert.equal(recoveredPrivate[0].toMemberId, "maya");
-    await page.locator("#message-to-select").selectOption("", { force: true });
+    await openPublic();
 
     await input.fill("A separate room draft");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
-    await page.locator("#message-to-select").selectOption("maya", { force: true });
+
     await input.fill("Keep this thread reply");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 9, "backward"));
@@ -358,7 +391,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.equal(await status.textContent(), threadError, "returning to the failed draft restores its recovery message");
     assert.equal(await input.inputValue(), "Keep this thread reply");
-    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    assert.equal(await page.locator("#message-to-select").inputValue(), "");
     assert.match(await page.locator("#reply-context").textContent(), /short story/);
     page.once("dialog", dialog => dialog.accept());
     await page.reload();
@@ -371,7 +404,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await status.textContent(), "");
     assert.equal(commandIds.length, 2); assert.equal(commandIds[0], commandIds[1]);
     const messages = store.snapshot(owner, "commons").state.messages.filter(m => m.body === "Keep this thread reply");
-    assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, "maya");
+    assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, null);
     await page.unroute("**/api/rooms/commons/commands");
 
     // Explicit opt-in survives reload only after authenticating the same room.

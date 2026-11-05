@@ -1,0 +1,153 @@
+SOURCE-BACKED FINAL AUDIT CONTINUATION CONTRACT — FOR ROOT REVIEW
+Baseline runtime7a5471142 on751f786639; no new audit admission implemented.
+Existing exact independent audit stays required and no main partial-slice landing.
+
+What must remain true
+Every unit operates on the same completed45/full-v2 source seal and restore_id.
+Imported business/history/audit/credential rows remain SQL-frozen throughout.
+Only exact target-owned operational state may change; mismatch/stale calls leave
+pending and return no verified result. Cursor + scratch changes + revision +
+latest receipt are one synchronous transaction. New cold code resumes from durable
+state; old exact control guard suspension must refuse before DROP/progress. New
+format binding must include both native work format and audit scratch version.
+202 never means successful recovery. No operator-written verified:true document,
+matching row counts or content hash substitutes for independent audit checks.
+
+Actual existing phases (server/recovery.mjs)
+A.56–77: schema floor, writer fences, table-scoped quick_check, foreign_key_check,
+   allowed/required inventory, optional cutover audit and closed current schema.
+B.78–187: each room current independent census (current-room-repository565+),
+   rebuildProjection/_replayRoom (store4252+), archive-qualified compaction,
+   drift + deterministic channel/work-control defaults, checkpoint bounds,
+   complete contiguous valid event history, text/charter/reply/help histories.
+C.191–234: invitations, share links, reminders, agent connections, request runs,
+   inbox, email, delegation, channel updates, handoff journals; full reminder
+   receipt revision/fingerprint/ownership/work/member/account relationships.
+D.236–249: all application rows canonicalized, sorted, per-table hashes, report
+   dataSha256. This is reporting in addition to independent semantic validation.
+
+Why a per-room cursor is insufficient
+A single normalized room can contain unbounded message/proof/work/event history.
+readCurrentRoomForAudit builds all maps and canonical messages, recomputes derived
+privacy/summary/thread/history membership, and compares full counts. _replayRoom
+loads all retained event rows then replayEvents, retaining an in-memory projection.
+The text/charter/reply/help validators retain their own history/fact maps. Finishing
+one room in one call preserves the current full-target bottleneck. Nor can the
+existing singleton progress safely store an arbitrary reconstructed room object
+under its1MiB metadata bound. Chunking a giant JSON blob alone repeats prefix
+parse/serialize and recreates the blob cost we are removing.
+
+Minimum working-state contract (not a new task store/certificate system)
+One exact target-owned scratch relation, scoped only to restore_id, is necessary
+if all independent per-room reconstruction must survive process exit:
+  (restore_id, lane, room_id, domain, unit_key, part) PRIMARY KEY
+  bounded payload/part; no source-provided DDL, grants, executable instructions
+Lanes: actual census reconstruction; strict replay reconstruction; existing
+history-validator working facts; report serialization only if retaining v1.
+These are temporary reducer working values, not claims that imported data is valid.
+Use existing current-record/projection-codec representation/row limits and chunk
+framing rather than inventing another serialized projection. Scalar byte admission
+precedes every payload read. No all-key enumeration/COUNT/offset scans; keyset
+pages and monotonic counters. Store only fixed global/phase cursors in the control.
+Exact own guard family permits these rows only for the matching privileged restore
+transaction and pending restore ID; normal methods remain503. Skip imported source
+scratch/control rows; register fixed inventory in schema/export/fence rules; old
+same-floor code refuses changed exact control DDL. Scratch deletion is allowed only
+for this target-owned restore state, never imported immutable journals.
+
+Smallest implementation sequence preserving one verifier
+1. Extract resumable iteration state from existing current census, sharing its
+   exact proof/receipt/payload checks with synchronous auditRecovery. Persist
+   independently reconstructed maps and expected relational keys as scratch
+   units. Recompute workSummary/workPrivacy/workRequest/workCapacity from actual
+   work; count all source proof/record/message domains; verify retained/archive
+   IDs, complete canonical ancestry/participants, history floors/exclusions.
+   Do not replace those computations with matching sealed-source bags.
+2. Extract strict replay from _replayRoom using the SAME checkpoint/historical
+   replay policy and pure reducers. Seed a checkpoint through existing byte codec
+   where needed, then page contiguous event history. Reducers needing whole-map
+   operations require explicit keyed expansion stages, not a lazy JS Proxy that
+   secretly materializes Object.values/keys. Existing addressed current-command
+   contexts are reusable for supported types, but not a blanket substitute for
+   retained historical event types. Finish only after independent replay/current
+   comparisons plus existing deterministic backfill allowances. Preserve the full
+   drift summary without values. No parallel simplified reducer/legacy rewrite.
+3. Refactor existing history/subsystem validators into init/feed/finish or keyed
+   row operations sharing exact leaf validation. Examples: charter owner/member
+   evolution; native receipt/event evidence and parent chain; help relevance and
+   supporting facts; reply consent/checkpoint/archive relationships; invitation
+   journal totals and private-reminder contiguous revisions/fingerprints. Persist
+   only working facts; exact final relational completeness is mandatory. Expose
+   audit-time ensure/seed writes blocked by freeze; do not grant broad DML bypass.
+4. Persist SQLite table-check cursor and completion for each fixed imported table.
+   Use the SAME required engine checks against frozen target, not source. A
+   per-table quick_check and per-table foreign_key_check avoid repeated prior
+   tables and whole violation arrays. However each engine call can itself scan
+   an entire B-tree/table. SQLite provides no supported continuation of internal
+   quick_check state. Report this honestly as an atomic engine phase with measured
+   limits/retry; no strict128-row/CPU guarantee. One legal payload atom may also
+   exceed a nominal byte quantum, as already disclosed for coverage.
+5. Finish report digest and exact current guards/census completion; only then
+   final200 clears pending. Every phase is durable/retryable, but only phases
+   whose inner work is paged may be called bounded. Do not claim engine internals
+   have a strict CPU bound without a changed platform contract.
+
+Report digest decision (source: recovery canonical() +236–249)
+Current v1 sorts complete canonical row strings using JS UTF16 ordering and hashes
+that array. BLOBs become objects enumerating every byte as keys. Simply hashing
+PK order changes v1 semantics. A scratch SQLite BINARY string sort also differs
+from JS for some Unicode, and a legal BLOB can expand past a durable SQLite row
+limit when serialized that way. Exact v1 needs a chunked external merge sort and
+portable hash continuation, adding avoidable report machinery. Prefer explicit
+contractVersion2 for typed-cell, code-owned stable-PK-order streaming digests,
+with a documented old/new comparison boundary. This changes reporting, not any
+semantic audit predicate. It needs root approval and consumer/test review; not an
+unannounced v1 hash change. Portable SHA state already exists in replay-sha256;
+reuse it, with exact input framing and persisted cursor/state, not process crypto
+objects. NULL/BLOB/Unicode and all PK layouts need admitted total ordering.
+
+Existing offline CLI alternative — useful, not automatic remote authority
+scripts/restore-room-backup.mjs already reassembles KV parts/whole SHA, or reads a
+local file once; replayNdjson strict validates complete content/trailer and full
+audit in private staging, then atomically no-replace promotes a NEW SQLite file.
+server/backup.mjs backupSnapshotDigest rejects nonempty WAL and verifies file stat
+identity before/after streaming SHA. backupRoom independently audits the captured
+standalone snapshot. Neither creates an authenticated Worker-consumable verifier
+receipt. CLI stdout verified:true is not cryptographic proof of trusted execution.
+Local --from output does not itself bind an input SHA in its summary.
+
+Finite executable evidence: tests/recovery-offline-equivalence-contract.test.mjs
+passes2controls. Actual CLI strict accepts immutable complete normalized45 source,
+promotes new checked file, cold independent audit passes, refuses existing target.
+A modified current metadata record with recomputed payload hash/size and COMPLETE
+content trailer still fails independent audit and is not promoted. Thus complete
+content framing/equality alone cannot imply logical validity. Log adjacent.
+
+Mathematically sufficient equivalence requires BOTH:
+- authenticated provenance that the exact immutable input/schema/runtime contract
+  really passed independent validator P, not a caller attestation; AND
+- exact typed multiset/keys equality for EVERY logical table/relationship relevant
+  to P, with equivalent schema/constraints/collations/format. Target-owned controls,
+  runtime permits and scratch are intentionally different and need separate exact
+  validation. Existing skipped/retired or sanitized fields must be accounted for;
+  equal normalized rows are not byte-for-byte equality of source SQLite pages.
+Even that transfers logical P only. Source quick_check says nothing about physical
+corruption/index integrity of newly constructed target B-trees. The Worker must
+still run its own engine/constraint checks. Content bag sum/xor is a cryptographic
+multiset commitment with its own assumptions, not literal byte equality/proof of
+trusted external execution. Backup age does not prove later revocations absent.
+
+Therefore an untrusted offline JSON receipt cannot safely remove target fullaudit.
+A new trusted-verifier/signing/attestation authority would be a product/security
+contract change; none is implemented or requested here. The existing CLI is a
+valid complete recovery path for a Node/self-hosted target and a useful independent
+qualification tool. For Durable Objects it can aid source diagnosis and work
+planning; it does not justify verified200 without the required target predicates.
+
+Recommended honest deployable direction
+Reuse existing operator continuation + target freeze; implement durable independent
+census/replay/subsystem stages with one fixed scratch relation, version report
+serialization explicitly, and retain measured atomic SQLite table checks as such.
+This is restartable recovery with bounded application units and documented engine
+atoms, rather than an impossible strict per-row guarantee over SQLite internals.
+No new service, signer, source certificate or runtime task/authority system.

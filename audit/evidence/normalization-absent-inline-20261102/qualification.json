@@ -1,0 +1,67 @@
+{
+  "base": "1f9dfb90f6d0391873f62e4f579d746929edac4f",
+  "rootOperator": "6b0546e2671dfaa0ab15b126d6e9b12f75d72b03",
+  "helperSource": "093ff38240a3c2bf124087c7c942521fc5b88745",
+  "node": {
+    "pass": 51,
+    "fail": 0
+  },
+  "native": {
+    "pass": 5,
+    "fail": 0,
+    "includes": "NULL-only proof adoption; channel copy; both auth modes; 1k vs 50k event write cost"
+  },
+  "preflight": {
+    "pass": 3,
+    "fail": 0
+  },
+  "lintErrors": 0,
+  "samples": [
+    {
+      "path": "/post?surface=small&id=two",
+      "status": 200,
+      "cost": {
+        "observedWorkerWallMs": 10,
+        "statements": 114,
+        "rowsRead": 1222,
+        "rowsWritten": 44,
+        "materializedBytes": 66567,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?id=two",
+      "status": 200,
+      "cost": {
+        "observedWorkerWallMs": 3,
+        "statements": 114,
+        "rowsRead": 1222,
+        "rowsWritten": 44,
+        "materializedBytes": 66269,
+        "unknown": 0
+      }
+    }
+  ],
+  "logs": [
+    {
+      "name": "normalization-absent-composed-node.log",
+      "sha256": "49a1ddd4e2b156f6b93325ee4538e7e2898199fdb7fafd16c00cc69db5645ace"
+    },
+    {
+      "name": "normalization-absent-composed-native.log",
+      "sha256": "573b59d1e69c901f887293cc23452c3cb20f67b52351154d382e9aa354924f71"
+    },
+    {
+      "name": "normalization-absent-composed-preflight.log",
+      "sha256": "a713b6e8a35ed980d705e8ffc898ffb1a8b4d109b29523063de20f7d65a89e80"
+    },
+    {
+      "name": "normalization-absent-composed-lint.log",
+      "sha256": "0a63583c5bc8352bf49ebcc0db79175f88c8eb33e161806d0f23c0d8c8066c9b"
+    }
+  ],
+  "independentReview": "bounded_replay_resume: no release-blocking sourceproof/authority issue; read-only review",
+  "liveActivation": "NOT attempted on this source yet",
+  "historyProvenance": "unknown",
+  "certified": false
+}

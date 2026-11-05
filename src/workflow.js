@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { workProgress } from "./work-packet.js";
 import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
 
@@ -42,7 +43,9 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
     && typeof receipt.duplicate === "boolean" && validId(entry?.id)
     && entry.type === T.WORK_PROPOSED && command?.type === T.WORK_PROPOSED
     && entry.roomId === roomId && entry.actorId === memberId
-    && data && Object.keys(data).length === Object.keys(command.data).length
+    // The server may add writeGrantPolicyVersion at admission; it is never in the command.
+    && data && Object.keys(data).filter(key => key !== "writeGrantPolicyVersion" || Object.hasOwn(command.data, key)).length === Object.keys(command.data).length
+    && (data.writeGrantPolicyVersion === undefined || Object.hasOwn(command.data, "writeGrantPolicyVersion") || data.writeGrantPolicyVersion === 1)
     && Object.keys(command.data).every(key => Object.hasOwn(data, key) && data[key] === command.data[key]);
 }
 
@@ -186,7 +189,7 @@ export function workActions(item, member, now = Date.now()) {
   const actions = [], own = item.accountableMemberId === member.id;
   const can = permission => member.permissions.includes(permission);
   const claim = activeClaim(item, now) && item.claim.holderId === member.id;
-  const writable = item.mode === "read" || (claim && can("write_external"));
+  const writable = item.mode === "read" || (claim && (can("write_external") || (Boolean(item.externalWriteGrantBy) && item.externalWriteGrantFor === member.id)));
   if (own && item.state === S.PROPOSED && can("accept_work")) actions.push(["accept", "Accept"]);
   if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && mayWriteBoardClaims(member)) actions.push(["claim", "Record write scope"]);
   if (own && item.state === S.ACCEPTED && can("accept_work") && writable) actions.push(["start", "Start"]);
@@ -236,13 +239,21 @@ export function presentedWorkActions(item, member, now = Date.now()) {
 export function renderWorkActions(item, member, { now = Date.now(), busy = false, esc = value => String(value ?? ""), workId = item?.id } = {}) {
   const presented = presentedWorkActions(item, member, now);
   const button = (action, label, prominence) => `<button type="button" class="button ${prominence}" data-action="${esc(action)}" data-work-id="${esc(workId)}" data-focus-key="work-action:${esc(workId)}:${esc(action)}"${busy ? " disabled" : ""}>${esc(label)}</button>`;
-  const primary = presented.primary ? button(presented.primary.action, presented.primary.label, "primary") : "";
-  const moreButtons = presented.more.map(([action, label]) => button(action, label, "secondary")).join("");
+  // Render human result entry with the card itself: selection can mount a card
+  // without another room-state sync. Keep authorization in workActions above.
+  const human = member?.kind === "human";
+  const primary = presented.primary ? button(presented.primary.action,
+    human && presented.primary.action === "complete" ? "Share result" : presented.primary.label, "primary") : "";
+  const result = human && presented.more.some(([action]) => action === "complete")
+    ? button("complete", "Share result", "secondary") : "";
+  const moreButtons = presented.more.filter(([action]) => !human || action !== "complete")
+    .map(([action, label]) => button(action, label, "secondary")).join("");
   const more = moreButtons
     ? `<details class="work-more"><summary data-focus-key="work-more:${esc(workId)}">More</summary><div class="work-more-actions">${moreButtons}</div></details>`
     : "";
-  const limit = `<p class="work-begin-limit">Records the Room action. Does not invoke Begin or start a host.</p>`;
-  return primary || more ? limit + primary + more : "";
+  const limit = member?.kind === "agent" && ["accept", "start"].includes(presented.primary?.action)
+    ? `<p class="work-begin-limit">${esc(uiText("work.actions.agentRunHint"))}</p>` : "";
+  return primary || result || more ? limit + primary + result + more : "";
 }
 
 // Round-2 #117: done chip. Marks terminally finished work at a glance — a

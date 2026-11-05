@@ -38,7 +38,13 @@
 //     twice — 'settled' returns its receipt, 'reserved' returns the live
 //     authorization (crash recovery within the lease), only 'voided' stays
 //     consumed; a re-presented nonce whose reservation was reaped past
-//     its lease must retry with a fresh nonce (409 duplicate_nonce)
+//     its lease must retry with a fresh nonce (409 duplicate_nonce).
+//     A replay is only honoured when it re-presents the SAME tool and
+//     price it first authorized with: a nonce re-presented with a
+//     different toolName or priceCents is refused 409 duplicate_nonce,
+//     never silently served the stored authorization (T2-L10a-C1 — the
+//     caller would otherwise execute its new tool while the stored
+//     tool's charge settles)
 //   - reserves carry a lease: expires_at = created_at + RESERVE_LEASE_MS.
 //     A process crash between reserve and settle/void can no longer
 //     permanently consume grant cap or room allowance —
@@ -68,8 +74,8 @@ import { randomUUID } from "node:crypto";
 import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "./grants.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
-import { spendAllowanceReport } from "./spend-allowance.mjs";
-import { ownMember, spendPricingEnabled } from "../src/events.js";
+import { spendAuthorityRoom, spendAllowanceForRoom } from "./spend-allowance.mjs";
+import { ownMember, spendPricingEnabled, spendAllowance } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "cents";
@@ -425,7 +431,9 @@ function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra =
 // - replay: a re-presented nonce never creates a second charge. 'settled'
 //   returns its receipt (exactly-once), 'reserved' returns the live
 //   authorization (crash recovery: the caller may still settle or void
-//   it); only 'voided' stays consumed (409).
+//   it); only 'voided' stays consumed (409). A replay whose tool or price
+//   differs from the stored authorization is refused 409, not silently
+//   substituted with the stored tool/price (T2-L10a-C1).
 export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonce,
   roomHeadroomCents = null, roomAllowanceCents = null, roomCommittedCents = null, nowMs = Date.now() } = {}) {
   if (!db || typeof roomId !== "string") refuse(422, "invalid_spend_grant", "roomId must be a string");
@@ -464,6 +472,15 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     const existing = db.prepare(`SELECT status, price_cents, tool_name FROM spend_authorizations
       WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce);
     if (existing) {
+      // T2-L10a-C1: a replay is the SAME call retried, so it must carry
+      // the stored tool and price. A nonce re-presented with different
+      // arguments is not a retry of this authorization — refuse it
+      // (handled outside the transaction, like the voided refusal below)
+      // instead of silently returning a handle for the stored tool/price
+      // while the caller goes on to execute its newly requested tool.
+      if ((existing.status === "settled" || existing.status === "reserved")
+        && (existing.tool_name !== toolName || Number(existing.price_cents) !== priceCents))
+        return { replay: "mismatch", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
       if (existing.status === "settled")
         return { replay: "settled", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
       if (existing.status === "reserved")
@@ -552,6 +569,13 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
       tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
     });
+  }
+  if (outcome.replay === "mismatch") {
+    refuse(409, "duplicate_nonce",
+      `This nonce already authorized ${outcome.toolName} at ${outcome.priceCents} cents; a replay must re-present the same tool and price, and a different call needs a fresh nonce`, {
+        tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
+        storedTool: outcome.toolName, storedPriceCents: outcome.priceCents,
+      });
   }
 
   // The settle transition lives in settleAuthorization below — one
@@ -712,7 +736,7 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const auth = store.authenticate(secret, roomId);
   const member = auth.member;
   if (!member || member.kind !== "agent") return null; // humans are never charged
-  const room = store.room(roomId);
+  const room = spendAuthorityRoom(store,roomId,[member.id]);
   if (member.id === room.state.room.ownerId) return null; // ownership implies full authority
   // Kill switch: disabled pricing un-prices every tool at the trust boundary,
   // before any grant is consulted — the tool forwards free, no rows written.
@@ -726,14 +750,19 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   // charge. Reaping here commits independently (the reaper transacts on
   // its own) and the snapshot then prices against the reaped state.
   reapExpiredSpendAuthorizations(store.db, { roomId, nowMs });
-  const report = spendAllowanceReport(room.state, nowMs);
+
   // The check+reserve MUST run inside the store's platform transaction.
   // authorizeSpend's transact() now delegates to the store's platform
   // transaction itself (it used to issue raw BEGIN IMMEDIATE, which the
   // Durable Object wrapper cannot execute: qa4-fix-spend-do-txn-jill,
   // live-verified 2026-10-05). Wrapping here keeps the projection read in
   // the same transaction as the reservation.
-  return store.transaction(() => authorizeSpend(store.db, {
+  return store.transaction(() => {
+    // Capture the complete session ledger in the SAME transaction as reserve.
+    const current=spendAuthorityRoom(store,roomId,[member.id]);
+    if(member.id===current.state.room.ownerId||priceForTool(name,current.state)===null)return null;
+    const report=spendAllowance(current.state)?spendAllowanceForRoom(store,roomId,current,nowMs):{allowance:null,committedCents:0};
+    return authorizeSpend(store.db, {
     roomId,
     agentId: member.id,
     toolName: name,
@@ -748,7 +777,8 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
       ? report.committedCents + settledToolChargesCents(store.db, roomId, Date.parse(report.period.since))
       : report.committedCents,
     nowMs,
-  }));
+    });
+  });
 }
 
 // #3269: the ONE charge-then-forward path every transport runs a priced
@@ -794,7 +824,7 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
   const { agentId, capCents, perTxCapCents, allowlist = null, singleUse = false, expiresAt = null } = request;
   return store.transaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id,agentId]);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
     if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
@@ -814,7 +844,7 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
       grantedBy: auth.member.id, capCents, perTxCapCents, allowlist,
       singleUse: singleUse === true, expiresAt, nowMs,
     });
-    return { roomId, agentId, spend: summary, evaluatedThrough: store.room(roomId).sequence };
+    return { roomId, agentId, spend: summary, evaluatedThrough: store.roomAuthority(roomId,{memberId:auth.member.id}).sequence };
   });
 }
 
@@ -823,12 +853,12 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
 export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSessionBinding = null) {
   return store.transaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id,agentId]);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
     if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     const revoked = revokeSpendGrant(store.db, roomId, agentId, { nowMs });
-    return { roomId, agentId, revoked, evaluatedThrough: store.room(roomId).sequence };
+    return { roomId, agentId, revoked, evaluatedThrough: store.roomAuthority(roomId,{memberId:auth.member.id}).sequence };
   });
 }
 
@@ -837,7 +867,7 @@ export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSes
 export function readSpendGrantRoute(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id]);
     const nowMs = store.now();
     const memberId = auth.member.id;
     const guest = auth.member.kind === "agent" && isGuestAgentMemberId(memberId);

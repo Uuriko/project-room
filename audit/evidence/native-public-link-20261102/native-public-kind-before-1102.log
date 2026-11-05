@@ -1,0 +1,28 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":29330144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ kindless historical public projection refuses admission atomically until explicit republish (60.762292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 169.018458
+
+✖ failing tests:
+
+test at tests/native-public-kind.test.mjs:3:1
+✖ kindless historical public projection refuses admission atomically until explicit republish (60.762292ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-native-public-link-1102/tests/native-public-kind.test.mjs:9:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

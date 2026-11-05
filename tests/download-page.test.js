@@ -42,7 +42,9 @@ test("GET /download returns honest platform status and the runtime latest link",
   assert.ok(html.includes(RUNTIME_RELEASE_URL));
   assert.equal(html.includes("official current download"), false);
   assert.equal(/[0-9a-f]{40}/.test(html), false, "an unstamped page must not invent a SHA");
-  assert.equal(html.includes("<script"), false);
+  // Only script: the CSP-hashed copy button (connect path, 2026-11-04).
+  assert.equal((html.match(/<script/g) ?? []).length, 1);
+  assert.match(html, /<script>document\.querySelectorAll\('\[data-copy\]'\)/);
   const head = await fetch(`${origin}/download`, { method: "HEAD" });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
@@ -59,4 +61,9 @@ test("setup skill and the short agent index state that there is no public Mac ap
   assert.ok(Buffer.byteLength(packet) < 5120, `llms.txt is ${Buffer.byteLength(packet)} bytes`);
   assert.ok(packet.includes(RUNTIME_RELEASE_URL));
   assert.equal(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, PACKAGE_VERSION);
+});
+
+test("download page wraps the 40-char deployed SHA at 390 px instead of overflowing", () => {
+  const html = downloadPageHtml();
+  assert.match(html, /main\{[^}]*overflow-wrap:anywhere/);
 });

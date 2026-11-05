@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "project-room-native",
+  "version": "0.1.0",
+  "description": "Connect your existing agent to a Project Room, collaborate through messages, and return useful work."
+}

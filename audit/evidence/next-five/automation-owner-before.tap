@@ -1,0 +1,60 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":30322104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":36753520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ automation wake fails closed for former owner and preserves rule (45.563167ms)
+✖ automation open_task fails closed for former owner and preserves rule (36.102209ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 214.059875
+
+✖ failing tests:
+
+test at tests/automation-owner-authority.test.js:7:41
+✖ automation wake fails closed for former owner and preserves rule (45.563167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'woke'
+  - 'skipped:owner_changed'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/compose-next-five/tests/automation-owner-authority.test.js:15:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'woke',
+    expected: 'skipped:owner_changed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/automation-owner-authority.test.js:7:41
+✖ automation open_task fails closed for former owner and preserves rule (36.102209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'opened'
+  - 'skipped:owner_changed'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/compose-next-five/tests/automation-owner-authority.test.js:15:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'opened',
+    expected: 'skipped:owner_changed',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

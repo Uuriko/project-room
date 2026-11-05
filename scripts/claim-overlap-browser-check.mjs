@@ -4,12 +4,13 @@
 // Real browser + local HTTP service; disposable fixture data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 test("a claim on already-claimed paths shows who else holds them", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -35,12 +36,21 @@ test("a claim on already-claimed paths shows who else holds them", { timeout: 60
   await page.locator("#main").waitFor({ state: "visible" });
 
   const first = page.locator('[data-work-record-id="w-first"]'), second = page.locator('[data-work-record-id="w-second"]');
+  // Work cards mount only after selecting their search or conversation link.
+  await openSearch(page);
+  await page.locator('#message-search').fill('Start a room');
+  await page.locator('#search-list [data-open-work="w-second"]').click();
   await second.waitFor();
   const openDetails = async card => { if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click(); };
   await openDetails(second);
   assert.match(await second.locator(".claim > summary").innerText(), /Overlaps 1/);
   await second.locator(".claim > summary").click();
   assert.match(await second.locator(".claim-overlap-list").innerText(), /Fix login redirect.*src\/app\.js/s);
+  mkdirSync('test-results', { recursive: true });
+  await second.screenshot({ path: 'test-results/claim-overlap-card.png' });
+  await page.locator('#message-search').fill('Fix login redirect');
+  await page.locator('#search-list [data-open-work="w-first"]').click();
+  await first.waitFor();
   await openDetails(first);
   assert.doesNotMatch(await first.locator(".claim > summary").innerText(), /Overlaps/, "the earlier claim is not rewritten");
   assert.deepEqual(errors, []);

@@ -25,6 +25,9 @@ export const CORE_REST_TWINS = Object.freeze({
   room_list_requests: ["GET /api/rooms/{roomId}/reply-requests"],
   room_read_request: ["GET /api/rooms/{roomId}/reply-context"],
   room_check_access: ["GET /api/agent-rooms"],
+  room_list_work: ["GET /api/rooms/{roomId}/work-claims"],
+  room_claim: ["POST /api/rooms/{roomId}/work-claims/{claimId}/claim"],
+  room_read_work: ["GET /api/rooms/{roomId}/work-claims/{claimId}"],
   room_create: ["POST /api/agent-rooms"],
   room_join: ["POST /api/share-links/join-agent", "POST /api/agent-invites/redeem", "POST /api/pair"],
   room_put_file: ["POST /api/rooms/{roomId}/files"],
@@ -32,7 +35,10 @@ export const CORE_REST_TWINS = Object.freeze({
   add_land_item: ["POST /api/rooms/{roomId}/add_land_item"],
   list_land_queue: ["GET /api/rooms/{roomId}/list_land_queue"],
   wake_pause: ["POST /api/rooms/{roomId}/agent-pause"],
-  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"]
+  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"],
+  // Flag ROOM_BOARD_CLAIM_TOOLS: listed in core only when on.
+  ...(/^(1|true|on)$/i.test(String(process.env.ROOM_BOARD_CLAIM_TOOLS ?? "").trim()) ? {
+    room_work_claim: ["POST /api/rooms/{roomId}/work-claims/{claimId}/claim", "POST /api/rooms/{roomId}/work-claims/{claimId}/update"] } : {})
 });
 
 // Static join documents, served as plain files rather than API routes.

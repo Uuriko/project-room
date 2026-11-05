@@ -1,4 +1,5 @@
-import { humanErrorMessage } from "./error-copy.js";
+import { uiText } from "./strings.js";
+import { humanErrorMessage, isDeadLinkCode } from "./error-copy.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
@@ -174,7 +175,9 @@ export class AccountClient {
       // Ownership ended (signed out, revoked, binding rotated): retire the
       // view instead of throwing. Uncertain failures (5xx, offline) keep
       // the session so the caller can retry.
-      if (error?.status === 401 || error?.status === 403 || error?.status === 409
+      // A storage capacity refusal does not establish an identity change.
+      // Keep the session, as for other uncertain failures, and let the caller retry.
+      if (error?.status === 401 || error?.status === 403 || (error?.status === 409 && error?.code !== "pilot_limit")
         || ["unauthenticated", "access_denied", "session_binding_changed"].includes(error?.code)) {
         this.invalidate(generation, session);
         return false;
@@ -184,6 +187,12 @@ export class AccountClient {
     if (!this.owns(generation, session)) return superseded();
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
+  }
+  createRoom(data, { session = this.currentSession("creating a room", { authenticated: true }) } = {}) {
+    return this.request("/api/account-rooms", { method: "POST", data, session });
+  }
+  createRoomFromTemplate(data, { session = this.currentSession("creating a room", { authenticated: true }) } = {}) {
+    return this.request("/api/account-rooms/from-template", { method: "POST", data, session });
   }
   async rooms(after = null) {
     const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
@@ -258,6 +267,28 @@ export class AccountClient {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
   }
+  submitAccountAccessRequest({ roomId, displayName, requestedPermissions, requestId, note, referredBy }) {
+    return this.accountAccessRequestOperation("/api/account/access-requests", {
+      method: "POST", data: { roomId, displayName, requestedPermissions, requestId, note, referredBy },
+    });
+  }
+  accountAccessRequest(requestId) {
+    return this.accountAccessRequestOperation("/api/account/access-requests/" + encodeURIComponent(requestId));
+  }
+  async accountAccessRequestOperation(path, options = {}) {
+    const session = this.currentSession(uiText("join.request.operation"), { authenticated: true });
+    const generation = this.generation;
+    try {
+      const value = await this.request(path, { ...options, session });
+      return this.owns(generation, session) ? value : null;
+    } catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) {
+        this.invalidate(generation, session);
+      }
+      throw error;
+    }
+  }
   // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
   // dead invitation mints a self-serve identity (an identity alone grants
   // nothing) and files an access request the room owner can approve or
@@ -303,7 +334,7 @@ export class AccountClient {
     try {
       preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
     } catch (error) {
-      if (error.code !== "link_unavailable") throw error;
+      if (!isDeadLinkCode(error.code)) throw error;
       const session = this.session ?? await this.restore();
       if (!session?.authenticated) throw error;
       const generation = this.generation;

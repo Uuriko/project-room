@@ -1,0 +1,42 @@
+{
+  "runtimeCommit": "18998fb79",
+  "redCommit": "0621505ce",
+  "auditProtocol": 11,
+  "newProtocolOrFormat": false,
+  "handlers": [
+    "work.blocked",
+    "work.blocker_resolved",
+    "work.superseded",
+    "verification.recorded",
+    "owner.decision_recorded",
+    "session.started",
+    "session.status_changed",
+    "session.stop_requested",
+    "session.stopped"
+  ],
+  "nodeTests": {
+    "pass": 12,
+    "fail": 0,
+    "negativeControls": "Original and scoped reducer return same authority/CAS/exact-version/session errors, no partial writes"
+  },
+  "native": {
+    "pass": 1,
+    "sourceEvents": 25,
+    "workItems": 2,
+    "steps": 55,
+    "elapsedMs": 6526.564,
+    "clockOnly": true,
+    "coldResume": true,
+    "independentScratchFullWorkValueMatchesOriginal": true,
+    "historyVerificationAndUsagePreserved": true,
+    "readiness503UntilFinalOracle": true,
+    "deferred": 0
+  },
+  "requiredNewRuntimePackageFiles": [],
+  "limits": [
+    "Full original audit remains required",
+    "Whole recovery is not bounded",
+    "No source ingestion/privacy/format changes",
+    "Global redaction/merge/evidence and other unsupported plans remain deferred"
+  ]
+}

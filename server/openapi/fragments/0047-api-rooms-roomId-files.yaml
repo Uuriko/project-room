@@ -1,14 +1,37 @@
   /api/rooms/{roomId}/files:
     get:
-      summary: List staged and committed room files
+      summary: List committed files for selected visible messages
       description: |
-        Members list room files staged or committed through the same
-        room_attachments store the MCP file tools use. Bytes are not included.
+        Normalized rooms require 1–8 messageId query values. Returns committed
+        metadata for those messages only, never a complete room inventory or
+        staged-file list. Keep the uploader-only staging receipt/id for get or
+        commit. Follow page.nextCursor with the same messageId selection until
+        page.hasMore is false, even when files is empty. A changed selection,
+        credential, room revision or server restart requires a fresh read.
+        Unknown, private and pre-join message selections are not found. Legacy
+        rooms retain their historical unselected staged/committed list.
+        No bytes are returned. Hosted room_list_files uses messageIds (array)
+        and cursor for the same service and scope.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: messageId
+          in: query
+          description: Required for normalized rooms; repeat for 1–8 visible messages.
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 8
+            uniqueItems: true
+            items: {type: string, minLength: 1, maxLength: 128}
+        - name: cursor
+          in: query
+          description: Opaque page.nextCursor from the exact same selection.
+          schema: {type: string, minLength: 1, maxLength: 4096}
       responses:
         '200':
-          description: Room file list
+          description: Selected file page (normalized v2) or historical legacy list
           content:
             application/json:
               schema:
@@ -16,8 +39,17 @@
                 properties:
                   roomId: { type: string }
                   files: { type: array, items: { type: object } }
+                  contractVersion: {type: integer, enum: [2]}
+                  coverage: {type: object, description: Selected messages only; complete refers to this source window.}
+                  page: {type: object, description: Follow nextCursor while hasMore is true.}
         '401':
           description: No room credential
+        '404':
+          description: Message selection is unavailable or not visible to this viewer.
+        '409':
+          description: Continuation or metadata requires reconciliation; restart the selection.
+        '422':
+          description: Select one to eight distinct visible message ids.
     post:
       summary: Stage one room file
       description: |

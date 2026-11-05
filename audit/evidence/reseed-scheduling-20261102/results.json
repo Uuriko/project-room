@@ -1,0 +1,62 @@
+{
+  "runtimePin": "c9d799bad5d0f9935df37fc074e64d8e6734d2b0",
+  "redCommit": "2375ba391",
+  "base": "89816a27e",
+  "causalRed": {
+    "passed": 0,
+    "failed": 1
+  },
+  "node": {
+    "passed": 13,
+    "failed": 0
+  },
+  "native": {
+    "passed": 1,
+    "failed": 0,
+    "arms": 12,
+    "sizes": [
+      0,
+      1000,
+      5000
+    ],
+    "missingAndSubmittedAnchors": true
+  },
+  "actualNodeRunner": {
+    "cadenceMs": 60000,
+    "initialNoopRuns": 1,
+    "repeatAtSameTimeRuns": 0,
+    "at59999msRuns": 0,
+    "at60000msRuns": 1
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 1,
+    "preexistingRawMemberLookup": true
+  },
+  "globalZeroRulePreserved": true,
+  "scheduledScanBounded": false,
+  "newSchema": false,
+  "liveOperations": false,
+  "logs": [
+    {
+      "name": "reseed-scheduling-red",
+      "bytes": 2182,
+      "sha256": "10a5815e49a10cbb37651a4b70adba597412c94902bfd33f67fd6b3e4c0938e1"
+    },
+    {
+      "name": "reseed-scheduling-final-node",
+      "bytes": 8635,
+      "sha256": "49dcd22637e78ae731bf13ee8d0d88b37d56986102b1191dc218025bad01f874"
+    },
+    {
+      "name": "reseed-scheduling-native",
+      "bytes": 11231,
+      "sha256": "bfa2df22ae0d001ffa6d0ba7c9ead5b8de8022727403adab4d3fcf3f44d3cb95"
+    },
+    {
+      "name": "reseed-scheduling-final-lint",
+      "bytes": 327,
+      "sha256": "8006fabb38dc1b52a0fc8164d561532e5bb5624b0184fdc727cda609a3edb20f"
+    }
+  ]
+}

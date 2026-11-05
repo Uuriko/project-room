@@ -1,3 +1,8 @@
+import { digestMessagePage } from "../src/message-digest.js";
+import { experimentArm } from "./experiments.mjs";
+import { filterMessagePage } from "../src/message-query.js";
+import {redactSelectedEventPage} from './current-room-events.mjs';
+import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -16,16 +21,15 @@ import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
+import { bountyNewWorkEnabled, BOUNTY_NEW_WORK_TOOLS, BOUNTIES_PAUSED_CODE, BOUNTIES_PAUSED_MESSAGE } from "./bounty-flag.mjs";
+import { publishBountyEvent, mayWorkOnBounties, WORK_CLAIMS_GATE_MESSAGE } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
-import { withProjectMapOverlap } from "./project-map-store.mjs";
+import { linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
+import { readBoard } from "./board-read.mjs";
 
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
-import { redactEventPage } from "./redact-read.mjs";
-import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
@@ -34,7 +38,7 @@ import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trus
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workUsesExpectedRevision } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevision } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
-import { markIfOther, stampAssistantResult, stampBoard, withContentTrust } from "./content-trust.mjs";
+import { markIfOther, stampAssistantResult, withContentTrust } from "./content-trust.mjs";
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map"]);
@@ -91,12 +95,13 @@ function stampRoom(value, roomId) {
 async function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const latest = args.latest ?? false;
+  // EXP-1 cold_read_latest (ROOM_EXPERIMENTS, default off; qa- rooms only by default).
+  const coldRead = args.after === undefined && args.latest === undefined;
+  const latest = args.latest ?? (coldRead && experimentArm("cold_read_latest", memberId, { roomId }) === "latest");
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
-  const currentMessages = store.redactionMessages(roomId);
   const fetchPage = (cursor, pageLimit) =>
-    redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
+    redactSelectedEventPage(store, roomId, store.eventsAfter(secret, roomId, cursor, pageLimit));
   const mapMessage = ({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
     body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
@@ -108,15 +113,41 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {
     after, limit, latest,
     // Backward walk needs the log head; the bound is exclusive, so +1.
-    end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
+    end: latest ? store.headSequence(roomId) + 1 : null,
     mapMessage,
   });
   const mapped = messages.map(message => markIfOther(message, memberId, message.from));
   const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
-  return withContentTrust({
+  // History hint: a cold read (no after, not latest) starts at the oldest
+  // event. Point at the caller's existing catch-up marker so a joining or
+  // woken agent can skip history it already handled. Uses the saved
+  // marker point lookup; no counts, no new summary, and reading does not acknowledge.
+  const catchUp = args.after === undefined && !latest ? catchUpHint(store, roomId, memberId) : null;
+  const page = withContentTrust({
     roomId, messages: mapped,
     next: cursor.next, hasMore: cursor.hasMore,
+    ...(catchUp ? { catchUp } : {}),
   });
+  // Search filters the authorized page only; it never widens what is read.
+  const searched = args.query === undefined ? page : filterMessagePage(page, args.query);
+  return args.view === "digest" ? digestMessagePage(searched, memberId) : searched;
+}
+
+// Bounded: one cursors point lookup plus the protected history floor. No
+// event-suffix scan (catchUpCursor skips the caller's own-authored run, which
+// walks history); the follow-up read simply includes those own messages.
+export function catchUpHint(store, roomId, memberId) {
+  let after;
+  try {
+    const stored = store.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    const floor = store.historyFloor(roomId, memberId);
+    after = Math.max(stored, floor ? floor.sequence - 1 : 0);
+  } catch { return null; }
+  if (!Number.isSafeInteger(after) || after <= 0) return null;
+  return {
+    after, source: "saved_catch_up_marker", acknowledges: false,
+    nextRead: { tool: "room_read_messages", arguments: { roomId, after } },
+  };
 }
 
 function replyRead(store, secret, roomId, name, args) {
@@ -234,8 +265,15 @@ export async function callHostedStdioTool(store, secret, name, args) {
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
-async function currentWorkRevision(store, secret, roomId, name, args, usesRevision) {
+async function currentWorkRevision(store, secret, roomId, name, args, usesRevision, identity, command) {
   if (!usesRevision(name) || args?.expectedRevision !== undefined || !validId(args?.workItemId)) return undefined;
+  // A retry must reconstruct the original command, not fill a newer revision.
+  // This lookup only supplies the omitted field: normal command authentication,
+  // scope checks and the complete input fingerprint still govern the replay.
+  const prior = store.db.prepare(`SELECT e.body FROM commands c JOIN events e
+    ON e.room_id=c.room_id AND e.sequence=c.sequence
+    WHERE c.room_id=? AND c.actor_id=? AND c.id=?`).get(roomId, identity.memberId, command.id);
+  if (prior) return JSON.parse(prior.body).data.expectedRevision;
   const context = await store.workContext(secret, roomId, args.workItemId, {});
   if (!Number.isSafeInteger(context?.work?.revision)) throw new ServiceError(422, "invalid_work_action", "Current work revision unavailable");
   return context.work.revision;
@@ -254,7 +292,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
   if (isHelpTool(name)) {
-    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, helpUsesExpectedRevision);
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, helpUsesExpectedRevision, identity, buildHelpCommand(name, rest, identity));
     const command = buildHelpCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command, receipt => recordedHelpAction(name, command, receipt));
   }
@@ -265,6 +303,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       if (value.responseActions) value.responseActions = value.responseActions.map(action => ({
         ...action, arguments: { roomId, ...action.arguments }
       }));
+      if(value.contractVersion===2&&value.nextRead){
+        value.nextRead={...value.nextRead,arguments:{roomId,...value.nextRead.arguments}};
+        if(value.page)value.page={...value.page,nextRead:value.nextRead};
+      }
       if (value.nextReads) value.nextReads = value.nextReads.map(pointer => ({ ...pointer,
         nextRead: { ...pointer.nextRead, arguments: { roomId, ...pointer.nextRead.arguments } }
       }));
@@ -348,7 +390,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
   }
   if (isWorkTool(name)) {
-    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision);
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision, identity, buildWorkCommand(name, rest, identity));
     const command = buildWorkCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command,
       receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
@@ -359,12 +401,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_board") {
-    const snapshot = store.snapshot(secret, roomId, null, "work");
-    const now = typeof store.now === "function" ? store.now() : Date.now();
-    const { claims, ...claimsPage } = withProjectMapOverlap(store, roomId, buildWorkClaimPage(store.workClaims.list(roomId), roomId,
-      auth.member.id, new URLSearchParams(rest), now));
-    return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
+    return { value: readBoard(store, secret, roomId, null, new URLSearchParams(rest)), isError: false };
   }
   if (name === "room_read_work") {
     try {
@@ -388,12 +425,36 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_inbox") {
-    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after ?? 0 });
+    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after, olderCursor:rest.olderCursor });
+    if(inbox.coverage?.mode==='native_bounded')return {value:{...inbox,boardAssignments:[],boardAssignmentsHasMore:false,boardReviewRequests:[],boardReviewRequestsHasMore:false},isError:false};
+    // Dispatch and agentInbox already authenticate; OAuth also requires work:read.
+    // Read fresh membership without materializing the full formal-work snapshot.
+    const { members } = store.roomAuthority(roomId);
+    const firstMatches = (items, predicate) => {
+      const matches = [];
+      for (const item of items) {
+        if (predicate(item)) matches.push(item);
+        if (matches.length === 51) break;
+      }
+      return matches;
+    };
+    const owned = firstMatches(store.workClaims.inboxCandidates(roomId, auth.member.id), item => item.owner === auth.member.id
+      && ["claimed", "in_progress", "blocked", "delivered"].includes(item.state) && !item.supersededBy);
+    const boardAssignments = owned.slice(0, 50).map(item => ({ claimId: item.id, state: item.state,
+      nextRead: { tool: "room_read_board", arguments: { roomId } } }));
+    const reviews = auth.member.permissions.includes("verify") ? firstMatches(store.workClaims.inboxCandidates(roomId, auth.member.id, { review: true }), item => item.owner
+      && item.owner !== auth.member.id && !["done", "closed"].includes(item.state) && !item.supersededBy
+      && (item.state === "in_progress" || item.pullRequest || item.pullRequests?.length)
+      && resolveNamedReviewers(item, members).includes(auth.member.id)
+      && !hasCurrentReview(item, auth.member.id)) : [];
+    const boardReviewRequests = reviews.slice(0, 50).map(item => ({ claimId: item.id, state: item.state,
+      nextRead: { tool: "room_read_board", arguments: { roomId } } }));
     const stamp = rows => rows.map(row => row.nextRead ? { ...row,
       nextRead: { ...row.nextRead, arguments: { roomId, ...row.nextRead.arguments } }
     } : row);
-    return { value: { ...inbox, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
+    return { value: { ...inbox, boardAssignments, boardAssignmentsHasMore: owned.length > 50, boardReviewRequests, boardReviewRequestsHasMore: reviews.length > 50, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
+  if (name === "room_mark_caught_up") return { value: { roomId, ...store.markCaughtUp(secret, roomId, rest.sequence), source: "saved_catch_up_marker" }, isError: false };
   if (name === "room_read_messages") return { value: await roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
   if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
@@ -424,6 +485,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
 // the credit movement. EscrowError propagates untouched: the transport maps
 // its code, and there is one error contract.
 function callBountyTool(store, secret, roomId, auth, name, rest) {
+  if (BOUNTY_NEW_WORK_TOOLS.has(name) && !bountyNewWorkEnabled())
+    throw new ServiceError(403, BOUNTIES_PAUSED_CODE, BOUNTIES_PAUSED_MESSAGE);
   const escrow = store.bountyEscrow;
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
@@ -448,8 +511,13 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       // Catalog visibility can span rooms. Write authority belongs to the
       // target room and must be checked inside the mutation/replay fence.
       enforceAutonomyTierForAction({ db: store.db, roomId,
-        state: { room: { ownerId: store.roomAuthority(roomId).ownerId } },
+        state: { room: { ownerId: store.roomOwnerId(roomId) } },
         actor: current.member, action: route });
+      // F-X4-1: bounty claim/submit enforce the board's work-permission
+      // gate, identical to the HTTP route (same helper, same refusal),
+      // checked before idemExecute so replays are gated too.
+      if ((route === "bounty.claim" || route === "bounty.submit") && !mayWorkOnBounties(store, roomId, current))
+        throw new ServiceError(403, "work_claims_not_permitted", WORK_CLAIMS_GATE_MESSAGE);
       return escrow.idemExecute(roomId, key, route, status, thunk,
         { callerLane: caller, bountyId: bountyId ?? null, payload });
     });

@@ -1,0 +1,27 @@
+{
+  "sourceRevision": "e850efefee13d7db118a77cdca511b014837b4f0",
+  "workflow": "https://github.com/Uuriko/project-room/actions/runs/41386718260",
+  "conclusion": "success",
+  "scope": "isolated staging; no production deployment or schema45 migration",
+  "browser": {
+    "invocation": "node scripts/live-smoke.mjs --browser",
+    "viewports": [
+      390,
+      1280
+    ],
+    "checks": [
+      "page errors",
+      "CSP console errors",
+      "mobile horizontal overflow",
+      "axe WCAG checks"
+    ],
+    "limitation": "Public-page smoke only; does not prove authenticated joining, useful work, or recovery journeys."
+  },
+  "remainingFindings": [
+    "Known A2A work-receipt extension specification URI returns404"
+  ],
+  "artifacts": [
+    "hosted-cold-start.json",
+    "hosted-staging-smoke.json"
+  ]
+}

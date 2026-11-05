@@ -1,0 +1,47 @@
+{
+  "componentSource": "5b22375ee32c8536d7c0f7b9536742a95029429c",
+  "base": "6b619981d8e8360a2cd3ceb1dd4cbd40a335280a",
+  "nodePass": 8,
+  "nativePass": 1,
+  "productionSourceEncoder": false,
+  "runtimeIntegrated": false,
+  "finalOracleStillMandatory": true,
+  "sourceFiles": {
+    "server/recovery-report-continuation.mjs": "e58da04179e3149966ae8a65e6a32c32aafc994dc5dae53c315de61f081d6751",
+    "tests/recovery-report-continuation.test.mjs": "f67b29ce67fffa0f74a383c1319d6b6e921e756c6a1586b93cd57f378c0e492a",
+    "cloudflare/recovery-report.test-fixture.mjs": "ed6f94fc5392cd2028357b75e3f3d2e6ef08f884c53f85922a1f19c45de88b59",
+    "cloudflare/recovery-report.check.mjs": "bd2d77aff34c829d39804f97cad605798789ead435518335e5bbeabacb6d0886"
+  },
+  "logs": [
+    {
+      "name": "node",
+      "bytes": 1049,
+      "sha256": "64786f17f4e1f8935893b7e0bcd717e50a3e3c4a112a1517f412ca81cfb42380",
+      "exitCode": 0
+    },
+    {
+      "name": "native",
+      "bytes": 1105,
+      "sha256": "a0b3e32625c75094c3a9eacda90ef100fce6262db6e1e60163b468900cc14b09",
+      "exitCode": 0
+    },
+    {
+      "name": "native-initial-guard-red",
+      "bytes": 1044,
+      "sha256": "c08f6f154b6ec4b7fccae3b919ceb5853137af78811007224a614175bebe9aa8",
+      "exitCode": 1
+    },
+    {
+      "name": "lint",
+      "bytes": 71386,
+      "sha256": "5dcae4c5a85068df4879788ef5e44576fce7ec783898e47a4d67c954bf1ed281",
+      "exitCode": 0
+    },
+    {
+      "name": "scan",
+      "bytes": 53,
+      "sha256": "a166d16690755b5b39cbe060607c7fbe1ec6a1d97df786377bcf59ef45c04aca",
+      "exitCode": 0
+    }
+  ]
+}

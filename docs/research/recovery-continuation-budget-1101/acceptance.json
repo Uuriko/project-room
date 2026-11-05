@@ -1,0 +1,158 @@
+{
+  "fixtureCommit": "d09b76de3",
+  "runtimeCommit": "fdedb8d67cc99b217723f707769ff95b48e42ada",
+  "runtimeEquivalentToRoot": "9e2174c77",
+  "productionFilesChanged": false,
+  "scope": "Only same-original-snapshot600message+512KiB fixture hunk changed; no broad suite repeated.",
+  "failure": "Old n<250 guard expires during advancing engine checks.",
+  "progress": {
+    "measuredAdvancingCalls": 300,
+    "sourceRows": 3638,
+    "sourceEvents": 602,
+    "schemaTables": 226,
+    "sourcePrimitiveCallBudget": 10975,
+    "cleanup": {
+      "rows": 9022,
+      "callBudget": 71,
+      "calls": 71
+    },
+    "stages": {
+      "coverage": {
+        "calls": 29,
+        "units": 0,
+        "coverageRows": 3638,
+        "elapsedMsClockOnly": 259.38779000000034
+      },
+      "rooms": {
+        "calls": 2,
+        "units": 128,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 21.44224999999983
+      },
+      "proofs": {
+        "calls": 9,
+        "units": 1152,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 118.42266700000027
+      },
+      "records": {
+        "calls": 9,
+        "units": 1152,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 108.61045899999954
+      },
+      "messages": {
+        "calls": 10,
+        "units": 696,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 181.85750000000007
+      },
+      "history_events": {
+        "calls": 4,
+        "units": 488,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 28.904875000000175
+      },
+      "history_members": {
+        "calls": 1,
+        "units": 1,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 6.028124999999818
+      },
+      "replay_events": {
+        "calls": 29,
+        "units": 602,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 239.78621100000146
+      },
+      "text_results": {
+        "calls": 19,
+        "units": 602,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 105.71775200000138
+      },
+      "charter": {
+        "calls": 19,
+        "units": 603,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 92.88895900000034
+      },
+      "reply_requests": {
+        "calls": 21,
+        "units": 602,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 164.79683299999988
+      },
+      "work_help": {
+        "calls": 19,
+        "units": 604,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 97.09650300000067
+      },
+      "reminders": {
+        "calls": 2,
+        "units": 0,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 9.763582999999926
+      },
+      "cleanup": {
+        "calls": 71,
+        "units": 9022,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 445.2932130000022
+      },
+      "engine": {
+        "calls": 56,
+        "units": 451,
+        "coverageRows": 0,
+        "elapsedMsClockOnly": 313.754211999998
+      }
+    }
+  },
+  "mandatoryFinalAuditCall": {
+    "status": 200,
+    "verified": true,
+    "returnedPayloadRows": 10892,
+    "returnedPayloadTextBlobBytes": 2931628
+  },
+  "sameSnapshotOldNewSha256": "761b9eceea30e19aa52ec92073a80c445a2db156d057c3743e2ba1ac4e42d222",
+  "oldProcesses": [
+    {
+      "returnedPayloadRows": 3129,
+      "returnedPayloadTextBlobBytes": 795524,
+      "verifiedPrefixRows": 128
+    },
+    {
+      "returnedPayloadRows": 3766,
+      "returnedPayloadTextBlobBytes": 1609693,
+      "verifiedPrefixRows": 128
+    }
+  ],
+  "newProcesses": [
+    {
+      "returnedPayloadRows": 128,
+      "returnedPayloadTextBlobBytes": 22704
+    },
+    {
+      "returnedPayloadRows": 128,
+      "returnedPayloadTextBlobBytes": 22912
+    }
+  ],
+  "oldDurableCoverageAdvance": 0,
+  "newDurableCoverageAdvance": 256,
+  "exactApplicationDigestsAndBlob": true,
+  "checks": {
+    "focusedRed": true,
+    "focusedGreen": true,
+    "lintErrors": 0,
+    "ownedSecretScan": "clean"
+  },
+  "limits": [
+    "300 is observed advancing work, not a speedup claim; one additional mandatory full-oracle call follows.",
+    "The11046 primitive ceiling is conservative liveness, not a performance SLA; unique semantic frontier and exact cleanup page assertions detect repeated/no-progress calls separately.",
+    "Metrics are returned UTF8/BLOB cells after constructor, not physical SQLite reads or CPU.",
+    "No whole bounded recovery claim: original full audit still duplicates checks and performs monolithic global/report scans.",
+    "Helper3741 checkpoint JSON-leaf cure was not part of measured runtime; this fixture has no checkpoint.",
+    "Same original snapshot is shared across old/new processes WITHIN a run; red and green runs have separately generated synthetic IDs/times."
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "runtime_sha": "89e1a58827483f7019085a39205eba62abcd15ba",
+  "native_workerd": "2026-07-30",
+  "source_events": 50000,
+  "source_messages": 5000,
+  "source_projection_bytes": 1111281,
+  "normalized_projection_bytes": 131,
+  "warm_1k": {
+    "host_wall_ms": 3.362333000000035,
+    "statements": 114,
+    "rowsRead": 1193,
+    "rowsWritten": 40,
+    "materializedBytes": 64243
+  },
+  "warm_50k": {
+    "host_wall_ms": 3.54950000000008,
+    "statements": 114,
+    "rowsRead": 1193,
+    "rowsWritten": 40,
+    "materializedBytes": 63945
+  },
+  "activation_host_wall_ms": 428.05308300000024,
+  "cold_activation_retry_host_wall_ms": 233.67166599999928,
+  "cold_post_host_wall_ms": 197.90941699999985,
+  "cold_post_retry": {
+    "host_wall_ms": 195.94187499999953,
+    "rows_written": 2,
+    "duplicate": true,
+    "sequence_preserved": true
+  },
+  "read_50k": {
+    "host_wall_ms": 3.1204170000000886,
+    "statements": 51,
+    "rowsRead": 242,
+    "rowsWritten": 0,
+    "materializedBytes": 66007
+  },
+  "one_sample_each": true,
+  "all_sample_sql_counters_known": true,
+  "warm_posts_sql_work_matches": true,
+  "account_connection_scope": "Scale fixture preserves its owner room credential through cold post/retry and reports adoption preservation; no independent account/OAuth snapshot comparison here",
+  "limitations": [
+    "Single local execution, not confidence intervals or production latency",
+    "SQL cursor counters and materialized JSON bytes are not total storage bytes written or whole-platform cost",
+    "Read sample is 50k only; no paired 1k read sample",
+    "State diagnostic deliberately scans counts, not an ordinary serving path",
+    "No 7MB-row, production action, whole-release or global CPU-bound claim"
+  ]
+}

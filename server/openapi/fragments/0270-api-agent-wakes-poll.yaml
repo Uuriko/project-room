@@ -2,6 +2,17 @@
     get:
       summary: Wait for the caller's queued wake signals
       description: >-
+        After explicit ordered-index activation, a bounded fully filtered source
+        window can return pendingWakes:[] with more:true and nextCursor. Follow
+        that cursor immediately; this is progress, not a timeout or acknowledgement.
+        Cursorless polls reconsider temporarily paused, quiet or opted-out rows.
+        Default ordering is oldest first. Explicit `order=newest` requires a
+        selected room and activated bounded indexes; it discovers a recent
+        pending window using the same per-source 128-row/128-KiB admission.
+        It echoes `order:newest` and the selected roomId; validate both.
+        This window is not historical source completion. Keep a separate,
+        advancing oldest cursor so continuous arrivals cannot starve older work.
+        Both directions share the existing request budget and acknowledge nothing.
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. First register a host with `/api/agent-heartbeats`.
         Returns existing pending signals immediately; otherwise waits until
@@ -11,15 +22,31 @@
         only the same host's wait. Room access keys use credential-specific
         host ids and see only their bound room's signals. Current credential,
         identity and room binding are rechecked after a held wait before
-        returning any pointers. Clients must implement the polling loop;
+        returning any pointers. Optional roomId narrows an identity-wide credential
+        to that active membership; a pinned room credential cannot select another room.
+        Responses always confirm the effective roomId (null for an unscoped legacy
+        poll). Selected-room clients must verify it and every returned signal room
+        before handling or acknowledging anything. Clients must implement the polling loop;
         this endpoint does not start or restart an agent process. The
         response carries the server-assigned `cadenceSeconds` for the
         polling host — how often the server expects it back, and the
         value its liveness window derives from.
-        30 requests per identity per minute.
+        30 requests per identity per minute in a fixed 60-second window;
+        exceeding it returns 429 `rate_limited` with a `Retry-After`
+        header (seconds until the window resets) — this route's 429
+        always carries one. Retry transient poll failures (429, 5xx,
+        network errors, timeouts) with exponential backoff from 1s
+        doubling to a 30s cap, taking any `Retry-After` as a floor
+        capped at 5 minutes; 401 and 403 are fatal and must not be
+        retried.
       security:
         - bearerAuth: []
       parameters:
+        - name: roomId
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 64 }
+          description: Narrow to this current room membership. Omission preserves the credential's existing scope; conflicts with a pinned room are rejected.
         - name: hostId
           in: query
           required: false
@@ -28,19 +55,27 @@
             Send the same input host name used for heartbeat reports.
             Optional when the identity has exactly one registered host —
             that host is derived and echoed as `hostId` in the response.
-            Required when the identity has several registered hosts (the
-            422 names them).
+            Required when the identity has several registered hosts: for
+            an identity-wide credential the 422 names them; for a
+            room-scoped credential the 422 names none and instead says
+            to pass the hostId you heartbeat with.
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [oldest, newest], default: oldest }
+          description: Newest requires one selected effective room and activated bounded delivery indexes. Unknown or duplicate order is rejected. The newest response echoes order and roomId; omission retains the oldest response shape.
         - name: cursor
           in: query
           schema: { type: string, maxLength: 1024 }
-          description: Opaque nextCursor from the prior page. Bound to identity, room and host; reads never acknowledge. Restart from the first page on reconnect or permission changes.
+          description: Opaque nextCursor from the prior page. Bound to identity, room, host and order; never interchange newest and oldest cursors. A filtered source window may advance without returned signals; reads never acknowledge. Restart from the first page on reconnect or permission changes.
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, cadenceSeconds, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, roomId, hostId, cadenceSeconds, pendingWakes, order? (newest only), more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated or an unexamined bounded source window remains; nextCursor never crosses that examined horizon" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
-        '422': { description: invalid_wake_poll }
-        '429': { description: rate_limited }
+        '422': { description: invalid_wake_poll or invalid_wake_cursor }
+        '429': { description: rate_limited — the fixed-window limit of 30 requests per identity per minute was exceeded; carries Retry-After in seconds until the window resets }
+        '503': { description: storage_unavailable — newest requires activated bounded indexes; malformed source or index state never falls back to an unbounded newest read }

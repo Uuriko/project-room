@@ -37,6 +37,17 @@ async function bundleSet(entry) {
   const result = await build({
     entryPoints: [entry], bundle: true, write: false, format: "esm", platform: "neutral",
     external: ["node:*", "cloudflare:*"], metafile: true, absWorkingDir: repo, logLevel: "silent",
+    // The discovery harness selects exact source modules through these aliases.
+    // Other qualification fixtures import their current source directly.
+    plugins: [{
+      name: "qualified-current-sources",
+      setup(bundle) {
+        if (entry === join(cfDir, "native-inbox-discovery.test-fixture.mjs")) {
+          bundle.onResolve({filter: /^@discovery\/store$/}, () => ({path: join(repo, "server/store.mjs")}));
+          bundle.onResolve({filter: /^@discovery\/repository$/}, () => ({path: join(repo, "server/current-room-repository.mjs")}));
+        }
+      },
+    }],
   });
   return new Set(Object.keys(result.metafile.inputs).filter(inScope));
 }

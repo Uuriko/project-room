@@ -18,8 +18,8 @@ function fixture(t, mode = 'human', linked = false) {
   const state = structuredClone(store.room('commons').state);
   state.members.reviewer = { id: 'reviewer', revision: 1, kind: 'agent', active: true, displayName: 'Reviewer', permissions: ['read', 'verify'] };
   state.members.stranger = { id: 'stranger', revision: 1, kind: 'human', active: true, displayName: 'Other human', permissions: ['read', 'decide', 'verify'] };
-  store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
-  if (linked === 'human') { state.members.reviewer.kind = 'human'; store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons'); }
+  store.transaction(() => store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(store.storedProjection('commons', state), 'commons'));
+  if (linked === 'human') { state.members.reviewer.kind = 'human'; store.transaction(() => store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(store.storedProjection('commons', state), 'commons')); }
   if (linked) store.command(store.issueAccessKey('commons', 'owner'), 'commons', { id: 'propose-linked-work', type: 'work.proposed', data: { workItemId: 'linked-work', title: 'Linked work', definitionOfDone: 'Exact independently reviewed result', accountableMemberId: 'owner', verifierMemberId: 'reviewer', independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: 'owner', mode: 'write' } });
   const reviewers = mode === 'human' ? (linked ? ['owner', 'reviewer'] : ['owner']) : mode === 'agent' ? ['reviewer'] : ['owner', 'reviewer'];
   store.projectOffers.create('commons', 'owner', { requestId: 'create', offerId: 'review-task', reviewerMemberIds: reviewers, ...(linked ? { workItemId: 'linked-work' } : {}),
@@ -31,7 +31,7 @@ function fixture(t, mode = 'human', linked = false) {
   const service = () => new PublicWorkReviews(store);
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   return { get store() { return store; }, service, receipt, producer, other, file,
-    alter(fn) { const state = structuredClone(store.room('commons').state); fn(state); store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons'); },
+    alter(fn) { const state = structuredClone(store.room('commons').state); fn(state); store.transaction(() => store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(store.storedProjection('commons', state), 'commons')); },
     reopen() { store.close(); store = new RoomStore(file); },
     input(requestId, revision = 0, extra = {}) { return { requestId, expectedReviewRevision: revision, taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion,
       generation: receipt.generation, artifactSha256: receipt.artifact.sha256, reason: 'Reviewed the exact artifact', ...extra }; } };

@@ -3,7 +3,7 @@
 //
 // What this protects (test-audit authoring gate):
 //  1. Behavior: the diff gate flags secret-shaped ADDED lines (12 seeded
-//     rules, generated at runtime) and stays silent on the current main
+//     rules, generated at runtime) and stays silent on the checked-out candidate
 //     tree — the zero-false-positive acceptance for the CI gate.
 //  2. Credible regressions: parseDiff scanning removed lines or misreporting
 //     line numbers; wrong CLI exit codes; the path-allowlist loader dropping
@@ -280,14 +280,14 @@ test("CLI rejects unknown flags (exit 2)", () => {
   assert.equal(r.status, 2);
 });
 
-// --- acceptance: zero false positives against current main -------------------
+// --- acceptance: zero false positives against checked-out candidate -------------------
 
-test("zero false positives against the origin/main tree", () => {
+test("zero false positives against the checked-out HEAD tree", () => {
   // The diff gate reuses the detector + shared line allowlist under the
   // tree scan's scope policy: whatever main contains in scope today must
   // not trip it, or PRs touching those lines would fail the gate.
   const dir = mkdtempSync(path.join(os.tmpdir(), "secret-scan-diff-main-"));
-  const archive = execFileSync("git", ["-C", REPO_ROOT, "archive", "origin/main"], {
+  const archive = execFileSync("git", ["-C", REPO_ROOT, "archive", "HEAD"], {
     maxBuffer: 256 * 1024 * 1024,
   });
   const tar = spawnSync("tar", ["-x", "-C", dir], { input: archive });
@@ -372,3 +372,23 @@ test("exact entropy exceptions retain other entropy tokens and credential patter
   assert.ok(scanText(shapedCredential, { safeEntropyTokens: [shapedCredential] }).some(finding => finding.rule === "github-token"),
     "an entropy exception never exempts credential-shaped tokens from pattern rules");
 });
+
+test("share-links invite-code alphabet is quiet but a real credential still trips", () => {
+  // Contract scanner (secret-scan-check) ignores the // secrets-allowlist marker.
+  // The AGENT_INVITE_CODE_PATTERN alphabets are exact SAFE_ENTROPY_TOKENS so the
+  // shape regex stays quiet; a real credential in the same file must still flag.
+  const inviteLine = "const AGENT_INVITE_CODE_PATTERN = /^RM-(?:[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/;";
+  assert.deepEqual(
+    scanText(inviteLine, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS }),
+    [],
+    "invite-code shape regex must not trip high-entropy"
+  );
+  const withCred = `${inviteLine}
+const leaked = "${fakeGithubToken()}";`;
+  const findings = scanText(withCred, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+  assert.ok(
+    findings.some((f) => f.rule === "github-token"),
+    "a real token in the same file must still trip"
+  );
+});
+

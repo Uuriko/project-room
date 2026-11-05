@@ -1,0 +1,26 @@
+{
+  "runtime_sha": "89e1a58827483f7019085a39205eba62abcd15ba",
+  "command": [
+    "node",
+    "--test",
+    "operator-normalization-auth.check.mjs"
+  ],
+  "cwd": "cloudflare",
+  "node": "v24.22.1",
+  "miniflare": "4.20260730.0",
+  "esbuild": "0.28.2",
+  "workerd": "workerd 2026-07-30",
+  "workerd_sha256": "b887d31d8839e80798bf3f92c416343c5db7dd9b22d7fe21bcf877f5d411936f",
+  "workerd_selection": "existing local July binary matching default dependency, no October runtime",
+  "exit_code": 0,
+  "outer_timeout": false,
+  "wall_seconds": 1.83963595808018,
+  "reaped_child_cpu_seconds": 3.330893,
+  "existing_test_timeout_ms": 120000,
+  "source_clean_before": true,
+  "source_clean_after": true,
+  "log_sha256": "1c4144704a2c37dc2fe693bde28f6f62bc016e52945a5e382316df58a7a9cf34",
+  "log_bytes": 6159,
+  "actual_snapshot_tables": 24,
+  "scope": "Existing synthetic Native account/connection adoption preservation test; no live provider/account or production deployment"
+}

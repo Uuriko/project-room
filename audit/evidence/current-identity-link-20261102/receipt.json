@@ -1,0 +1,120 @@
+{
+  "base": "80b05fbf0c14eb60137515384decdde247d92e37",
+  "runtimeOwnCommit": "5aba0ad8f287d6672a1e722d8c29e7e1c775e8e4",
+  "composedRootAccessCommit": "0cf6fe9a5",
+  "finalTestSource": "9fdb8c9c9c6ead5cfa47c857e8142fa83b0528b4",
+  "node": "v24.22.1",
+  "native": {
+    "miniflare": "4.20260730.0",
+    "workerd": "2026-07-30",
+    "override": false,
+    "pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "tests": {
+    "initialBefore": {
+      "pass": 0,
+      "fail": 4
+    },
+    "initialAfter": {
+      "pass": 4,
+      "fail": 0
+    },
+    "composedFinal": {
+      "pass": 6,
+      "fail": 0,
+      "skip": 0
+    },
+    "identityNeighborsFinal": {
+      "pass": 26,
+      "fail": 0,
+      "skip": 0
+    },
+    "securityNeighbors": {
+      "pass": 48,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "sourceSha256": {
+    "server/agent-identities.mjs": "039e7dc010be7df7825ee250c6e3011d73734cfff533b87564ec44ca3980fe04",
+    "server/current-room-repository.mjs": "98ec6937375b9c049b6f37340459a0530aefd89e94abd7f8a503799bb1bf801f",
+    "server/store.mjs": "3bde3aa56a57d97651f93195c5bff228cbd04c5b09913cc9c1888152b07beb8c",
+    "tests/current-identity-link.test.mjs": "febda07aac8d5d23dd5cf6aab8c047e071c3216f8f42588ec6b440aedfc00dce",
+    "tests/agent-identities.test.js": "661752e9615c86bb033379c366793dad56989823860330574acc3af661174b51",
+    "cloudflare/current-identity-link.check.mjs": "bc646e24b9851b10cb82cf50954cb2306986473c384b3ae66273d6d66894032f",
+    "cloudflare/current-identity-link.test-fixture.mjs": "bcdff6a58f5a00880b022a384e0939d50f6e8f50f735968bfa13dace4d3148d1"
+  },
+  "logs": [
+    {
+      "name": "causal-before",
+      "file": "causal-before.log.gz",
+      "exitCode": 1,
+      "sha256": "d3cb1a23797d3e1afcaebfcf0a9d3995c97820b632510cb8df4295176ea8a46b",
+      "compressedSha256": "069d1c4f2f780ace479f7107e7618c0eb3023b5c01ad75a14f327d4b63fc8c44"
+    },
+    {
+      "name": "initial-after",
+      "file": "initial-after.log.gz",
+      "exitCode": 0,
+      "sha256": "2214c1d52170eee5caaf5a2d8b00865d5f73fee39086c486621e5e844441fb91",
+      "compressedSha256": "adb842898ce979ed582969ce6dc475df4c79c929ca2d07085e4d67f8caa9a4bd"
+    },
+    {
+      "name": "native",
+      "file": "native.log.gz",
+      "exitCode": 0,
+      "sha256": "f47ec38d44c091b2e778e2ade83beb10eea36445523e82c30468d9475130c01b",
+      "compressedSha256": "996b098cb2115b151ac53e20f6107ec4354432abc66806b863d60d69a10e2f4f"
+    },
+    {
+      "name": "composed-final",
+      "file": "composed-final.log.gz",
+      "exitCode": 0,
+      "sha256": "559224ddfd3d4790de377682e640e55f818cad1b8b49a3261c60ec424057453e",
+      "compressedSha256": "fb687992b0f877acbd4038fb6edf5ba3f694724dd2642679ef1ade2bb8277cb9"
+    },
+    {
+      "name": "neighbors-stale-owner-assertion",
+      "file": "neighbors-stale-owner-assertion.log.gz",
+      "exitCode": 1,
+      "sha256": "408e6de83dd8fa262911226d57843399265b505a3b64e346dc2ff601114e904b",
+      "compressedSha256": "37290699b331532df5014600fad655878c6639c0c5c597197d771d7ebad746b3"
+    },
+    {
+      "name": "identities-final",
+      "file": "identities-final.log.gz",
+      "exitCode": 0,
+      "sha256": "ac1b54dab1c12a61d5858c2318f869b3eed8bd834f98dc416188999e86f1aaf9",
+      "compressedSha256": "d79b00e5995adefba4eac65136dbdf9383ba99fdf1085e49b9b362cd6fdaddf2"
+    },
+    {
+      "name": "security-neighbors",
+      "file": "security-neighbors.log.gz",
+      "exitCode": 0,
+      "sha256": "e9a15ce3a2ded368d19055220802fd66132b11b30fd0a52ebe065e6ed9ebb652",
+      "compressedSha256": "e6bcf8dde7897b47f1b8d883bf719154b1a0473cc95752ecd5e294f604c601dd"
+    },
+    {
+      "name": "lint",
+      "file": "lint.log.gz",
+      "exitCode": 0,
+      "sha256": "53417517dc34475e6be9b384eadd686e77eaea7f1dd2c05025a8a81bfed8d105",
+      "compressedSha256": "b734af712491c331d8ef30c3f7dbad3519e432120b3dfa12f7256a3c579078ee"
+    },
+    {
+      "name": "secret",
+      "file": "secret.log.gz",
+      "exitCode": 0,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "compressedSha256": "e7c7cd96c65009a7fb69bda792d31999cad4cf5590cbd1c248092ae9ae8c926b"
+    }
+  ],
+  "limits": [
+    "Deactivation remains unsupported, including held-work cleanup; this patch admits member.added and active:true only.",
+    "Full-roster membership input reservation1024 records preserves256KiB ceiling/global200 default. Oversized rosters still fail closed.",
+    "Native test is actual local SQLite Worker direct RoomStore/identity path, not live Cloudflare or full Native HTTP OAuth qualification.",
+    "No secret rotation, grant widening, format/schema change, migration framework or full-room fallback."
+  ]
+}

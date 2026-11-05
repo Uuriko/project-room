@@ -98,7 +98,8 @@ test("outgoing answers and declines are discoverable even when completed between
   assert.deepEqual(notices.map(n => n.request.terminalEventId).sort(), [a.event.id, d.event.id].sort());
   for (const n of notices) await f.ack(n.id);
   assert.equal((await f.pull()).pending, 0);
-  f.post("owner", { replyToId: answer.event.data.messageId, body: "Ordinary post-close remark" });
+  assert.throws(() => f.post("owner", { replyToId: answer.event.data.messageId, body: "Bystander cannot join a private thread" }), { status: 422, code: "command_rejected" });
+  f.post("other", { replyToId: answer.event.data.messageId, body: "Ordinary post-close remark" });
   assert.equal((await f.pull()).pending, 0, "closed request attention is not a discussion subscription");
   f.access("other", false);
   assert.equal((await f.pull()).pending, 0, "membership changes do not renotify an already observed answer");

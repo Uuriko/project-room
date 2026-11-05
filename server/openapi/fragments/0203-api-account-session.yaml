@@ -28,7 +28,7 @@
         `Origin` and `X-CSRF-Token` (the slot's `csrf`) are required. The
         body carries the account access key and the slot's current
         `sessionRevision`; the slot is compare-and-swapped to the account
-        for at most eight hours and its CSRF token and session binding
+        for at most 30 days, bounded by the slot and access-key expiry; its CSRF token and session binding
         change. An existing `room_session` cookie for the same browser is
         revoked. 10 per address and slot per minute.
       security:

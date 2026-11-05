@@ -1,0 +1,10 @@
+✔ verified offline archive runs the actual Native durable restore qualification (15359.403792ms)
+ℹ PACKAGED_NATIVE_DURABLE_RESTORE {"sourceCommit":"624f0dfc22d4e313563661fdf05051a99c161a6d","package":{"verified":true,"sourceCommit":"624f0dfc22d4e313563661fdf05051a99c161a6d","sourceTree":"16513234951dbfbca4e9606441bcd94c898d7c8c","schemaVersion":45,"files":684,"assets":142,"manifestSha256":"d3a93cb89d606b5d54d813148e3d4ed3e0c87f3a95c84c7513bb2b7c9e884385"},"qualification":{"runtimeSource":"751f786639+native-work-2-restore-gate","actualNative":true,"importedPartialEvents":1000,"sourceSeal":true,"coverageSteps":49,"coverageRows":6075,"maxPayloadRowsPerStep":128,"coldDuringCoverage":true,"preopenedPreparedDenied":true,"ordinaryReady503UntilAudit":true,"finalUnboundedAuditRequired":true,"coldReady":true,"exactRetry":true,"wholeRecoveryBounded":false,"acceptedNativeWorkCapacity":true,"nativeWorkExactRetry":true},"fixturesOutsideArchive":["durable-coverage.check.mjs","durable-coverage-seed.test-fixture.mjs","durable-coverage-native.test-fixture.mjs","current-room-serving.test-fixture.mjs"],"productionSource":"verified offline archive","archiveUnchanged":true}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15410.635542

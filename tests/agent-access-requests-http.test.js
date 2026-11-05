@@ -34,7 +34,7 @@ async function ownerRoom(origin, fixture) {
   const owner = fixture.store.identities.create("ar owner");
   const roomId = "ar-room";
   const roomRes = await post(origin, "/api/agent-rooms", {
-    roomId, title: "Access requests", purpose: "probe", kind: "personal", displayName: "Access requests",
+    roomId, title: "Access requests", purpose: "probe", kind: "personal", displayName: "Access requests", visibility: "private",
   }, owner.secret);
   assert.equal(roomRes.status, 201);
   return { ownerSecret: owner.secret, roomId };

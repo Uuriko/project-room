@@ -1,4 +1,5 @@
-import { messageRepository } from "./message-repository.mjs";
+import {isCurrentRoom,readCurrentRecord,withCurrentReadContext} from './current-room-repository.mjs';
+import { selectedMessageRecord } from "./message-repository.mjs";
 // Squads (plan-squads): named groups with a goal, a member roster, and a
 // channel that is a room thread (the thread-root message id; the thread is
 // derived from message replyToId chains, see server/activity.mjs).
@@ -87,6 +88,17 @@ export function squadView(row) {
   };
 }
 
+// Squad mutations need only archive state and the explicitly selected roster.
+function squadRoom(store, roomId, ids = []) {
+  if (!isCurrentRoom(store.db, roomId)) return store.room(roomId);
+  const selected = [...new Set(ids)];
+  if (selected.length > MAX_SQUAD_MEMBERS) fail(422, "squad_roster_full", `A squad holds at most ${MAX_SQUAD_MEMBERS} members`);
+  return withCurrentReadContext(store.db, roomId, () => ({ state: {
+    room: readCurrentRecord(store.db, roomId, 'metadata', 'room'),
+    members: Object.fromEntries(selected.map(id => [id, readCurrentRecord(store.db, roomId, 'members', id)]))
+  } }));
+}
+
 function activeMemberIds(room, ids) {
   const members = room?.state?.members ?? {};
   return [...new Set(ids)].filter(id => {
@@ -160,7 +172,7 @@ function checkBody(data) {
 function visibleSquad(store, roomId, viewer, row) {
   const view = squadView(row);
   if (view.channel) {
-    const message = messageRepository(store, roomId).get(view.channel);
+    const message = selectedMessageRecord(store, roomId, view.channel, true);
     if (message?.toMemberId || !messageVisibleToViewer(message, viewer, store.historyFloor(roomId, viewer))) view.channel = null;
   }
   return view;
@@ -189,10 +201,10 @@ export function createSquad(store, token, roomId, data, expectedSessionBinding =
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
-    refuseArchivedWrite(store.room(roomId).state);
+    refuseArchivedWrite(squadRoom(store, roomId).state);
     if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
-    const room = store.room(roomId);
-    const channel = input.channelMessageId ? messageRepository(store, roomId, room.state).get(input.channelMessageId) : null;
+    const room = squadRoom(store, roomId, [...input.memberIds, me]);
+    const channel = input.channelMessageId ? selectedMessageRecord(store, roomId, input.channelMessageId, true) : null;
     if (input.channelMessageId && (!channel || channel.toMemberId
       || !messageVisibleToViewer(channel, me, store.historyFloor(roomId, me)))) {
       fail(422, "squad_channel_unknown", "channelMessageId is not a live message in this room");
@@ -230,15 +242,15 @@ export function updateSquadMembers(store, token, roomId, squadId, data, expected
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
-    refuseArchivedWrite(store.room(roomId).state);
+    refuseArchivedWrite(squadRoom(store, roomId).state);
     if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const row = typeof squadId === "string" ? getRow(store.db, roomId, squadId) : null;
     if (!row) fail(404, "squad_not_found", "No such squad in this room");
     if (row.state !== "active") fail(409, "squad_disbanded", "A disbanded squad has no roster changes");
     const isOwner = row.owner_id === me;
     const current = parseMembers(row.members_json);
-    const room = store.room(roomId);
     const add = data.add ?? [], remove = data.remove ?? [];
+    const room = squadRoom(store, roomId, add);
     for (const id of add) {
       if (!isOwner) fail(403, "squad_owner_required", "Only the squad owner can add members");
       if (!activeMemberIds(room, [id]).length) fail(422, "squad_member_unknown", `member "${id}" is not an active member of this room`);
@@ -264,7 +276,7 @@ export function disbandSquad(store, token, roomId, squadId, expectedSessionBindi
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const me = auth.member?.id;
     if (!me) fail(403, "access_denied", "Membership required");
-    refuseArchivedWrite(store.room(roomId).state);
+    refuseArchivedWrite(squadRoom(store, roomId).state);
     if (isGuestAgentMemberId(me)) fail(403, "guest_scope_denied", "Guest members cannot change squads");
     const row = typeof squadId === "string" ? getRow(store.db, roomId, squadId) : null;
     if (!row) fail(404, "squad_not_found", "No such squad in this room");

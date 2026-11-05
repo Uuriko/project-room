@@ -2,6 +2,11 @@
     post:
       summary: Append an event command
       description: |
+        Optional `x-room-listener-token` fences this write to the authenticated
+        agent's live listener lease for this room. It is checked inside the
+        mutation transaction; expired, missing or replaced leases return
+        409 `stale_listener`, and an empty token returns 422. Omitting the
+        header preserves ordinary credential-authorized writes.
         The single write path. Body is an event envelope: {id, type, data}.
         `id` is a client-generated idempotency key (UUID) — resending the
         same id with the same input returns the original receipt (200);
@@ -10,10 +15,52 @@
         Hosted MCP `room_post_message` submits this same message.posted
         envelope `{ id, type, data: { messageId, body } }`. It does not
         open a second write path.
+
+        Native work (current-format rooms): work items are proposed,
+        accepted, started and completed as commands on this route — the
+        Board (`/work-claims`) is retired in these rooms and its writes
+        answer 409 `legacy_work_retired`. The lifecycle types:
+        - `work.proposed`: data {workItemId, title, definitionOfDone,
+          accountableMemberId, mode?, labels?, verifierMemberId?,
+          independentVerificationRequired?, ownerDecisionRequired?,
+          humanDecisionMakerId?, sourceMessageId?, dependsOn?}. The
+          proposer needs the `steer` permission; `accountableMemberId`
+          must name an existing room member. The item lands in state
+          `proposed` at revision 0. Hosted MCP: `room_propose_work`.
+        - `work.accepted`: data {workItemId, expectedRevision}. Only the
+          accountable member (needs `accept_work`); this is the native
+          claim step — assignment is fixed at propose time.
+        - `work.started`: data {workItemId, expectedRevision}. Accountable
+          member with `accept_work`. A `mode: "write"` item first needs a
+          live write claim: `claim.acquired` with data {workItemId,
+          expectedRevision, repository, ref, paths, expiresAt} (renew:
+          `claim.renewed`; release: `claim.released`).
+        - `work.completed`: data {workItemId, expectedRevision, summary,
+          nextAction, ...evidence}. Accountable member with
+          `complete_work`. Room-text evidence: {evidenceKind: "room_text",
+          evidenceMessageId, evidenceMessageEventId, evidenceVersion:
+          "sha256:<sha256 hex of the result body>",
+          previousCompletionEventId, producerId} where the evidence
+          message is a `message.posted` carrying the same workItemId;
+          external evidence uses `evidenceUrl` / `signedEvidence`
+          instead of `evidenceKind`.
+        - `verification.recorded`: data {workItemId, expectedRevision,
+          result: "pass"|"fail", completionEventId, evidenceVersion,
+          summary} from the verifier named at propose time (`verify`).
+        - `owner.decision_recorded`: data {workItemId, expectedRevision,
+          decision, completionEventId, evidenceVersion, reason,
+          sourceMessageId} from the designated human decision-maker
+          (`decide`), when an owner decision was required.
+        Every later command carries the item's current revision as
+        `expectedRevision`; a stale revision is refused. Also
+        `work.blocked`, `work.blocker_resolved`, `work.handoff_recorded`
+        and `work.superseded` follow the same envelope.
         Room lifecycle (issue #6 A2): `room.archived` (data: optional
         `reason`, 280 characters) is owner-only and makes the room read
-        only — reads, streams and export continue, every later command
-        answers 409 room_archived. `member.access_changed` targeted at the
+        only — reads, streams and export continue. Ordinary later commands
+        answer 409 room_archived. The current active owner may explicitly
+        erase a message with `message.deleted`; original target and revision
+        checks still apply, and its internal privacy followups are recorded. `member.access_changed` targeted at the
         caller with unchanged permissions and `active: false` is a leave and
         needs no manage_members; the owner cannot leave.
 

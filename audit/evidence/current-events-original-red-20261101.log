@@ -1,0 +1,27 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":27448992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ normalized events traverse excluded source windows and redact current bodies without room hydration (59.840167ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 167.095625
+
+✖ failing tests:
+
+test at tests/current-room-events.test.mjs:20:1
+✖ normalized events traverse excluded source windows and redact current bodies without room hydration (59.840167ms)
+  Error: whole-room hydration
+      at store.room (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/current-room-events.test.mjs:17:24)
+      at file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:6660:64
+      at getResolved (file:///Users/johnpotter/src/pr-current-events-reader-1101/server/dm-event-visibility.mjs:50:62)
+      at file:///Users/johnpotter/src/pr-current-events-reader-1101/server/dm-event-visibility.mjs:74:32
+      at file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:6661:87
+      at Array.filter (<anonymous>)
+      at file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:6661:30
+      at run (file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:698:22)
+      at Object.transaction (file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:725:22)
+      at RoomStore.readTransaction (file:///Users/johnpotter/src/pr-current-events-reader-1101/server/store.mjs:4056:39)

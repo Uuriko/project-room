@@ -1,0 +1,15 @@
+{
+  "base": "8c00175cf",
+  "runtimeChanges": false,
+  "scope": "Literal recovery comparison includes six schema45 tables; lifecycle invariants use actual schema checks; route census includes work-list",
+  "before": {
+    "tests": 27,
+    "pass": 24,
+    "fail": 3
+  },
+  "after": {
+    "tests": 27,
+    "pass": 27,
+    "fail": 0
+  }
+}

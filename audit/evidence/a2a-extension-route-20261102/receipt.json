@@ -1,0 +1,62 @@
+{
+  "base": "328928e275e05b950b8f4e7bd6ec9bcf42cc03f5",
+  "routeSource": "9418fd269fec3cf24f0454ca79b494eee264364a",
+  "finalSource": "3709d759e9bc81287a42a38b3f343a8125147a84",
+  "priorPatch": {
+    "pr": 4534,
+    "head": "c18ab337cf2d70b8328994ec74d5977b5a9d7415",
+    "adoption": "Shared discovery route approach only; inaccurate signed public receipt claim corrected against existing canonical doc. Skill routes not adopted."
+  },
+  "before": {
+    "exit": 1,
+    "passed": 0,
+    "failed": 2
+  },
+  "node": {
+    "command": "node --test tests/a2a-receipt-extension-route.test.mjs tests/agent-discovery.test.js tests/agent-card-wellknown.test.js tests/route-table.test.js",
+    "exit": 0,
+    "passed": 57,
+    "failed": 0,
+    "skipped": 0
+  },
+  "native": {
+    "command": "cd cloudflare && node --test edge-public.check.mjs",
+    "exit": 0,
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0
+  },
+  "contract": {
+    "command": "CI=1 node scripts/check.mjs",
+    "exit": 0,
+    "fullUnitSuite": false,
+    "catalogTests": 15
+  },
+  "qaFormattingAST": "b8071bd82e9372beee8375c0732923da0c79871e429f129624cfb11a18d3c749",
+  "logs": {
+    "before": {
+      "bytes": 2938,
+      "sha256": "7f22541ea616ca4668d307dcf10050dd206e6d4e7c41f4adf62706ff9c085de7"
+    },
+    "node-final": {
+      "bytes": 14212,
+      "sha256": "724a3a0a2db47854b74b20b466c7619a493c43753d0e624c14dfd2e2ef52f484"
+    },
+    "native-final": {
+      "bytes": 6985,
+      "sha256": "7856492cb39053c46f86e1c8fa9c9606c044343a4d3012992f29d8be70e604c4"
+    },
+    "contract": {
+      "bytes": 73076,
+      "sha256": "0dc125301c4b299b061ebfde27f467e9d9f593983832cc394f936a53f9f9ce0c"
+    },
+    "qa-ast": {
+      "bytes": 79,
+      "sha256": "235c543e2d3da86b33e55c617708a503564c1e0f1b241f8bc3a9ed34921d1048"
+    },
+    "secrets": {
+      "bytes": 53,
+      "sha256": "d182abb42212f9390fff6065e759e3ccf8b294781a8577bc11e41fc69559bc98"
+    }
+  }
+}

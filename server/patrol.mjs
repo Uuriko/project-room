@@ -124,6 +124,20 @@ const SETTLE_NEXT = new Map([
 ]);
 const isSettleMove = (action, fromState, nextState) =>
   SETTLE_NEXT.get(action) === nextState && ACTIVE_CLAIM_STATES.includes(fromState);
+// The update route's one-step finish: under the default self_attested
+// review policy the owner may move in_progress straight to done
+// (updateWork's `collapse`); any other policy refuses it with
+// work_not_delivered, so the route, not this table, enforces the policy.
+const isCollapseMove = (action, fromState, nextState) =>
+  action === "state_changed" && fromState === "in_progress" && nextState === "done";
+// closeWhenLive (server/work-claims.mjs): a land or deploy claim whose
+// revision is live closes to done from any non-terminal state, under the
+// state_changed action (claim-pr-sync and the work-claim route). Kind is
+// fixed at creation, so the registry row's kind is the claim's kind.
+const LIVE_CLOSE_KINDS = new Set(["land", "deploy"]);
+const isLiveCloseMove = (action, fromState, nextState, kind) =>
+  action === "state_changed" && nextState === "done" && LIVE_CLOSE_KINDS.has(kind)
+  && fromState !== "done" && fromState !== "closed";
 
 export const PATROL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS patrol_cursor (
@@ -220,6 +234,37 @@ export function patrolPending(store) {
       LIMIT 1`).get();
     return Boolean(row?.hit);
   } catch { return true; }
+}
+
+// Health grace starts at the oldest event actually waiting, not at an idle
+// job's last run. Inspect one indexed successor per room; a missing/gapped
+// or malformed record cannot grant freshness. Never use the newest tail,
+// which would let continuous writes hide an old stalled backlog.
+export function patrolPendingSince(store, now) {
+  const db = store?.db;
+  if (!db?.prepare || !Number.isFinite(now)) return null;
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('rooms','patrol_cursor','patrol_blocks')").all().map(row => row.name));
+  if (!tables.has("rooms")) return null;
+  // Bound even a large fleet of caught-up rooms, not only pending results.
+  if (db.prepare("SELECT COUNT(*) AS n FROM (SELECT 1 FROM rooms LIMIT 1001)").get().n > 1000) return null;
+  const hasCursor = tables.has("patrol_cursor");
+  const sequence = hasCursor ? "COALESCE(c.sequence, 0)" : "0";
+  const parkedClause = tables.has("patrol_blocks")
+    ? "AND NOT EXISTS (SELECT 1 FROM patrol_blocks b WHERE b.room_id=r.id AND b.head_seq=r.sequence)" : "";
+  const rows = db.prepare(`SELECT json_extract(e.body, '$.at') AS pending_at FROM rooms r
+    ${hasCursor ? "LEFT JOIN patrol_cursor c ON c.room_id=r.id" : ""}
+    LEFT JOIN events e ON e.room_id=r.id AND e.sequence=${sequence}+1
+    WHERE r.sequence > ${sequence}
+      ${hasCursor ? "AND (COALESCE(c.blocked, 0)=0 OR r.sequence!=c.blocked_head)" : ""}
+      ${parkedClause} LIMIT 1001`).all();
+  if (!rows.length || rows.length > 1000) return null;
+  let oldest = Infinity;
+  for (const row of rows) {
+    const at = typeof row.pending_at === "string" ? Date.parse(row.pending_at) : NaN;
+    if (!Number.isFinite(at) || at > now) return null;
+    oldest = Math.min(oldest, at);
+  }
+  return oldest;
 }
 
 // The durable parked set: rooms whose stored state the patrol cannot
@@ -511,7 +556,7 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
       }
     }
     if (event?.type === "work_claim.updated") {
-      patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedClaims, event, sequence: row.sequence, eventId: row.id });
+      patrolClaimEvent({ file, claimPrior, claimKind: id => { const row = store.workClaims?.get(roomId, id); return row ? (row.kind ?? null) : undefined; }, claimWork, touchedClaims, deletedClaims, event, sequence: row.sequence, eventId: row.id });
     } else if (typeof event?.type === "string" && event.type.startsWith("message.")) {
       for (const id of patrolMessageEvent({ messagePrior, messageWork, event, sequence: row.sequence })) {
         touchedMessages.add(id);
@@ -597,7 +642,7 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
 // thin receipt (work-claim-events.mjs): { workClaim, action, claimState,
 // ownerId }. The registry row is the truth; the shadow is what the log
 // claims happened, in order.
-function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedClaims, event, sequence, eventId }) {
+function patrolClaimEvent({ file, claimPrior, claimKind, claimWork, touchedClaims, deletedClaims, event, sequence, eventId }) {
   const data = event.data ?? {};
   const claimId = typeof data.workClaim === "string" && data.workClaim ? data.workClaim : null;
   if (!claimId || typeof data.claimState !== "string") return;
@@ -616,7 +661,15 @@ function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedC
   if (!CLAIM_STATES.includes(nextState)) {
     file(sequence, eventId, "claim_legality", "unknown_state", claimId, { state: nextState, action });
   } else if (prior) {
-    if (nextState !== prior.state && !isSettleMove(action, prior.state, nextState)
+    // Kind, in order of replay stability: the receipt's own stamp, the
+    // shadow, then the registry row. A row deleted after a live close (land
+    // queue removal) leaves an older unstamped receipt with no kind at all;
+    // that one state_changed -> done cannot be judged, so it is not filed.
+    const kind = typeof data.kind === "string" ? data.kind : (prior.kind ?? claimKind?.(claimId));
+    const kindUnknown = kind === undefined && action === "state_changed" && nextState === "done";
+    if (nextState !== prior.state && !kindUnknown && !isSettleMove(action, prior.state, nextState)
+      && !isCollapseMove(action, prior.state, nextState)
+      && !isLiveCloseMove(action, prior.state, nextState, kind)
       && !(LEGAL_NEXT.get(prior.state)?.has(nextState) ?? false)) {
       file(sequence, eventId, "claim_legality", "illegal_transition", claimId,
         { from: prior.state, to: nextState, action });
@@ -639,7 +692,8 @@ function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedC
   }
   const doneSequence = nextState !== "done" ? null
     : prior?.state === "done" ? prior.doneSequence : sequence;
-  claimWork.set(claimId, { claimId, state: nextState, ownerId: nextOwner, lastSequence: sequence, doneSequence });
+  const kindSeen = typeof data.kind === "string" ? data.kind : (prior?.kind ?? undefined);
+  claimWork.set(claimId, { claimId, state: nextState, ownerId: nextOwner, lastSequence: sequence, doneSequence, ...(kindSeen ? { kind: kindSeen } : {}) });
   touchedClaims.add(claimId);
 }
 

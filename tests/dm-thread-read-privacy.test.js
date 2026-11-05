@@ -143,15 +143,21 @@ test("parties keep full read access to the DM thread", async t => {
     "the DM recipient still gets their DM notification");
 });
 
-test("reply-request threads stay room-visible: comments under them are not stamped", async t => {
+test("private reply-request threads reject outsiders but retain participant public clarifications", async t => {
   const f = await httpFixture(t);
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   f.store.dmConsents.request("commons", "producer", "reviewer", "ch-2011");
   f.store.dmConsents.decide("commons", "reviewer", "producer", "approve");
   send("producer", T.MESSAGE_POSTED, { messageId: "req-1", body: "Which option?", toMemberId: "reviewer",
     requestKind: "reply" });
-  // A non-party may clarify under a reply request (PR #2011 exemption).
-  send("guest", T.MESSAGE_POSTED, { messageId: "req-1-c", body: "clarifying comment", replyToId: "req-1" });
+  // The privacy boundary supersedes the old PR #2011 outsider exemption.
+  // A participant may still deliberately post an ordinary public comment.
+  const sequence = f.store.room("commons").sequence;
+  assert.throws(() => send("guest", T.MESSAGE_POSTED, {
+    messageId: "outsider-comment", body: "uninvited context", replyToId: "req-1"
+  }), { status: 422, code: "command_rejected" });
+  assert.equal(f.store.room("commons").sequence, sequence, "rejection writes no event");
+  send("reviewer", T.MESSAGE_POSTED, { messageId: "req-1-c", body: "clarifying comment", replyToId: "req-1" });
   const byId = new Map(f.store.room("commons").state.messages.map(m => [m.id, m]));
   assert.equal(byId.get("req-1-c").toMemberId ?? null, null, "room-threaded reply-request comments stay public");
   const ownerSnap = await f.get("/api/rooms/commons", f.keys.owner).then(r => r.json());

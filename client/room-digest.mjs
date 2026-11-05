@@ -8,6 +8,7 @@ const countMap = value => object(value) && Object.values(value).every(integer);
 const sum = value => Object.values(value).reduce((total, count) => total + count, 0);
 
 export function validRoomDigest(value, { roomId, memberId, since }) {
+  if(value?.contractVersion===2)return validCurrentDigest(value,{roomId,memberId,since});
   if (!object(value) || Buffer.byteLength(JSON.stringify(value), "utf8") > 4096
     || value.contractVersion !== 1 || value.roomId !== roomId || !text(value.viewerId)
     || memberId && value.viewerId !== memberId || value.untrusted !== true
@@ -50,4 +51,17 @@ export function validRoomDigest(value, { roomId, memberId, since }) {
     && follow.work === `GET /api/rooms/${room}/work-claims/{id}`
     && follow.context === `GET /api/rooms/${room}/context`
     && follow.updates === `GET /api/rooms/${room}/updates`;
+}
+
+function validCurrentDigest(v,{roomId,memberId,since}){
+ if(!object(v)||Buffer.byteLength(JSON.stringify(v))>16384||v.roomId!==roomId||!text(v.viewerId)||memberId&&v.viewerId!==memberId||v.untrusted!==true||v.since!==since||v.requestedSince!==since||!integer(v.through)||v.through<since||typeof v.evaluatedAt!=='string'||!Number.isFinite(Date.parse(v.evaluatedAt)))return false;
+ const w=v.sourceWindow,c=v.coverage,n=w?.nextRead;
+ if(!object(w)||typeof w.complete!=='boolean'||w.coverage?.mode!=='native_bounded'||w.coverage.globalAttentionComplete!==false||!Array.isArray(w.coverage.omitted)||!w.coverage.omitted.every(text)||v.next!==(w.complete?v.through:since))return false;
+ const source=w.coverage;if(source.available!==true||typeof source.conversation?.complete!=='boolean'||typeof source.standingWorkAndRequests?.complete!=='boolean'||w.complete!==(source.conversation.complete&&source.standingWorkAndRequests.complete)||!integer(source.conversation.examined)||source.conversation.examined>4||source.conversation.direction!=='catch_up')return false;
+ if(w.complete?n!==null:!object(n)||Object.keys(n).sort().join(' ')!=='cursor since'||n.since!==since||!text(n.cursor)||Buffer.byteLength(n.cursor)>12288)return false;
+ if(!object(c)||!['eventsInWindow','byType','workChangedTotal','attentionTotal','messagesTotal'].every(k=>c[k]===null)||v.actionableNow?.total!==null||v.actionableNow.complete!==false||!object(v.context)||!/^[a-f0-9]{64}$/.test(v.context.context_version))return false;
+ if(!Array.isArray(v.attention)||v.attention.length>9||!Array.isArray(v.work)||v.work.length>1||c.attentionReturned!==v.attention.length)return false;
+ for(const item of [...v.attention,...v.work])if(!object(item)||item.roomId!==roomId||!text(item.id)||!text(item.kind)||!integer(item.seq)||typeof item.summary!=='string'||item.summary.length>140||!object(item.next)||!text(item.next.tool)||!object(item.next.arguments)||item.next.arguments.roomId!==roomId)return false;
+ const path=`GET /api/rooms/${encodeURIComponent(roomId)}`;
+ return v.followUps?.context===path+'/context'&&v.followUps.events===path+`/events?after=${since}&limit=4`;
 }

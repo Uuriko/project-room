@@ -1,0 +1,196 @@
+{
+  "receipts": [
+    {
+      "name": "before",
+      "count": 1000,
+      "workItems": 500,
+      "calls": 756,
+      "conversationCalls": 256,
+      "firstUseful": {
+        "calls": 756,
+        "responseBytes": 1444551,
+        "physicalRowsRead": 216335,
+        "returnedSqlTextBytes": 87674505,
+        "statements": 67126,
+        "elapsedMs": 1013.046666,
+        "cpuMeasured": false
+      },
+      "fullStandingFollowup": {
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 160498,
+        "returnedSqlTextBytes": 69039073,
+        "statements": 42513,
+        "elapsedMs": 669.4148750000004,
+        "cpuMeasured": false,
+        "complete": true,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ]
+      },
+      "optionalOldestCatchupNotRequiredForFirstUsefulDiscovery": true,
+      "firstFound": {
+        "dm": false,
+        "reply": false,
+        "request": false,
+        "work": false
+      },
+      "budgets": null
+    },
+    {
+      "name": "before",
+      "count": 5000,
+      "workItems": 500,
+      "calls": 1756,
+      "conversationCalls": 1256,
+      "firstUseful": {
+        "calls": 1756,
+        "responseBytes": 3315551,
+        "physicalRowsRead": 434335,
+        "returnedSqlTextBytes": 143350705,
+        "statements": 163126,
+        "elapsedMs": 2032.3591670000005,
+        "cpuMeasured": false
+      },
+      "fullStandingFollowup": {
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 160498,
+        "returnedSqlTextBytes": 61496125,
+        "statements": 42513,
+        "elapsedMs": 647.3274590000001,
+        "cpuMeasured": false,
+        "complete": true,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ]
+      },
+      "optionalOldestCatchupNotRequiredForFirstUsefulDiscovery": true,
+      "firstFound": {
+        "dm": false,
+        "reply": false,
+        "request": false,
+        "work": false
+      },
+      "budgets": null
+    },
+    {
+      "name": "after",
+      "count": 1000,
+      "workItems": 500,
+      "calls": 1,
+      "conversationCalls": 1,
+      "firstUseful": {
+        "calls": 1,
+        "responseBytes": 3146,
+        "physicalRowsRead": 268,
+        "returnedSqlTextBytes": 130169,
+        "statements": 135,
+        "elapsedMs": 4.456291999998939,
+        "cpuMeasured": false
+      },
+      "fullStandingFollowup": {
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 170498,
+        "returnedSqlTextBytes": 70045073,
+        "statements": 42513,
+        "elapsedMs": 690.0223749999986,
+        "cpuMeasured": false,
+        "complete": true,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ]
+      },
+      "optionalOldestCatchupNotRequiredForFirstUsefulDiscovery": true,
+      "firstFound": {
+        "dm": true,
+        "reply": true,
+        "request": true,
+        "work": true
+      },
+      "budgets": {
+        "at200": {
+          "bytes": 157648,
+          "records": 156
+        },
+        "at512": {
+          "bytes": 157648,
+          "records": 156
+        }
+      }
+    },
+    {
+      "name": "after",
+      "count": 5000,
+      "workItems": 500,
+      "calls": 1,
+      "conversationCalls": 1,
+      "firstUseful": {
+        "calls": 1,
+        "responseBytes": 3146,
+        "physicalRowsRead": 268,
+        "returnedSqlTextBytes": 122301,
+        "statements": 135,
+        "elapsedMs": 3.0572080000001733,
+        "cpuMeasured": false
+      },
+      "fullStandingFollowup": {
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 170498,
+        "returnedSqlTextBytes": 62502125,
+        "statements": 42513,
+        "elapsedMs": 683.2347499999996,
+        "cpuMeasured": false,
+        "complete": true,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ]
+      },
+      "optionalOldestCatchupNotRequiredForFirstUsefulDiscovery": true,
+      "firstFound": {
+        "dm": true,
+        "reply": true,
+        "request": true,
+        "work": true
+      },
+      "budgets": {
+        "at200": {
+          "bytes": 149780,
+          "records": 156
+        },
+        "at512": {
+          "bytes": 149780,
+          "records": 156
+        }
+      }
+    }
+  ],
+  "baseline": "34f63174e",
+  "syntheticRooms": true,
+  "productionRecordReservation": 200,
+  "legalPilotWorkItems": 500,
+  "globalAttentionComplete": false,
+  "sourceAfter": "670723fb25864019503e325f59a1dfb8cc3e7a42",
+  "legalWorkerLog": "/tmp/native-inbox-discovery-worker-legal-frozen.log",
+  "initialStressLog": "/tmp/native-inbox-discovery-worker-first.log",
+  "initialStressScopeCorrection": "Initial1k/5k work-item fixture exceeded PILOT workItemsPerRoom500. It is out-of-policy stress only and supplies no legal MVP discovery evidence. Legal final fixture has500 native tasks at both message sizes.",
+  "visibility": "Same usefulDM/reply/request/task IDs in both arms; hidden message/request prose never appears in responses. Baseline cursor secrecy flaw separately corrected inb7; this is not a new baseline privacy clearance.",
+  "coverage": "firstUseful is discovery, not full enumeration. fullStandingFollowup actually exhausts current needs_me source and returns exactly the owned task/open incoming request;500calls remains material and explicitly measured. Optional oldest-first conversation catch-up is independent, not included as mandatory standing work.",
+  "clocks": "Observed process/workerd wall clock only; no CPU or production latency claim",
+  "deployed": false,
+  "liveVerified": false
+}

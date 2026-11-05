@@ -1,0 +1,78 @@
+{
+  "sourceHead": "df79bb59bae828b421cace2083aeca6aa6cc0d0a",
+  "base": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+  "results": {
+    "originalSourceFinalFunctionalFixture": {
+      "exit": 1,
+      "cause": "consent URL never reached; Google landed on existing commons room"
+    },
+    "composedBrowserControls": {
+      "exit": 0,
+      "pass": 19,
+      "skip": 0,
+      "note": "same final runtime; before later comments/diagnostic strings and suite registration metadata"
+    },
+    "exactFrozenNewBrowserControls": {
+      "exit": 0,
+      "pass": 6,
+      "skip": 0
+    },
+    "suiteAndJourneyCoverage": {
+      "exit": 0,
+      "pass": 12,
+      "skip": 0
+    },
+    "secretScan": {
+      "exit": 0
+    }
+  },
+  "sourceHashes": {
+    "src/app.js": "86f9ca948bae18b7bbbed1100b7f20c4b64e0dbe6a5cab472280bc4e1be91f12",
+    "scripts/connector-google-consent-browser-check.mjs": "4fcfc67efeb2e480d28a1c7b2fe0c4ac6ef04e96c1db0da1aefbb56d5b7cab55",
+    "scripts/browser-ci-durations.json": "54dbb9a20b3e9c0001f32990a9558e96355b425489ebd967de0099bdd9d24f71",
+    "docs/JOURNEY-COVERAGE-MAP.md": "ec39411e5a492f69448221f8cd182a66ffa7bdd8b7d760fd222320d3fa5424f4"
+  },
+  "logs": {
+    "claude-google-consent-original-final-fixture": {
+      "uncompressedSha256": "f96b8692ec5dd35638b41a94f531f35ca392764e8f613a3e350aa85e8cc159f1",
+      "uncompressedBytes": 1959
+    },
+    "claude-google-consent-final": {
+      "uncompressedSha256": "b069b930cb1259e6e760b5de2fe2bd5872bfe288582d0ff8c96966c9db4cb403",
+      "uncompressedBytes": 14400
+    },
+    "claude-google-consent-frozen-six": {
+      "uncompressedSha256": "738b2bb8a27068ea2523086ed4f686969178916ac1042b0b7140e7c02d95b405",
+      "uncompressedBytes": 4138
+    },
+    "claude-google-consent-registration-final": {
+      "uncompressedSha256": "151d366b75d50809e7acd13bbe640d20e0f7dbba2189909c0ed0f7aa4a4d15b6",
+      "uncompressedBytes": 1106
+    },
+    "claude-google-consent-scan": {
+      "uncompressedSha256": "942762bea2dd1d3cd7f554d6a56a32061f7ae1978d9f04ee38bdb9934b7bb20e",
+      "uncompressedBytes": 53
+    }
+  },
+  "limitations": [
+    "Synthetic signed Google provider/token/JWKS; actual Room server, HTTPS proxy, browser cookies, callback bridge, DCR and selected existing agent consent.",
+    "No real Google account, Claude cloud exchange, deployment or live verification.",
+    "No automatic consent approval; oauth_provider_codes stays empty until human Allow.",
+    "Existing desktop auto-provider/cancel validation unchanged. Generic continuation requires explicit successful provider marker; Google callback supplies google=signed-in.",
+    "Root regenerates candidate manifest and publishes."
+  ],
+  "finalManifest": {
+    "schema": 44,
+    "onlyChangedAsset": "src/app.js",
+    "candidateManifestTests": {
+      "exit": 0,
+      "pass": 8,
+      "skip": 0
+    },
+    "ciModeCheck": {
+      "exit": 0,
+      "nodeSuite": "explicitly skipped in CI; dedicated jobs own it"
+    },
+    "checkLogSha256": "92656c64510e7697b2632cdfd63a352008f6d5e8db9d4899394ca7b9895277c5"
+  }
+}

@@ -105,7 +105,7 @@ h1 {
   padding-bottom:48px
 }
 .settlement { max-width: 44rem; margin: 0 0 2rem; color: var(--muted); }
-.settlement h2 { color: var(--ink); font-size: var(--text-lg); margin: 0 0 .5rem; }
+.settlement summary { color: var(--ink); cursor: pointer; font-weight: 600; margin: .5rem 0; }
 .settlement p { margin: 0; line-height: 1.6; }
 .workspace {
   display:grid;
@@ -386,7 +386,7 @@ textarea {
   color:var(--red)
 }
 .detail-close {
-  display:none
+  display:inline-block
 }
 footer {
   max-width:1280px;
@@ -496,7 +496,11 @@ footer a {
 }
 
 .find-work { margin:0 0 32px; padding:24px; border:1px solid var(--line); border-radius:var(--radius-xl); }
-.find-work form { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:16px; align-items:end; }
+.offer-selected .find-work { display:none; }
+.find-work form { display:grid; gap:16px; }
+.match-filters summary { cursor:pointer; }
+.match-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px; }
+.find-work form > button { justify-self:start; }
 .find-work label { display:grid; gap:8px; min-width:0; }
 .find-work input,.find-work select,.find-work textarea { width:100%; min-height:44px; padding:10px; font:inherit; border:1px solid var(--line-control); border-radius:var(--radius-md); box-sizing:border-box; background:var(--panel); color:var(--text); }
 .find-work ul { list-style:none; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
@@ -508,10 +512,10 @@ footer a {
    ~160px on an iPad portrait, truncating the selects. The <=760px phone rule
    below still wins on narrow screens. */
 @media(max-width:1024px) {
-  .find-work form { grid-template-columns:1fr 1fr; }
+  .match-fields { grid-template-columns:1fr 1fr; }
   .find-work ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
-@media(max-width:760px) { .find-work { padding:16px; } .find-work form,.find-work ul { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:760px) { .find-work { padding:16px; } .match-fields,.find-work ul { grid-template-columns:minmax(0,1fr); } }
 
 /* Front-door batch B-8 (#3744): coarse-pointer floor from the one token. */
 @media (pointer: coarse) {

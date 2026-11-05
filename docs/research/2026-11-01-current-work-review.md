@@ -1,0 +1,9 @@
+# Independent review and human approval on current records
+
+The supported dependency set now admits the existing `verification.recorded` and `owner.decision_recorded` actions. Generic `decision.recorded` is a different room-level action and remains unsupported. The current context already loads the exact selected work body and receipt histories, protected member/owner authority, actor halt, and addressed `sourceMessageId`; no additional map or full-room hydration is introduced.
+
+The shared reducers retain all semantics: designated verifier and verify permission, exact completion and evidence version, producer independence, designated human and decide permission, independent PASS before approval, and public existing rationale. Existing histories are preserved exactly, including more than twenty previous records; only handoff history has the separate20 limit. The unchanged per-record size bound still applies.
+
+Five new Node tests exercise the synthetic real canonical flow and negative cases; with handoff neighbors9 pass. Actual Worker qualification runs producer saved native text → independent agent PASS → human public-rationale approval. Both verification and approval lose their committed response and return the original receipt after cold restart without changing any business/audit row or adding adapter writes. An injected failure after the real current-head insert rolls approval back exactly, including proofs and audit rows; cold restart confirms no approval before the successful retry. Final independent recovery audit and closed permit pass.
+
+Evidence and exact log paths are in `audit/evidence/current-work-review-20261101.json`. This is an offline source checkpoint, with no schema, grants, floor activation or deployment change. Other unsupported lifecycle commands and latest composed recovery qualification remain separate work.

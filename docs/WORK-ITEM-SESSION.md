@@ -69,6 +69,18 @@ the write is last-writer-wins.
 (→done/failed), or `session.status_changed`. `request_stop` writes
 `stop_requested_at` and `session.stop_requested`.
 
+A start may include `provider`, `client`, and `model` (each at most 100 printable
+characters). These are caller declarations, not verified identities, billing
+records, or permissions. The SDK's `workSessionAction` forwards them; session
+reads and the existing details view label them declared and unverified.
+
+A completion (`room_record_completion` or `room_submit_text_result`) may supply
+`attempt`, the exact positive attempt number for this work. It must already be
+finished successfully and belong to both the authenticated reporter and explicit
+`producerId`. Room snapshots that attempt at completion; retries, later attempts,
+and subsequent declarations cannot rewrite it. Omission leaves the completion's
+attempt unknown. Existing public receipt summaries do not publish this metadata.
+
 The same Events are accepted on `POST /api/rooms/:room/commands`.
 
 List/filter returns Room member IDs and work titles only. No people-data

@@ -38,6 +38,13 @@ const INTERLEAVINGS = 240;
 const sortedEntries = map => [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
 
 describe('P1 torn-write resistance: fault at any internal step leaves no torn claim rows', () => {
+  it('absent additive indexes remain absent while conflicting index definitions fail closed', () => {
+    const { storage, db, registry } = makeClaimRoom(makeClock());
+    assert.equal(db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get('work_claim_inbox_owner'), undefined);
+    storage.schemas.work_claim_inbox_owner = 'CREATE INDEX work_claim_inbox_owner ON work_claims(updated_at)';
+    assert.throws(() => registry.verifySchema(), /inbox index requires operator reconciliation/);
+  });
+
   for (let i = 0; i < INTERLEAVINGS; i++) {
     it(`interleaving ${i}: random op x random internal fault step is all-old or all-new`, () => {
       const rand = mulberry32(0xc3a0 + i * 7919);

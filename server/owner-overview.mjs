@@ -1,3 +1,4 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
 // #3342 — Owner Cockpit slice 1: the cross-room read model behind
 // GET /api/owner/overview (spec: project-room-owner-cockpit.md §§2, 4, 6).
 // #3343 — Slice 2 adds the Money (§5) and Roster (§3) sections below:
@@ -107,8 +108,8 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     catch (error) { if (error.status === 403) return null; throw error; }
     const member = roomAuth.member;
     if (!member || member.kind !== "human") return null;
-    const state = store.room(roomId).state;
-    if (member.id === state.room.ownerId) return "owner";
+    const authority = store.roomAuthority(roomId,{memberId:member.id});
+    if (member.id === authority.ownerId) return "owner";
     if (Array.isArray(member.permissions) && member.permissions.includes("manage_members")) return "admin";
     return null;
   };
@@ -124,6 +125,14 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
 
   const pageIds = allRoomIds.filter(roomId => after === null || roomId > after).slice(0, ROOM_PAGE);
   const hasMore = allRoomIds.filter(roomId => after === null || roomId > after).length > ROOM_PAGE;
+  // The legacy cockpit requires complete work/session/money state. Recognize
+  // real current owners without pretending that bounded personal pages are a
+  // complete account-wide report. The existing per-room reader is v2-aware.
+  for (const roomId of pageIds) {
+    if (isCurrentRoom(store.db,roomId) && probeRole(roomId) !== null)
+      fail(409, "current_room_context_required", "Cross-room overview is unavailable for normalized rooms. Open the room's Needs you queue and follow its pages.");
+  }
+
 
   const decisions = [];
   const exceptions = [];
@@ -650,8 +659,9 @@ function collectRoomMoney(store, roomId, base, state, nowMs, windowStart, moneyR
     unreportedAttempts: group.unreported,
   })).sort((a, b) => a.memberId.localeCompare(b.memberId));
 
-  // Accepted outcomes in the window (§5.3): a work item reaching its
-  // completed (accepted-terminal) state, plus bounties reaching paid.
+  // Recorded outcomes in the window: currently completed work items by
+  // update time, plus currently paid bounties by state-change time.
+  // Completion can precede review; these are not independent acceptance events.
   // The escrow records carry no bounty↔work-item link, so the two
   // recorded outcome sources are counted as recorded — no linkage is
   // invented here.
@@ -714,13 +724,14 @@ function collectRoomCredits(store, roomId) {
   return { byGroup, lockedMillis, disputedMillis, poolBalanceMillis, agentBalances };
 }
 
-// §5.3: reported cents ÷ accepted outcomes, denominator always shown.
+// Compatibility fields retain their names: recorded completions plus paid bounties,
+// not deduplicated independently accepted tasks. Numerator is reported session spend.
 // Ratio suppressed at n=0; "unknown" when every attempt is unreported.
 function costPerOutcome(totals) {
   const { reportedCents, unreportedAttempts, acceptedOutcomes } = totals;
   if (acceptedOutcomes === 0) {
     return Object.freeze({ status: "no_outcomes", ratioCents: null, acceptedOutcomes,
-      unreportedAttempts, label: "no accepted outcomes in window" });
+      unreportedAttempts, label: "no recorded completions or paid bounties in window" });
   }
   if (reportedCents === "unknown") {
     return Object.freeze({ status: "unknown", ratioCents: null, acceptedOutcomes,
@@ -728,7 +739,7 @@ function costPerOutcome(totals) {
   }
   const ratioCents = reportedCents / acceptedOutcomes;
   return Object.freeze({ status: "ok", ratioCents, acceptedOutcomes, unreportedAttempts,
-    label: `$${(ratioCents / 100).toFixed(2)} / accepted outcome (n=${acceptedOutcomes}, ${unreportedAttempts} unreported)` });
+    label: `$${(ratioCents / 100).toFixed(2)} reported spend / recorded outcome (n=${acceptedOutcomes}, ${unreportedAttempts} unreported attempts)` });
 }
 
 function totalsOf(entries) {
@@ -835,9 +846,19 @@ function collectRoomRoster({ store, token, binding }, roomId, base, state, nowMs
     const blocked = sessions.some(({ session }) =>
       session.suspended_by !== null || (session.stop_requested_at !== null
         && ["processing", "active", "suspended"].includes(session.status)));
-    const stalled = (claimsByOwner.get(member.id) ?? []).some(claim => claimIdle(claim, nowMs));
+    const memberClaims = claimsByOwner.get(member.id) ?? [];
+    const stalled = memberClaims.some(claim => claimIdle(claim, nowMs));
+    // Presence lists board-door holds since the #5338 leg (b) cure, so a
+    // claim entry alone no longer proves live work: an entry whose claim
+    // is idle on the registry's own clock (claimIdle) is the stalled case
+    // below. Session entries carry no claim status and always count.
+    const idleClaimKeys = new Set(memberClaims
+      .filter(claim => claimIdle(claim, nowMs))
+      .map(claim => typeof claim.workItemId === "string" && claim.workItemId ? claim.workItemId : claim.id));
+    const liveWorkingOn = workingOn.filter(entry =>
+      typeof entry.status !== "string" || !idleClaimKeys.has(entry.workItemId));
     const workState = hostStatus === "offline" ? "offline"
-      : workingOn.length > 0 ? "working"
+      : liveWorkingOn.length > 0 ? "working"
       : stalled ? "stalled"
       : blocked ? "blocked" : "idle";
 
@@ -860,7 +881,7 @@ function collectRoomRoster({ store, token, binding }, roomId, base, state, nowMs
       identityId: presenceRow?.ownerIdentityId ?? null,
       hostStatus,
       lastSeenAt: presenceRow?.lastSeenAt ?? null,
-      currentWork: workingOn.length > 0 ? Object.freeze({ ...workingOn[0] }) : null,
+      currentWork: liveWorkingOn.length > 0 ? Object.freeze({ ...liveWorkingOn[0] }) : null,
       workState,
       autonomyTier,
       reputationBand,

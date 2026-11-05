@@ -1,0 +1,43 @@
+✔ restore-only sealed scan partitions journals, auxiliary maps and event log across cold cursors (10.846375ms)
+✔ legal checkpoint beyond cutover4MiB and individual128KiB limits remains byte framed (87.985416ms)
+✔ sealed source framing cannot be used by old cutover scanner or escape source bounds (0.151792ms)
+✔ malformed checkpoint framing and malformed complete leaves cannot grant completion (0.176958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":53019840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":58625896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ scanner preserves byte ranges across every UTF-8/escape/container boundary (6.888916ms)
+✔ 17,405 message codec bootstrap uses constant control state and bounded records (68.103458ms)
+✔ one spanning maximum leaf is fetched once, without a growing persisted token buffer (1.940583ms)
+✔ invalid or oversized shape refuses {"messages":[{"id":"a"},]} (0.229ms)
+✔ invalid or oversized shape refuses {"room":{},} (0.08125ms)
+✔ invalid or oversized shape refuses {"room":{},"room":{}} (0.046541ms)
+✔ invalid or oversized shape refuses {"messages":[{"id":"a"}]}garbage (0.046ms)
+✔ invalid or oversized shape refuses {"messages":{}} (0.03775ms)
+✔ invalid or oversized shape refuses {"messages":[null]} (0.062083ms)
+✔ invalid or oversized shape refuses {"messages":[{"id":"a","body":"xxxx (3.584292ms)
+✔ input/control admission refuses oversized fields and impossible depth before progress (0.153167ms)
+✔ pure shared message-at-rest transform exactly matches normal writer: enabled=false (43.682458ms)
+✔ pure shared message-at-rest transform exactly matches normal writer: enabled=true (34.6005ms)
+✔ reply map preserves exact parent and escaped child key framing across byte boundaries (1.672375ms)
+✔ fatal span decoding preserves a BOM inside a string but refuses one outside JSON (0.084459ms)
+✔ growing members, channels and work maps partition into bounded addressed entries (15.6205ms)
+✔ growing archive retainedIds partition by exact nested array position without token growth (23.149667ms)
+✔ nested retained framing survives escaped keys and UTF8 boundaries: 1 (0.877125ms)
+✔ nested retained framing survives escaped keys and UTF8 boundaries: 2 (0.454083ms)
+✔ nested retained framing survives escaped keys and UTF8 boundaries: 7 (0.241125ms)
+✔ nested retained framing survives escaped keys and UTF8 boundaries: 63 (0.127917ms)
+✔ nested archive empty/null shape remains explicit null (0.187083ms)
+✔ nested archive empty/null shape remains explicit {"retainedIds":[]} (0.208ms)
+✔ nested archive empty/null shape remains explicit {} (0.14525ms)
+✔ nested archive refuses malformed identity shape {} (0.058542ms)
+✔ nested archive refuses malformed identity shape [7] (0.045292ms)
+✔ nested archive refuses malformed identity shape ["xxxxxxxxxxxxxxxxxxxxxxxxxxxx (0.0595ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 306.392042

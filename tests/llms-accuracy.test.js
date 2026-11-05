@@ -19,7 +19,7 @@
 //    canonical claim.
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,13 +32,13 @@ import { createRoomServer } from "../server/http.mjs";
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
-// The 18 essential tools the packet names for the member core profile.
-const CORE_18 = [
+// The 10 essential tools the packet names for the member core profile
+// (trimmed to conversation tools in fc5a0ea2; the rest are focus/full).
+const CORE_10 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
-  "dm_posted", "room_check_access", "room_create", "room_join",
-  "room_put_file", "room_commit_file", "add_land_item", "list_land_queue",
-  "wake_pause", "wake_resume", "bond_propose",
+  "dm_posted", "room_check_access", "room_join",
+  "room_list_work", "room_read_work", "room_claim",
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
@@ -117,28 +117,26 @@ async function toolsList(params, secret) {
   return body.result.tools.map(t => t.name);
 }
 
-test("anonymous catalog is exactly the packet's seven tools", async () => {
+test("anonymous catalog keeps packet tools plus the existing OAuth access check", async () => {
   const names = await toolsList();
   // Packet: "the four public join tools ... plus public_work_recommend,
-  // public_work_read_task, and room_identity_mint" / "seven tools with no credential".
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ANON, ...IDENTITY_MINT_ANON]);
+  // public_work_read_task and room_identity_mint, plus the protected access check.
+  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ANON, ...IDENTITY_MINT_ANON, "room_check_access"]);
   assert.ok(llmsTxt().includes("room_mcp_snippet"),
     "packet must name room_mcp_snippet among the four join tools");
 });
 
-test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+test("outside identity gets join readers, access and join tools, and public-work tools", async () => {
   const names = await toolsList(undefined, outsiderSecret);
-  // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  assert.deepEqual(names, [...JOIN_READERS, "room_check_access", "room_join", ...PUBLIC_WORK_ALL]);
+  assert.match(llmsFullTxt(), /room_join {}/, "discovery must explain the default public-lobby join");
+  assert.match(llmsFullTxt(), /Outside identities get the four join documents, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member core profile is the packet's 13 core tools; join readers drop once joined (#5468)", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  assert.equal(names.length, 13, `core profile must be 13 tools, got ${names.length}`);
+  assert.deepEqual(names, CORE_10);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
@@ -162,13 +160,25 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
-test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
+test("Routes compact core set names the same tools as the 10-tool paragraph", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     const match = packet.match(/Their compact core set: ([^.]+)\./);
     assert.ok(match, `${label} must have a compact core set list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
-    const missing = CORE_18.filter(n => !listed.includes(n));
+    const missing = CORE_10.filter(n => !listed.includes(n));
     assert.deepEqual(missing, [],
-      `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
+      `${label} compact core set is missing tools the 10-tool paragraph promises: ${missing.join(",")}`);
   }
+});
+
+// PR5163 discovery slice: name the verified registry entry without promising
+// a new release version or changing the canonical connection destination.
+test('both agent packets name the official registry listing and canonical remote', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../server.json', import.meta.url), 'utf8'));
+  for (const packet of [llmsTxt(), llmsFullTxt()]) {
+    assert.ok(packet.includes('https://registry.modelcontextprotocol.io'));
+    assert.ok(packet.includes(manifest.name));
+    assert.ok(packet.includes(manifest.remotes[0].url));
+  }
+  assert.ok(Buffer.byteLength(llmsTxt()) < 5120, 'registry guidance must fit the short packet budget');
 });

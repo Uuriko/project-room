@@ -76,3 +76,14 @@ test("mount with no arguments works; every step handler is optional", (t) => {
   assert.equal(card.removed, true, "greet dismisses");
   assert.equal(agentFirstRunSeen(), true, "dismissal marks seen");
 });
+
+test("mount with no arguments: the board step explains itself instead of throwing", (t) => {
+  installDom(t);
+  const card = mountAgentFirstRun();
+  card.fireClick("board"); // no board action wired: must not throw
+  assert.equal(card.removed, false, "the card stays open when no host can open the board");
+  const foot = card.children.find((c) => c.className === "agent-first-run-foot");
+  const hint = foot.children.find((c) => c.className === "agent-first-run-hint");
+  assert.equal(hint.hidden, false, "the unavailable-board hint shows");
+  assert.match(String(hint.textContent), /work board/);
+});

@@ -1,0 +1,26 @@
+{
+  "cost": {
+    "statements": 34,
+    "rowsRead": 1745,
+    "rowsWritten": 0,
+    "unknown": 0,
+    "returnedSqlTextBytes": 38916,
+    "eventPayloadBytes": 0
+  },
+  "rawRuntime": {
+    "statements": 2,
+    "rowsWritten": 2,
+    "unknown": 0
+  },
+  "historyCertified": false,
+  "baseline": "b7c6d7a2d6112134fb7fb37b1da5f42d3df1078b",
+  "redLog": "/tmp/current-reply-cancel-red.log",
+  "nodeTests": 4,
+  "nodeLog": "/tmp/current-reply-cancel-node-green.log",
+  "workerTests": 1,
+  "workerLog": "/tmp/current-reply-cancel-worker-green.log",
+  "policy": "unchanged existing cancelReplyRequest requester or human-room-owner policy; no owner private-read exemption",
+  "scope": "addressed selected protected request, opening message, optional linked canonical work",
+  "deployed": false,
+  "liveVerified": false
+}

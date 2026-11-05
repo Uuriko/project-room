@@ -1,0 +1,30 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":30963056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":35,"heapBytes":37880600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":30700872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":34,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":37835016,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":34,"legacyColdStartMs":34,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":35,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":30184760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":35,"legacyColdStartMs":35,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":36300824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":42482984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ pure: type checks, null clears, dueAt normalized, missing sorts last (0.908666ms)
+✔ flag off: planning fields are unknown (422), as today (49.506792ms)
+✔ flag on: create, update, filter and sort (41.532459ms)
+✔ projects: flag off refuses project fields; on: set, filter, groupBy (39.640875ms)
+✔ planning update rejects extra non-planning fields before any mutation (36.487416ms)
+✔ combined note and planning update returns the persisted planning value (38.762209ms)
+✔ planning edits carrying requestId are refused without changing the claim or events (37.459459ms)
+✔ non-planning requestId replay still succeeds and a changed note conflicts (37.576125ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 391.584833

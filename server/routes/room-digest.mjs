@@ -11,12 +11,12 @@ export function readRoomDigest(ctx) {
     ctx.reject(403, "insufficient_scope", "API key lacks the rooms:read scope");
   }
   const params = ctx.url.searchParams;
-  if ([...params.keys()].some(key => !["since", "auth"].includes(key) || params.getAll(key).length !== 1)
+  if ([...params.keys()].some(key => !["since", "cursor", "auth"].includes(key) || params.getAll(key).length !== 1)
     || (params.has("since") && !/^(0|[1-9]\d*)$/.test(params.get("since")))) {
-    ctx.reject(422, "invalid_cursor", "since is the only digest query parameter, as a sequence number");
+    ctx.reject(422, "invalid_cursor", "Use since as a sequence number and the returned opaque cursor for native continuation");
   }
   return ctx.json(ctx.res, 200, ctx.store.roomDigest(selected.token, roomId, {
-    since: params.has("since") ? Number(params.get("since")) : 0, expectedSessionBinding: fence
+    since: params.has("since") ? Number(params.get("since")) : 0, ...(params.has("cursor")?{cursor:params.get("cursor")} : {}), expectedSessionBinding: fence
   }));
 }
 
@@ -26,7 +26,7 @@ export const ROOM_DIGEST_ROUTES = Object.freeze([
     auth: "room", capability: null, scope: "room", handler: readRoomDigest,
     schema: {
       params: { type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } },
-      query: { type: "object", properties: { since: { type: "integer", minimum: 0 } } },
+      query: { type: "object", properties: { since: { type: "integer", minimum: 0 }, cursor:{type:"string",maxLength:12288} } },
       response: { type: "object" }
     }, events: [] })
 ]);

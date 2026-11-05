@@ -1,0 +1,15 @@
+✔ actual compact native receipt click opens exact selected result loader and preserves binding (1.071167ms)
+✔ full external receipt remains unopened; busy and noncurrent cards do not open (1.175667ms)
+✔ full native previous completion pointer is retained (0.594375ms)
+✔ actual thin external receipt never opens the text reader (0.683041ms)
+✔ actual compact native work receipt renders selected result control without summary or nativeText (0.777667ms)
+✔ full text and external receipts preserve exact display and evidence behavior (0.19525ms)
+✔ actual thin external result preserves safe evidence anchor instead of text-reader control (0.084042ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 114.713916

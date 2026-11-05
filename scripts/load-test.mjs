@@ -1,26 +1,23 @@
-// Load test against a local room server. Three measurements, all in-process:
+// Load test against a local room server. Two measurements, all in-process:
 //
 //   commands  N concurrent agents doing a realistic work loop over HTTP
 //             (presence, post, claim, changes, capabilities).
 //   streams   N concurrently open SSE streams while M messages are posted over
 //             HTTP; reports per-delivery fan-out latency (post -> arrival on
 //             every stream) and any stream the server closed.
-//   queue     wake-queue enqueue-to-lease lag through the server/wake-queue.mjs
-//             API, with a poller leasing due wakes at a fixed interval.
 //
 // Usage:
 //   node scripts/load-test.mjs [agents=25] [iterations=5]        # commands, legacy flat JSON
-//   node scripts/load-test.mjs --mode streams|queue|commands|all [flags]
+//   node scripts/load-test.mjs --mode streams|commands|all [flags]
 //
 // Flags (safe defaults finish in well under two minutes on a laptop):
 //   --streams 50  --messages 200  --message-interval-ms 100  --stream-interval-ms 250  --settle-ms auto
-//   --wakes 200   --wake-interval-ms 5  --poll-ms 50  --lease-batch 32  --wake-members auto
 //   --agents 25   --iterations 5
 //   --quiet       suppress the human table (stderr); the JSON blob always goes to stdout.
 //
 // Room guardrails that bound the flags: at most 100 members per room (so at most
 // 99 stream members), at most 100 open streams per server and 3 per credential,
-// 40 writes per credential burst, 200 active wakes per member.
+// 40 writes per credential burst.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +50,7 @@ function parseArgs(argv) {
   return { positional, flags };
 }
 function usage(message) {
-  console.error(`${message}\nUsage: node scripts/load-test.mjs [agents] [iterations] | --mode streams|queue|commands|all [--streams N] [--messages N] [--message-interval-ms N] [--stream-interval-ms N] [--settle-ms N] [--wakes N] [--wake-interval-ms N] [--poll-ms N] [--lease-batch N] [--wake-members N] [--agents N] [--iterations N] [--quiet]`);
+  console.error(`${message}\nUsage: node scripts/load-test.mjs [agents] [iterations] | --mode streams|commands|all [--streams N] [--messages N] [--message-interval-ms N] [--stream-interval-ms N] [--settle-ms N] [--agents N] [--iterations N] [--quiet]`);
   process.exit(2);
 }
 const integer = (value, name, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) => {
@@ -63,11 +60,11 @@ const integer = (value, name, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) =
   return n;
 };
 const { positional, flags } = parseArgs(process.argv.slice(2));
-const KNOWN = ["mode", "streams", "messages", "messageIntervalMs", "streamIntervalMs", "settleMs", "wakes", "wakeIntervalMs", "pollMs", "leaseBatch", "wakeMembers", "agents", "iterations", "quiet"];
+const KNOWN = ["mode", "streams", "messages", "messageIntervalMs", "streamIntervalMs", "settleMs", "agents", "iterations", "quiet"];
 for (const name of Object.keys(flags)) if (!KNOWN.includes(name)) usage(`Unknown flag --${name}`);
 const legacy = flags.mode === undefined;
 const mode = legacy ? "commands" : flags.mode;
-if (!["commands", "streams", "queue", "all"].includes(mode)) usage("--mode must be commands, streams, queue or all");
+if (!["commands", "streams", "all"].includes(mode)) usage("--mode must be commands, streams or all");
 const options = {
   agents: integer(flags.agents ?? positional[0] ?? 25, "agents", { min: 1, max: MAX_AGENT_MEMBERS }),
   iterations: integer(flags.iterations ?? positional[1] ?? 5, "iterations", { min: 1 }),
@@ -76,15 +73,9 @@ const options = {
   messageIntervalMs: integer(flags.messageIntervalMs ?? 100, "message-interval-ms"),
   streamIntervalMs: integer(flags.streamIntervalMs ?? STREAM_INTERVAL_DEFAULT_MS, "stream-interval-ms", { min: 1 }),
   settleMs: integer(flags.settleMs ?? "auto", "settle-ms"),
-  wakes: integer(flags.wakes ?? 200, "wakes", { min: 1, max: 20000 }),
-  wakeIntervalMs: integer(flags.wakeIntervalMs ?? 5, "wake-interval-ms"),
-  pollMs: integer(flags.pollMs ?? 50, "poll-ms", { min: 1 }),
-  leaseBatch: integer(flags.leaseBatch ?? 32, "lease-batch", { min: 1, max: 1000 }),
-  wakeMembers: integer(flags.wakeMembers ?? "auto", "wake-members", { min: 1, max: MAX_AGENT_MEMBERS }),
   quiet: flags.quiet === true
 };
 options.settleMs ??= 3 * options.streamIntervalMs + 2000;
-options.wakeMembers ??= Math.min(MAX_AGENT_MEMBERS, Math.ceil(options.wakes / 100));
 
 // ---- statistics ------------------------------------------------------------
 const round = n => Math.round(n * 10) / 10;
@@ -288,70 +279,6 @@ async function runStreams({ streams: STREAMS, messages: MESSAGES, messageInterva
   return result;
 }
 
-// ---- queue -------------------------------------------------------------------
-async function runQueue({ wakes: WAKES, wakeIntervalMs, pollMs, leaseBatch, wakeMembers }) {
-  const room = openRoom({ members: wakeMembers, prefix: "wake-agent" });
-  const queue = room.store.wakeQueue;
-  const pending = new Map(); // `${memberId}/${queueKey}` -> performance.now() before enqueue
-  const lag = [], enqueueMs = [], leaseMs = [], completeMs = [];
-  const errors = new Map();
-  let enqueued = 0, leased = 0, completed = 0, maxBacklog = 0, polls = 0;
-  const wallStart = performance.now();
-  let producing = true;
-  const producer = (async () => {
-    try { for (let i = 0; i < WAKES; i++) {
-      const { memberId, key } = room.agents[i % room.agents.length];
-      const queueKey = `load-wake-${i}`, start = performance.now();
-      pending.set(`${memberId}/${queueKey}`, start);
-      try {
-        queue.enqueue(key, ROOM, { requestId: randomUUID(), queueKey, intent: { load: i }, dueAt: Date.now(), maxAttempts: 3 });
-        enqueueMs.push(performance.now() - start); enqueued++;
-      } catch (e) { pending.delete(`${memberId}/${queueKey}`); countErrors(errors, e); }
-      if (wakeIntervalMs > 0 && i + 1 < WAKES) await sleep(wakeIntervalMs);
-      else if (i % 50 === 49) await sleep(0); // let the poller run in burst mode
-    } } finally { producing = false; }
-  })();
-  const worker = randomUUID();
-  const deadline = performance.now() + 120000;
-  while ((producing || leased < enqueued) && performance.now() < deadline) {
-    await sleep(pollMs); polls++;
-    const due = queue.due(Date.now(), leaseBatch);
-    maxBacklog = Math.max(maxBacklog, due.length);
-    for (const wake of due) {
-      const memberId = wakeMember(wake, room);
-      if (!memberId) continue;
-      const start = performance.now();
-      const row = queue.lease(ROOM, memberId, wake.queueKey, worker);
-      if (!row) continue;
-      const leasedAt = performance.now(); leaseMs.push(leasedAt - start); leased++;
-      const sentAt = pending.get(`${memberId}/${wake.queueKey}`);
-      if (sentAt !== undefined) lag.push(leasedAt - sentAt);
-      try { queue.complete(ROOM, memberId, wake.queueKey, { requestId: randomUUID(), leaseOwner: worker }); completeMs.push(performance.now() - leasedAt); completed++; }
-      catch (e) { countErrors(errors, e); }
-    }
-  }
-  const wallMs = performance.now() - wallStart;
-  await producer; room.close();
-  const result = {
-    wakes: WAKES, wakeMembers, wakeIntervalMs, pollMs, leaseBatch,
-    enqueued, leased, completed, unleased: enqueued - leased, polls, maxDueBacklog: maxBacklog,
-    errors: Object.fromEntries(errors),
-    enqueueMs: percentiles(enqueueMs), leaseMs: percentiles(leaseMs), completeMs: percentiles(completeMs),
-    lagMs: percentiles(lag), lagHistogram: histogram(lag), wallMs: Math.round(wallMs)
-  };
-  table(`queue: ${enqueued}/${WAKES} enqueued every ${wakeIntervalMs}ms across ${wakeMembers} member(s), poller every ${pollMs}ms x ${leaseBatch}; leased ${leased}, completed ${completed}, max due backlog ${maxBacklog}, wall ${result.wallMs}ms`,
-    ["metric", "count", "p50", "p95", "p99", "max"],
-    [pctRow("enqueue ms", result.enqueueMs), pctRow("lease ms", result.leaseMs), pctRow("complete ms", result.completeMs), pctRow("enqueue->lease lag ms", result.lagMs)]);
-  table("enqueue->lease lag histogram", ["bucket", "count", ""], histRows(result.lagHistogram));
-  return result;
-}
-// due() rows are member-scoped views without the member id; wakes are keyed
-// per member here so the owning member can be recovered from the queue key.
-function wakeMember(wake, room) {
-  const index = Number(/^load-wake-(\d+)$/.exec(wake.queueKey)?.[1]);
-  return Number.isInteger(index) ? room.agents[index % room.agents.length].memberId : null;
-}
-
 // ---- main ----------------------------------------------------------------------
 const startedAt = new Date().toISOString();
 let output;
@@ -361,7 +288,6 @@ else {
   output = { mode, node: process.version, startedAt, options: reported };
   if (mode === "commands" || mode === "all") output.commands = await runCommands(options);
   if (mode === "streams" || mode === "all") output.streams = await runStreams(options);
-  if (mode === "queue" || mode === "all") output.queue = await runQueue(options);
 }
 console.log(JSON.stringify(output, null, 2));
 // Idle fetch keep-alive sockets can outlive the server; do not let them hold the process.

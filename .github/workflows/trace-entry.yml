@@ -5,14 +5,14 @@
 # metadata — number, title, merge SHA, linked Room-Work claim — by
 # scripts/trace-entry.mjs. No manual backfill, ever.
 #
-# Why a bot PR and not a direct push: main's branch protection requires status
-# checks [test, contract, lint, browser, cloudflare] on merges, which blocks
-# direct pushes of fresh commits (a new SHA has no passing checks).
+# Why a bot PR and not a direct push: keep the generated trace change
+# reviewable through the landing workflow. Check triggers and current merge
+# qualification are documented in docs/RELEASE-MERGE-GATE.md.
 #
 # Why a PAT and not GITHUB_TOKEN: GitHub suppresses workflow runs for
 # GITHUB_TOKEN-caused events (anti-recursion), so a PR opened with
-# GITHUB_TOKEN would never launch the required status checks and could never
-# merge. A fine-grained PAT (or GitHub App token) triggers workflows normally.
+# GITHUB_TOKEN would not launch qualification workflows for that PR.
+# A fine-grained PAT (or GitHub App token) triggers workflows normally.
 # (Validated 2026-10-06: PR #1650, opened with a non-GITHUB_TOKEN credential,
 # launched the full CI suite.)
 #

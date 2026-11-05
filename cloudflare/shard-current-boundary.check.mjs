@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {Miniflare} from 'miniflare';import {fileURLToPath} from 'node:url';
+test('actual RoomShard stays default-off and refuses normalized transfer without writes or loss of readable state',{timeout:30000},async()=>{
+ const script=(await build({entryPoints:[fileURLToPath(new URL('./shard-current-boundary.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
+ for(const enabled of ['0','1']){const mf=new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM_SHARD:{className:'ShardBoundaryRoom',useSQLite:true}},bindings:{ROOM_PER_ROOM_OBJECTS:enabled}});try{const response=await mf.dispatchFetch('https://room.example.test/');assert.equal(response.status,200);const body=await response.json();assert.deepEqual(body,enabled==='0'?{enabled:false}:{enabled:true,refused:[true,true,true],writes:0,transactions:0,unknown:0,unchanged:true,controlUnchanged:true});}finally{await mf.dispose();}}
+});

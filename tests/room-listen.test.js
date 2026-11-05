@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { AgentIdentities } from "../server/agent-identities.mjs";
 import { RoomStore } from '../server/store.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -21,11 +22,21 @@ const qualify = fileURLToPath(new URL('../scripts/receive-qualify.mjs', import.m
 
 async function saved(t, { listen = false } = {}) {
   const store = new RoomStore(':memory:');
+  let server = null, directory = null;
+  t.after(async () => {
+    try {
+      server?.closeStreams(); server?.closeAllConnections();
+      if (server?.listening) await new Promise(resolve => server.close(resolve));
+    } finally {
+      store.close();
+      if (directory) rmSync(directory, { recursive: true, force: true });
+    }
+  });
   const owner = store.identities.create('Listen owner');
   const agent = store.identities.create('Listen receiver');
-  const server = listen ? createRoomServer({ store }) : null;
+  server = listen ? createRoomServer({ store }) : null;
   if (server) await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const directory = mkdtempSync(join(tmpdir(), 'room-listen-'));
+  directory = mkdtempSync(join(tmpdir(), 'room-listen-'));
   const config = join(directory, 'private');
   const origin = server ? 'http://127.0.0.1:' + server.address().port : 'http://127.0.0.1:9';
   if (listen) {
@@ -35,11 +46,6 @@ async function saved(t, { listen = false } = {}) {
   saveAgentConnection(config, { version: 1, origin, roomId: 'listen-room', memberId: 'receiver', token: agent.secret });
   const requests = [];
   if (server) server.on('request', request => requests.push(request.url));
-  t.after(async () => {
-    if (server) await new Promise(resolve => server.close(resolve));
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  });
   return { store, agent, config, requests, server };
 }
 
@@ -55,6 +61,19 @@ function run(t, script, args, env) {
   });
   return { child, text: () => ({ stdout, stderr }) };
 }
+
+test('setup failure after opening the server retains registered resource cleanup', async () => {
+  const cleanup = [], original = AgentIdentities.prototype.link;
+  const injected = new Error('Synthetic link setup failure');
+  try {
+    AgentIdentities.prototype.link = () => { assert.equal(cleanup.length, 1); throw injected; };
+    await assert.rejects(() => saved({ after: operation => cleanup.push(operation) }, { listen: true }), error => error === injected);
+  } finally {
+    AgentIdentities.prototype.link = original;
+    for (const operation of cleanup) await operation();
+  }
+  assert.equal(cleanup.length, 1);
+});
 
 test('poll prints one pointer and leaves the wake pending; webhook prints the subscribe call and does not connect', async t => {
   const f = await saved(t, { listen: true });
@@ -136,10 +155,10 @@ test('qualification child records the reply and returns reachability evidence', 
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); });
   const [code] = await once(child, 'exit');
   assert.equal(code, 0, stderr);
   assert.deepEqual(JSON.parse(stdout), {
     qualified: true, replyStatus: 'answered', signalAcknowledged: true, reachabilityObserved: true, uiBadge: 'room_ui_v2'
   });
-  t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
 });

@@ -37,6 +37,17 @@ export const SMOKE_TESTS = [
   "tests/work-claim-events.test.js",
 ];
 
+// Cheap checks of committed whole-tree snapshots (deploy manifest, MCP
+// catalog, the stamped llms.txt budget). A change anywhere can break them
+// without importing or naming them, and they are what "forgot to regenerate"
+// fails in CI, so they run on every non-empty diff, outside the time budget.
+export const TREE_GUARDS = [
+  "tests/candidate-manifest.test.js",
+  "tests/mcp-catalog-contract.test.js",
+  "tests/plain-room-setup.test.js",
+  "tests/runtime-source-guard.test.mjs",
+];
+
 // Changing one of these can break any test; always add the smoke set.
 export const GLOBAL_FILES = new Set([
   "package.json",
@@ -147,7 +158,7 @@ export function relatedTests({ changed, tests, reverse, read }) {
 
 // Pick tests closest first, then cheapest, within budgetMs of summed
 // estimated time. Changed tests are always kept.
-export function selectTests({ changed, tests, reverse, read, timings = {}, budgetMs, smoke = SMOKE_TESTS }) {
+export function selectTests({ changed, tests, reverse, read, timings = {}, budgetMs, smoke = SMOKE_TESTS, guards = TREE_GUARDS }) {
   const hit = relatedTests({ changed, tests, reverse, read });
   const estimate = (f) => (Number.isFinite(timings[f]) && timings[f] > 0 ? timings[f] : DEFAULT_ESTIMATE_MS);
   const ranked = [...hit.entries()].sort(
@@ -160,11 +171,20 @@ export function selectTests({ changed, tests, reverse, read, timings = {}, budge
     const ms = estimate(test);
     const mustKeep = info.via === "changed";
     if (!mustKeep && (ms >= SLOW_MS || spent + ms > budgetMs)) {
-      skipped.push({ test, ...info, ms });
+      skipped.push({ test, ...info, ms, reason: ms >= SLOW_MS ? "slow_check_limit" : "budget" });
       continue;
     }
     selected.push({ test, ...info, ms });
     spent += ms;
+  }
+  if (changed.length) {
+    const testSet = new Set(tests);
+    for (const test of guards) {
+      if (!testSet.has(test) || selected.some((s) => s.test === test)) continue;
+      const at = skipped.findIndex((s) => s.test === test);
+      if (at >= 0) skipped.splice(at, 1);
+      selected.push({ test, distance: Infinity, via: "tree guard", ms: estimate(test) });
+    }
   }
   const codeChanged = changed.filter((f) => CODE_EXT.has(extname(f)) && !f.startsWith("tests/"));
   const unmapped = codeChanged.filter((f) => ![...hit.values()].some((h) => h.via === `imports ${f}` || h.via === `mentions ${f}`));
@@ -296,7 +316,10 @@ async function main() {
 
   const scratch = resolve(root, ".tmp");
   mkdirSync(scratch, { recursive: true });
-  const env = { ...process.env, TMPDIR: process.env.TMPDIR || scratch };
+  // CI points TMPDIR at the repo's .tmp/, under the type:module root, so
+  // extensionless helper scripts load as ESM. Match it even when the host
+  // already sets TMPDIR (agent sandboxes do); VERIFY_KEEP_TMPDIR=1 opts out.
+  const env = { ...process.env, TMPDIR: process.env.VERIFY_KEEP_TMPDIR === "1" && process.env.TMPDIR || scratch };
   if (!env.XDG_RUNTIME_DIR) env.XDG_RUNTIME_DIR = env.TMPDIR;
   const run = spawnSync(process.execPath, ["--test", ...result.selected.map((s) => s.test)], { cwd: root, env, stdio: "inherit" });
   const secs = ((Date.now() - started) / 1000).toFixed(1);

@@ -1,0 +1,21 @@
+import {transitionEmptyCurrentPermit} from './helpers/empty-current-permit-transition.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,mkdirSync,rmSync,symlinkSync,realpathSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';import{execFileSync}from'node:child_process';import{pathToFileURL}from'node:url';
+import {RoomStore}from'../server/store.mjs';import{initialRoom}from'../server/bootstrap.mjs';import{exportNdjsonText}from'../server/room-export.mjs';import{operatorRestoreResponse}from'../server/restore-ndjson.mjs';import{RESTORE_CONTROL_GUARDS,restoreProgress}from'../server/restore-admission.mjs';
+test('genuine18 warm/prepared/cold operator refuses19 before suspension or progress',async t=>{
+ // Published main ancestor: genuine audit protocol18, before protocol19 admission.
+ const dir=mkdtempSync(join(tmpdir(),'report19-old18-')),old=join(dir,'old18'),filename=join(dir,'target.sqlite');mkdirSync(old);execFileSync('tar',['-xf','-','-C',old],{input:execFileSync('git',['archive','--format=tar','46bd0e7b3e95270b5b1b532ed511b76a7481ce0d','server','src','client','strings','cloudflare/room-backup.mjs','package.json'],{maxBuffer:64*1024*1024})});symlinkSync(realpathSync('node_modules'),join(old,'node_modules'));
+ const {RoomStore:OldStore}=await import(pathToFileURL(join(old,'server/store.mjs'))),oldAdmission=await import(pathToFileURL(join(old,'server/restore-admission.mjs'))),oldCurrent=await import(pathToFileURL(join(old,'server/current-room-repository.mjs'))),oldRestore=await import(pathToFileURL(join(old,'server/restore-ndjson.mjs'))),held=new OldStore(filename),source=new RoomStore(':memory:');let current;t.after(()=>{held.close();current?.close();source.close();rmSync(dir,{recursive:true,force:true});});
+ const prepared=held.db.prepare('UPDATE current_restore_admission SET latest_receipt=latest_receipt');oldAdmission.verifyRestoreControl(held.db);assert.equal(held.db.prepare('SELECT count(*) n FROM rooms').get().n,0);
+ // Explicit, test-only transition of a verified-empty experimental target.
+ oldAdmission.withRestoreTransaction(held,()=>{transitionEmptyCurrentPermit(held,oldCurrent);for(const[name]of oldAdmission.RESTORE_CONTROL_GUARDS)held.db.exec('DROP TRIGGER '+name);for(const[,sql]of RESTORE_CONTROL_GUARDS)held.db.exec(sql);});
+ current=new RoomStore(filename);source.initialize(initialRoom(),{representation:'normalized-current-v1'});const token=['synthetic','protocol19','only'].join('-'),url='https://room.example/api/operator/restore';
+ const response=await operatorRestoreResponse(new Request(url,{method:'POST',headers:{Authorization:'Bearer '+token},body:exportNdjsonText(source.db)}),token,current),body=await response.json();assert.equal(response.status,202);const before=restoreProgress(current.db);
+ let drops=0;const exec=held.db.exec.bind(held.db);held.db.exec=sql=>{if(sql.startsWith('DROP TRIGGER '))drops++;return exec(sql);};
+ assert.throws(()=>prepared.run(),/restore|writer|schema/);assert.throws(()=>oldAdmission.withRestoreTransaction(held,()=>oldAdmission.withExactRestoreGuards(held.db,oldAdmission.RESTORE_CONTROL_GUARDS,()=>assert.fail('old scope opened'))),/reconciliation/);
+ // Cold schema45 code fails at the newer schema floor; warm admission checks above still exercise the protocol guard.
+ assert.throws(()=>new OldStore(filename),/Database schema is newer than this service/);
+ const sameFloor=current.db.prepare('UPDATE current_restore_admission SET latest_receipt=latest_receipt');
+ assert.throws(()=>sameFloor.run(),/restore admission|restore target|unsupported restore/i);
+ const input={requestId:'old18-refused',restoreId:body.restoreId,sourceSeal:body.sourceSeal,expectedRevision:body.revision};const refused=await oldRestore.operatorRestoreResponse(new Request(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(input)}),token,held);assert.equal(refused.status,422);assert.equal(drops,0);assert.deepEqual(restoreProgress(current.db),before);
+ const resumed=await operatorRestoreResponse(new Request(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(input)}),token,current);assert.equal(resumed.status,202);
+});

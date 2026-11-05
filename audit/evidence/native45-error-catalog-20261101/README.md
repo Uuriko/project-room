@@ -1,0 +1,9 @@
+# Native45 error catalog and safe recovery guidance
+
+Final sourcec71bf0e06.32 existing server-emitted codes missing from the catalog are now documented with source-backed HTTP status, retry class and recovery. Exact emit sites and reviewed rows are retained. Existing skills-sync regenerated the plugin mirror; bytes are identical. These are offline schema45 source statements, not a production activation claim.
+
+The first catalog-only test run correctly exposed9 previously unknown AX recoveries. Root authorized9 additions to the EXISTING named recovery map; no family exemption, new registry, service write, grant or approval behavior. Source12ebb full CI-mode check exits0,15 drift tests pass and the normal full Node suite is explicitly skipped by that contract. Root then requested shorter copy: final9 hints are concise factual reasons, with the precise safe next action unchanged. Final focused catalog/AX34 tests and secret scan1818files pass. Root explicitly accepted focused verification for the wording-only refinement; fullcheck12ebb is not misattributed to c71.
+
+Catalog statuses were checked at actual constructors/default fail helpers, including409 mirror/current-work limits,422 selection/resume refusals,403 membership,404 existence-private event absence and503 sealed incomplete restore. Guidance preserves current identities/grants, original retirement request IDs, immutable evidence and source-sealed operator recovery. No automatic approval or claim that a refused erasure succeeded.
+
+Manifest generator reran with schema45/179assets/9deployment; bytes remain unchanged because agent-error.mjs is already an optional runtime module rather than an enumerated public asset in this exact base. Parent owns combined app manifest and publication. Route/gate evidence remains in the separate preceding29f2 commit.

@@ -144,3 +144,28 @@ test("archived rooms are refused: the compacted shape is not this repair's", () 
     error => error?.status === 422 && error?.code === "repair_unsupported"
   );
 });
+
+test("reconstruction refreshes only its own proof and planning leaves serving storage unchanged",async()=>{
+ const store=seededStore();
+ try {
+  post(store,"unicode","Reconstructed 🪷 payload");
+  store.initialize(initialRoom("other"));await store.verifyRoomIntegrity();await store.verifyRoomIntegrity();
+  const snapshot=store.readIntegritySnapshot();
+  const otherProof=store.db.prepare("SELECT * FROM integrity_room_state WHERE room_id='other'").get();
+  const other=rawProjection(store,"other").projection;
+  const changed=JSON.parse(other);changed.room.title+=' tampered';
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='other'").run(JSON.stringify(changed));
+  tear(store);
+  const serving=()=>JSON.stringify(['rooms','messages','work_entities','projection_bodies','integrity_room_state'].map(table=>store.db.prepare(`SELECT * FROM ${table}`).all()));
+  const before=serving(),plan=planProjectionRepair(store,{roomId:"repair-room"});
+  assert.equal(plan.repairable,true);assert.equal(serving(),before,"preview must not serialize or publish proofs");
+  executeProjectionRepair(store,{roomId:"repair-room",...plan.executeGuard});
+  assert.equal(store.readIntegritySnapshot(),snapshot,"repair cannot replace the fleet baseline");
+  assert.deepEqual(store.db.prepare("SELECT * FROM integrity_room_state WHERE room_id='other'").get(),otherProof);
+  // The rolling sweep visits one room per tick; let both rooms be visited.
+  for(let attempt=0;attempt<3 && !store.integrityFailures().some(row=>row.step==='projection_content');attempt++) await store.verifyRoomIntegrity();
+  const failures=store.integrityFailures().filter(row=>row.step==='projection_content');
+  assert.ok(failures.some(row=>row.recordId==='other'));
+  assert.equal(failures.some(row=>row.recordId==='repair-room'),false);
+ }finally{store.close();}
+});

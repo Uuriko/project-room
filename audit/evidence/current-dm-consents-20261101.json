@@ -1,0 +1,35 @@
+{
+  "actualRuntime": true,
+  "lostApproveResponseReadback": "approved",
+  "retryApprove": "409 dm_no_pending_request",
+  "faultRollback": true,
+  "coldRestart": true,
+  "historyPreserved": true,
+  "historyCertified": false,
+  "sourceBase": "c90f4ce811ce68412c4a8a438bed7e3672f8a881",
+  "nodeTests": 7,
+  "affectedNodeNeighborhoodTests": 53,
+  "nodeLog": "/tmp/current-dm-consents-frozen-neighborhood.log",
+  "workerTests": 1,
+  "workerLog": "/tmp/current-dm-consents-worker-first.log",
+  "causalReds": [
+    "/tmp/current-dm-consents-red.log",
+    "/tmp/current-dm-consent-prepared-red.log"
+  ],
+  "nativeGuards": [
+    "current_room_guard_dm_consents_insert",
+    "current_room_guard_dm_consents_update",
+    "current_room_guard_dm_consents_delete"
+  ],
+  "oldRuntimeControl": "genuine git-archived67045 preopened runtime and prepared INSERT refuse after current guard install",
+  "restoreControl": "production export\u2192restore exact business/current/ledger rows and owned consent guardDDL; subsequent revoke/full audit pass",
+  "policy": "same existing DmConsents and shared dm.consent_changed no-op reducer; t1 new outreach denied, protective actions retained; default-open DM policy unchanged",
+  "scopeLimits": [
+    "No new API, command, grant, format token or idempotency contract",
+    "Full consent-list response contract remains unchanged, not newly paginated/bounded",
+    "100member authority budget issue remains tracked by root",
+    "Whole composed matching-format recovery requires current guard inventory qualification"
+  ],
+  "deployed": false,
+  "liveVerified": false
+}

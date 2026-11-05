@@ -1,3 +1,4 @@
+import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 // Work claims (B006/B007). A pure work-item state machine for agent
 // coordination: work starts unclaimed; an agent claims it (claimed), starts
 // it (in_progress), and finishes it (done) or marks it blocked. Only the
@@ -48,6 +49,7 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+import { storedPlanningOf } from "./board-planning.mjs";
 import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
@@ -164,16 +166,9 @@ export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_DEPENDS = 16;
 const dependsOnOf = (value, selfId) => {
-  check(Array.isArray(value), "dependsOn must be an array");
-  check(value.length <= MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
-  const ids = value.map(id => {
-    check(typeof id === "string" && DEPENDS_PATTERN.test(id), "each dependsOn entry must be a claim id");
-    check(id !== selfId, "a claim cannot depend on itself");
-    return id;
-  });
-  return Object.freeze([...new Set(ids)].sort());
+  try { return normalizeWorkDependencies(value, selfId); }
+  catch (error) { check(false, error.message); }
 };
 // Provenance (orch-provenance-rollback): parentClaimId names the claim whose
 // output or premise this claim builds on — the edge the provenance walk
@@ -419,16 +414,13 @@ const verificationOf = value => {
     check(typeof value.by === "string" && value.by.length > 0 && value.by.length <= 128, "verification by must be 1..128 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "verification at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
-  let jev;
-  if (value.jev !== undefined && value.jev !== null) {
-    check(typeof value.jev === "object" && !Array.isArray(value.jev), "verification jev must be an object");
-    check(typeof value.jev.verdict === "string" && value.jev.verdict.length > 0 && value.jev.verdict.length <= 64,
-      "verification jev verdict must be 1..64 characters");
-    check(typeof value.jev.score === "number" && Number.isFinite(value.jev.score), "verification jev score must be a number");
-    jev = Object.freeze({ verdict: value.jev.verdict, score: value.jev.score });
-  }
+  // D1: the Jev receipt score is shadow measurement, not a verdict on this
+  // fact. A stored `jev` entry (written by an earlier version beside the
+  // verified state) is dropped here, on canonicalisation, so a legacy fact
+  // reads back without it; the full scored decision lives only in the
+  // owner-only shadow journal (server/jev-shadow-journal.mjs).
   return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
-    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}) });
+    executedChecks: executedChecksOf(value.executedChecks) });
 };
 // A delivery as stored on the item: the validated bundle plus the stamp the
 // finish transition froze onto it (digest + who delivered + when).
@@ -553,10 +545,19 @@ const currentReviewBasis = (review, item) => {
   // stales it exactly like a CI head move. An approval recorded before
   // any delivery (generation 0) attests the work in flight and counts
   // only for the round's FIRST delivery (generation 1); a replacement
-  // delivery is outside what it attested and stales it too.
+  // delivery is outside what it attested and stales it too. A delivery
+  // with no bundle has no digest to bind to, so its reviews bind to the
+  // generation instead: a review recorded on generation N's delivery
+  // (digest null, generation N > 0) is current only while the claim is
+  // still on generation N — a bundle-less re-delivery advances the
+  // generation like any other finish, so the earlier round's verdict
+  // stales instead of reading as a live send_back on the new delivery
+  // (Dot 24432: the stale send_back edge).
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === current.deliveryDigest
-    : (basis.deliveryGeneration ?? 0) === 0 && current.deliveryGeneration <= 1;
+    : (basis.deliveryGeneration ?? 0) === 0
+      ? current.deliveryGeneration <= 1
+      : (basis.deliveryGeneration ?? 0) === current.deliveryGeneration;
   return deliveryCurrent
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
@@ -897,7 +898,10 @@ export const workOf = value => {
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
-    owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
+    owner: value.owner ?? null,
+    ...(typeof value.delegate === "string" && value.delegate.length > 0 && value.delegate.length <= 128 ? { delegate: value.delegate } : {}),
+    ...(approvalHoldOf(value.approvalHold) ? { approvalHold: approvalHoldOf(value.approvalHold) } : {}),
+    history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
@@ -907,6 +911,7 @@ export const workOf = value => {
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
     acceptanceCriteria, delivery, verification,
+    ...(storedPlanningOf(value.planning) ? { planning: storedPlanningOf(value.planning) } : {}),
     // #3684: how many deliveries this claim round has frozen (0 = none
     // yet). In-flight approvals (basis generation 0) cover only the
     // round's first delivery; the counter is what makes "first" a fact
@@ -1095,7 +1100,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     ? `work "${item.id}" is already ${item.state}`
     : item.owner === agent
       ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
-      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
@@ -1127,6 +1132,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+  delete claimed.delegate; // A fresh claim cannot inherit another owner's delegation.
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
@@ -1239,8 +1245,13 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // Approval hold: a pending hold pauses delivery and completion until the
+  // named approver approves. Other moves (block, pause, notes) stay open.
+  if (item.approvalHold && item.approvalHold.status !== "approved" && (state === "delivered" || state === "done")) {
+    fail("work_approval_pending", `work "${item.id}" is on hold until ${item.approvalHold.approverId} approves: ${item.approvalHold.step}`);
+  }
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -1255,7 +1266,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     if (verdict === "conflict") fail("work_claim_conflict",
       `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
   }
-  check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
+  // The delegate (#5876) does the work, so it may move the claim like the owner.
+  check(authority === true || item.owner === agent || (item.delegate !== undefined && item.delegate === agent),
+    `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner or its delegate can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   // The effective review policy for this transition: the caller (route)
   // resolves the room default and passes it in; the item's own policy is
@@ -1295,14 +1308,6 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     check(finishing, "a delivery bundle is only recorded on the finish transition");
     deliveryOf(delivery);
   }
-  let jevRecord;
-  if (jev !== undefined && jev !== null) {
-    check(state === "done", "jev is only recorded on the verify transition");
-    check(typeof jev === "object" && !Array.isArray(jev)
-      && typeof jev.verdict === "string" && jev.verdict.length > 0 && jev.verdict.length <= 64
-      && typeof jev.score === "number" && Number.isFinite(jev.score), "jev must be { verdict, score }");
-    jevRecord = Object.freeze({ verdict: jev.verdict, score: jev.score });
-  }
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const released = state === "unclaimed";
@@ -1327,7 +1332,13 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
         // #3684: every frozen delivery advances the round's generation —
         // approvals bound to an earlier generation's delivery go stale.
         deliveryGeneration: (item.deliveryGeneration ?? 0) + 1 }
-      : { ...item, delivery: null };
+      // A bundle-less finish is still a delivery: it opens a new round
+      // exactly like a frozen bundle does, so it advances the generation
+      // too. Without this, a no-bundle claim's generation stays 0 across
+      // a send-back and redelivery, and the first round's reviews (basis
+      // generation 0, digest null) still read as current on the new
+      // delivery — the stale send_back edge (Dot 24432).
+      : { ...item, delivery: null, deliveryGeneration: (item.deliveryGeneration ?? 0) + 1 };
   }
   // #3685: a finish that REPLACES an existing delivery opens a new
   // delivery round — the previous round's CI settlement is invalidated
@@ -1363,7 +1374,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = Object.freeze({
       state: effectivePolicy === "self_attested" ? "self_attested" : "verified",
       by: reviewedBy ?? agent, at: isoOf(atMs), basis: reviewBasisFor(deliveredItem),
-      executedChecks, ...(jevRecord ? { jev: jevRecord } : {}),
+      executedChecks,
     });
   } else if (state === "in_progress" && item.state === "delivered") {
     // changes_requested: the delivery stays as the record of what was
@@ -1406,6 +1417,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     deliveryGeneration: released ? 0 : deliveredItem.deliveryGeneration ?? item.deliveryGeneration ?? 0,
     verification,
     ...withProvenance };
+  if (released) delete next.delegate;
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
       requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest, item.claimRound) });
@@ -1494,7 +1506,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // manual done policy. The owner cannot review their own claim.
 export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
+  check(item.owner !== agent && item.delegate !== agent, `work "${item.id}" cannot be reviewed by its owner or delegate`);
   check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   check(REVIEW_VERDICTS.includes(verdict), `verdict must be one of ${REVIEW_VERDICTS.join(", ")}`);
   check(typeof summary === "string" && summary.length > 0 && summary.length <= 2000, "summary must be 1..2000 characters");
@@ -1553,15 +1565,35 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
   return withHistory({ ...item, reviews, attestations }, atMs, agent, "reviewed", summary.slice(0, 512));
 }
 // Land and deploy claims close when this server's live revision matches the
-// claim's revision. Any non-done state can close; the history stamp is the
-// same state:done the receipts search already looks for.
+// claim's revision — but only along the evidence chain that makes "done"
+// true for these kinds, the same chain settlePullRequest (the other designed
+// system mover) requires before it completes a claim on a merged pull:
+//   - the claim is HELD: state claimed, in_progress, blocked or delivered,
+//     with a non-null owner. An unclaimed claim can never close here —
+//     canCloseWork refuses unclaimed/ownerless work for the same reason:
+//     no round exists whose work could have been delivered or verified.
+//   - every linked pull is settled (outcome merged or closed) and at least
+//     one is merged. The outcome is recorded by the pull poller/webhook,
+//     never by the claim's holder, so a preset revision string alone — the
+//     shape an ordinary GET used to close on — proves nothing.
+//   - the claim's lease has not lapsed (a dead round is released, never
+//     settled as done; delivered claims carry no expiring lease).
+//   - the live revision matches the claim's revision or its CI head.
+// The history stamp is the same state:done the receipts search looks for.
 export function closeWhenLive(work, liveRevision, now) {
   const item = workOf(work);
+  if (item.approvalHold && item.approvalHold.status !== "approved") return null;
   if (item.kind !== "land" && item.kind !== "deploy") return null;
   if (isTerminalClaimState(item.state) || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) && item.state !== "delivered") return null;
+  if (item.owner === null) return null;
+  const atMs = nowMsOf(now);
+  if (isLeaseExpired(item, atMs)) return null;
+  const links = item.pullRequests?.length ? item.pullRequests : (item.pullRequest ? [item.pullRequest] : []);
+  if (links.length === 0 || !links.every(pull => pull.outcome === "merged" || pull.outcome === "closed")) return null;
+  if (!links.some(pull => pull.outcome === "merged")) return null;
   const head = item.ci?.headSha ?? null;
   if (item.revision !== liveRevision && head !== liveRevision) return null;
-  const atMs = nowMsOf(now);
   return withHistory({ ...item, state: "done", deliveryMode: item.deliveryMode ?? "production" }, atMs, item.owner ?? "system", "state:done",
     `live revision matches ${liveRevision}`);
 }
@@ -1643,9 +1675,59 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     : item.state === "delivered"
       ? { state: "in_progress", verification: null }
       : {};
-  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+  const { delegate: _previousDelegate, ...reassigned } = item;
+  return withHistory({ ...reassigned, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
     atMs, agent, `reassigned:${target}`, note);
 }
+// Linear-parity delegation: the owner stays accountable while a delegate
+// (usually an agent) does the work, so stale or blocked work always has a
+// human or lead to escalate to. Only the owner (or room authority) sets or
+// clears the delegate; terminal claims are immutable. Pass null to clear.
+export function delegateWork(work, agentId, delegateId, { note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(authority === true || (item.owner !== null && item.owner === agent), `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can set its delegate`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  if (delegateId === null) {
+    const { delegate: _gone, ...rest } = item;
+    return withHistory(rest, atMs, agent, "undelegated", note);
+  }
+  const target = agentOf(delegateId);
+  return withHistory({ ...item, delegate: target }, atMs, agent, `delegated:${target}`, note);
+}
+// Approval hold (Linear has no equivalent; recent agent incidents are
+// destructive steps run without a person saying yes). The owner or
+// delegate names a risky step and an approver; the claim cannot be
+// delivered or finished until the approver approves. A denial preserves the
+// delivery hold; the worker must re-request and obtain approval to proceed.
+const HOLD_STATUSES = ["pending", "approved", "denied"];
+function approvalHoldOf(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!HOLD_STATUSES.includes(value.status) || typeof value.approverId !== "string" || typeof value.step !== "string") return null;
+  return Object.freeze({ status: value.status, approverId: value.approverId, step: value.step,
+    requestedBy: typeof value.requestedBy === "string" ? value.requestedBy : null,
+    requestedAt: typeof value.requestedAt === "string" ? value.requestedAt : null,
+    decidedAt: typeof value.decidedAt === "string" ? value.decidedAt : null });
+}
+export function requestApproval(work, agentId, { approverId, step, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now), approver = agentOf(approverId);
+  check(item.owner === agent || item.delegate === agent, `only the owner or delegate of work "${item.id}" can request approval`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  check(approver !== agent, "the approver must be someone else");
+  check(typeof step === "string" && step.trim().length > 0 && step.length <= 500, "step must be a short description of the risky action");
+  check(item.approvalHold?.status !== "pending", `work "${item.id}" already has a pending approval`);
+  const hold = { status: "pending", approverId: approver, step, requestedBy: agent, requestedAt: isoOf(atMs), decidedAt: null };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_requested:${approver}`, step);
+}
+export function decideApproval(work, agentId, { decision, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.approvalHold?.status === "pending", `work "${item.id}" has no pending approval`);
+  check(item.approvalHold.approverId === agent, `only ${item.approvalHold.approverId} can decide this approval`);
+  check(decision === "approve" || decision === "deny", "decision must be approve or deny");
+  const hold = { ...item.approvalHold, status: decision === "approve" ? "approved" : "denied", decidedAt: isoOf(atMs) };
+  return withHistory({ ...item, approvalHold: Object.freeze(hold) }, atMs, agent, `approval_${hold.status}`, note);
+}
+export const approvalHoldEnabled = (env = process.env) => env?.ROOM_APPROVAL_HOLD === "1";
+export const claimDelegateEnabled = (env = process.env) => env?.ROOM_CLAIM_DELEGATE === "1";
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
 export function isLeaseExpired(work, now) {
@@ -1678,6 +1760,7 @@ export function releaseExpired(items, now) {
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
       delivery: null, verification: null, deliveryGeneration: 0,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    delete released.delegate;
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });
@@ -1696,7 +1779,7 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
   if (isTerminalClaimState(item.state) || item.state === "unclaimed" || item.owner === null) return false;
   if (typeof reviewerId !== "string" || reviewerId.length === 0) return false;
   if (effective === "self_attested") return reviewerId === item.owner;
-  if (reviewerId === item.owner || item.supersededBy) return false;
+  if (reviewerId === item.owner || reviewerId === item.delegate || item.supersededBy) return false;
   const review = item.reviews.find(entry => entry.memberId === reviewerId);
   if (review?.verdict !== "approve" || !currentReviewBasis(review, item)) return false;
   const attestation = item.attestations.find(entry => entry.memberId === reviewerId);
@@ -1737,8 +1820,11 @@ export function resolveNamedReviewers(item, members = {}) {
   }
   return [...ids];
 }
+export function currentReviewOf(item, memberId) {
+  return (item?.reviews ?? []).find(review => review?.memberId === memberId && currentReviewBasis(review, item)) ?? null;
+}
 export function hasCurrentReview(item, memberId) {
-  return (item?.reviews ?? []).some(review => review?.memberId === memberId && currentReviewBasis(review, item));
+  return currentReviewOf(item, memberId) !== null;
 }
 // Query helpers over a list.
 export function workOwnedBy(items, agentId) {

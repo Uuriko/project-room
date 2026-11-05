@@ -1,0 +1,16 @@
+{
+  "base": "de54ffc5a",
+  "runtimeChanges": false,
+  "scope": "H-row trigger probes through existing transactional writer; raw old/outside/cross-room mutations must refuse",
+  "lintErrors": 0,
+  "before": {
+    "tests": 24,
+    "pass": 15,
+    "fail": 9
+  },
+  "after": {
+    "tests": 24,
+    "pass": 24,
+    "fail": 0
+  }
+}

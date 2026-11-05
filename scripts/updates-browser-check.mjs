@@ -1,5 +1,7 @@
 // Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.
+import { openChannel } from "./reveal-record.mjs";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -109,6 +111,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#message-input").fill(replyDraft);
   await page.locator("#work-navigation-return").press("Enter");
   await page.locator("#thread-bar").waitFor({ state: "hidden" });
+  // The private reply's thread lives in the direct conversation (DM-first); the public root is in the channel.
+  await openChannel(page);
   await page.locator(`[data-message-id="${threadId}"][data-message-action="reply"]`).click();
   await page.locator("#thread-bar").waitFor({ state: "visible" });
   assert.equal(await page.locator("#message-input").inputValue(), replyDraft, "fallback leaves the reply through the normal draft-saving path");
@@ -405,12 +409,23 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     const sessionResponse = await page.request.get(`${origin}/api/account-session`);
     assert.equal((await sessionResponse.json()).account.id, accountId, "this is a distinct account session, not a room-key principal swap");
   };
-  const showOnlyUpdate = async title => {
+  // Expected IDs come from the explicit fixtures, not whatever the API returns.
+  const updateId = (kind, key) => `upd_${createHash("sha256").update(`${kind}|${key}`).digest("hex").slice(0, 20)}`;
+  const dmId = messageId => updateId("dm", `dm|${messageId}`);
+  const assignmentId = updateId("work_assigned", `work|${sharedHistoryId}|accept`);
+  const expectedUpdates = {
+    "Private update for Reader A": [dmId("private-reader-a"), assignmentId],
+    "Private update in the other room": [dmId("other-room-update"), assignmentId],
+    "Private update for Reader B": [dmId("private-reader-b")]
+  };
+  const visibleUpdateIds = () => page.locator(".updates-row").evaluateAll(nodes => nodes.map(node => node.dataset.updateId));
+  const showExpectedUpdates = async title => {
     await page.locator("#topbar-updates").click();
     await selectUpdatesFilter("Needs me", "needs");
-    assert.equal(await page.locator(".updates-row").count(), 1);
-    assert.match(await page.locator(".updates-row").innerText(), new RegExp(title));
-    return page.locator('.updates-row [data-update-action="open"]');
+    assert.deepEqual((await visibleUpdateIds()).sort(), [...expectedUpdates[title]].sort());
+    const messageRow = page.locator(".updates-row").filter({ hasText: title });
+    assert.equal(await messageRow.count(), 1);
+    return messageRow.locator('[data-update-action="open"]');
   };
   const openAccountRoom = async roomId => {
     await clickChrome(page, "#choose-room");
@@ -419,15 +434,15 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.waitForFunction(id => new URL(location.href).searchParams.get("room") === id, roomId);
   };
   await loginAccount("navigation-account-a", "Reader A");
-  const oldOpen = await showOnlyUpdate("Private update for Reader A");
-  const oldUpdateId = await page.locator(".updates-row").getAttribute("data-update-id");
+  const oldOpen = await showExpectedUpdates("Private update for Reader A");
+  const oldUpdateId = dmId("private-reader-a");
   const oldDocument = await page.evaluate(() => performance.timeOrigin);
   const roomDelay = await delayRead();
   await oldOpen.click(); await roomDelay.entered;
   await page.locator("#updates-close").click();
   await openAccountRoom("updates-other");
   await page.locator("#message-input").fill("Replacement room draft");
-  await showOnlyUpdate("Private update in the other room");
+  await showExpectedUpdates("Private update in the other room");
   const roomDestination = page.url();
   await roomDelay.finish();
   assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "room switch preserves the pending old JavaScript callback");
@@ -435,7 +450,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   const sameAccount = await page.request.get(`${origin}/api/account-session`);
   assert.equal((await sameAccount.json()).account.id, "navigation-account-a", "Rooms navigation keeps the same account");
   assert.equal(await page.locator("#updates-dialog").isVisible(), true);
-  assert.match(await page.locator(".updates-row").innerText(), /Private update in the other room/);
+  assert.match(await row(dmId("other-room-update")).innerText(), /Private update in the other room/);
+  assert.equal(await row(oldUpdateId).count(), 0);
   assert.equal(await page.locator("#message-input").inputValue(), "Replacement room draft");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM private_update_marks WHERE room_id=?").get("updates-other").count, 0);
   await page.locator("#updates-close").click();
@@ -454,34 +470,33 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   assert.equal(await card(sharedHistoryId).locator("h3").textContent(), "History destination in Commons");
   await openAccountRoom("updates-other");
   const otherHistoryCard = card(sharedHistoryId);
-  assert.equal(await otherHistoryCard.locator("h3").textContent(), "History destination in Other");
-  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false);
+  assert.equal(await otherHistoryCard.count(), 0, "switching rooms does not reveal a contextual work card");
   await page.locator("#message-input").fill("Keep the current room history draft");
   await page.goBack();
   await page.waitForFunction(() => new URL(location.href).searchParams.get("room") === "updates-other" && location.hash === "#pr-view/rooms");
   assert.equal(await page.locator("#main").isVisible(), true);
   assert.match(await page.locator("#identity-label").textContent(), /^Room owner/);
-  assert.equal(await otherHistoryCard.locator("h3").textContent(), "History destination in Other");
-  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false,
+  assert.equal(await otherHistoryCard.count(), 0,
     "lost old-room ticket does not open the colliding task in the current room");
   assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
   assert.equal(await page.locator("#message-input").inputValue(), "Keep the current room history draft");
   assert.doesNotMatch(await page.locator("#message-list").innerText(), /Commons-only task details|History destination in Commons/);
   await page.goForward();
   await page.waitForFunction(() => new URL(location.href).searchParams.get("room") === "updates-other" && location.hash === "#pr-view/rooms");
-  assert.equal(await otherHistoryCard.locator(".work-details").evaluate(node => node.open), false);
+  assert.equal(await otherHistoryCard.count(), 0);
+  assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
   assert.equal(JSON.stringify([store.room("commons"), store.room("updates-other")]), lifecycleBefore);
   await page.locator("#message-input").fill("");
   await openAccountRoom("commons");
 
-  const accountOpen = await showOnlyUpdate("Private update for Reader A");
+  const accountOpen = await showExpectedUpdates("Private update for Reader A");
   const accountDelay = await delayRead();
   await accountOpen.click(); await accountDelay.entered;
   await page.locator("#updates-close").click();
   await clickChrome(page, "#signout-button");
   await loginAccount("navigation-account-b", "Reader B");
   await page.locator("#message-input").fill("Replacement account draft");
-  await showOnlyUpdate("Private update for Reader B");
+  await showExpectedUpdates("Private update for Reader B");
   const accountDestination = page.url();
   await accountDelay.finish();
   assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "account switch preserves the pending old JavaScript callback");
@@ -500,6 +515,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   for (let index = 0; index < 70; index++) send(agent, T.MESSAGE_POSTED, {
     messageId: `reader-a-page-${index}`, body: `Reader A pagination ${index}`, toMemberId: "reader-a"
   });
+  const expectedReaderPages = [...expectedUpdates["Private update for Reader A"],
+    ...Array.from({ length: 70 }, (_, index) => dmId(`reader-a-page-${index}`))].sort();
   const pagingMarksBefore = store.db.prepare("SELECT COUNT(*) AS count FROM private_update_commands").get().count;
   for (const boundary of ["room", "account", "authority"]) {
     if (await page.locator("#updates-dialog").isVisible()) await page.locator("#updates-close").click();
@@ -509,11 +526,14 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     await page.locator("#topbar-updates").click();
     await selectUpdatesFilter("Needs me", "needs");
     assert.equal(await page.locator(".updates-row").count(), 50);
+    const firstPageIds = await visibleUpdateIds();
     const delayedPage = await holdUpdatesPage(page, "actionable");
     await page.locator("#updates-load-more").click();
     const oldPage = await delayedPage.entered;
     assert.equal(oldPage.viewerId, "reader-a");
-    assert.equal(oldPage.items.length, 21);
+    const secondPageIds = oldPage.items.map(item => item.id);
+    assert.equal(secondPageIds.some(id => firstPageIds.includes(id)), false, "pages are disjoint");
+    assert.deepEqual([...firstPageIds, ...secondPageIds].sort(), expectedReaderPages, "pagination covers exactly the authorized fixtures");
     if (boundary === "authority") {
       const member = store.room("commons").state.members["reader-a"];
       send(owner, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision,
@@ -527,21 +547,30 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
         await loginAccount("navigation-account-b", "Reader B");
       }
       await page.locator("#message-input").fill(`Keep ${boundary} replacement draft`);
-      await showOnlyUpdate(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
+      await showExpectedUpdates(boundary === "room" ? "Private update in the other room" : "Private update for Reader B");
     }
     const destination = page.url();
     await delayedPage.finish();
     assert.equal(await page.evaluate(() => performance.timeOrigin), oldDocument, "the old page callback survives in the same document");
     assert.equal(page.url(), destination);
-    for (const item of oldPage.items) assert.equal(await row(item.id).count(), 0, `${boundary} retires every old-reader page row`);
+    for (const item of oldPage.items) {
+      // This fixture intentionally reuses the work ID in both rooms. Its Update
+      // ID also collides, so prove the current title survives rather than
+      // demanding the authorized replacement assignment disappear.
+      if (boundary === "room" && item.id === assignmentId) {
+        assert.match(await row(item.id).innerText(), /History destination in Other/);
+        assert.doesNotMatch(await row(item.id).innerText(), /History destination in Commons/);
+      } else assert.equal(await row(item.id).count(), 0, `${boundary} retires every old-reader page row`);
+    }
     if (boundary === "authority") {
       assert.equal(await page.locator(".updates-row").count(), 0);
       assert.equal(await page.locator("#updates-dialog").isVisible(), false);
       assert.equal(await page.locator("#updates-count").textContent(), "");
       assert.equal(await page.locator("#work-navigation-return").isVisible(), false);
     } else {
-      assert.equal(await page.locator(".updates-row").count(), 1);
-      assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b/);
+      const expected = expectedUpdates[boundary === "room" ? "Private update in the other room" : "Private update for Reader B"];
+      assert.deepEqual((await visibleUpdateIds()).sort(), [...expected].sort());
+      assert.match(await page.locator("#updates-summary").textContent(), new RegExp(`\\b${expected.length} loaded\\b`));
       assert.equal(await page.locator("#message-input").inputValue(), `Keep ${boundary} replacement draft`);
       assert.doesNotMatch(await page.locator("#updates-dialog").innerText(), /Reader A pagination/);
     }
@@ -1538,12 +1567,13 @@ test("Updates refresh live without stealing focus and filter permission decision
   new AccessRequests(store).requestForMember(applicant,'commons',{permissions:['accept_work'],requestId:'live-permission'});
   await page.waitForFunction(()=>document.querySelector('#updates-count').textContent==='3');
   const decision=page.locator('[data-access-request-id="live-permission"]');await decision.waitFor();
-  assert.equal(await decision.getByRole('button',{name:'Approve partial',exact:true}).count(),0);
+  const decisionTitle=(await decision.locator('.attention-title').textContent()).trim();
+  assert.equal(await decision.getByRole('button',{name:`Approve partial — ${decisionTitle}`,exact:true}).count(),0);
   assert.equal(await page.locator('.updates-row').filter({hasText:'Applicant wants more permissions'}).count(),0);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/refined-updates-phone.png'});
   await selectUpdatesFilter('Mentions','mentions');assert.equal(await decision.isVisible(),false);
-  await selectUpdatesFilter('Needs me','needs');await decision.getByRole('button',{name:'Approve',exact:true}).click();
+  await selectUpdatesFilter('Needs me','needs');await decision.getByRole('button',{name:`Approve — ${decisionTitle}`,exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#updates-count').textContent==='2');
   await page.locator('#updates-close').click();assert.equal(await page.locator('#message-input').inputValue(),'Keep my conversation draft');
   assert.deepEqual(errors,[]);

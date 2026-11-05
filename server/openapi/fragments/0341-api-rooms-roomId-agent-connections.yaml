@@ -35,6 +35,17 @@
         wrong-bound, expired, reused, tampered, or revoked-identity proof —
         all one error, no oracle). The raw code is never stored or logged.
         (Uuriko/project-room#942; replaces the #948 interim disable.)
+        A readers-first feature, disabled by default, also accepts
+        `action: enroll-existing` from the signed-in target room owner.
+        Supply the exact server-offered `choiceId`, `sourceRoomId`,
+        `sourceMemberId`, `identityId`, `memberId`, explicit managed `access`
+        profile, `requestId` and `expectedOwnerRevision`. Only configured,
+        managed or adopted source seats controlled by this account qualify;
+        sponsorship and caller-supplied preferred IDs grant no authority.
+        No identity or setup key is minted. The target-room OAuth grant
+        requires separate consent. GET includes `existingAgentEnrollment`
+        availability, choices and exact profile permissions. See
+        docs/ACCOUNT-AGENT-ENROLLMENT.md for the rollback boundary.
       security:
         - accountSession: []
       parameters:
@@ -47,10 +58,14 @@
               type: object
               required: [action, requestId, memberId, expectedOwnerRevision]
               properties:
-                action: { type: string, enum: [create, rotate, disconnect] }
+                action: { type: string, enum: [create, rotate, disconnect, enroll-existing] }
                 requestId: { type: string }
                 memberId: { type: string }
                 expectedOwnerRevision: { type: integer }
+                choiceId: { type: string, description: "enroll-existing only: current server source choice fingerprint" }
+                sourceRoomId: { type: string, description: "enroll-existing only: selected source room" }
+                sourceMemberId: { type: string, description: "enroll-existing only: selected source member" }
+                access: { type: string, description: "Explicit profile; enrollment supports chat, guest, contribute, review and collaborate" }
                 identityId: { type: string, description: "optional on create: the agent identity to link; requires identityLinkCode" }
                 identityLinkCode: { type: string, description: "optional on create with identityId: single-use 22-char proof minted by the identity holder (POST /api/identities/{identityId}/link-code); never stored" }
       responses:

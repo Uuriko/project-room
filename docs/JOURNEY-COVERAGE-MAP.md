@@ -354,7 +354,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "human-signin-navigation",
-      "claim": "People can sign in with Google or the visible email/password form, create an account, choose password reset or an email sign-in link under Forgot password, and navigate back on mobile without interrupting pending authentication. Reset links preserve invitation destinations and require fresh sign-in.",
+      "claim": "People can sign in with Google or the visible email/password form, create an account, choose password reset or an email sign-in link under Forgot password, and navigate back on mobile without interrupting pending authentication. Reset links preserve invitation destinations and require fresh sign-in. Returning Google members resume the exact pending connector consent before Room restoration, with terms and explicit approval preserved.",
       "evidence": {
         "unit": [
           "tests/auth-signin-ui.test.js",
@@ -371,6 +371,7 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/mobile-signin-history-browser-check.mjs",
           "scripts/invitation-check.mjs",
           "scripts/oauth-return-invite-browser-check.mjs",
+          "scripts/connector-google-consent-browser-check.mjs",
           "scripts/auth-journeys-browser-check.mjs"
         ],
         "agent": [],

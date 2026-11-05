@@ -9,6 +9,7 @@
 // selected — the report is meant to be pasted into a review ticket.
 import { ServiceError } from "./service-error.mjs";
 import { ownMember } from "../src/events.js";
+import {isCurrentRoom,readCurrentRecord,withCurrentReadContext} from "./current-room-repository.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 export const ACCESS_REVIEW_FORMAT = "project-room-access-review-v1";
@@ -25,7 +26,7 @@ export function accessReviewOwner(store, token, roomId, binding) {
   // Owner delegates (server/owner-delegates.mjs) arrive via
   // store.authenticate with the delegate flag stamped on the member copy.
   const auth = store.authenticate(token, roomId, binding);
-  if (!auth.delegate && (auth.member.id !== store.room(roomId).state.room.ownerId
+  if (!auth.delegate && (auth.member.id !== store.roomAuthority(roomId,{memberId:auth.member.id}).ownerId
     || !auth.member.permissions.includes("manage_members"))) {
     fail(403, "owner_required", "Only the room owner can read the access review");
   }
@@ -46,7 +47,10 @@ export function listRoomIds(store) {
 // Unauthenticated assembly for a caller that already holds the database file
 // (the CLI in store mode) or has passed accessReviewOwner (the route).
 export function assembleAccessReview(store, roomId) {
-  const { state } = store.room(roomId), now = store.now(), db = store.db;
+  const state = isCurrentRoom(store.db,roomId)
+    ? store.readTransaction(()=>withCurrentReadContext(store.db,roomId,()=>({room:readCurrentRecord(store.db,roomId,'metadata','room'),members:store.roomAuthority(roomId).members}),{maxRecords:1024}))
+    : store.room(roomId).state;
+  const now = store.now(), db = store.db;
   const lastActivity = new Map(db.prepare(`SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
     FROM events WHERE room_id=? GROUP BY actor`).all(roomId).map(row => [row.actor, row.at]));
   const liveKeys = new Map(db.prepare(`SELECT member_id, count(*) AS n, max(expires_at) AS latest FROM credentials
@@ -109,8 +113,8 @@ export function assembleAccessReview(store, roomId) {
   // record, like an expired link). Only the hash-free inviteId handle that
   // revoke() takes is selected — never the code or its stored hash.
   const pendingInvites = db.prepare("SELECT * FROM agent_invite_codes WHERE room_id=? AND redeemed_at IS NULL AND revoked_at IS NULL ORDER BY created_at DESC,code_hash").all(roomId).map(row => {
-    const { inviteId, displayName, permissions, createdBy, createdAt, expiresAt, status, ownerEquivalent } = store.invites.view(row, now);
-    return { inviteId, displayName, permissions, ownerEquivalent, inviterMemberId: createdBy, createdAt: iso(createdAt), expiresAt: iso(expiresAt), status };
+    const { inviteId, displayName, permissions, createdBy, createdAt, expiresAt, status, ownerEquivalent, unreadable } = store.invites.view(row, now);
+    return { inviteId, displayName, permissions, ...(unreadable ? { unreadable: true } : {}), ownerEquivalent, inviterMemberId: createdBy, createdAt: iso(createdAt), expiresAt: iso(expiresAt), status };
   });
   const agentIdentities = db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id

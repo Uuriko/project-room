@@ -9,7 +9,8 @@
 // touches the DOM, so no stubs are needed.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { confirmationPhrase, describeFailure } from "../src/operator-ui.js";
+import { confirmationPhrase, describeFailure, operatorExportPath } from "../src/operator-ui.js";
+import { readFileSync } from "node:fs";
 
 test("confirmationPhrase: single-room plan with a known title requires the title", () => {
   const targets = [{ kind: "room", id: "rm_1" }];
@@ -37,6 +38,22 @@ test("describeFailure: known statuses map to operator-readable messages", () => 
     describeFailure(409, { error: { code: "plan_changed" } }),
     "The data changed after this plan was made. Nothing was deleted. Plan again."
   );
+});
+
+test("operatorExportPath: a live room carries the typed id and reason (MF-6)", () => {
+  const path = operatorExportPath({ id: "commons", archived: false }, { confirmRoomId: "commons", reason: "cap diagnosis" });
+  assert.equal(path, "/api/operator/rooms/commons/export?format=jsonl&confirmRoomId=commons&reason=cap+diagnosis");
+});
+
+test("operatorExportPath: an archived room exports with no confirmation params", () => {
+  const path = operatorExportPath({ id: "commons", archived: true }, { format: "html", confirmRoomId: "ignored", reason: "ignored" });
+  assert.equal(path, "/api/operator/rooms/commons/export?format=html");
+});
+
+test("MF-11: operator UI rendering stays textContent-only (no innerHTML)", () => {
+  const source = readFileSync(new URL("../src/operator-ui.js", import.meta.url), "utf8");
+  assert.ok(!/\.innerHTML\b/.test(source), "operator-ui.js must not assign innerHTML");
+  assert.ok(!/insertAdjacentHTML/.test(source), "operator-ui.js must not use insertAdjacentHTML");
 });
 
 test("describeFailure: server errors surface the message or fall back to the status", () => {

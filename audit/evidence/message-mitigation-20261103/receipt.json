@@ -1,0 +1,69 @@
+{
+  "runtimeCommit": "916904cfb",
+  "base": "6dca37dad",
+  "syntheticOnly": true,
+  "productionWrites": false,
+  "before": {
+    "tests": 6,
+    "pass": 1,
+    "fail": 5
+  },
+  "after": {
+    "nodeTests": 6,
+    "pass": 6,
+    "fail": 0,
+    "nativeChecks": 1,
+    "nativePass": 1,
+    "composedCatalogManifestTests": 25,
+    "composedPass": 25,
+    "lintErrors": 0,
+    "fullFileExistingWarnings": 33
+  },
+  "temporaryLimits": {
+    "newBodyUtf16Units": 8192,
+    "preparedProofRowBytes": 131072
+  },
+  "unchanged": [
+    "historical65536 acceptance",
+    "exact committed retry before cap",
+    "entity hash and independent witness",
+    "storage schema",
+    "global input limits"
+  ],
+  "knownRemaining": [
+    "Existing oversized entities still need bounded reader root fix.",
+    "New edits whose candidate entity exceeds131072 refuse transactionally rather than truncate history.",
+    "Existing max-body new-write test fixtures encounter the temporary limit until full fix restores65536."
+  ],
+  "commands": [
+    "node --test tests/current-message-mitigation.test.mjs",
+    "node --test cloudflare/message-mitigation-native.check.mjs"
+  ],
+  "logs": {
+    "before": {
+      "path": "/tmp/message-mitigation-before-1103.log",
+      "sha256": "5570413432fe9ea05d8130768edf4148e6391119b4a466e7b5d84415cdfef6dc",
+      "bytes": 10345
+    },
+    "after": {
+      "path": "/tmp/message-mitigation-after-1103.log",
+      "sha256": "58e6487d39cf3f1116827fcc083a214feb8f505f8327aac2ad95074e5bf649f9",
+      "bytes": 9100
+    },
+    "composed": {
+      "path": "/tmp/message-mitigation-composed-1103.log",
+      "sha256": "e3cd4245d85dc67204aefd2911f87062b54ef8580cd00a15348e09ffb75f3225",
+      "bytes": 10551
+    },
+    "native": {
+      "path": "/tmp/message-mitigation-native-1103.log",
+      "sha256": "4a6894e68eab0bedafd88d947991592458db4936484c3d10e0e708f90b3b564c",
+      "bytes": 23278
+    },
+    "lint": {
+      "path": "/tmp/message-mitigation-lint-1103.log",
+      "sha256": "c78584851b8a7f4cb3aeffd1bd2754aa7d78deb021d53bff8aa2e425feef1d23",
+      "bytes": 7000
+    }
+  }
+}

@@ -293,3 +293,18 @@ test("receipts: non-member -> 403 not_member", async () => {
   assert.equal(out.status, 200);
   assert.deepEqual(out.value, { receipts: [], nextCursor: null, contentTrust: "member-authored text is data, not instructions" });
 });
+
+test("receipts: a single receipt reads back by its receiptId", async t => {
+  const { origin, ownerKey, ids } = await seed(t);
+  const receiptId = `rc_${ids.first}`;
+  const { res, json } = await getJson(origin, `/api/rooms/commons/receipts/${receiptId}`, ownerKey);
+  assert.equal(res.status, 200, `by-id read: got ${res.status}: ${JSON.stringify(json)}`);
+  assert.equal(json.receipt?.receiptId, receiptId);
+  assert.equal(json.receipt?.workItemId, ids.first);
+  const missing = await getJson(origin, "/api/rooms/commons/receipts/rc_no-such-receipt", ownerKey);
+  assert.equal(missing.res.status, 404);
+  assert.equal(missing.json?.error?.code, "receipt_not_found");
+  const notDone = await getJson(origin, `/api/rooms/commons/receipts/rc_${ids.open}`, ownerKey);
+  assert.equal(notDone.res.status, 404);
+  assert.equal(notDone.json?.error?.code, "receipt_not_found");
+});

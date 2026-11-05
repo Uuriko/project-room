@@ -1,3 +1,4 @@
+import {legacyAgentRoom} from "./helpers/legacy-agent-room.mjs";
 // Lane C inbox collaboration HTTP routes (task RC-2026-09-18-011), over a
 // real store and a real HTTP server: assignments, internal notes (with the
 // non-leakage invariant), draft locks, approvals (an agent can never clear
@@ -14,7 +15,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
-import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { assertNoInternal } from "../server/inbox-internal-notes.mjs";
 import { InboxCollabStore } from "../server/inbox-collab-store.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -28,11 +28,8 @@ function setup(t) {
   // A second room owned by an agent, with no human account bindings at all:
   // the handoff_no_account_scope path and the room-scoping checks.
   state.store.db.exec(agentRoomSchema);
-  const agentRooms = new AgentRooms(state.store, {
-    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }),
-  });
   const denIdentity = state.store.identities.create("Den Agent");
-  agentRooms.create(denIdentity.secret, { roomId: "agent-den", title: "Den",
+  legacyAgentRoom(state.store, denIdentity, { roomId: "agent-den", title: "Den",
     purpose: "An agent-owned room.", kind: "personal", displayName: "Den Keeper" });
   const humanKey = state.store.issueAccessKey("commons", "owner");
   const agent = state.store.identities.create("Collab Agent");
@@ -736,4 +733,17 @@ test("405s on collab routes carry the RFC 9110 Allow header", async t => {
   const deleteOnGetPost = await fetch(f.origin + base + "/assignments", { method: "DELETE", headers: bearer(f.humanKey) });
   assert.equal(deleteOnGetPost.status, 405);
   assert.equal(deleteOnGetPost.headers.get("allow"), "GET, POST");
+});
+
+// New product rooms do not silently recreate the historical assignment board.
+test("native rooms explicitly retire collab assignment creation while canonical work stays room-scoped",async t=>{
+ const f=setup(t);await f.serve();const owner=f.store.identities.create('Native collab Lena');
+ new AgentRooms(f.store).create(owner.secret,{roomId:'native-collab',title:'Canonical work',purpose:'Scoped contracts',kind:'personal',displayName:'Native collab Lena',starter:false});
+ const denied=await post(f,'/api/rooms/native-collab/collab/assignments',owner.secret,{threadId:'old-thread',assignee:{kind:'agent',id:owner.identityId}});
+ assert.equal(denied.status,409);assert.equal((await denied.json()).error.code,'legacy_work_retired');
+ assert.equal(f.store.db.prepare("SELECT count(*) n FROM work_claims WHERE room_id='native-collab'").get().n,0);
+ const created=await post(f,'/api/rooms/native-collab/commands',owner.secret,{id:'native-contract',type:'work.proposed',data:{workItemId:'native-task',title:'Scoped native task',definitionOfDone:'Saved room-scoped result',accountableMemberId:owner.identityId,mode:'read'}});assert.equal(created.status,201);
+ const work=await get(f,'/api/rooms/native-collab/work-context?workItemId=native-task',owner.secret);assert.equal(work.status,200);assert.ok(JSON.stringify(await work.json()).includes('Scoped native task'));
+ const outsider=await get(f,'/api/rooms/native-collab/work-context?workItemId=native-task',f.humanKey);assert.ok([401,403].includes(outsider.status));
+ const oldRoom=await get(f,'/api/rooms/commons/work-context?workItemId=native-task',f.humanKey);assert.equal(oldRoom.status,404);
 });

@@ -1,0 +1,11 @@
+# Native host launch and recovery failure status
+
+The installed/prod source 0908 could fail on a private `.room-runtime.lock`, close its watcher, and leave only stopped/unverified/unknown status. Native intentionally discards stdout and stderr, so the actionable reason never reached the user. A real fake-runtime/profile-lock subprocess reproduces this with output discarded; its lock inode/content remains unchanged and its runtime is never started.
+
+The existing channel now carries three closed local codes: `profile_lock_requires_reconciliation`, `login_required` and `invalid_runtime`. Only typed local setup failures produce those codes; provider error codes, raw error text, profile paths and account details are not forwarded. Existing `status.json` retains an allowlisted scalar `failureCode` through supervisor cleanup. Stopped status still reports unverified protocol and unknown credentials. An old/stale record cannot supply a failure to a replacement live owner, and verified recovery or a new session clears the earlier reason.
+
+Failures before watcher status exists use dedicated wrapper exit codes 70/71/72. `LocalRoomHost` reads only the normal exit status of its actual unreaped child and the existing fresh PID/session/scope-pinned status record. Static Swift messages survive child cleanup. Known failures report `setup_failed`; an unknown nonzero or signaled exit cannot count as a confirmed clean stop. No stderr parsing, automatic lock clearing, account import or permission change was added.
+
+Validation: 35 affected Node tests pass, including native-style discarded-output failures, login/config failures, provider-code spoof rejection, terminal-code persistence, replacement ownership, recovery and existing real subprocess supervision/cleanup controls. The standalone Swift code/exit mapper compiles and passes its executable checks. Lint reports 0 errors and 335 warnings. Full `ProjectRoomKit`/native acceptance is not claimed here; the root integration lane owns that build. The existing native acceptance executable includes new cases for child failure, missing status, private diagnostic exclusion, unknown nonzero exit and later restart.
+
+Exact source/log hashes, commands and boundaries are in `audit/evidence/native-launch-status-20261101.json`. This is a local source qualification; no deployment or installed-app change occurred.

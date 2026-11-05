@@ -1,3 +1,4 @@
+import { openWorkFromSearch } from "./room-chrome.mjs";
 import { openMemberProfile } from "./room-chrome.mjs";
 // Quiet Focus A1/A2 evidence: a background snapshot must not collapse an open
 // disclosure, steal focus, or clear a draft. Real browser + local HTTP service;
@@ -95,6 +96,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   // A2 applies to the accountable-work rail too: unrelated traffic may replace a
   // card's markup, but it must restore the exact still-available action. Unchanged
   // summary counts must not mutate their polite live region on every room event.
+  await openWorkFromSearch(page, "focus-work", "Keep the work control focused");
   const accept = page.locator('[data-work-record-id="focus-work"] [data-action="accept"]');
   await accept.focus();
   await page.evaluate(() => {
@@ -127,6 +129,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-action:focus-work:accept");
 
+  await openWorkFromSearch(page, "focus-work-fallback", "Fall back to the changed work card");
   const fallbackAccept = page.locator('[data-work-record-id="focus-work-fallback"] [data-action="accept"]');
   await fallbackAccept.click();
   await page.locator("#action-dialog").waitFor({ state: "visible" });

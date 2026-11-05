@@ -15,6 +15,23 @@
 // counts as that day's backup.
 import { createHash } from "node:crypto";
 
+// Only stages assigned by this module may become durable/public failure details.
+const backupFailures = new WeakMap();
+function backupFailure(stage, message = `room-backup: ${stage} failed`) {
+  const error = new Error(message);
+  backupFailures.set(error, { code: `backup_${stage}_failed`, component: stage, errorClass: 'backup_failure' });
+  return error;
+}
+export function backupFailureDetail(error) {
+  return backupFailures.get(error) ?? { code: 'backup_unknown_failed', component: 'unknown', errorClass: 'backup_failure' };
+}
+async function backupStep(stage, action) {
+  try { return await action(); } catch { throw backupFailure(stage); }
+}
+async function* exportChunks(body) {
+  try { yield* byteChunks(body); } catch { throw backupFailure('export'); }
+}
+
 export const BACKUP_BINDING = "ROOM_BACKUPS";
 export const BACKUP_KV_BINDING = "ROOM_BACKUPS_KV";
 export const BACKUP_PREFIX = "room-backups/";
@@ -41,14 +58,14 @@ export function backupPartKey(key, index) {
 function backupBucket(env) {
   const bucket = env?.[BACKUP_BINDING];
   if (bucket == null) return null;
-  if (typeof bucket.put !== "function" || typeof bucket.head !== "function") throw new Error("ROOM_BACKUPS binding is missing put or head");
+  if (typeof bucket.put !== "function" || typeof bucket.head !== "function") throw backupFailure("binding", "ROOM_BACKUPS binding is missing put or head");
   return bucket;
 }
 
 function backupKv(env) {
   const kv = env?.[BACKUP_KV_BINDING];
   if (kv == null) return null;
-  if (typeof kv.put !== "function" || typeof kv.get !== "function") throw new Error("ROOM_BACKUPS_KV binding is missing put or get");
+  if (typeof kv.put !== "function" || typeof kv.get !== "function") throw backupFailure("binding", "ROOM_BACKUPS_KV binding is missing put or get");
   return kv;
 }
 
@@ -213,12 +230,12 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     if (!pendingBytes && parts.length) return;
     const bytes = concatBytes(pending, pendingBytes);
     const partKey = backupPartKey(key, parts.length);
-    await kv.put(partKey, bytes, options);
+    await backupStep("part_write", () => kv.put(partKey, bytes, options));
     parts.push({ key: partKey, bytes: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") });
     pending = [];
     pendingBytes = 0;
   };
-  for await (let chunk of byteChunks(body)) {
+  for await (let chunk of exportChunks(body)) {
     noteHeadTail(chunk);
     whole.update(chunk);
     total += chunk.byteLength;
@@ -233,13 +250,13 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   }
   if (tracker.headLine !== null) {
     const reason = tornReason(tracker.headLine, tracker.tail);
-    if (reason) throw new Error(`room-backup: refusing manifest, export torn (${reason})`);
+    if (reason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${reason})`);
   }
   const hashReason = hashTracker.finish();
-  if (hashReason) throw new Error(`room-backup: refusing manifest, export torn (${hashReason})`);
+  if (hashReason) throw backupFailure("verification", `room-backup: refusing manifest, export torn (${hashReason})`);
   if (pendingBytes || !parts.length) await flush();
   const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
-  await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });
+  await backupStep("manifest_write", () => kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } }));
   return manifest;
 }
 
@@ -271,7 +288,7 @@ async function writeR2Backup(bucket, key, body) {
   const tracker = headTailTracker();
   const chunks = [];
   let total = 0;
-  for await (const chunk of byteChunks(body)) {
+  for await (const chunk of exportChunks(body)) {
     tracker.note(chunk);
     whole.update(chunk);
     total += chunk.byteLength;
@@ -279,16 +296,16 @@ async function writeR2Backup(bucket, key, body) {
   }
   if (tracker.headLine !== null) {
     const reason = tornReason(tracker.headLine, tracker.tail);
-    if (reason) throw new Error(`room-backup: refusing to store export, export torn (${reason})`);
+    if (reason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${reason})`);
   }
   const bytes = concatBytes(chunks, total);
   const hashReason = trailerHashReason(bytes);
-  if (hashReason) throw new Error(`room-backup: refusing to store export, export torn (${hashReason})`);
+  if (hashReason) throw backupFailure("verification", `room-backup: refusing to store export, export torn (${hashReason})`);
   const sha256 = whole.digest("hex");
-  await bucket.put(key, bytes, {
+  await backupStep("manifest_write", () => bucket.put(key, bytes, {
     httpMetadata: { contentType: "application/x-ndjson" },
     customMetadata: { sha256, bytes: String(total), backupVersion: String(BACKUP_MANIFEST_VERSION) }
-  });
+  }));
   return { bytes: total, sha256 };
 }
 
@@ -306,13 +323,13 @@ export async function writeDailyBackup(env, room, now = new Date()) {
   if (!bucket && !kv) return { skipped: "unconfigured" };
   const key = backupObjectKey(now);
   if (bucket) {
-    if (verifiedR2Backup(await bucket.head(key))) return { skipped: "exists", key };
-    const body = await room.exportRoomNdjson();
+    if (verifiedR2Backup(await backupStep("read", () => bucket.head(key)))) return { skipped: "exists", key };
+    const body = await backupStep("export", () => room.exportRoomNdjson());
     await writeR2Backup(bucket, key, body);
     return { wrote: key };
   }
-  if (currentManifest(await kv.get(key))) return { skipped: "exists", key, target: "kv" };
-  const body = await room.exportRoomNdjson();
+  if (currentManifest(await backupStep("read", () => kv.get(key)))) return { skipped: "exists", key, target: "kv" };
+  const body = await backupStep("export", () => room.exportRoomNdjson());
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
 }
@@ -331,7 +348,7 @@ export async function verifiedRecentBackup(env, now = Date.now()) {
     if (!bucket && !kv) return null;
     for (let day = 0; day < RELIEF_BACKUP_MAX_AGE_DAYS; day++) {
       const key = backupObjectKey(new Date(Number(now) - day * 86_400_000));
-      const ok = bucket ? verifiedR2Backup(await bucket.head(key)) : currentManifest(await kv.get(key));
+      const ok = bucket ? verifiedR2Backup(await backupStep("read", () => bucket.head(key))) : currentManifest(await backupStep("read", () => kv.get(key)));
       if (ok) return { key, target: bucket ? "r2" : "kv", ageDays: day };
     }
     return null;

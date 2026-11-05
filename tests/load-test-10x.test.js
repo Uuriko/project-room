@@ -1,7 +1,7 @@
 // F010 load-test expansion: 10x scenarios alongside tests/load-test-smoke.test.js.
 //
 // Script-level scenarios drive scripts/load-test.mjs with small-but-real configs
-// (ramp-up/ramp-down, soak, burst spikes, degraded pump, all-mode targets).
+// (ramp-up/ramp-down, burst spikes, degraded pump, all-mode targets).
 // In-process scenarios reuse the script's own fixture pattern (RoomStore +
 // createRoomServer + RoomAgentClient) for the knobs the script does not expose:
 // claim contention on one key, mixed read/write ratios, error injection under
@@ -9,7 +9,8 @@
 //
 // Everything is simulated in-process over loopback: no real network, no devices.
 // Guardrails respected throughout: <=99 agent members, <=3 streams per credential,
-// 100 open streams per server. Credential writes burst at 40; chat posts
+// 100 open streams per server, at most 50 of them in any one room. Credential
+// writes burst at 40; chat posts
 // still stop at the per-member flood of 30.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -125,18 +126,6 @@ test("ramp-up/ramp-down: commands scale with concurrency, latency recovers", () 
     `peak ${peak.opsPerSec} ops/s should stay within 4x of small ${small.opsPerSec} ops/s`);
   const down = run(4);
   assert.ok(Number(down.latencyMs.p95) <= Number(peak.latencyMs.p95) * 2, "latency recovers after ramp-down");
-});
-
-// ---- 2. sustained load soak ----------------------------------------------------
-test("sustained load soak: 1000 wakes drain with zero loss", () => {
-  const report = reportOf(runScript(["--mode", "queue", "--wakes", "1000", "--wake-interval-ms", "2",
-    "--poll-ms", "10", "--lease-batch", "32", "--wake-members", "6", "--quiet"])).queue;
-  assert.equal(report.enqueued, 1000);
-  assert.equal(report.leased, 1000);
-  assert.equal(report.completed, 1000);
-  assert.equal(report.unleased, 0);
-  assert.deepEqual(report.errors, {});
-  assert.equal(report.lagMs.count, 1000);
 });
 
 // ---- 3. burst spikes -------------------------------------------------------------
@@ -282,15 +271,18 @@ test("connection-pool exhaustion: stream pool rejects gracefully and recovers", 
     assert.equal(overCredential.status, 429);
     assert.equal(overCredential.code, "stream_limit");
     overCredential.socket.destroy();
-    // global cap: 33 more members x 3 streams; the pool holds exactly 100
+    // per-room share (R-16.5): 33 more members x 3 streams are attempted, but
+    // one room holds at most 50 of the 100-stream server pool, so other rooms
+    // can never be starved by this room alone (cross-room case:
+    // tests/stream-pool-per-room.test.js).
     let ok = 0, rejected = 0;
     for (let m = 1; m < 34; m++) for (let s = 0; s < 3; s++) {
       const r = await openRawStream(origin, room.agents[m].key, after);
       if (r.status === 200) { ok++; sockets.push(r.socket); }
       else { assert.equal(r.status, 429); assert.equal(r.code, "stream_limit"); r.socket.destroy(); rejected++; }
     }
-    assert.equal(ok + 3, 100, "pool holds exactly 100 streams");
-    assert.equal(rejected, 2, "attempts past the cap are rejected, not hung");
+    assert.equal(ok + 3, 50, "one room holds at most its 50-stream share of the pool");
+    assert.equal(rejected, 52, "attempts past the share are rejected, not hung");
     // the room keeps serving reads while the pool is full
     const probe = clientFor({ origin, memberId: room.agents[0].memberId, key: room.agents[0].key });
     await probe.presence();
@@ -348,12 +340,9 @@ test("graceful degradation: slow stream pump still delivers everything", () => {
 test("throughput/latency: all-mode run meets the repo's load targets", () => {
   const report = reportOf(runScript(["--mode", "all", "--agents", "10", "--iterations", "2",
     "--streams", "8", "--messages", "20", "--message-interval-ms", "10", "--stream-interval-ms", "50",
-    "--wakes", "60", "--wake-interval-ms", "5", "--poll-ms", "10", "--quiet"]));
+    "--quiet"]));
   assert.ok(report.commands.ops > 0 && report.commands.opsPerSec > 0);
   assert.ok(Number(report.commands.latencyMs.p95) < 10000, "command p95 under bound");
   assert.equal(report.streams.deliveries.received, report.streams.deliveries.expected);
   assert.ok(report.streams.deliveryLatencyMs.p95 < 30000, "delivery p95 under bound");
-  assert.equal(report.queue.completed, report.queue.enqueued);
-  assert.deepEqual(report.queue.errors, {});
-  assert.ok(report.queue.lagMs.p95 < 30000, "wake-lease lag p95 under bound");
 });

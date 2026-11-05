@@ -16,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, spendAllowance, SPEND_ALLOWANCE_LIMITS, validId } from "../src/events.js";
 import { sessionRecord, isTerminalSession, isRunningSession, spendLedger } from "../src/work-item-session.js";
 
+import {isCurrentRoom,currentInviteContext,withCurrentWorkReadUnits} from './current-room-repository.mjs';
+
 export const SPEND_ALLOWANCE_DEFAULT_PERIOD_DAYS = 30;
 
 export class SpendAllowanceError extends Error {
@@ -37,6 +39,42 @@ export function spendAllowanceReport(state, nowMs = Date.now()) {
     headroomCents: allowance ? Math.max(0, allowance.allowanceCents - ledger.committedCents) : null,
     overCents: allowance ? Math.max(0, ledger.committedCents - allowance.allowanceCents) : 0
   };
+}
+
+// Authority only: never pass this sparse state as the global session ledger.
+export function spendAuthorityRoom(store,roomId,memberIds=[]) {
+  return currentInviteContext(store,roomId,{memberIds})?.room ?? store.room(roomId);
+}
+
+// Global accounting is necessarily O(all work), but retains only one admitted
+// work body at a time. Every original attempt is folded by the existing ledger;
+// a missing/extra/unreadable proof refuses the operation, never undercharges.
+export function spendAllowanceForRoom(store,roomId,room,nowMs=store.now()) {
+  if(!isCurrentRoom(store.db,roomId))return spendAllowanceReport(room.state,nowMs);
+  return store.readTransaction(()=>withCurrentWorkReadUnits(store,roomId,units=>{
+    const db=store.db,head=units.head,report=spendAllowanceReport({room:room.state.room,workItems:{}},nowMs);
+    let after='',seen=0;
+    for(;;) {
+      const scalars=db.prepare("SELECT length(CAST(record_key AS BLOB)) bytes FROM current_room_record_proofs WHERE room_id=? AND domain='workItems' AND present=1 AND record_key>? ORDER BY record_key LIMIT 32").all(roomId,after);
+      if(scalars.some(row=>!Number.isSafeInteger(row.bytes)||row.bytes<1||row.bytes>512))refuse(409,'current_room_context_unavailable','Spend accounting work keys exceed admitted bounds');
+      if(!scalars.length)break;
+      const keys=db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='workItems' AND present=1 AND record_key>? ORDER BY record_key LIMIT 32").all(roomId,after);
+      if(keys.length!==scalars.length)refuse(409,'current_room_context_unavailable','Spend accounting source changed');
+      for(const {record_key:id}of keys) {
+        const item=units.work(id);
+        if(!item)refuse(409,'current_room_context_unavailable','Spend accounting work proof is missing');
+        const part=spendLedger({workItems:{[id]:item}},{nowMs,periodDays:report.period.days});
+        for(const field of ['spentCents','reservedCents','heldCents','committedCents'])report[field]+=part[field];
+        for(const field of Object.keys(report.sessions))report.sessions[field]+=part.sessions[field];
+        seen++;
+      }
+      after=keys.at(-1).record_key;
+    }
+    if(seen!==head.counts.workItems)refuse(409,'current_room_context_unavailable','Complete spend accounting work census differs from protected head');
+    report.headroomCents=report.allowance?Math.max(0,report.allowance.allowanceCents-report.committedCents):null;
+    report.overCents=report.allowance?Math.max(0,report.committedCents-report.allowance.allowanceCents):0;
+    return report;
+  }));
 }
 
 // The effective spend cap of a session start: the declared budget, or on a
@@ -86,9 +124,9 @@ export function enforceSpendAllowance(state, command, nowMs, fail = refuse) {
 // derive from the work-session state members already see.
 export function readSpendAllowance(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
-    return { roomId, evaluatedThrough: room.sequence, ...spendAllowanceReport(room.state, store.now()) };
+    const auth=store.authenticate(token, roomId, expectedSessionBinding);
+    const room=spendAuthorityRoom(store,roomId,[auth.member.id]);
+    return { roomId, evaluatedThrough: room.sequence, ...spendAllowanceForRoom(store,roomId,room,store.now()) };
   });
 }
 
@@ -102,7 +140,7 @@ export function setSpendAllowance(store, token, roomId, request, expectedSession
   // owners carry the same owner capability as human room owners.
   store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id]);
     if (auth.member.id !== room.state.room.ownerId) refuse(403, "owner_required", "Only the room owner can set the spend allowance");
   });
   if (!request || Array.isArray(request) || typeof request !== "object") refuse(422, "invalid_spend_allowance", "Supply allowanceCents and an optional periodDays");

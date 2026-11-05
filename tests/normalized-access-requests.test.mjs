@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {RoomStore} from '../server/store.mjs';
+import {AccessRequests} from '../server/access-requests.mjs';
+import {AgentRooms} from '../server/agent-rooms.mjs';
+import {auditRecovery} from '../server/recovery.mjs';
+
+test('normalized access requests retain pending review, exact retry, standing-rule scope and cold admission',t=>{
+ const dir=mkdtempSync(join(tmpdir(),'normalized-access-')),path=join(dir,'room.sqlite');let s=new RoomStore(path);
+ t.after(()=>{s.close();rmSync(dir,{recursive:true,force:true});});
+ const owner=s.identities.create('Project founder');new AgentRooms(s).create(owner.secret,{roomId:'requests',title:'Requests',purpose:'Work together',starter:false});
+ const peer=s.identities.create('Peer collaborator');
+ s.room=()=>{throw Error('whole-room hydration forbidden');};
+ const pending={identityId:peer.identityId,displayName:'Peer collaborator',requestedPermissions:['accept_work'],requestId:'pending-peer'};
+ const before=s.roomAuthority('requests').sequence, prepare=s.db.prepare.bind(s.db);let fault=false;
+ s.db.prepare=sql=>{const stmt=prepare(sql);if(!sql.startsWith('INSERT INTO events VALUES'))return stmt;return new Proxy(stmt,{get(target,key){const value=Reflect.get(target,key,target);if(key!=='run')return typeof value==='function'?value.bind(target):value;return(...args)=>{value.apply(target,args);fault=true;throw Error('injected access event save fault');};}});};
+ assert.throws(()=>new AccessRequests(s).request('requests',pending,peer.secret),/injected access event save fault/);
+ s.db.prepare=prepare;assert.equal(fault,true);assert.equal(s.roomAuthority('requests').sequence,before);
+ assert.equal(s.db.prepare("SELECT count(*) n FROM access_requests WHERE request_id='pending-peer'").get().n,0);
+ assert.equal(new AccessRequests(s).request('requests',pending,peer.secret).status,'pending');
+ const head=s.roomAuthority('requests').sequence;
+ assert.equal(new AccessRequests(s).request('requests',pending,peer.secret).status,'pending');assert.equal(s.roomAuthority('requests').sequence,head);
+ assert.equal(new AccessRequests(s).decide(owner.secret,'requests','pending-peer',{decision:'deny'}).status,'denied');
+ assert.throws(()=>new AccessRequests(s).setAutoApprove(owner.secret,'requests',{permissions:['manage_members']}),e=>e.status===422);
+ new AccessRequests(s).setAutoApprove(owner.secret,'requests',{permissions:['accept_work']});
+ const admitted={...pending,requestId:'admit-peer',referredBy:'Project founder'};
+ const receipt=new AccessRequests(s).request('requests',admitted,peer.secret);assert.equal(receipt.status,'approved');
+ assert.deepEqual(s.authenticate(peer.secret,'requests').member.permissions,['accept_work']);
+ const sequence=s.roomAuthority('requests').sequence;
+ s.close();s=new RoomStore(path);s.room=()=>{throw Error('whole-room hydration forbidden');};
+ assert.equal(new AccessRequests(s).request('requests',admitted,peer.secret).status,'approved');assert.equal(s.roomAuthority('requests').sequence,sequence);
+ assert.equal(auditRecovery(s).rooms,1);
+ assert.ok(s.db.prepare("SELECT octet_length(projection) n FROM rooms WHERE id='requests'").get().n<512);
+});

@@ -1,0 +1,11 @@
+{
+  "shardTestRevision": "ab9c66137",
+  "shardTests": 35,
+  "shardPass": 35,
+  "shardFail": 0,
+  "schemaFixtureCommit": "de54ffc5a",
+  "schemaFixtureBeforeFail": 1,
+  "schemaFixtureAfterPass": 1,
+  "productionChanged": false,
+  "normalizedTransferComplete": false
+}

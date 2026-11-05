@@ -22,8 +22,8 @@ function transport(override = () => undefined) {
     const intercepted = await override({ url: String(url), options, setCurrent: value => { current = value; } });
     if (intercepted) return intercepted;
     if (!String(url).includes('/map')) {
-      assert.equal(new URL(url).pathname + new URL(url).search, '/api/rooms/commons?view=work');
-      return Response.json({ snapshotView: 'work', snapshotVersion: 1, roomId: 'commons', viewerId: 'agent',
+      assert.equal(new URL(url).pathname + new URL(url).search, '/api/rooms/commons?view=identity');
+      return Response.json({ snapshotView: 'identity', snapshotVersion: 1, roomId: 'commons', viewerId: 'agent',
         viewerAccountId: null, viewerAuthEpoch: null, viewerSessionBinding: null, viewerSessionRevision: null, state: {
       room: { ownerId: 'owner' }, members: { agent: { id: 'agent', kind: 'agent', active: true, revision: 1, permissions: ['manage_claims'] } } } });
     }

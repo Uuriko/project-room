@@ -734,9 +734,9 @@ test("remove() emits a claim-deleted room event naming the deleted claim and its
   assert.deepEqual(events[0].data.dependents, ["work-dep-remove"]);
 });
 
-test("pr_not_found during refresh emits a claim-deleted room event with dependents", async t => {
-  const { store } = fixture(t);
-  const itemId = "lq_gone_1";
+test("a single pr_not_found during scheduled refresh keeps the item and its mirrored claim", async t => {
+  const { store, clock } = fixture(t);
+  const itemId = "lq_hidden_1";
   store.db.prepare(`INSERT INTO land_queue
     (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', ?, 'acme/demo', 11, 'owner', 'owner', 'unknown', 0, 'pending', 1, 1, 1)`).run(itemId);
@@ -747,18 +747,78 @@ test("pr_not_found during refresh emits a claim-deleted room event with dependen
     { now: store.now(), agentId: "owner" }
   );
   store.workClaims.set("commons", dependent);
+  // A 404 is also how GitHub hides a private repo or a repo the token lost
+  // access to, so for an established item it is inconclusive: the refresh
+  // records it and retries on the backoff ladder instead of deleting.
   store.landQueue.configure({
+    token: TOKEN,
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => ({ message: "Not Found" }) })
   });
 
-  await store.landQueue.refreshDue();
+  const summary = await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000 });
 
-  assert.equal(store.workClaims.get("commons", itemId), null, "mirror claim is deleted");
-  const events = claimDeletedEvents(store);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].data.action, "deleted");
-  assert.equal(events[0].data.workClaim, itemId);
-  assert.deepEqual(events[0].data.dependents, ["work-dep-refresh"]);
+  assert.equal(summary.checked, 1);
+  const row = store.db.prepare("SELECT last_error, next_poll_at FROM land_queue WHERE item_id=?").get(itemId);
+  assert.ok(row, "queue row survives a single 404");
+  assert.equal(row.last_error, "pr_not_found");
+  assert.ok(row.next_poll_at > clock.now, "the next poll is deferred, not immediate");
+  assert.ok(store.workClaims.get("commons", itemId), "mirrored claim survives a single 404");
+  assert.equal(claimDeletedEvents(store).length, 0, "no claim-deleted receipt is emitted");
+  assert.equal(landEvents(store).filter(event => event.data.changed?.includes("removed")).length, 0,
+    "no removal receipt is emitted");
+});
+
+test("repeated pr_not_found refreshes keep the item, and a later successful read recovers it", async t => {
+  const { store, clock } = fixture(t);
+  let hidden = false;
+  const github = mockGitHub(() => snapshot({ checks: "green" }));
+  store.landQueue.configure({
+    token: TOKEN,
+    fetchImpl: async (...args) => hidden
+      ? { status: 404, ok: false, json: async () => ({ message: "Not Found" }) }
+      : github.fetchImpl(...args)
+  });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 12 });
+  const itemId = added.item.itemId;
+
+  hidden = true;
+  // Two consecutive scheduled refreshes, each past the previous backoff.
+  await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000 });
+  assert.ok(store.db.prepare("SELECT 1 FROM land_queue WHERE item_id=?").get(itemId), "row survives the first 404");
+  await store.landQueue.refreshDue({ now: clock.now + 30 * 60 * 1000 });
+  const row = store.db.prepare("SELECT last_error FROM land_queue WHERE item_id=?").get(itemId);
+  assert.ok(row, "row survives repeated 404s");
+  assert.equal(row.last_error, "pr_not_found");
+  assert.ok(store.workClaims.get("commons", itemId), "mirrored claim survives repeated 404s");
+
+  // The repo becomes visible again (un-privated, access restored): the
+  // next due refresh reads it normally and clears the recorded error.
+  hidden = false;
+  await store.landQueue.refreshDue({ now: clock.now + 60 * 60 * 1000 });
+  const recovered = store.db.prepare("SELECT last_error, checks_state FROM land_queue WHERE item_id=?").get(itemId);
+  assert.ok(recovered, "row is still present after recovery");
+  assert.equal(recovered.last_error, null);
+  assert.equal(recovered.checks_state, "green");
+});
+
+test("a scheduled refresh that observes the pull request merged still marks it and stops polling it", async t => {
+  const { store, clock } = fixture(t);
+  let merged = false;
+  const github = mockGitHub(() => snapshot({ checks: "green", merged }));
+  store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 13 });
+  const itemId = added.item.itemId;
+
+  merged = true;
+  const summary = await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000 });
+  assert.equal(summary.checked, 1);
+  const row = store.db.prepare("SELECT merged_sha, closed FROM land_queue WHERE item_id=?").get(itemId);
+  assert.ok(row, "confirmed-merged items are marked, not deleted");
+  assert.equal(row.merged_sha, MERGED);
+  assert.equal(row.closed, 1);
+  // Confirmed-gone items leave the due set: later ticks do not poll them.
+  const again = await store.landQueue.refreshDue({ now: clock.now + 60 * 60 * 1000 });
+  assert.equal(again.checked, 0);
 });
 
 test("add refuses a claimant already at the per-member open-claim cap", async t => {

@@ -1,0 +1,40 @@
+  /api/rooms/{roomId}/work-claims/{claimId}/delegate:
+    post:
+      x-room-permission: claim_owner|owner|manage_claims
+      summary: Set or clear the delegate on a work claim
+      description: |
+        Linear-parity delegation. The claim owner stays accountable while
+        the delegate (an active room member, usually an agent) does the
+        work and is woken. Pass `delegate: null` to clear it. Returns 404
+        unless the server runs with ROOM_CLAIM_DELEGATE=1.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [delegate]
+              properties:
+                delegate: { type: [string, 'null'], maxLength: 128, description: Member id of the delegate, or null to clear. }
+                note: { type: string, maxLength: 4000 }
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
+        '404': { description: not_found when delegation is disabled }
+        '409': { description: room_event_budget_low }
+        '422': { description: invalid_claim_input, work_delegate_unknown_member }
+        '429': { description: Rate limit exceeded (rate_limited). }

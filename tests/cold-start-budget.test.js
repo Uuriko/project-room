@@ -13,12 +13,15 @@ import { applicationTables } from "../server/writer-fence.mjs";
 // Empty in the recovery fixture: cron tables, and update marks that exist only
 // after a member reads, finishes, or clears an item. Same exceptions as the recovery audit.
 const EMPTY_UNTIL_CRON = new Set([
+  // Only muse-room can enable development access. This fixture deliberately
+  // contains ordinary rooms; the populated table is audited in muse-development-access.test.js.
+  "development_co_owner_links",
   "message_replay_snapshots", // Staging is empty outside an unfinished replay.
+  "current_restore_audit_scratch", // Temporary verification rows exist only during a restore.
   "membership_delegation_pending",
   "room_access_auto_approve",
   "integrity_snapshot",
   "integrity_job_cursor",
-  "integrity_room_state",
   // A public room page stays empty until an owner opts in, and the recorded
   // receipts setting is written only when an owner opts in or out. The
   // backfill cursor is written by cron. Same exceptions as the recovery audit.
@@ -123,6 +126,12 @@ test("deferred cold start on a production-shaped store stays within the budget",
   try {
     try {
       await seedRecoveryCoverage(fixture);
+      // A mixed store includes actual schema45 entity rows, not merely its
+      // empty tables. Keep the legacy 200k-event room below as a separate case.
+      fixture.store.initialize(initialRoom("normalized-cold"), { representation: "normalized-current-v1" });
+      const normalizedKey = fixture.store.issueAccessKey("normalized-cold", "owner");
+      fixture.store.command(normalizedKey, "normalized-cold", { id: "normalized-cold-post", type: "message.posted",
+        data: { messageId: "normalized-cold-message", body: "Saved before the cold restart" } });
       const counted = [];
       for (const table of applicationTables) {
         if (!/^[a-z0-9_]+$/.test(table)) throw new Error(`unexpected table name ${table}`);
@@ -153,6 +162,11 @@ test("deferred cold start on a production-shaped store stays within the budget",
       assert.ok(record.sequences > EVENTS);
       assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `deferred cold start used ${record.cpuMs}ms CPU`);
       assert.equal(deferred.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
+      const marker = JSON.parse(deferred.db.prepare("SELECT projection FROM rooms WHERE id='normalized-cold'").get().projection);
+      assert.equal(marker.normalizedCurrent.version, 1);
+      assert.equal(deferred.db.prepare("SELECT count(*) n FROM current_room_head WHERE room_id='normalized-cold'").get().n, 1);
+      assert.equal(deferred.db.prepare("SELECT body FROM messages WHERE room_id='normalized-cold' AND message_id='normalized-cold-message'").get().body,
+        "Saved before the cold restart");
     } finally { deferred.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -167,7 +181,7 @@ test("reopen still repairs a legacy channel and a missing proposer", () => {
     delete legacy.channels;
     legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
-    store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
+    store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(store.storedProjection("commons", legacy)));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(
       "commons", sequence + 1, "legacy-propose",
       JSON.stringify({ id: "legacy-propose", type: "work.proposed", roomId: "commons", actorId: "owner", data: { workItemId: "legacy-job" } })
@@ -193,7 +207,7 @@ test("deferred open leaves a legacy projection until the integrity job repairs i
     delete legacy.channels;
     legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
-    store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
+    store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(store.storedProjection("commons", legacy)));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(
       "commons", sequence + 1, "legacy-propose",
       JSON.stringify({ id: "legacy-propose", type: "work.proposed", roomId: "commons", actorId: "owner", data: { workItemId: "legacy-job" } })
@@ -221,4 +235,50 @@ test("deferred open leaves a legacy projection until the integrity job repairs i
       assert.equal(again.skipped, 1);
     } finally { reopened.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("successful writable startup total includes work after the legacy cold-start record", t => {
+  let clock = 0, legacySeen = false; const records = [];
+  t.mock.method(performance, "now", () => clock);
+  t.mock.method(console, "error", value => {
+    try { const row = JSON.parse(value); records.push(row); if (row.event === "room.cold_start") legacySeen = true; } catch { /* unrelated diagnostic */ }
+  });
+  const store = new RoomStore(":memory:", { now: () => {
+    if (legacySeen) clock += 50; // Backfill's real now() call occurs after the old timing boundary.
+    return Date.parse("2026-10-29T00:00:00Z");
+  } });
+  t.after(() => store.close());
+  const old = records.find(row => row.event === "room.cold_start");
+  const complete = records.find(row => row.event === "room.store_initialized");
+  assert.equal(old.durationMs, 0, "legacy metric keeps its original boundary");
+  assert.equal(complete.initializationMs, 50, "backfill interval is included in the new total");
+  assert.equal(complete.legacyColdStartMs, old.durationMs);
+  assert.equal(store.initializationMs, complete.initializationMs);
+  assert.equal(complete.cpuMeasured, false);
+  assert.equal(complete.clockSemantics, "runtime-dependent");
+});
+
+
+test("hosted successful startup is info while failed startup remains error", t => {
+  const seed = new RoomStore(":memory:");
+  const platform = { ...seed.storagePlatform, clockSemantics: "io-bound" };
+  seed.close();
+  const records = [];
+  for (const level of ["info", "error"]) t.mock.method(console, level, line => {
+    try { records.push({ level, ...JSON.parse(line) }); } catch { /* unrelated */ }
+  });
+  const store = new RoomStore(":memory:", { storagePlatform: platform });
+  store.close();
+  for (const event of ["room.cold_start", "room.store_initialized"]) {
+    assert.equal(records.find(row => row.event === event)?.level, "info");
+  }
+  records.length = 0;
+  assert.throws(() => new RoomStore(":memory:", { storagePlatform: {
+    ...platform, installWriterFence() { throw new Error("fixture fence failure"); }
+  } }), /fixture fence failure/);
+  const failed = records.find(row => row.event === "room.cold_start");
+  assert.equal(failed.level, "error");
+  assert.equal(failed.failed, true);
+  assert.equal(records.some(row => row.event === "room.store_initialized"), false);
 });

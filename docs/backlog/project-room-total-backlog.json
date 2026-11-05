@@ -4345,7 +4345,7 @@
     },
     {
       "id": "OPS-12",
-      "title": "Publish only after current-session authorization; verify production journeys and running versions after any eventual release.",
+      "title": "Use existing authorization and serialized deployment; verify production journeys and running versions after release. The historical per-session approval restriction is superseded by standing authorization.",
       "section": "OPS",
       "kind": "required-work-or-reconciliation",
       "status": "open",

@@ -165,7 +165,9 @@ export class WorkClaimDoStorage {
     }
     if (q === 'SELECT SQL FROM SQLITE_MASTER WHERE NAME=?'
       || q === "SELECT SQL FROM SQLITE_MASTER WHERE NAME=? AND TYPE='TABLE'") {
-      return [{ sql: this.schemas[args[0]] ?? null }];
+      // sqlite_master has no row for an absent table or additive index.
+      // A row whose SQL is NULL is a different schema observation.
+      return Object.hasOwn(this.schemas, args[0]) ? [{ sql: this.schemas[args[0]] }] : [];
     }
     if (q === 'SELECT VERSION FROM ROOM_RUNTIME_VERSION WHERE SINGLETON=1') {
       return [{ version: this.state.room_runtime_version.get(1).version }];

@@ -167,7 +167,7 @@ function postEvent(stream, sequence) {
   }));
 }
 
-test('a later successful read clears an interrupted open stream without replacing it', async t => {
+test('a later successful read after cooldown clears an interrupted open stream without replacing it', async t => {
   const { client, streams, statuses, emit } = fixture(t);
   client.connect();
   await emit('open', 1);
@@ -178,6 +178,8 @@ test('a later successful read clears an interrupted open stream without replacin
   assert.equal(client.sequence, 7);
   client.fetcher = async () => followUpSnapshot(client, 9);
   postEvent(streams[0], 9);
+  assert.equal(client.flight, null, 'another event cannot bypass the recovery backoff');
+  t.mock.timers.tick(1000);
   await client.flight.promise;
   assert.equal(streams.length, 1, 'the live stream stays open');
   assert.equal(client.sequence, 9);
@@ -227,4 +229,27 @@ test('a dm.consent_changed stream receipt fires onConsentChange; other receipts 
   }));
   await client.flight.promise.catch(() => {});
   assert.equal(fires.length, 1, 'other receipts leave the hook alone');
+});
+
+test('bond receipts refresh selected bonds, unrelated and obsolete streams do not', async t => {
+  const { client, streams, emit } = fixture(t);
+  let changes = 0;
+  client.onBondChange = () => { changes++; };
+  client.connect();
+  await emit('open', 1);
+  let sequence = 7;
+  for (const type of ['bond.proposed', 'bond.activated', 'bond.revoked', 'message.posted']) {
+    sequence++;
+    client.fetcher = async () => followUpSnapshot(client, sequence);
+    streams[0].dispatchEvent(new MessageEvent('room-event', {
+      data: JSON.stringify({ sequence, event: { type, roomId: 'commons' } }),
+    }));
+    await client.flight?.promise;
+  }
+  assert.equal(changes, 3);
+  client.generation++;
+  streams[0].dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence: ++sequence, event: { type: 'bond.proposed', roomId: 'commons' } }),
+  }));
+  assert.equal(changes, 3, 'an obsolete stream cannot refresh another session');
 });

@@ -84,7 +84,7 @@ export function scopedKeyRoomBinding(store, auth) {
   if (!roomId) refuse(SCOPED_KEY_REFUSAL, "This API key's room scope names no room");
   const link = store.db.prepare(
     "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, auth.identityId);
-  const member = link ? ownMember(store.room(roomId).state.members, link.memberId) : null;
+  const member = link ? ownMember(store.roomAuthority(roomId, { memberId: link.memberId }).members, link.memberId) : null;
   // Links survive access suspension. Recheck the current room member, not
   // just the identity mapping, including when a held poll reauthorizes.
   if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)

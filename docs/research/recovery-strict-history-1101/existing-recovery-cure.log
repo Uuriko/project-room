@@ -1,0 +1,21 @@
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ online capture preserves all application tables, identity boundaries and exact retries through recovery and restart (528.01525ms)
+✔ audit permits overdue, cancelled, resolved, rescheduled and backward-clock reminder histories (190.232375ms)
+✔ read-only audit rejects projection without repairing the source (162.123709ms)
+✔ read-only audit rejects legacy-envelope without repairing the source (163.004166ms)
+✔ read-only audit rejects missing-receipt without repairing the source (167.863792ms)
+✔ read-only audit rejects receipt-fingerprint without repairing the source (165.109292ms)
+✔ read-only audit rejects human-binding without repairing the source (162.22475ms)
+✔ read-only audit rejects extra-table without repairing the source (155.666583ms)
+✔ v8 readonly verification refuses a v7 marker rather than migrating the backup (155.3175ms)
+✔ read-only open accepts a v34 backup written before the additive wake queue and attention tables (259.568625ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2269.258416

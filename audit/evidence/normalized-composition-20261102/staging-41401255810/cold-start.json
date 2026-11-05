@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-11-02T06:39:37.353Z",
+  "url": "https://project-room-stage.getdasha.workers.dev/api/version/worker",
+  "status": 200,
+  "elapsedMs": 480,
+  "budgetMs": 2000,
+  "sourceRevision": "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+  "pass": true,
+  "cold_start": "worker: first request after deploy, before other staging traffic; durable-object: second request, first DO-touching request",
+  "workerCold": {
+    "url": "https://project-room-stage.getdasha.workers.dev/api/version/worker",
+    "status": 200,
+    "elapsedMs": 480,
+    "sourceRevision": "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+    "answered": true,
+    "incidentSignals": {
+      "error1101WorkerJsException": 0,
+      "error1102WorkerCpuLimitExceeded": 0
+    },
+    "budgetMs": 2000,
+    "gated": true,
+    "measures": "Worker isolate cold start only: /api/version/worker is answered from Worker module scope and never touches the Durable Object",
+    "pass": true
+  },
+  "doCold": {
+    "url": "https://project-room-stage.getdasha.workers.dev/api/version",
+    "status": 200,
+    "elapsedMs": 1215,
+    "sourceRevision": "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+    "answered": true,
+    "incidentSignals": {
+      "error1101WorkerJsException": 0,
+      "error1102WorkerCpuLimitExceeded": 0
+    },
+    "budgetMs": null,
+    "gated": false,
+    "measures": "Durable Object cold start (constructor + Node bridge + handler) via /api/version, on top of a warm Worker; reported separately and not folded into the Worker budget"
+  },
+  "incidentSignals": {
+    "error1101WorkerJsException": 0,
+    "error1102WorkerCpuLimitExceeded": 0
+  }
+}

@@ -1,3 +1,4 @@
+import { boundedWakeDeliveryActive, readWakeWindow, compareWakePosition } from './wake-delivery-window.mjs';
 // Agent host heartbeats and the durable mention/DM wake queue.
 //
 // Each agent identity has zero or more hosts. A host is wakeable (the
@@ -24,6 +25,10 @@ import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from ".
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
+import { WakeBucket } from "./agent-wake-bucket.mjs";
+
+// One global metadata budget, independent of durable signal/agent counts.
+const MAX_THROTTLED_SIGNALS = 4096;
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
 const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land", "ask"]);
@@ -127,6 +132,10 @@ export const wakeListenerLeaseSchema = `
     redelivered INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS agent_wake_signal_claims_agent ON agent_wake_signal_claims(agent_id, claimed_at);
+  CREATE TABLE IF NOT EXISTS agent_host_disconnects (
+    agent_id TEXT NOT NULL, host_id TEXT NOT NULL, disconnected_at INTEGER NOT NULL,
+    PRIMARY KEY(agent_id, host_id)
+  );
 `;
 // A claim is abandoned when its fencing token no longer holds a live lease;
 // redelivery replays the batch with redelivered=true.
@@ -327,6 +336,14 @@ export class AgentHeartbeats {
     check(Number.isFinite(staleAfterMs) && staleAfterMs > 0,
       500, "invalid_heartbeat_config", "staleAfterMs must be positive");
     this.staleAfterMs = staleAfterMs;
+    // Wake-loop guard (server/agent-wake-bucket.mjs).
+    this.wakeBucket = new WakeBucket(() => this.now());
+    // Signal ids queued while the bucket was empty (signalId -> agentId).
+    // Global FIFO cap: evicting metadata allows delivery, never removes a row. A poll
+    // whose whole pending page is throttled holds for its waitMs once
+    // instead of returning at once, so over-budget turns are actually
+    // capped, not only the instant release (Root review on #5745).
+    this._throttledSignals = new Map();
     // Push delivery transport (RC-2026-09-24-203). Production leaves both
     // null: postDelivery then uses the real fetch and real DNS. Tests inject
     // mocks via setPushTransport so the push path never touches the network.
@@ -579,6 +596,9 @@ export class AgentHeartbeats {
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
+    // A fresh heartbeat after a graceful disconnect brings the host back.
+    try { this.db.prepare("DELETE FROM agent_host_disconnects WHERE agent_id=? AND host_id=?").run(agentId, hostId); }
+    catch (error) { if (!isMissingTable(error)) throw error; }
     // plan-wake-live: heartbeat activity proves the host is listening.
     // CX5-FIX: a room-scoped credential's heartbeat (activityRoomId set by
     // the route) stamps room activity only — never the global stamp.
@@ -626,6 +646,7 @@ export class AgentHeartbeats {
       reachableUntil,
     });
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
+    this.clearWakeBudgetMarks(agentId, page.signals.map(s => s.signalId));
     const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
@@ -711,14 +732,14 @@ export class AgentHeartbeats {
       const identityOnline = ownHosts.some(host => host.state === "online");
       if (ownHosts.length === 0 || identityOnline) return Object.freeze([]);
       const configs = new Map(this.db.prepare(
-        "SELECT host_id AS hostId, push_url AS pushUrl, push_token AS pushToken, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
+        "SELECT host_id AS hostId, push_url AS pushUrl, push_token AS pushToken, push_auth_json AS pushAuthJson, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
         .all(agentId).map(row => [row.hostId, row]));
       const targets = [];
       for (const host of ownHosts) {
         if (host.mode !== "wakeable") continue;
         const config = configs.get(host.hostId);
         if (!config || !config.pushUrl || config.pushSuspended) continue;
-        targets.push(Object.freeze({ agentId, hostId: host.hostId, url: config.pushUrl, token: config.pushToken }));
+        targets.push(Object.freeze({ agentId, hostId: host.hostId, url: config.pushUrl, token: config.pushToken, authJson: config.pushAuthJson ?? null }));
       }
       return Object.freeze(targets);
     } catch (error) {
@@ -762,11 +783,17 @@ export class AgentHeartbeats {
   // delivered (failures reset); anything else increments push_failures,
   // and 3 consecutive failures suspend the subscription until the agent
   // re-arms it with a fresh pushNotification.
-  async deliverPush({ agentId, hostId, url, token, eventType, roomId, id, ts }) {
+  async deliverPush({ agentId, hostId, url, token, authJson = null, eventType, roomId, id, ts }) {
     const envelope = Object.freeze({ eventType, roomId, id, ts });
+    // A2A-style receivers (and hosted assistant webhook triggers) verify a
+    // bearer key, not a custom header. Registered credentials were stored
+    // but never sent; send them as Authorization when present.
+    let bearer = null;
+    try { bearer = authJson ? JSON.parse(authJson)?.credentials ?? null : null; } catch { bearer = null; }
     const headers = Object.freeze({
       "Content-Type": "application/json",
       "X-Room-Notification-Token": token,
+      ...(typeof bearer === "string" && bearer ? { Authorization: `Bearer ${bearer}` } : {}),
     });
     let result;
     try {
@@ -774,7 +801,7 @@ export class AgentHeartbeats {
       // transport (M-1 fix). Tests inject one via setPushTransport.
       result = await postDelivery({
         ...(this.pushFetchImpl ? { fetchImpl: this.pushFetchImpl } : {}),
-        url, envelope, headers,
+        url, envelope, headers, allowCrossOriginRedirects: false,
         timeoutMs: PUSH_DELIVERY_TIMEOUT_MS,
         dnsResolvers: this.pushDnsResolvers ?? undefined,
       });
@@ -903,6 +930,8 @@ export class AgentHeartbeats {
           event: "acked", door, kind: "work", subjectId: agentId });
         acknowledged.push(signalId);
       }
+      this.clearWakeBudgetMarks(agentId, acknowledged);
+      if (acknowledged.length > 0) { try { this.store.agentPlugin?.noteWakeAcknowledged?.(agentId, roomId, acknowledged); } catch { /* wake adapters are advisory */ } }
       return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
     });
   }
@@ -1000,6 +1029,24 @@ export class AgentHeartbeats {
     return Object.freeze({ signals: Object.freeze(signals) });
   }
 
+  // Graceful disconnect: the bridge is stopping. Release its listener lease
+  // (when it presents the token) and mark the host gone now, so presence
+  // stops reading "listening" without waiting out the 180s window. Queued
+  // signals stay queued for the next heartbeat.
+  disconnectHost({ agentId, hostId, roomId = null, fencingToken = null }) {
+    checkAgentId(agentId);
+    check(typeof hostId === "string" && hostId.length > 0, 422, "invalid_heartbeat", "hostId is required");
+    this.ensureListenerSchema();
+    const known = this.db.prepare("SELECT last_seen_at AS at FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId);
+    if (!known) return Object.freeze({ disconnected: false, released: false });
+    const released = typeof fencingToken === "string" && fencingToken.length > 0
+      ? this.releaseListenerLease({ agentId, roomId, fencingToken }).released : false;
+    const at = Math.max(this.now(), known.at);
+    this.db.prepare(`INSERT INTO agent_host_disconnects(agent_id, host_id, disconnected_at) VALUES(?,?,?)
+      ON CONFLICT(agent_id, host_id) DO UPDATE SET disconnected_at=excluded.disconnected_at`).run(agentId, hostId, at);
+    return Object.freeze({ disconnected: true, released });
+  }
+
   // Release a listener lease. The holder's unacked claims are freed at once —
   // marked redelivered so the next claim replays them immediately (flagged).
   // A wrong token releases nothing.
@@ -1044,8 +1091,21 @@ export class AgentHeartbeats {
     // poll waiter (coalesced duplicates don't — nothing new arrived).
     // R327-1 (r6): a held (paused) room wake does not release the host's
     // poll; it stays queued until the pause is lifted.
-    if (applied.changes > 0 && !(roomId && this.pausedRoomsOf(agentId).some(p => p.roomId === roomId))) this._releaseWakeWaiter(agentId, roomId);
-    return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
+    // Wake-loop guard: an over-budget signal stays queued for the next
+    // heartbeat or poll; only the instant waiter release is skipped.
+    let throttled = false;
+    if (applied.changes > 0 && !(roomId && this.pausedRoomsOf(agentId).some(p => p.roomId === roomId))) {
+      // Obligation kinds arrive from existing authorized producers; their own
+      // request/work limits still apply. Chat noise must not delay them.
+      if (kind === "ask" || kind === "assignment" || this.wakeBucket.take(agentId, roomId)) this._releaseWakeWaiter(agentId, roomId);
+      else {
+        throttled = true;
+        this._throttledSignals.set(row.signal_id, agentId);
+        if (this._throttledSignals.size > MAX_THROTTLED_SIGNALS)
+          this._throttledSignals.delete(this._throttledSignals.keys().next().value);
+      }
+    }
+    return Object.freeze({ enqueued: applied.changes > 0, ...(throttled ? { throttled: true } : {}), signal: signalView(row) });
   }
 
   // Undelivered wake signals, oldest first, capped at the caller's limit.
@@ -1057,11 +1117,14 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null, order = "oldest" } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
-    const scope = [1, agentId, roomId, hostId];
+    check(["oldest", "newest"].includes(order) && (order !== "newest" || roomId !== null),
+      422, "invalid_wake_poll", "Newest wake discovery requires a selected room");
+    const newest = order === "newest", direction = newest ? -1 : 1;
+    const scope = [newest ? 2 : 1, agentId, roomId, hostId];
     let after = null;
     if (cursor !== null) {
       try {
@@ -1074,17 +1137,29 @@ export class AgentHeartbeats {
     }
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+    const bounded = boundedWakeDeliveryActive(this.db);
+    check(!newest || bounded, 503, "storage_unavailable", "Newest wake discovery requires installed bounded delivery indexes");
+    const messageWindow = bounded ? readWakeWindow(this.db, 'agent_wake_signals', agentId, after, roomId, order) : null;
+    const messages = messageWindow ? messageWindow.rows.filter(row => (roomId === null || row.room_id === roomId) && !held.has(row.room_id)).map(signalView)
+      : this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY created_at,signal_id LIMIT ?`)
       .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
         after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
-    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
-    const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
-      .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
+    const workWindow = bounded ? this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after, bounded: true, order })
+      ?? { signals: [], more: false, through: null } : null;
+    const work = workWindow ? workWindow.signals : this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
+    // Never cross an unexamined source position. A fully filtered window may
+    // yield an empty page with an honest continuation, without acknowledging it.
+    const horizons = bounded ? [messageWindow, workWindow].filter(window => window.more).map(window => window.through).sort((a, b) => direction * compareWakePosition(a, b)) : [];
+    const horizon = horizons[0] ?? null;
+    const combined = [...messages, ...work].filter(signal => !held.has(signal.roomId) && (!horizon || direction * compareWakePosition(signal, horizon) <= 0))
+      .sort((a, b) => direction * compareWakePosition(a, b));
     const page = combined.slice(0, limit);
+    const more = combined.length > limit || horizons.length > 0;
+    const continuation = more ? combined.length > limit ? page.at(-1) : horizon : null;
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
     if (page.length > 0) {
@@ -1103,8 +1178,8 @@ export class AgentHeartbeats {
     }
     return Object.freeze({
       signals: Object.freeze(page),
-      more: combined.length > limit,
-      nextCursor: combined.length > limit ? Buffer.from(JSON.stringify([...scope, page.at(-1).createdAt, page.at(-1).signalId])).toString("base64url") : null,
+      more,
+      nextCursor: continuation ? Buffer.from(JSON.stringify([...scope, continuation.createdAt, continuation.signalId])).toString("base64url") : null,
     });
   }
 
@@ -1117,7 +1192,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null, hostId = null, cursor = null }) {
+  notePoll({ agentId, roomId = null, hostId = null, cursor = null, order = "oldest" }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -1144,7 +1219,7 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
-    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor, order });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
       // BUILD-HEARTBEAT-CADENCE: the poll response carries the
@@ -1171,6 +1246,23 @@ export class AgentHeartbeats {
       // Older database without the push table: no hint is stored.
     }
     return assignedCadenceSeconds(stored);
+  }
+
+  // True when every pending signal was queued over budget: the poll should
+  // hold once. Holding clears the marks, so a signal is held at most once
+  // and is always delivered by the post-wait read.
+  holdForWakeBudget(agentId, pendingWakes) {
+    if (pendingWakes.length === 0 || !pendingWakes.every(s => this._throttledSignals.get(s.signalId) === agentId)) return false;
+    this.clearWakeBudgetMarks(agentId, pendingWakes.map(s => s.signalId));
+    return true;
+  }
+
+  // Clear only delivered/actually acknowledged IDs owned by this agent.
+  // This is advisory memory cleanup, never queue acknowledgement.
+  clearWakeBudgetMarks(agentId, signalIds) {
+    for (const signalId of signalIds) {
+      if (this._throttledSignals.get(signalId) === agentId) this._throttledSignals.delete(signalId);
+    }
   }
 
   // RC-2026-09-28-3602: register one in-process waiter per HOST for the
@@ -1224,6 +1316,17 @@ export class AgentHeartbeats {
   // CADENCE: the cadence in that formula is the server-assigned value for
   // the host's stored hint; hosts that never declared read the assigned
   // default, whose window is the same 180s.
+  // Bounded connection observation. A partial host window can prove an
+  // online host, but cannot prove all hosts offline or unregistered.
+  statusWindow(agentId){
+    checkAgentId(agentId);const at=this.now(),rows=this.db.prepare("SELECT CASE WHEN length(CAST(host_id AS BLOB))<=128 THEN host_id ELSE NULL END hostId,last_seen_at FROM agent_hosts INDEXED BY agent_hosts_seen WHERE agent_id=? ORDER BY last_seen_at DESC LIMIT 9").all(agentId);
+    if(rows.some(row=>row.hostId===null))throw Error('Host observation requires reconciliation');
+    const selected=rows.slice(0,8),more=rows.length>8;
+    const online=selected.some(row=>{const cadence=this.db.prepare('SELECT cadence_seconds FROM agent_push_configs WHERE agent_id=? AND host_id=?').get(agentId,row.hostId)?.cadence_seconds??null;
+      let gone;try{gone=this.db.prepare('SELECT disconnected_at FROM agent_host_disconnects WHERE agent_id=? AND host_id=?').get(agentId,row.hostId)?.disconnected_at;}catch(error){if(!isMissingTable(error))throw error;}
+      return !(Number.isFinite(gone)&&gone>=row.last_seen_at)&&row.last_seen_at<=at&&at-row.last_seen_at<=this.windowFor(assignedCadenceSeconds(cadence));});
+    return{agentId,status:online?'online':more?'unknown':selected.length?'offline':'unregistered',lastSeenAt:selected[0]?.last_seen_at??null,sourceWindow:{complete:!more,shown:selected.length,hasMore:more}};
+  }
   statusOf(agentId) {
     checkAgentId(agentId);
     const at = this.now();
@@ -1252,6 +1355,11 @@ export class AgentHeartbeats {
       // Older database without the push table: every host reads the
       // default window (read-only never migrates).
     }
+    let disconnects = new Map();
+    try {
+      disconnects = new Map(this.db.prepare("SELECT host_id AS hostId, disconnected_at AS at FROM agent_host_disconnects WHERE agent_id=?")
+        .all(agentId).map(row => [row.hostId, row.at]));
+    } catch (error) { if (!isMissingTable(error)) throw error; }
     const withState = hosts.map(row => {
       // BUILD-HEARTBEAT-CADENCE: the stored value is read as the host's
       // standing hint and the ASSIGNED value governs — so a row stored
@@ -1261,7 +1369,11 @@ export class AgentHeartbeats {
       const cadenceSeconds = assignedCadenceSeconds(cadences.get(row.host_id) ?? null);
       const windowMs = this.windowFor(cadenceSeconds);
       const view = hostView(row, cadenceSeconds);
-      return Object.freeze({ ...view, state: at - view.lastSeenAt <= windowMs ? "online" : "stale" });
+      // A host that said goodbye (graceful disconnect) is stale at once,
+      // until its next heartbeat. lastSeenAt is left as observed.
+      const goneAt = disconnects.get(row.host_id);
+      const gone = Number.isFinite(goneAt) && goneAt >= view.lastSeenAt;
+      return Object.freeze({ ...view, state: !gone && at - view.lastSeenAt <= windowMs ? "online" : "stale" });
     });
     const online = withState.some(host => host.state === "online");
     return Object.freeze({

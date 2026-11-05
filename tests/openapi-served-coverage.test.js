@@ -126,9 +126,11 @@ test("served /openapi.json documents the POST /api/agent-rooms request body", as
   const schema = op.requestBody?.content?.["application/json"]?.schema;
   assert.ok(schema, "POST /api/agent-rooms carries a requestBody schema in the served spec");
   assert.deepEqual(Object.keys(schema.properties ?? {}).sort(),
-    ["displayName", "kind", "purpose", "roomId", "starter", "title"],
+    ["displayName", "kind", "purpose", "requestId", "roomId", "starter", "title", "visibility"],
     "schema properties match the server's CREATE_FIELDS");
   assert.deepEqual(schema.required ?? [], ["title", "purpose"],
     "schema required matches the server's required fields");
   assert.equal(schema.properties.starter?.type, "boolean");
+  assert.deepEqual(schema.properties.visibility?.enum, ["open", "private"]);
+  assert.equal(schema.properties.visibility?.default, "open");
 });

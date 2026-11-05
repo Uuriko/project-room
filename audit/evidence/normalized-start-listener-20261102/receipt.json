@@ -1,0 +1,178 @@
+{
+  "node": "v24.22.1",
+  "base": "80b05fbf0",
+  "ownCommits": {
+    "start": "86fddf9afa8b584f3f4e1a2c1ebc15304799f2b4",
+    "cleanup": "6d3f381bcb49ec05b0a34049f75307471e06a0e8",
+    "opaqueCursor": "2afd0282469966f244ef3bf26fbc53158862d4dd",
+    "heartbeat": "df90892ff0c3b6ef8ad9733befab4e3ccd751e42",
+    "coverageConsumer": "eded1e87c1abf2590b3b3b96f6cb20e6a31fa6b5"
+  },
+  "dependencies": [
+    "identity-link5aba0ad8f",
+    "rootAccess0cf6fe9a5",
+    "pairingAgentWork007ec4a7d+1d8fdde8c",
+    "boundedNeedsMeE22e16d5f+b2fa9371c (coverage consumer/full composed test)"
+  ],
+  "commands": [
+    "node --test tests/agent-self-onboarding.test.js",
+    "node --test --test-name-pattern='setup failure|webhook refuses|usage and plugin' tests/room-listen.test.js",
+    "node --test tests/current-heartbeat-listener.test.mjs tests/agent-listener-contract.test.js tests/scoped-listener-contract.test.js tests/agent-wake-listener-lease.test.js tests/room-listen.test.js",
+    "node --test cloudflare/current-heartbeat-listener.check.mjs",
+    "node --test tests/agent-resume.test.js tests/room-listen.test.js tests/normalized-needs-me.test.mjs"
+  ],
+  "logs": [
+    {
+      "name": "start-resume-original",
+      "file": "start-resume-original.log.gz",
+      "exitCode": 1,
+      "sha256": "ea0f29a2bc2506c4845fd5c79d8d0b22e2be8e630ec2c717f9263fa4ed8bfb4a",
+      "compressedSha256": "3e7f97f832a7f52937ee1438448e24df63641df138d7a5e57025ed2b2fa1b764"
+    },
+    {
+      "name": "start-final",
+      "file": "start-final.log.gz",
+      "exitCode": 0,
+      "sha256": "f6fb05234211af77b7dfa23cbd2034e1177ca32515b890fdb2b4483fc05cf3b6",
+      "compressedSha256": "628b87543f9591ee093fbc8ea8f97de065d023b2b81184f068026f1a54e6f350"
+    },
+    {
+      "name": "listener-before-heartbeat",
+      "file": "listener-before-heartbeat.log.gz",
+      "exitCode": 1,
+      "sha256": "dd5176268c3e7739257a9cc0819f123399abd23c661f9da3d6613a7f1e172894",
+      "compressedSha256": "a8e19e318e44b214862e2a182ec72cd455b375c64d62338a6558d67d69def4ab"
+    },
+    {
+      "name": "listener-cleanup-focused",
+      "file": "listener-cleanup-focused.log.gz",
+      "exitCode": 0,
+      "sha256": "e8b356718b6fb2e4f104a08142070cc67d40b1b373202f3ac31d1d9489e61dd7",
+      "compressedSha256": "ba7c57813bc3c3347792dc8afae276a9931d8b98b90e79a06e368ef32e069df8"
+    },
+    {
+      "name": "heartbeat-before",
+      "file": "heartbeat-before.log.gz",
+      "exitCode": 1,
+      "sha256": "a54b8e95a9d97fc22a6417cae3367e673844e02f2e5ca982cb3574f96b1dfe6f",
+      "compressedSha256": "9aae0eaf9dee55e1a7547992bc8108e11da6f84236380b446d9d16cd5f9f739b"
+    },
+    {
+      "name": "heartbeat-lazy-schema-fixture-red",
+      "file": "heartbeat-lazy-schema-fixture-red.log.gz",
+      "exitCode": 1,
+      "sha256": "2fd5e5b28f8dd2cf23113ba0088fc83b024f0688e9b2afabb1f4d7321e916394",
+      "compressedSha256": "34e4c843b3404cdeb354010e1161fbea4868730ffb2714a88451be6f2894e570"
+    },
+    {
+      "name": "heartbeat-listener-final",
+      "file": "heartbeat-listener-final.log.gz",
+      "exitCode": 0,
+      "sha256": "4281323bd11b625d97b59975d8a7398dd857888d824df7c7ed81b2beb71e3e6a",
+      "compressedSha256": "dd6d8896f9981a38968e2d4355a6e5bf61591b371abaff064b1c15a15566405c"
+    },
+    {
+      "name": "heartbeat-native",
+      "file": "heartbeat-native.log.gz",
+      "exitCode": 0,
+      "sha256": "18753345cea085cb136d9e674f54c2b6bc13a94aa375fa11dd5f825df92eab10",
+      "compressedSha256": "998d9290a510f622dab0ebbb0d09fd745945085e57c8a9ea0901eb9625c5dad6"
+    },
+    {
+      "name": "cursor-before",
+      "file": "cursor-before.log.gz",
+      "exitCode": 1,
+      "sha256": "38dec79b5a7b74eca6e495d04f2c64df17111adb67c8b81f39e10ad08b2732d5",
+      "compressedSha256": "da767582f38304504ddf04900b2c9761ff365f118081e61014c814d798ae5500"
+    },
+    {
+      "name": "cursor-final",
+      "file": "cursor-final.log.gz",
+      "exitCode": 0,
+      "sha256": "3c25488b90323899f373f3b5d88f1766c97caf972c887c44b2e8a33dc7ef330f",
+      "compressedSha256": "e92b8955b3142bce28b77a660ba0f8df123435c2c962e18e6430236f2ccd3cfb"
+    },
+    {
+      "name": "coverage-before",
+      "file": "coverage-before.log.gz",
+      "exitCode": 1,
+      "sha256": "18849a17e0fdff18f6344a41c62777fb3df3f2bb1f6d19ea066faeb1f50c099a",
+      "compressedSha256": "d434c74785756d2607b28a513eb9949a1b6a0cccda0aa41a061da71b182bd963"
+    },
+    {
+      "name": "coverage-final",
+      "file": "coverage-final.log.gz",
+      "exitCode": 0,
+      "sha256": "9d6d6efc6478d732267eb5bce44f025bc70196eb307bfa2bd4a846c77d74448e",
+      "compressedSha256": "3bed255eb5050984412b7f745fd9d9f62518082ee777801ee171f4e9a5739114"
+    },
+    {
+      "name": "composed-pending-two",
+      "file": "composed-pending-two.log.gz",
+      "exitCode": 1,
+      "sha256": "8f5448d8591b1cc04d2670c74b4d007dcd241ab392fd97bf8d76901a021923be",
+      "compressedSha256": "26120e7a250555e744077d47ba43913f75833b4b3fc94745bfec64fb083a2b7b"
+    },
+    {
+      "name": "secret-own-files",
+      "file": "secret-own-files.log.gz",
+      "exitCode": 0,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "compressedSha256": "e7c7cd96c65009a7fb69bda792d31999cad4cf5590cbd1c248092ae9ae8c926b"
+    },
+    {
+      "name": "heartbeat-lint-final",
+      "file": "heartbeat-lint-final.log.gz",
+      "exitCode": 0,
+      "sha256": "c6c13344ae88e848254d3af309ca24e20382464a753dd66f8d338703e991ba0b",
+      "compressedSha256": "538aa4fee372ec60b3df41dc3b8c12fd6c4e47ac62f8b30608422d613665a67e"
+    }
+  ],
+  "qualification": {
+    "START": {
+      "pass": 3,
+      "fail": 0,
+      "skip": 0
+    },
+    "cleanupFocused": {
+      "pass": 3,
+      "fail": 0,
+      "skip": 0
+    },
+    "heartbeatAndListener": {
+      "pass": 36,
+      "fail": 0,
+      "skip": 0
+    },
+    "NativeDefaultJuly": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    "cursorFocused": {
+      "pass": 9,
+      "fail": 0,
+      "skip": 0
+    },
+    "metadataAndCursorFocused": {
+      "pass": 10,
+      "fail": 0,
+      "skip": 0
+    },
+    "actualComposedResumeListenerNeedsMe": {
+      "pass": 27,
+      "fail": 2,
+      "skip": 0
+    }
+  },
+  "remainingFailures": [
+    "Compact-resume30messages test expects zero incompleteSources after default2 attention pages; actual source honestly reports page_limit.",
+    "Reply-only resume reaches actual RequestRuns.apply whole-room refusal; assigned next, not qualified by this receipt."
+  ],
+  "limits": [
+    "No timeout or lease/grant widening.",
+    "Actual Node HTTP and child-process product paths; Native heartbeat helper/storage separate; no live/deploy/CloudflareCPU claim.",
+    "Full unit run remains parent-owned, no green claim.",
+    "A new negative heartbeat test originally expected a lazy lease table after rolled-back/refused registration; corrected to assert absent or zero, preserved red."
+  ]
+}

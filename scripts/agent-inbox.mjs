@@ -1,4 +1,5 @@
 import { workContextMarkdown, RoomAgentClient, RoomClientError, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { orientAgentRoom } from "./bootstrap-agent-room.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { MAX_LEASE_HOURS } from "../server/work-claims.mjs";
@@ -455,7 +456,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra.includes("--include-source"), includeOffers: extra.includes("--include-offers") })
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
-      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
+      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await orientAgentRoom(client) : action === "brief" ? await client.returnBrief()
       : action === "context" ? await client.roomContext(checkpoint === undefined ? {} : { sinceVersion: checkpoint })
       : action === "presence" ? await client.presence()
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })

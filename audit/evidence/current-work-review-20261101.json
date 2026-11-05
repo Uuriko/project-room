@@ -1,0 +1,10 @@
+{
+  "sourceBase": "c3094ec43",
+  "runtimeChange": "Add verification.recorded and owner.decision_recorded to the qualified current command set; existing selected work, member authority and addressed sourceMessageId dependencies already loaded",
+  "causalRed": {"log": "/tmp/current-work-review-red.log", "failure": "This command has no qualified current-record dependency plan"},
+  "node": {"log": "/tmp/current-work-review-node.log", "newReviewTests": 5, "withHandoffNeighborsPassed": 9, "failed": 0},
+  "worker": {"log": "/tmp/current-work-review-worker.log", "passed": 1, "failed": 0, "controls": ["actual canonical producer agent saved native text", "different designated agent exact-version independent PASS", "lost committed verification response then cold exact retry with unchanged business/audit snapshot and zero adapter writes", "fault after actual current head insert during approval rolls back exact full snapshot", "cold restart retains no decision", "designated human public rationale approval", "lost approval response then cold exact retry unchanged snapshot and zero adapter writes", "full independent recovery audit", "closed format permit"]},
+  "negativeControls": ["stale work revision", "unknown completion", "wrong evidence version", "wrong verifier", "known producer equals verifier despite different accountable member", "missing verify permission despite designation", "approval before independent PASS", "nonhuman decision actor", "missing and private rationale message", "revoked verifier credential cannot retry old receipt"],
+  "history": "Existing shared verificationHistory and decisionHistory are not capped at20; 22 repeated reviews/approvals retain21 previous entries and pass full replay audit. No invented trim or new provenance assertion.",
+  "limits": ["Synthetic initialized canonical room, not onboarding or deployed qualification", "Generic decision.recorded is a distinct room-level action and remains unsupported", "Blocked/replacement/claim commands remain separately tracked", "Latest root composition and recovery protocol need composed qualification", "No grants, format or schema changes"]
+}

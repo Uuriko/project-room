@@ -4,34 +4,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assignVariant, defineExperiment, listExperiments } from "../server/growth-experiments.mjs";
 
-test("the seeded experiments are the four virality copy and placement tests", () => {
+test("the seeded experiments are the assigned virality placement tests", () => {
   const experiments = listExperiments();
   assert.deepEqual(experiments.map(experiment => experiment.id), [
-    "receipt_cta_copy",
     "pr_footer_placement",
-    "approval_join_placement",
-    "template_cta",
   ]);
   assert.deepEqual(experiments.map(experiment => [...experiment.arms]), [
-    ["run_this", "start_own"],
     ["bottom", "top"],
-    ["after", "beside"],
-    ["use_this", "fork"],
   ]);
   assert.deepEqual(experiments.map(experiment => experiment.metric), [
     "public_artifact_cta_clicked",
-    "public_artifact_cta_clicked",
-    "public_artifact_cta_clicked",
-    "template_forked",
   ]);
   assert.ok(experiments.every(experiment => experiment.minSamplePerArm === 400));
 });
 
 test("assignment is deterministic for one unit and rejects an unknown experiment", () => {
   const env = {};
-  const first = assignVariant("receipt_cta_copy", "rcpt:wcr_example", env);
-  assert.equal(assignVariant("receipt_cta_copy", "rcpt:wcr_example", env), first);
-  assert.ok(first === "run_this" || first === "start_own");
+  const first = assignVariant("pr_footer_placement", "rcpt:wcr_example", env);
+  assert.equal(assignVariant("pr_footer_placement", "rcpt:wcr_example", env), first);
+  assert.ok(first === "bottom" || first === "top");
   assert.throws(() => assignVariant("not_an_experiment", "rcpt:wcr_example", env), /unknown experiment/);
   assert.throws(() => defineExperiment({ id: "solo", arms: ["only"], metric: "public_artifact_cta_clicked", minSamplePerArm: 400 }), /2 to 8 arms/);
 });
@@ -44,8 +35,8 @@ test("ten thousand units split within 3 percent per arm", () => {
 });
 
 test("GROWTH_FORCE_ARMS pins a known arm and ignores an unknown one", () => {
-  const natural = assignVariant("receipt_cta_copy", "rcpt:1", {});
-  assert.equal(assignVariant("receipt_cta_copy", "rcpt:1", { GROWTH_FORCE_ARMS: "receipt_cta_copy:nope" }), natural);
-  assert.equal(assignVariant("template_cta", "tmpl:1", { GROWTH_FORCE_ARMS: "receipt_cta_copy:start_own, template_cta:fork" }), "fork");
+  const natural = assignVariant("pr_footer_placement", "rcpt:1", {});
+  assert.equal(assignVariant("pr_footer_placement", "rcpt:1", { GROWTH_FORCE_ARMS: "pr_footer_placement:nope" }), natural);
   assert.equal(assignVariant("pr_footer_placement", "pr:1", { GROWTH_FORCE_ARMS: "pr_footer_placement:top" }), "top");
+  assert.equal(assignVariant("pr_footer_placement", "pr:1", { GROWTH_FORCE_ARMS: "unknown:ignored, pr_footer_placement:top" }), "top");
 });

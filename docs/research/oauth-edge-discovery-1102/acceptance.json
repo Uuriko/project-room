@@ -1,0 +1,186 @@
+{
+  "runtimeCommit": "0cf33bd53ca7ff8dca6b8f9e16b5ca54c3566db6",
+  "base": "bf089acfcf7dd1987ca3f04753264a4a1bcb88d2",
+  "purpose": "Static configured OAuth discovery independent of Room availability; not an outage cure or evidence that authorization completes while Room is unavailable.",
+  "behavior": {
+    "routes": [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-protected-resource/mcp"
+    ],
+    "methods": "GET only; same trailing-slash normalization; other methods keep existing durable route",
+    "builders": "Existing resource metadata moved unchanged, existing inline authorization metadata extracted unchanged; HTTP and edge share scopes/builders. Existing provider pure static client validation/error type reused.",
+    "unconfigured": "Resource404 error:not_found without CORS, AS200 omits registration_endpoint",
+    "invalidConfiguration": "Falls through original durable construction/error route, never advertises malformed config; zero-DO guarantee applies to valid configuration only.",
+    "stateful": "Registration, consent, access/refresh tokens, revocation and MCP requests remain durable; no state or grants minted by metadata."
+  },
+  "tests": {
+    "node": {
+      "passed": 49,
+      "failed": 0,
+      "includes": "4 new actual HTTP parity/pure validation/invalid config controls + provider/durable/MCP/registration neighborhood"
+    },
+    "worker": {
+      "passed": 3,
+      "failed": 0,
+      "metadataRequests": 36,
+      "metadataRoomCalls": 0,
+      "faults": [
+        "throw",
+        "1500ms simulated hanging call followed by rejection; new route never starts it"
+      ],
+      "configurations": "Actual checked-in canonical and entry vars, plus explicit synthetic configured/unconfigured overrides; distinct isolates",
+      "dynamicRouteControls": "5 POST paths x 6 instances x 2 fault subtests return503 from the existing Room boundary, one Room call each",
+      "hostGuard": "403, zero Room calls"
+    },
+    "existingWorker": {
+      "passed": 2,
+      "failed": 0
+    },
+    "red": {
+      "node": "2 parity cases fail out of4; edge returns null",
+      "worker": "throw and hang each fail with1 Room call instead of0; hanging baseline incurs1500ms before503"
+    },
+    "lint": "0 errors,1 preexisting prefer-const warning in server/http.mjs:1072",
+    "secretScan": "clean",
+    "package": {
+      "verified": true,
+      "files": 670,
+      "schema": 44,
+      "actualArchivedImports": [
+        "oauth-client-contract",
+        "oauth-metadata",
+        "oauth-provider",
+        "mcp-oauth",
+        "http"
+      ]
+    }
+  },
+  "graph": {
+    "engine": "Graphify0.9.96",
+    "revision": "0cf33bd53ca7ff8dca6b8f9e16b5ca54c3566db6",
+    "scope": [
+      "cloudflare/edge-public.mjs",
+      "server/oauth-metadata.mjs",
+      "server/oauth-client-contract.mjs"
+    ],
+    "sourceParts": [
+      {
+        "revision": "0cf33bd53ca7ff8dca6b8f9e16b5ca54c3566db6",
+        "sourceFiles": 1,
+        "sourceBytes": 18632,
+        "sourceManifestSha256": "d3b93be82ab1fcb5d473e7fed976af3a4a694d3696c67bdbbb2ea0e0da4a3ba9",
+        "scope": "cloudflare/edge-public.mjs"
+      },
+      {
+        "revision": "0cf33bd53ca7ff8dca6b8f9e16b5ca54c3566db6",
+        "sourceFiles": 1,
+        "sourceBytes": 2178,
+        "sourceManifestSha256": "5e93bc440ef12d6518228d75752297f53a2b2efdc925f62fa1e2bd6fb11f9c15",
+        "scope": "server/oauth-metadata.mjs"
+      },
+      {
+        "revision": "0cf33bd53ca7ff8dca6b8f9e16b5ca54c3566db6",
+        "sourceFiles": 1,
+        "sourceBytes": 1591,
+        "sourceManifestSha256": "fd06c2e224b544254a33374be770fc21a41c908cc7991eef6ba31a7dc4c40936",
+        "scope": "server/oauth-client-contract.mjs"
+      }
+    ],
+    "nodes": 48,
+    "edges": 94,
+    "truncation": "No truncated marker emitted; graph is intentionally scoped/semantically partial, not a fleetgraph",
+    "modelCalls": 0,
+    "authority": "Source and actual bundle import closure are authoritative; graph is navigation only.",
+    "bundle": {
+      "sourceRevision": "0cf33bd53",
+      "inputs": [
+        "server/oauth-client-contract.mjs",
+        "server/oauth-metadata.mjs"
+      ],
+      "bundleBytes": 3610
+    }
+  },
+  "limits": [
+    "Checked-in canonical configuration has MCP clients while checked-in entry configuration does not. Per-door effective configuration is preserved; no live variables inspected or copied.",
+    "Metadata availability does not imply durable readiness or successful setup/token issuance.",
+    "No production calls, credential creation, push, merge or deployment.",
+    "Cold isolate elapsed times include local runtime startup; no CPU or total latency speedup claim."
+  ],
+  "receipts": {
+    "node-red": {
+      "path": "node-red.gz",
+      "sha256": "db1b096a940e175066958693c55978c467e3d424e3604dd7f3eef4cd36b8cfa0"
+    },
+    "worker-red": {
+      "path": "worker-red.gz",
+      "sha256": "45376d8c3d97c4aa0f921d0acf01eecbd97e2636cbdc9c524a9b3f11662aa63a"
+    },
+    "node-green": {
+      "path": "node-green.gz",
+      "sha256": "1a8a7f138ba4ec7f1df62acba0141a0e2916b1d7fb309aa371b31b0e614cf59e"
+    },
+    "worker-green": {
+      "path": "worker-green.gz",
+      "sha256": "809608f738ffafc3487096c8cbd38a52e954c888749affec8d0964161ec7ad16"
+    },
+    "existing-edge": {
+      "path": "existing-edge.gz",
+      "sha256": "d0a3c04e2d1aa839bab7750a9ff45159807a613cb331a98499bc80bdc4a8172d"
+    },
+    "package": {
+      "path": "package.gz",
+      "sha256": "fd7d72506b8beb64000f75436daa4ccad68469e05394ef92db8c2cd7ab9fc70d"
+    },
+    "package-import": {
+      "path": "package-import.gz",
+      "sha256": "77eea88275d4a493ae536386a14e4ce88942b3df44467b22354dc8b16c55e955"
+    },
+    "graphify": {
+      "path": "graphify.gz",
+      "sha256": "f17fee128b2e2fbbe679c5af9c6a6296c20b081acc4ac765b505c7f0f0277bcd"
+    },
+    "graph": {
+      "path": "graph.gz",
+      "sha256": "a10cb158c8b3fb81d864f1cd82d662f6be49112efbe7158d7bb3768a8753586a"
+    },
+    "lint": {
+      "path": "lint.gz",
+      "sha256": "44c0c3a21e4fb645cc20f4e8461c2ccd86166d7192aff6638e159d6dcd232aca"
+    },
+    "secrets": {
+      "path": "secrets.gz",
+      "sha256": "08fcda4cab3e741233927de428740e46597e9db806486c9b682371b936644908"
+    }
+  },
+  "rootComposition": {
+    "testedHead": "7c377abaa",
+    "mainIncluded": "4fe04027cf537cb01143d64612f2861794acdb20",
+    "includes": [
+      "presence query fix5657",
+      "identity recovery ownership5653",
+      "Claude Google consent return5654"
+    ],
+    "nodeAndSyntheticBrowserPassed": 82,
+    "actualWorkerPassed": 5,
+    "ciModeDriftPassed": 15,
+    "fullNodeSuite": "explicitly skipped in CI-mode publication check",
+    "manifestTestsPassed": 8,
+    "baselineUnchanged": true,
+    "logs": {
+      "composed-node-browser": {
+        "decodedSha256": "fa281017c4d8a12ee60acd3db0867b015cb60c21f5e39454efaa981de3a9d886",
+        "bytes": 35136
+      },
+      "composed-native": {
+        "decodedSha256": "3f2a55e515b0a22d8f089b11a492b82cf55c4ee4de70371b2a2e71d0b6425b79",
+        "bytes": 34086
+      },
+      "composed-publication": {
+        "decodedSha256": "753312158b4be7a63193eb99ec2a4e1027bad529bb85bb121021c5e59087d8eb",
+        "bytes": 67206
+      }
+    },
+    "productionDeployment": "not performed for this metadata patch"
+  }
+}

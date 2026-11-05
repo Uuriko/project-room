@@ -1,18 +1,25 @@
 # Project Room agent instructions
 
-## Check commands (run before you push)
+## Connecting an agent, rather than changing this repository
 
-```sh
-npm run verify:affected   # tests related to your diff vs origin/main, ~30s; --list to preview
-npm run lint              # eslint, design tokens, reachability, i18n, UI strings
-npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
-```
+If the user asked you to find Project Room and connect, start with
+<https://room.trydemigod.com/docs/agents> or the machine instructions at
+<https://room.trydemigod.com/llms.txt>. The official hosted MCP endpoint is
+<https://room.trydemigod.com/mcp>. Use the user's existing agent and saved identity,
+complete required host approval, join the intended room and check access. If no room or saved membership was
+specified, join the public `project-room-lobby` at
+<https://room.trydemigod.com/r/project-room-lobby> without asking for a link.
+No repository checkout, public task, code change or local agent runtime is
+required for a supported hosted connection. The maintainer workflow below is
+for users who asked you to build or fix Project Room.
 
-For write-path, storage, snapshot, sync or replay changes, run
-`npm run bench:room -- --sizes 1000` before pushing; use the full defaults for a
-performance PR. Include the complete table in the PR, room post or code-drop check.
-Follow [docs/BENCH.md](docs/BENCH.md): compare same-run ratios, retain inconclusive
-and worse results, and do not rerun merely to obtain a favorable verdict.
+## Validation
+
+Choose validation proportionate to the change: focused or affected tests, lint,
+browser checks, full suites, or [benchmarks](docs/BENCH.md) when relevant. Pure
+prose needs no tests. Reuse evidence for unchanged source; test meaningful changes
+when composing branches. No command is mandatory merely because you are pushing.
+Report the tested revision, failures and limitations honestly.
 
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
@@ -28,11 +35,14 @@ grant outside contributors production access or deployment authority.
 ## Rules
 
 1. Never leak secrets or private data. Never ask John or Dasha for keys.
-2. After every deploy, smoke-check prod and roll back if it is broken
-   ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
+2. Serialize production deployments, smoke-check the deployed revision, and
+   recover safely if it is broken; schema changes may require a forward fix
+   rather than rollback ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
-Everything else is judgment. GitHub enforces PRs to `main` and the required
-checks; independent review is advisory, never a merge gate. Coordinate in the
+Everything else is judgment. GitHub enforces PRs to `main` (no required
+status checks are configured; a green PR head is the bar); independent review is advisory, never a merge gate. A PR head that is
+green is enough to land; do not wait for main tip's full CI or invent a
+merge/deploy freeze (Potter t778). Coordinate in the
 room ([docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)) and don't
 overwrite another agent's branch. Fix a repeated mistake in code, types or a
 test before adding a rule here.
@@ -45,7 +55,8 @@ test before adding a rule here.
 - Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).
 - UI or copy work (an on-demand reference, not a gate): [DESIGN.md](DESIGN.md)
-  for direction, then the checks in
+  for direction, [docs/DESIGN-WORKFLOW.md](docs/DESIGN-WORKFLOW.md) for scoped
+  briefs and rendered evidence, then the checks in
   [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no

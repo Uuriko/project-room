@@ -3,7 +3,7 @@ import { DatabaseSync as TrailerDb } from "node:sqlite";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -334,6 +334,10 @@ test("a version 1 KV manifest for today is rewritten; a current one is kept", as
 test("replay skips Durable Object runtime and retired tables and reports them", t => {
   const { directory, store } = openStore(t, 3);
   const extra = [
+    // These controls belong to the restore target. Even an exported open
+    // permit or pending admission must be ignored, never become authority.
+    { table: "current_room_writer_permit", row: { singleton: 1, enabled: 1, room_id: "commons", receipt_id: "forged-source" } },
+    { table: "current_restore_admission", row: { singleton: 1, state: "pending", restore_id: "forged-source", phase: "loading", revision: 0 } },
     { table: "room_writer_permit", row: { singleton: 1, version: 41 } },
     { table: "room_runtime_version", row: { singleton: 1, version: 41 } },
     { table: "emissary_journal", row: { room_id: "commons", id: "j1" } },
@@ -344,7 +348,19 @@ test("replay skips Durable Object runtime and retired tables and reports them", 
   const ndjson = `${exportNdjsonText(store.db)}${extra}\n`;
   const result = replayNdjson(ndjson, join(directory, "skip", "room.sqlite"));
   assert.equal(result.verified, true);
-  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1 });
+  assert.deepEqual(result.skippedTables, {
+    room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1,
+    // Each current control has the original seeded export row plus the
+    // adversarial row appended above. The fresh target keeps its own state.
+    current_room_writer_permit: 2, current_restore_admission: 2
+  });
+  const restored = new TrailerDb(join(directory, "skip", "room.sqlite"), { readOnly: true });
+  try {
+    assert.deepEqual({ ...restored.prepare("SELECT enabled,room_id,receipt_id FROM current_room_writer_permit WHERE singleton=1").get() }, { enabled: 0, room_id: null, receipt_id: null });
+    assert.deepEqual({ ...restored.prepare("SELECT state,restore_id,phase,revision,source_seal,coverage FROM current_restore_admission WHERE singleton=1").get() }, {
+      state: "clear", restore_id: null, phase: "clear", revision: 0, source_seal: null, coverage: null
+    });
+  } finally { restored.close(); }
   const unknown = `${exportNdjsonText(store.db)}${JSON.stringify({ table: "not_a_table", row: { a: 1 } })}\n`;
   assert.throws(() => replayNdjson(unknown, join(directory, "unknown", "room.sqlite")), /does not have/);
 });
@@ -570,4 +586,79 @@ test("replayNdjson refuses a tampered non-event row and reports the verification
   }).join("\n");
   assert.ok(done, "fixture export has an account_credentials row to tamper");
   assert.throws(() => replayNdjson(tampered, join(directory, "tampered", "room.sqlite")), /table digest does not match for account_credentials/);
+});
+
+
+for (const sidecars of [false, true]) test(`restore CLI preserves a destination created while reading input (sidecars: ${sidecars})`, t => {
+  const { directory, store } = openStore(t, 1);
+  const source = join(directory, "race-source.ndjson");
+  const target = join(directory, "race-target.sqlite");
+  writeFileSync(source, exportNdjsonText(store.db));
+  const hook = join(directory, "race-hook.mjs");
+  writeFileSync(hook, `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const read = fs.readFileSync;
+    fs.readFileSync = function(path, ...args) {
+      const result = read.call(this, path, ...args);
+      if (path === ${JSON.stringify(source)}) {
+        for (const suffix of ${JSON.stringify(sidecars ? ['', '-wal', '-shm'] : [''])})
+          fs.writeFileSync(${JSON.stringify(target)} + suffix, 'another process owns this' + suffix);
+      }
+      return result;
+    };
+    syncBuiltinESMExports();
+  `);
+  assert.throws(() => execFileSync(process.execPath, ["--import", hook, restoreScript,
+    "--from", source, "--to", target], { encoding: "utf8", stdio: "pipe" }));
+  for (const suffix of (sidecars ? ["", "-wal", "-shm"] : [""]))
+    assert.equal(readFileSync(target + suffix, "utf8"), "another process owns this" + suffix,
+      "a restore must never remove a store or sidecar created by another process");
+  assert.deepEqual(readdirSync(directory).filter(name => name.startsWith(".room-restore-")), []);
+});
+
+test("restore CLI removes only its private staging files when verification fails", t => {
+  const { directory, store } = openStore(t, 1);
+  const source = join(directory, "invalid-source.ndjson");
+  const target = join(directory, "invalid-target.sqlite");
+  store.db.prepare("UPDATE rooms SET projection=json_set(projection, '$.drift', 1) WHERE id='commons'").run();
+  writeFileSync(source, exportNdjsonText(store.db));
+  assert.throws(() => execFileSync(process.execPath, [restoreScript, "--from", source,
+    "--to", target], { encoding: "utf8", stdio: "pipe" }), /reconciliation/);
+  assert.equal(existsSync(target), false);
+  assert.deepEqual(readdirSync(directory).filter(name => name.startsWith(".room-restore-")), []);
+});
+
+for (const rejected of [false, true]) test(`restore CLI reports cleanup failure truthfully (audit rejected: ${rejected})`, t => {
+  const { directory, store } = openStore(t, 1);
+  if (rejected) store.db.prepare("UPDATE rooms SET projection=json_set(projection, '$.drift', 1) WHERE id='commons'").run();
+  const source = join(directory, "cleanup-source.ndjson");
+  const target = join(directory, "cleanup-target.sqlite");
+  writeFileSync(source, exportNdjsonText(store.db));
+  const hook = join(directory, "cleanup-hook.mjs");
+  writeFileSync(hook, `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const remove = fs.rmSync;
+    fs.rmSync = function(path, ...args) {
+      if (String(path).includes('/.room-restore-')) throw Error('Injected staging cleanup failure');
+      return remove.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+  `);
+  let failure;
+  try { execFileSync(process.execPath, ["--import", hook, restoreScript, "--from", source,
+    "--to", target], { encoding: "utf8", stdio: "pipe" }); }
+  catch (error) { failure = error; }
+  assert.ok(failure, "cleanup failure must not silently pass");
+  const stderr = String(failure.stderr);
+  assert.equal(existsSync(target), !rejected);
+  assert.match(stderr, /Private staging cleanup failed/);
+  if (rejected) {
+    assert.match(stderr, /reconciliation/, "preserve the original audit failure");
+    assert.match(stderr, /destination was not promoted/);
+  } else {
+    assert.match(stderr, /destination was promoted/);
+    assert.doesNotMatch(stderr, /destination was not promoted/);
+  }
 });

@@ -27,6 +27,8 @@
 // and the handoff journal (server/inbox-handoff.mjs) already persists itself
 // through store.handoffs and is reused directly here.
 import { randomUUID } from "node:crypto";
+import {isCurrentRoom} from './current-room-repository.mjs';
+import {ServiceError} from './service-error.mjs';
 import { createAssignmentJournal } from "./inbox-assign.mjs";
 import { createInternalNotes } from "./inbox-internal-notes.mjs";
 import { createCollisionTracker } from "./inbox-collision.mjs";
@@ -406,6 +408,7 @@ export class InboxCollabStore {
   // because the pure journal keys by threadId while the HTTP release route
   // addresses assignments by id. ----
   assignThread(roomId, threadId, assignee, { by, force = false } = {}) {
+    if(isCurrentRoom(this.db,roomId))throw new ServiceError(409,'legacy_work_retired','This room uses native work. Propose canonical work through work.proposed; legacy release and history inspection remain available.');
     const entry = this.#entry(roomId);
     const op = { op: "assign", threadId, assignee, by, force };
     return this.#transact(roomId, entry,
@@ -452,7 +455,7 @@ export class InboxCollabStore {
     // assign_not_assigned as before.
     const current = entry.assign.get(row.thread_id);
     if (current?.status === "assigned") {
-      const ownerId = this.store.roomAuthority(roomId)?.ownerId ?? null;
+      const ownerId = this.store.roomOwnerId(roomId) ?? null;
       const byId = by?.id ?? null;
       const permitted = typeof byId === "string" && byId !== "" && (
         byId === current.assignee?.id ||
@@ -703,7 +706,7 @@ export class InboxCollabStore {
     // the room scope the owner's account opened every handoff in every room
     // that account owns: an agent in one room could read the full packets of
     // the owner's handoffs elsewhere and move them through their lifecycle.
-    const ownerId = this.store.roomAuthority(roomId).ownerId;
+    const ownerId = this.store.roomOwnerId(roomId);
     const ownerAccount = ownerId === callerId ? null : this.store.accountForMember(roomId, ownerId);
     if (ownerAccount) return { accountId: ownerAccount.id, roomId };
     const error = new Error("No account scope is bound for this handoff; bind a human account to the room first.");
@@ -756,7 +759,7 @@ export class InboxCollabStore {
              WHERE h.account_id=? AND h.handoff_id=? AND r.room_id=?`)
           .get(scope.accountId, handoffId, scope.roomId);
       if (row) {
-        const ownerId = roomId !== null ? this.store.roomAuthority(roomId)?.ownerId ?? null : null;
+        const ownerId = roomId !== null ? this.store.roomOwnerId(roomId) ?? null : null;
         let identityId = null;
         if (roomId !== null) {
           identityId = this.db.prepare(

@@ -128,12 +128,16 @@ test("readonly Room membership preserves independent public contribution authori
   assert.equal(store.publicWorkClaims.read("visibility-task").claim.identityId, peer.identityId);
 });
 
+const JOIN_HELPERS = new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"]);
+
 test("owner keeps the full catalog: withholding changes nothing for the unrestricted", async t => {
   const { owner, call } = await demotedPeer(t);
   for (const profile of ["core", "full"]) {
     const listed = await call("tools/list", { profile }, owner.secret);
     const names = toolNames(listed.result.tools);
-    assert.deepEqual([...names].sort(), [...toolNames(listedMcpTools(profile, false))].sort(),
+    // Joined members skip the join helpers on core; that is not withholding.
+    const unfiltered = [...toolNames(listedMcpTools(profile, false))].filter(name => profile === "full" || !JOIN_HELPERS.has(name));
+    assert.deepEqual([...names].sort(), [...unfiltered].sort(),
       `${profile}: owner catalog must equal the unfiltered list`);
   }
 });
@@ -225,10 +229,10 @@ test("capabilityVisibleTo: grant-edge seam refines tiers (slice-1 plug-in point)
 
 test("listing endpoints: no leaks, no over-filtering", async t => {
   // 1. Anonymous MCP: four join documents, two executable read-only work tools,
-  //    and the identity mint.
+  //    the identity mint and the explicit protected access check.
   const publicList = handleMcpJoinRpc(rpc("tools/list"));
   assert.deepEqual(toolNames(publicList.result.tools),
-    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"]));
+    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint", "room_check_access"]));
 
   // 2. Server card: public by design, full unfiltered list. The enrolled
   //    tier is the member core catalog — the default a member bearer gets —

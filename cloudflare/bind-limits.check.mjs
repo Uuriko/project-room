@@ -21,6 +21,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream } from "../server/room-export.mjs";
 import { writeKvBackup } from "./room-backup.mjs";
+import {verifiedOperatorRestore} from "./helpers/verified-operator-restore.mjs";
 
 // Repo root from this file, so the check runs from cloudflare/ (CI) or the root.
 const source = process.env.ROOM_SOURCE_ROOT || fileURLToPath(new URL("..", import.meta.url));
@@ -112,8 +113,7 @@ test("restore-from-backup on the Worker survives 150 browser sessions with disti
   const restored = await mf.dispatchFetch(`${origin}/api/operator/restore-from-backup`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ key }),
   });
-  const result = await restored.json();
-  assert.equal(restored.status, 200, JSON.stringify(result));
+  const {body:result}=await verifiedOperatorRestore(restored,input=>mf.dispatchFetch(`${origin}/api/operator/restore`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(input)}));
   assert.equal(result.verified, true);
   assert.deepEqual(await get("/__probe/state"), { rooms: 1, sessions: 150 });
 });

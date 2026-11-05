@@ -33,7 +33,15 @@ function refuseNonAgent(ctx, auth) {
 
 function refuseArchived(ctx, roomId) {
   let state = null;
-  try { state = ctx.store.room?.(roomId)?.state ?? null; } catch { state = null; }
+  try {
+    state = ctx.store.room?.(roomId)?.state ?? null;
+  } catch {
+    // This guard is the archived freeze for the surface, so an unreadable
+    // room state is unknown, not unarchived: refuse the write rather than
+    // let it land in a room that may be archived. The archived reads in
+    // work-claim-routes fail closed the same way, by letting the read throw.
+    ctx.reject(503, "room_state_unavailable", "This room's state could not be read, so the change was refused");
+  }
   if (isRoomArchived(state)) ctx.reject(409, "room_archived", "This room is archived");
 }
 

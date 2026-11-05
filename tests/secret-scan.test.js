@@ -171,3 +171,34 @@ test("wallet seed detection covers JSON and assignment keys without exposing wor
     }
   }
 });
+
+test("scratch Operator conditional random generation is narrowly exempt without hiding literal credentials", async () => {
+  const { ALLOWLIST } = await import("../scripts/secret-scan-check.mjs");
+  const line = readFileSync(new URL("../scripts/openapi-method-accuracy.mjs", import.meta.url), "utf8")
+    .split("\n").find(value => value.includes("const token = operatorEnabled ?"));
+  assert.ok(line, "guard pins the actual scratch assignment");
+  assert.ok(scanText(line).some(finding => finding.rule === "generic-secret"), "the original detector still recognizes the ambiguous conditional assignment");
+  const scan = value => scanText(value, { allowlist: ALLOWLIST });
+  assert.deepEqual(scan(line), []);
+  const literal = randomBytes(24).toString("hex");
+  for (const changed of [line.replace('randomBytes(32).toString("hex")', JSON.stringify(literal)),
+    line.replace(": null", ': "' + literal + '"'),
+    line + ' const password = "' + literal + '";'])
+    assert.ok(scan(changed).some(finding => finding.rule === "generic-secret"), "a literal branch or adjacent credential remains a finding");
+  const awsKey = fakeAwsKey();
+  assert.ok(scan(line + ' ' + awsKey).some(finding => finding.rule === "aws-access-key"));
+});
+
+
+test("selected-status Miniflare exception matches only its complete synthetic declaration", async () => {
+  const { ALLOWLIST } = await import("../scripts/secret-scan-check.mjs");
+  const declaration = "  const token='synthetic-selected-parity-operator-0123456789';";
+  const scan = line => scanText(line, { allowlist: ALLOWLIST });
+  assert.deepEqual(scan(declaration), []);
+  assert.ok(scan(declaration.replace('0123456789', '0123456780')).some(f => f.rule === 'generic-secret'));
+  assert.ok(scan(declaration.replace('const token', 'const password')).some(f => f.rule === 'generic-secret'));
+  const unrelated = fakeStripeKey();
+  const adjacent = scan(declaration + ` const password = "${unrelated}";`);
+  assert.ok(adjacent.some(f => f.rule === 'generic-secret'));
+  assert.ok(adjacent.some(f => f.rule === 'stripe-key'));
+});

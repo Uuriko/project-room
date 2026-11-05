@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openWorkFromSearch } from "./room-chrome.mjs";
 // Simulated people in isolated rooms, including real browser failure recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,6 +30,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   const open = async id => { await page.locator('[data-portable-original="' + id + '"]').click(); await page.locator("#portable-dialog").waitFor(); };
   const close = () => page.locator("#portable-close").click();
   const ordinary = async () => {
+    if (!await page.locator(`[data-work-record-id="${workId}"]`).isVisible()) await openWorkFromSearch(page, workId, state().workItems[workId].title);
     const details = page.locator('[data-work-record-id="' + workId + '"] .work-details');
     if (!await details.evaluate(node => node.open)) await details.locator(":scope > summary").click();
     await details.getByRole("button", { name: "Share draft", exact: true }).click();

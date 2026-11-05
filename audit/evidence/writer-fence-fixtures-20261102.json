@@ -1,0 +1,47 @@
+{
+  "base": "4c27e86aa13dd48750eade6431a06772879d176b",
+  "originFullSuite": "26ae96268",
+  "command": "node --test tests/writer-fence.test.js",
+  "scope": [
+    "tests/writer-fence.test.js",
+    "audit/evidence/writer-fence-fixtures-20261102.json",
+    "audit/evidence/writer-fence-fixtures-20261102/"
+  ],
+  "runtimeChanged": false,
+  "runtimeBlobs": {
+    "server/writer-fence.mjs": "1d1a3e9aeb0a5124bd8d11bcbfb12e84a1c569e4",
+    "server/store.mjs": "f4ae4aec4df6bc60f3c43e43e623ba0c7f96f26a"
+  },
+  "causes": [
+    "Three observed writer-refusal failures and one read-only audit failure pinned obsolete writer_v44/schema44 text while the current runtime correctly reported45. The later v42 refusal assertion was likewise stale but its fixture failed earlier.",
+    "Synthetic v42 setup removed43/44 guards but retained45, so its alleged old connection could not perform the intended pre-upgrade write."
+  ],
+  "changes": [
+    "Bind current refusal assertions to exported WRITER_FUNCTION and STORE_SCHEMA_VERSION.",
+    "Remove all newer code-owned writer fence definitions in the synthetic v42 setup, then assert current guards absent.",
+    "Retain old prepared writer refusal, exact current fence verification, read-only no-upgrade and rollback controls.",
+    "Prove v42 existing account unchanged by upgrade and by the refused prepared increment."
+  ],
+  "logs": {
+    "before": {
+      "path": "audit/evidence/writer-fence-fixtures-20261102/before.log.gz",
+      "sha256": "a47d622fdc4eb1851a7d1897c8c0a20f53b32d1b23f0d4f575f16cfc34a199b6",
+      "uncompressedBytes": 16813,
+      "passed": 5,
+      "failed": 5,
+      "skipped": 0
+    },
+    "after": {
+      "path": "audit/evidence/writer-fence-fixtures-20261102/after.log.gz",
+      "sha256": "8efbc8ac69031c3eb41ee904301dd66150fd3b032fa4f21f57921ab8d8d99d00",
+      "uncompressedBytes": 9308,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "limitations": [
+    "Synthetic migration fixtures only; no production data or runtime changes.",
+    "No full-unit or deployment claim."
+  ]
+}

@@ -1,4 +1,7 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
+import {combineCurrentEventPages} from './current-room-events.mjs';
 import { messageRepository } from "./message-repository.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -16,7 +19,7 @@ import { canInviteMembers, validId } from "../src/events.js";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
-  "request", "mention", "dm", "review_requested", "handoff",
+  "request", "mention", "dm", "review_requested", "work_assigned", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
@@ -158,6 +161,7 @@ function ackedWakes(store, roomId, memberId, flags) {
 }
 
 function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false } = {}) {
+  if(isCurrentRoom(store.db,roomId))throw new ServiceError(409,'current_updates_aggregate_unavailable',`Use GET /api/rooms/${encodeURIComponent(roomId)}/needs-me for bounded native attention; reading does not resolve work`,{Link:`</api/rooms/${encodeURIComponent(roomId)}/needs-me>; rel="alternate"`});
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
   const state = room.state;
@@ -168,14 +172,16 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const now = store.now();
   const items = [];
   const requests = state.replyRequests ?? {};
+  const floor = store.historyFloor(roomId, memberId, room.sequence);
   const byId = messageRepository(store, roomId, state);
 
   for (const request of Object.values(requests)) {
-    if (!request || request.recipientId !== memberId) continue;
+    if (!request || request.recipientId !== memberId || !messageInHistory(request, floor)) continue;
     const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
     // Same rule as reply-context (server/reply-requests.mjs): a private message is
     // visible only to its author and recipient, so never echo it as the title.
-    const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
+    const context = !messageInHistory(latest, floor)
+      || latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
     const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
@@ -193,7 +199,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const requestIds = new Set(Object.keys(requests));
   try {
     const rows = store.db.prepare(
-      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt,
+      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt, e.sequence,
               json_extract(e.body,'$.actorId') AS actorId, json_extract(e.body,'$.data.messageId') AS messageId,
               json_extract(e.body,'$.data.body') AS body
        FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
@@ -201,6 +207,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     ).all(roomId, memberId);
     for (const row of rows) {
       const messageId = row.messageId || row.messageEventId;
+      if (floor && row.sequence < floor.sequence) continue;
       if (requestIds.has(messageId)) continue;
       const terminal = row.state === "responded" ? "answered" : row.state === "acknowledged" ? "read" : null;
       const at = iso(row.createdAt);
@@ -218,7 +225,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   }
 
   for (const message of byId.receivedBy(memberId)) {
-    if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (!message || message.toMemberId !== memberId || message.authorId === memberId || !messageInHistory(message, floor)) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({
@@ -270,10 +277,10 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       }));
       continue;
     }
-    if (!["verify", "decide"].includes(next.action)) continue;
+    const review = ["verify", "decide"].includes(next.action);
     const at = iso(item.updatedAt ?? item.createdAt ?? now);
     items.push(draft({
-      kind: "review_requested", roomId, key: `review|${item.id}|${next.action}`,
+      kind: review ? "review_requested" : "work_assigned", roomId, key: `${review ? "review" : "work"}|${item.id}|${next.action}`,
       title: clip(item.title || item.id), actor: item.accountableMemberId ?? null,
       createdAt: iso(item.createdAt ?? at), updatedAt: at,
       basis: `${item.revision}|${item.receipt?.eventId ?? ""}|${next.action}`,
@@ -360,8 +367,9 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   if (member.permissions?.includes("manage_members") && !needsMeOnly) {
     try {
       const rows = store.db.prepare(
-        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt, identity_id AS actor
-         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade')`
+        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt,
+           CASE WHEN status='pending_account' THEN NULL ELSE identity_id END AS actor
+         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade', 'pending_account')`
       ).all(roomId);
       for (const row of rows) {
         const at = iso(row.createdAt);
@@ -526,7 +534,7 @@ export function listAccountUpdates(store, token, binding, query = {}) {
 // in `where`), how long it has been waiting (waitingMs), and the suggested
 // next read or reply (next). Reading never acknowledges or resolves items;
 // use the updates mark endpoints for that.
-const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "handoff"]);
+const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "work_assigned", "handoff"]);
 
 function parseOwedQuery({ limit = DEFAULT_LIMIT, cursor = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) fail(422, "invalid_owed_query", "limit must be an integer from 1 to 100");
@@ -691,8 +699,37 @@ export function orientSections(store, roomId, memberId, { limit = 10 } = {}) {
 
 export function readEventTail(store, token, roomId, tail, binding = null) {
   if (!Number.isSafeInteger(tail) || tail < 1 || tail > 200) fail(422, "invalid_event_cursor", "tail must be an integer from 1 to 200");
-  const sequence = store.roomAuthority(roomId).sequence;
+  const sequence = store.headSequence(roomId);
   const start = Math.max(0, sequence - tail);
+  // Loop the normalized reader like the legacy branch below: one selected
+  // window can hold fewer visible events than `tail` (invisible source, or a
+  // page bounded by the read budget), so keep paging from `start` until the
+  // tail is full or the head is reached. hasMore stays honest: it reports
+  // whether the scan reached the head, not whether the tail filled.
+  if (isCurrentRoom(store.db,roomId)) {
+    const pages = [];
+    let after = start;
+    let guard = 0;
+    let collected = 0;
+    while (collected < tail && guard < 256) {
+      const page = store.eventsAfter(token, roomId, after, Math.min(100, tail - collected), { expectedSessionBinding: binding });
+      pages.push(page);
+      collected += page.events.length;
+      if (!page.hasMore || page.next <= after) break;
+      after = page.next;
+      guard += 1;
+    }
+    if (pages.length === 1) return pages[0];
+    const combined = combineCurrentEventPages(roomId, pages);
+    // Return the registered object itself: combineCurrentEventPages keys
+    // the page's redaction context to this exact object identity, so a
+    // spread copy would make the HTTP redaction step refuse with 409
+    // current_room_context_unavailable. Setting hasMore on the object is
+    // safe — it was created by the combine call above and is owned solely
+    // by this return — and keeps the value identical to the old spread's.
+    combined.hasMore = combined.next < sequence;
+    return combined;
+  }
   const events = [];
   let after = start;
   let next = start;

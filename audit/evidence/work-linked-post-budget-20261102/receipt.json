@@ -1,0 +1,80 @@
+{
+  "base": "0448ab55d",
+  "runtime": "5efaf85e0",
+  "nativeTestInitial": "2b2d6a244",
+  "node": {
+    "affectedPassed": 16,
+    "newPassed": 2,
+    "baselineNewFailed": 2
+  },
+  "native": {
+    "passed": 1,
+    "baselineFailed": 1,
+    "plain": {
+      "sql": 210,
+      "physicalReads": 569,
+      "adapterWrites": 42,
+      "rawPermitWrites": 2,
+      "returnedSqlStringsBytes": 88361,
+      "sqlTextBytes": 24151,
+      "boundBytes": 7731
+    },
+    "workLinked1648": {
+      "sql": 223,
+      "physicalReads": 582,
+      "adapterWrites": 42,
+      "rawPermitWrites": 2,
+      "returnedSqlStringsBytes": 93732,
+      "sqlTextBytes": 25581,
+      "boundBytes": 13090
+    },
+    "coldExactRetry": {
+      "sql": 143,
+      "physicalReads": 2097,
+      "adapterWrites": 0,
+      "rawPermitWrites": 2,
+      "returnedSqlStringsBytes": 88269,
+      "sqlTextBytes": 13516,
+      "boundBytes": 5907
+    },
+    "carrierBytes": 130,
+    "unknownCounters": 0
+  },
+  "limits": {
+    "postRecords": 512,
+    "mentionPostRecordsUnchanged": 1024,
+    "defaultRecordsUnchanged": 200,
+    "bytesUnchanged": 262144,
+    "recordBytesUnchanged": 131072
+  },
+  "logs": {
+    "node-before": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/node-before.log.gz",
+      "sha256": "c88ec767f2458ec4f1b37e06b78e9e288f01b2dddfa2399d2e198f6c50512661"
+    },
+    "node-after": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/node-after.log.gz",
+      "sha256": "b4854a775314d0555b872197c24ca6045c0e24880f4588b526efd81df82eb0b9"
+    },
+    "affected": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/affected.log.gz",
+      "sha256": "eefd8780971eec96a9b456d1d6e3a39d4695465ef2f9bb060444ca1cfbf2f6ab"
+    },
+    "native-before": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/native-before.log.gz",
+      "sha256": "1b730873f06dd957bb6b872b8a6b45938604050e88037ae49d5cf74428d98208"
+    },
+    "native-after": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/native-after.log.gz",
+      "sha256": "b1be4930cd29e763eba27531035571b8d54448ca755a957f3d1671fe3b6d6524"
+    },
+    "lint": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/lint.log.gz",
+      "sha256": "ceb49e6b27dbb55159ecff22feb2a219d35f1955599c9f0d7acf5101249353fb"
+    },
+    "secret": {
+      "path": "audit/evidence/work-linked-post-budget-20261102/secret.log.gz",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  }
+}

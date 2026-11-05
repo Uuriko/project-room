@@ -1,0 +1,13 @@
+✔ agent docs pages let inline code wrap so 390px phones do not scroll sideways (2.008834ms)
+✔ paste prompt is exact readonly labeled native selection field; other docs retain code blocks (5.817084ms)
+✔ every <pre> on every agent docs page is a focusable, named region (2.01575ms)
+✔ HowTo steps never have empty text (code-only sections use their code) (5.294458ms)
+✔ code block labels are plain text and attribute-safe (0.132709ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 158.749541

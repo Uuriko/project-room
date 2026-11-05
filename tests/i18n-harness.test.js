@@ -148,7 +148,7 @@ test("--check rejects an inflated committed baseline (bootstrap exactness)", () 
   }
 });
 
-test("--check ratchets in steady state: fails when counts grow past an untouched baseline", () => {
+test("--check ratchets in steady state: warns when counts grow past an untouched baseline", () => {
   // Steady state = baseline file identical to the base ref (committed). With
   // I18N_BASE_REF=HEAD the classic ratchet applies, not bootstrap exactness.
   // Current copy may be below the ratchet after a legitimate catalog migration.
@@ -165,8 +165,9 @@ test("--check ratchets in steady state: fails when counts grow past an untouched
     const literals = Array(addedCount).fill('"This is a brand new hardcoded user facing sentence for the probe"');
     writeFileSync(probe, `export const probe = [${literals.join(",")}];\n`);
     const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
-    assert.equal(r.status, 1, `--check should exit 1 when counts exceed baseline; stderr: ${r.stderr}`);
-    assert.match(r.stderr, new RegExp(`grew ${baseCount} -> ${currentCount + addedCount}`));
+    // Growth is advisory (Potter, Nov 3): a warning, not a failure.
+    assert.equal(r.status, 0, `--check should warn, not fail, when counts exceed baseline; stderr: ${r.stderr}`);
+    assert.match(r.stdout, new RegExp(`grew ${baseCount} -> ${currentCount + addedCount}`));
   } finally {
     rmSync(probe, { force: true });
   }
@@ -190,7 +191,7 @@ function git(args, env = process.env) {
   return r.stdout.trim();
 }
 
-test("--check: declared growth passes, undeclared growth names the way to declare it", () => {
+test("--check: growth is advisory with or without a declaration", () => {
   const probe = join(root, "src", "__i18n-probe-growth.tmp.mjs");
   const env = { ...strictEnv(), I18N_BASE_REF: "HEAD" };
   const committedCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
@@ -199,9 +200,8 @@ test("--check: declared growth passes, undeclared growth names the way to declar
   try {
     writeFileSync(probe, `export const probe = [${Array(added).fill('"Another brand new hardcoded user facing sentence for the probe"').join(",")}];\n`);
     const strict = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
-    assert.equal(strict.status, 1, strict.stderr);
-    assert.match(strict.stderr, /i18n-growth/);
-    assert.match(strict.stderr, /Do not commit a regenerated baseline/);
+    assert.equal(strict.status, 0, strict.stderr);
+    assert.match(strict.stdout, /Advisory only/);
     const allowed = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env: { ...env, I18N_ALLOW_GROWTH: "1" } });
     assert.equal(allowed.status, 0, allowed.stderr);
     assert.match(allowed.stdout, /allowed by I18N_ALLOW_GROWTH=1/);
@@ -231,9 +231,9 @@ test("--check: growth already in the base tree passes without a regenerated base
     const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
     // The scope manifest does not list the probe, so only the pin may fail;
     // the count ratchet itself must not.
-    assert.doesNotMatch(r.stderr, /grew/, r.stderr);
+    assert.doesNotMatch(r.stdout + r.stderr, /grew/, r.stderr);
     const strict = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env: { ...env, I18N_BASE_REF: "HEAD" } });
-    assert.match(strict.stderr, /grew/, "against HEAD (no probe) the same tree is growth");
+    assert.match(strict.stdout, /grew/, "against HEAD (no probe) the same tree is growth");
   } finally {
     rmSync(probe, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -302,4 +302,15 @@ test("--check without a baseline exits 2 with guidance", () => {
   } finally {
     if (had !== null) renameSync(baselinePath + ".bak", baselinePath);
   }
+});
+
+// English copy growth may warn, but broken positional placeholders still block.
+test("--check keeps positional-placeholder growth gated when English copy is advisory", () => {
+  const probe = join(root, "src", "__i18n-probe-placeholder.tmp.mjs");
+  try {
+    writeFileSync(probe, 'export const value = "You have {0} pending messages in this room";\n');
+    const result = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env: { ...strictEnv(), I18N_BASE_REF: "HEAD" } });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /positional-placeholder/);
+  } finally { rmSync(probe, { force: true }); }
 });

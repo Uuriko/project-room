@@ -1,0 +1,9 @@
+{
+  "source": "0908cbcb76797601e878ee9f1f3b93bcb4afbfa1",
+  "command": "node --test tests/codex-host-launch-failure.test.js",
+  "exitCode": 1,
+  "failure": "native-style child stdout/stderr discarded; stopped record has no actionable profile-lock failure code",
+  "log": "/tmp/native-launch-0908-original-red.log",
+  "sha256": "d90886cbfa96de5394d08ddc411a859c604d3064d1d3bec15157788c18a35cc2",
+  "providerModelExecution": false
+}

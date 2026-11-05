@@ -113,6 +113,21 @@ const claimsOf = value => {
   return claims;
 };
 
+// Older complete callers return arrays or { claims }; newer paged responses
+// must explicitly finish their walk before they can certify absence of conflicts.
+const claimCoverage = value => {
+  if (Array.isArray(value)) return { hasMore: false, nextCursor: null };
+  const hasPaging = Object.hasOwn(value ?? {}, "hasMore") || Object.hasOwn(value ?? {}, "nextCursor");
+  const complete = !hasPaging || (value.hasMore === false && value.nextCursor == null);
+  return { hasMore: !complete, nextCursor: typeof value?.nextCursor === "string" ? value.nextCursor : null };
+};
+const requireCompleteClaims = value => {
+  const claims = claimsOf(value);
+  const coverage = claimCoverage(value);
+  if (coverage.hasMore) throw new CoordError("claims_incomplete", "Room claim coverage is incomplete; overlap safety is unknown", coverage);
+  return claims;
+};
+
 // Files the given member may not touch: a live claim that covers a wanted
 // path, or a wanted path that covers a live file. Sorted by file, then claim id.
 export function guardConflicts(claims, files, { memberId, now } = {}) {
@@ -120,7 +135,7 @@ export function guardConflicts(claims, files, { memberId, now } = {}) {
   const me = memberId ?? null;
   const wanted = [...new Set(files.map(normalizePath))].sort();
   const conflicts = [];
-  for (const claim of claimsOf(claims)) {
+  for (const claim of requireCompleteClaims(claims)) {
     if (!isLiveClaim(claim, at) || claim.owner === me) continue;
     for (const held of claimFiles(claim)) {
       for (const file of wanted) {
@@ -137,7 +152,7 @@ export function guardConflicts(claims, files, { memberId, now } = {}) {
 // Live claims whose file lists overlap (exact or directory prefix).
 export function claimOverlaps(claims, { now } = {}) {
   const at = nowFrom({ now });
-  const live = claimsOf(claims).filter(claim => isLiveClaim(claim, at));
+  const live = requireCompleteClaims(claims).filter(claim => isLiveClaim(claim, at));
   const overlaps = [];
   for (let i = 0; i < live.length; i += 1) {
     for (let j = i + 1; j < live.length; j += 1) {
@@ -174,6 +189,7 @@ export async function coordStatus(client, { lander, memberId, now, expiringWithi
     leaseExpiresAt: claim.leaseExpiresAt ?? null, files: [...(claim.files ?? [])] });
   return {
     roomId: claimsResponse?.roomId ?? null,
+    ...claimCoverage(claimsResponse),
     at: new Date(at).toISOString(),
     live: live.map(brief),
     mine: memberId ? live.filter(claim => claim.owner === memberId).map(brief) : [],
@@ -250,7 +266,25 @@ export async function claimAndVerify(client, id, { memberId, title, files, lease
   // release it when someone else's live claim now covers the files.
   const held = claimFiles(claim);
   if (held.length && !allowOverlap) {
-    const conflicts = await conflictsFor(client, held, { memberId, claimId, now: at, signal });
+    let conflicts;
+    try { conflicts = await conflictsFor(client, held, { memberId, claimId, now: at, signal }); }
+    catch (error) {
+      if (!(error instanceof CoordError) || error.code !== "claims_incomplete") throw error;
+      let released = false;
+      try {
+        await client.releaseWorkItem(claimId, { note: "released because overlap verification was incomplete",
+          ...claimRound(claim), signal });
+        const after = await client.workClaimGet(claimId, { signal });
+        const observed = after?.claim ?? after;
+        const expectedHistory = claimRound(claim).expectedHistoryLength
+          + (["in_progress", "blocked"].includes(claim.state) ? 2 : 1);
+        released = observed?.state === "unclaimed" && observed.owner === null
+          && observed.claimedAt === claim.claimedAt
+          && claimRound(observed).expectedHistoryLength === expectedHistory;
+      } catch { /* An uncertain release still requires explicit reconciliation. */ }
+      throw new CoordError("claims_incomplete", "Claim overlap verification was incomplete; inspect the claim before continuing",
+        { ...error.details, claimId, released, reconciliationRequired: !released });
+    }
     if (conflicts.length) {
       let released = false;
       try {
@@ -447,7 +481,8 @@ export async function tail(client, { after = 0, types = [], mine = false, member
 export function digest({ events = [], status } = {}) {
   const out = [];
   if (status) {
-    out.push(`## Claims (${status.live.length} live)`);
+    if (status.hasMore) out.push("Claim coverage incomplete; counts and overlaps below include observed claims only.", "");
+    out.push(`## Claims (${status.live.length} live${status.hasMore ? " observed" : ""})`);
     for (const claim of status.live) out.push(`- ${claim.id} · ${claim.owner} · ${claim.state} · lease ${claim.leaseExpiresAt ?? "none"}${claim.files.length ? ` · ${claim.files.join(", ")}` : ""}`);
     if (status.expiring.length) out.push("", "## Expiring soon", ...status.expiring.map(claim => `- ${claim.id} · ${claim.owner} · ${claim.leaseExpiresAt}`));
     if (status.overlaps.length) out.push("", "## Overlapping claims", ...status.overlaps.map(o => `- ${o.claims.join(" + ")} · ${o.paths.join(", ")}`));

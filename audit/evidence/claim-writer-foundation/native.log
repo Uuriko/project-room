@@ -1,0 +1,518 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":67,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":25,"rowsRead":41041},"fence":{"ms":24,"rowsRead":47661},"verifies":{"ms":3,"rowsRead":21871},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":68,"legacyColdStartMs":67,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":28,"integrity":"deferred","phases":{"schema":{"ms":5,"rowsRead":25916},"plugin":{"ms":3,"rowsRead":55278},"fence":{"ms":16,"rowsRead":164266},"verifies":{"ms":2,"rowsRead":22318},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":2,"projectionBytes":723,"events":2}
+{"event":"room.store_initialized","initializationMs":29,"legacyColdStartMs":28,"clockSemantics":"io-bound","cpuMeasured":false}
+{"phase":"45-to46-upgrade","priorVersion":45,"version":46,"initializationMs":29,"oldWriterRefused":true,"connectionPreserved":true}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":893},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":2,"projectionBytes":723}
+{"event":"room.store_initialized","initializationMs":3,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+{"phase":"cold46-reopen","priorVersion":46,"version":46,"initializationMs":3,"oldWriterRefused":true,"connectionPreserved":true}
+✔ actual v45 Native storage cold-upgrades, preserves connections and refuses an old cached adapter (2218.584833ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":50,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":13,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":54,"storeInitializationMs":51}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":18,"integrity":"deferred","phases":{"schema":{"ms":5,"rowsRead":34025},"plugin":{"ms":4,"rowsRead":55464},"fence":{"ms":6,"rowsRead":47282},"verifies":{"ms":1,"rowsRead":1},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":2,"projectionBytes":737}
+{"event":"room.store_initialized","initializationMs":18,"legacyColdStartMs":18,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":22,"storeInitializationMs":18}
+✔ Native cold format transition preserves legacy credentials and accounts (1142.206209ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":51,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":51,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":55,"storeInitializationMs":51}
+{"event":"room.request","method":"GET","path":"/__test-provision","status":200,"totalMs":69,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":51,"firstRequestMs":15,"storeInitializationMs":51,"durableObjectInitializationMs":55,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":11,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":15}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":16,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":15,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":3}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/presence","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/presence","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-identities","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/agent-identities","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-rooms","status":201,"appMs":11}
+{"event":"room.request","method":"POST","path":"/api/agent-rooms","status":201,"totalMs":12,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":11,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-rooms","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/agent-rooms","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/returning-agent/commands","status":201,"appMs":4}
+{"event":"room.request","method":"POST","path":"/api/rooms/returning-agent/commands","status":201,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":4,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/returning-agent/commands","status":201,"appMs":4}
+{"event":"room.request","method":"POST","path":"/api/rooms/returning-agent/commands","status":201,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":4,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-conversation-certify","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"appMs":4}
+{"event":"room.request","method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":4,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"appMs":3}
+{"event":"room.request","method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/returning-agent/conversation","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-conversation-history-provision","status":200,"totalMs":152,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/history-platform/conversation","status":200,"appMs":3}
+{"event":"room.request","method":"GET","path":"/api/rooms/history-platform/conversation","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_x-4tpMJb 404 message_not_found not_found /api/rooms/:roomId/conversation
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/history-platform/conversation","status":404,"appMs":3}
+{"event":"room.request","method":"GET","path":"/api/rooms/history-platform/conversation","status":404,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-conversation-certify","status":200,"totalMs":11,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/history-platform/conversation","status":200,"appMs":3}
+{"event":"room.request","method":"GET","path":"/api/rooms/history-platform/conversation","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_E9EHbDsv 404 message_not_found not_found /api/rooms/:roomId/conversation
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/history-platform/conversation","status":404,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/history-platform/conversation","status":404,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-rooms","status":401,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/agent-rooms","status":401,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-rooms","status":401,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/agent-rooms","status":401,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/inbox/webhooks/unknown-connection","status":404,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/inbox/webhooks/unknown-connection","status":404,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/api/health","status":200,"totalMs":4,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/version","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/version","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"HEAD","path":"/api/version","status":200,"appMs":0}
+{"event":"room.request","method":"HEAD","path":"/api/version","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"HEAD","path":"/api/health","status":200,"totalMs":0,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/","status":200,"totalMs":4,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/room","status":302,"appMs":0}
+{"event":"room.request","method":"GET","path":"/room","status":302,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/room","status":302,"appMs":0}
+{"event":"room.request","method":"GET","path":"/room","status":302,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/room/","status":302,"appMs":0}
+{"event":"room.request","method":"GET","path":"/room/","status":302,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/rooms","status":404,"totalMs":0,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/llms.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/room","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/room","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/llms.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/skill","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/llms.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/agent.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/.well-known/agent.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/.well-known/agent-card.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/.well-known/agent.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/agent.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/agent-card.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/.well-known/ard.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/.well-known/ai-catalog.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/robots.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/health","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/api/health","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/api/healthz","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/healthz","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/healthz","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/api/healthz","status":200,"totalMs":1,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/api/health","status":403,"totalMs":0,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_wait_started","outcome":"pending","epochMs":1793784891088}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_rpc_started","outcome":"pending","epochMs":1793784891088}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"do_entered","outcome":"pending","epochMs":1793784891088}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"sql_completed","outcome":"ok","epochMs":1793784891088,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"do_completed","outcome":"ok","epochMs":1793784891088,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_rpc_settled","outcome":"ok","epochMs":1793784891088,"authorityObservation":"present","authoritySourceRevision":null,"authorityBuildId":null,"authoritySqlOutcome":"ok","authoritySqlElapsedMs":0,"authorityDoElapsedMs":0,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_response","outcome":"ready","epochMs":1793784891088,"elapsedMs":0,"probeWaitMs":0,"timeoutMs":2500,"probeRole":"leader"}
+{"event":"room.request","method":"GET","path":"/api/ready","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_wait_started","outcome":"pending","epochMs":1793784891089}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_rpc_started","outcome":"pending","epochMs":1793784891089}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"do_entered","outcome":"pending","epochMs":1793784891089}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"sql_completed","outcome":"ok","epochMs":1793784891089,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"do_completed","outcome":"ok","epochMs":1793784891089,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_rpc_settled","outcome":"ok","epochMs":1793784891089,"authorityObservation":"present","authoritySourceRevision":null,"authorityBuildId":null,"authoritySqlOutcome":"ok","authoritySqlElapsedMs":0,"authorityDoElapsedMs":0,"elapsedMs":0}
+{"event":"room.readiness_probe","clockSemantics":"io-bound","cpuMeasured":false,"sourceRevision":null,"buildId":null,"stage":"worker_response","outcome":"ready","epochMs":1793784891089,"elapsedMs":0,"probeWaitMs":0,"timeoutMs":2500,"probeRole":"leader"}
+{"event":"room.request","method":"HEAD","path":"/api/ready","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/kits","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/llms.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/apps","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/tools","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/kits.txt","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/kits.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/room/kits.json","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/kits","status":200,"totalMs":0,"servedBy":"edge","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/session","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/session","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/identities/ai_9NfKBnEVuK3C5PXS/link-code","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/identities/ai_9NfKBnEVuK3C5PXS/link-code","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/identity-links","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/identity-links","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats/ack","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats/ack","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats","status":200,"appMs":0}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/account-session","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/account-session","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/auth/desktop/start","status":302,"appMs":7}
+{"event":"room.request","method":"GET","path":"/api/auth/desktop/start","status":302,"totalMs":8,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":7,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/oauth/authorize","status":302,"appMs":2}
+{"event":"room.request","method":"POST","path":"/oauth/authorize","status":302,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/auth/desktop/callback","status":302,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/auth/desktop/callback","status":302,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/desktop/session","status":401,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/auth/desktop/session","status":401,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/desktop/session","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/auth/desktop/session","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+oauth security event: {"type":"authorization_code_reuse_detected","familyId":"oarf_xgltG-VkJGBi-bXU25JPAQ","userId":"worker-mail-owner","clientId":"project-room-macos","revokedCount":0,"detectedAt":1793784891135}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/desktop/session","status":401,"appMs":0}
+{"event":"room.request","method":"POST","path":"/api/auth/desktop/session","status":401,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account/sessions","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account/sessions","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"DELETE","path":"/api/account/sessions/acs_91a7952d973aded078400886","status":200,"appMs":1}
+{"event":"room.request","method":"DELETE","path":"/api/account/sessions/acs_91a7952d973aded078400886","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account/sessions","status":401,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account/sessions","status":401,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"DELETE","path":"/api/account/sessions/acs_91a7952d973aded078400886","status":404,"appMs":0}
+{"event":"room.request","method":"DELETE","path":"/api/account/sessions/acs_91a7952d973aded078400886","status":404,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account/sessions","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account/sessions","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/inbox/sources/email-f3c271bf2b6419e708a9d52853fadcd602e04bc344a436e6f0bca56734faee4c/reply-review","status":404,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/inbox/review","status":404,"appMs":0}
+{"event":"room.request","method":"POST","path":"/api/inbox/review","status":404,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/share-links","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/share-links","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/share-links/join","status":201,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/share-links/join","status":201,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-rooms","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-rooms","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-rooms","status":422,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-rooms","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_6emvkBYw 422 invalid_snapshot_view input /api/rooms/:roomId
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":422,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_kDWgbc9Q 422 invalid_help_context input /api/rooms/:roomId
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":422,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_O0lbhFE3 409 session_binding_changed conflict /api/rooms/:roomId/work-discussion
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_y1zXbgJd 409 session_binding_changed conflict /api/rooms/:roomId/work-context
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":409,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":409,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+room diagnostic op_lat8ysgN 409 discussion_reset_required conflict /api/rooms/:roomId/work-discussion
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+room diagnostic op_2BZfUq2X 409 discussion_reset_required conflict /api/rooms/:roomId/work-discussion
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_t8svKrri 409 discussion_reset_required conflict /api/rooms/:roomId/work-discussion
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-discussion","status":409,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_QiA1Z9xn 422 invalid_offer_context input /api/rooms/:roomId/work-context
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":422,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/work-context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/work-context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+room diagnostic op_dv07_9La 422 invalid_offer_context input /api/rooms/:roomId
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":422,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/dm-consents","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/dm-consents","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/dm-consents/owner/decide","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/dm-consents/owner/decide","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/dm-consents","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/dm-consents","status":201,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/dm-consents/guest-e276a296-252b-44d8-a0bc-ee2475a927ab/decide","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/dm-consents/guest-e276a296-252b-44d8-a0bc-ee2475a927ab/decide","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/reply-context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/reply-context","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/reply-requests","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/reply-requests","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":200,"appMs":0}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/reply-history","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/reply-history","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":200,"appMs":2}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_67CEmtFC 409 session_binding_changed conflict /api/rooms/:roomId/reply-context
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/reply-context","status":409,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/reply-context","status":409,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+room diagnostic op_fivmg-N5 422 invalid_reply_selection input /api/rooms/:roomId/reply-history
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/reply-history","status":422,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/reply-history","status":422,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_6ajBCuXp 403 csrf_denied access /api/rooms/:roomId/commands
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":403,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":403,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+room diagnostic op_X6lMe8In 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons","status":401,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons","status":401,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/api/health","status":403,"totalMs":0,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.request","method":"GET","path":"/api/ready","status":403,"totalMs":0,"servedBy":"worker","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/context","status":200,"appMs":6}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/context","status":200,"totalMs":7,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":6,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/work-claims","status":201,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/work-claims","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/context","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/context","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":429,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":429,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+✔ shared HTTP service on Workers: secure cookie, invitation, guest message, CSRF and visitor rate limits (1242.332541ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":57,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":19,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":57,"legacyColdStartMs":57,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":61,"storeInitializationMs":57}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":57,"firstRequestMs":9,"storeInitializationMs":57,"durableObjectInitializationMs":61,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":19,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-identities","status":201,"appMs":9}
+{"event":"room.request","method":"POST","path":"/api/agent-identities","status":201,"totalMs":75,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":9,"queueMs":66,"residualMs":66,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-rooms","status":201,"appMs":14}
+{"event":"room.request","method":"POST","path":"/api/agent-rooms","status":201,"totalMs":15,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":14,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-rooms","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/agent-rooms","status":200,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/shared-entry/agent-invites","status":201,"appMs":33}
+{"event":"room.request","method":"POST","path":"/api/rooms/shared-entry/agent-invites","status":201,"totalMs":33,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":33,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-invites/redeem","status":201,"appMs":23}
+{"event":"room.request","method":"POST","path":"/api/agent-invites/redeem","status":201,"totalMs":23,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":23,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/shared-entry","status":200,"appMs":6}
+{"event":"room.request","method":"GET","path":"/api/rooms/shared-entry","status":200,"totalMs":7,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":6,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+✔ getdasha entry and canonical browser app share identities, rooms and invites through one namespace (1173.770583ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":50,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":13,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":54,"storeInitializationMs":51}
+{"event":"room.request","method":"GET","path":"/__test-bounty-provision","status":200,"totalMs":67,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":50,"firstRequestMs":11,"storeInitializationMs":51,"durableObjectInitializationMs":54,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":13,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/bounties","status":201,"appMs":11}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/bounties","status":201,"totalMs":12,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":11,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/bounties","status":201,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/bounties","status":201,"totalMs":4,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-bounty-queue","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":4,"integrity":"deferred","phases":{"schema":{"ms":0,"rowsRead":894},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":3,"projectionBytes":950}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":4,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":8,"storeInitializationMs":4}
+{"event":"room.request","method":"GET","path":"/__test-bounty-queue","status":200,"totalMs":12,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":4,"firstRequestMs":9,"storeInitializationMs":4,"durableObjectInitializationMs":8,"rooms":1,"sequences":3,"projectionBytes":950,"phases":{"schema":{"ms":0,"rowsRead":894},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/bounties","status":201,"appMs":9}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/bounties","status":201,"totalMs":9,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":9,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/bounties","status":201,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/bounties","status":201,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-bounty-queue","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+✔ Worker bounty HTTP receipts create distinct durable webhook deliveries without dispatch (985.27025ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":53,"integrity":"deferred","phases":{"schema":{"ms":13,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":53,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":57,"storeInitializationMs":53}
+{"event":"room.request","method":"GET","path":"/__test-provision","status":200,"totalMs":70,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":53,"firstRequestMs":7,"storeInitializationMs":53,"durableObjectInitializationMs":57,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":13,"rowsRead":8402},"plugin":{"ms":21,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/board/v2/board","status":410,"appMs":7}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/board/v2/board","status":410,"totalMs":8,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":7,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/board/v2/claims","status":410,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/board/v2/claims","status":410,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/rooms/commons/board/v2/claims/task-1/not-a-route","status":410,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/rooms/commons/board/v2/claims/task-1/not-a-route","status":410,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+✔ Worker board v2 routes stay retired (583.436916ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":51,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":51,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":55,"storeInitializationMs":51}
+{"event":"room.request","method":"GET","path":"/__test-password-reset-provision","status":200,"totalMs":76,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":51,"firstRequestMs":7,"storeInitializationMs":51,"durableObjectInitializationMs":55,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":7}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":7,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":7,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/password/reset/consume","status":401,"appMs":17}
+{"event":"room.request","method":"POST","path":"/api/auth/password/reset/consume","status":401,"totalMs":18,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":17,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/__test-password-reset-state","status":200,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/password/reset/consume","status":200,"appMs":15}
+{"event":"room.request","method":"POST","path":"/api/auth/password/reset/consume","status":200,"totalMs":16,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":15,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":401,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":401,"totalMs":0,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/password/reset/consume","status":401,"appMs":16}
+{"event":"room.request","method":"POST","path":"/api/auth/password/reset/consume","status":401,"totalMs":16,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":16,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/password/login","status":401,"appMs":16}
+{"event":"room.request","method":"POST","path":"/api/auth/password/login","status":401,"totalMs":16,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":16,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/auth/password/login","status":200,"appMs":17}
+{"event":"room.request","method":"POST","path":"/api/auth/password/login","status":200,"totalMs":17,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":17,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/account-session","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/account-session","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+✔ Workers password reset commits failed attempts, consumes once and requires fresh password login (662.219833ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":50,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":50,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":55,"storeInitializationMs":50}
+{"event":"room.request","method":"GET","path":"/__test-provision","status":200,"totalMs":68,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":50,"firstRequestMs":9,"storeInitializationMs":50,"durableObjectInitializationMs":55,"rooms":0,"sequences":0,"projectionBytes":0,"phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":14,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-identities","status":201,"appMs":9}
+{"event":"room.request","method":"POST","path":"/api/agent-identities","status":201,"totalMs":9,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":9,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/identities/ai_6MhURBKADVC9gVsX/link-code","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/identities/ai_6MhURBKADVC9gVsX/link-code","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/identity-links","status":201,"appMs":6}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/identity-links","status":201,"totalMs":6,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":6,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-keys","status":201,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/agent-keys","status":201,"totalMs":2,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats","status":200,"appMs":1}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":11}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-wakes/poll","status":200,"appMs":165}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":14,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":11,"queueMs":3,"residualMs":3,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/api/agent-wakes/poll","status":200,"totalMs":167,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":165,"queueMs":2,"residualMs":2,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-wakes/poll","status":200,"appMs":1}
+{"event":"room.request","method":"GET","path":"/api/agent-wakes/poll","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":1,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-heartbeats/ack","status":200,"appMs":2}
+{"event":"room.request","method":"POST","path":"/api/agent-heartbeats/ack","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":2,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-wakes/poll","status":200,"appMs":0}
+{"event":"room.request","method":"GET","path":"/api/agent-wakes/poll","status":200,"totalMs":1,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":0,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/agent-keys/rak_mESQKYDnWvooNsvi/revoke","status":200,"appMs":3}
+{"event":"room.request","method":"POST","path":"/api/agent-keys/rak_mESQKYDnWvooNsvi/revoke","status":200,"totalMs":3,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":3,"queueMs":0,"residualMs":0,"residualAttribution":"unattributed"}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/commons/commands","status":201,"appMs":8}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/agent-wakes/poll","status":401,"appMs":167}
+{"event":"room.request","method":"POST","path":"/api/rooms/commons/commands","status":201,"totalMs":9,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":8,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+{"event":"room.request","method":"GET","path":"/api/agent-wakes/poll","status":401,"totalMs":168,"servedBy":"durable-object","clockSemantics":"io-bound","cpuMeasured":false,"appMs":167,"queueMs":1,"residualMs":1,"residualAttribution":"unattributed"}
+✔ Workers held wake poll receives a fresh online mention and fences revoked credentials (958.623625ms)
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":51,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":15,"rowsRead":47817},"verifies":{"ms":3,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":51,"clockSemantics":"io-bound","cpuMeasured":false}
+{"install":2680,"verify":1786,"triggers":144}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":43,"integrity":"deferred","phases":{"schema":{"ms":10,"rowsRead":8402},"plugin":{"ms":19,"rowsRead":41041},"fence":{"ms":12,"rowsRead":47817},"verifies":{"ms":2,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":43,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":43,"integrity":"deferred","phases":{"schema":{"ms":10,"rowsRead":8402},"plugin":{"ms":19,"rowsRead":41041},"fence":{"ms":13,"rowsRead":47817},"verifies":{"ms":1,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":43,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":43,"integrity":"deferred","phases":{"schema":{"ms":10,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":12,"rowsRead":47817},"verifies":{"ms":1,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":43,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":41,"integrity":"deferred","phases":{"schema":{"ms":9,"rowsRead":8402},"plugin":{"ms":19,"rowsRead":41041},"fence":{"ms":11,"rowsRead":47817},"verifies":{"ms":2,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":42,"integrity":"deferred","phases":{"schema":{"ms":9,"rowsRead":8402},"plugin":{"ms":20,"rowsRead":41041},"fence":{"ms":11,"rowsRead":47817},"verifies":{"ms":1,"rowsRead":21946},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"io-bound","cpuMeasured":false}
+✔ full-schema writer fences use bounded metadata reads and retain reconciliation and permit protection (667.366958ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10207.974917

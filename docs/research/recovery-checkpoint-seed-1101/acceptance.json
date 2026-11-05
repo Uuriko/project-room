@@ -1,0 +1,11 @@
+{
+ "runtimePin":"ec03d4533",
+ "basePin":"012395c4d",
+ "writerFormat":"normalized-current-v1-native-work-3",
+ "restoreAuditProtocol":9,
+ "reportVersion":1,
+ "actualNative":{"tests":1,"passed":1,"constructor":"production ProjectRoom","checkpointSequence":1008,"checkpointMessages":1001,"checkpointReplyRequests":1,"acceptedNativeWork":true,"strictTailAndSavedResult":true,"continuationCalls":326,"coveredRows":6095,"engineChecks":455,"replayDeferred":0,"sourceTimestampBytes":160029,"coldRestart":true,"exactMessageAndWorkRetries":true,"ordinaryReady503UntilOracle":true,"finalReady200":true,"elapsedMs":20627.37425,"clockOnly":true,"cpuMeasured":false,"physicalSqliteRowsMeasured":false,"logLabelNote":"The source guard is protocol9; native log cosmetic runtimeSource said protocol8 and is corrected in the tests-only followup."},
+ "node":{"operatorControls":7,"operatorPassed":7,"leafControls":22,"leafPassed":22,"retainedCheckpointTail":53,"zeroTailCheckpoint":true,"reverseChainMessages":150,"reverseChainSeedUnits":1214,"driftedCheckpointFinalRefusal":true,"oldPins":["012395c4d","e2a8b1900"],"oldColdAndPreopenedRefusal":true,"oldCoverageAdvance":0,"lintErrors":0},
+ "invariants":["Same original frozen source and existing restore ID/admission/receipt/cursor transaction", "Existing byte scanner and bounded scratch value parts; no second task store or source authority", "Exact existing work/default-channel helpers; all request records seeded before ordered reply-context derivation", "Bounded path fixup supplies root channels to all discovered ancestors, avoiding reverse-chain quadratic rescans", "Unsupported shapes, duplicate IDs, cycles and staging needs explicitly defer to required original oracle; no silent checkpoint-to-fullhistory fallback", "The original independent full oracle remains required even when point fold reports no deferrals"],
+ "remaining":["Saved historical receipt basis still explicitly deferred", "Complete global event plans and independently resumable drift/subsystem/report2 phases remain incomplete", "Original source ingestion/seal is a separate writer-owned critical slice", "No whole recovery boundedness or performance improvement claim; independent staging/cleanup currently adds calls", "Per-table SQLite atoms still have measured atomic engine work and no strict CPU guarantee"]
+}

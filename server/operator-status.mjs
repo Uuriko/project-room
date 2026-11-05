@@ -1,3 +1,4 @@
+import { operatorParityDiagnostics, operatorSelectedParityDiagnostics, SELECTED_PARITY_LIMITS } from "./operator-parity-diagnostics.mjs";
 // Operator status. One read of version, readiness, the largest tables, and
 // the latest operator actions. The server does not call GitHub. Job heartbeats
 // live on the Worker, which this process does not reach without the Durable
@@ -68,6 +69,13 @@ function patrolBlocks(store, limit = 25) {
 }
 
 export function operatorStatus(store, options = {}) {
+  if (options.parityRoom != null) {
+    const value = { version: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, messageParityDiagnostics: operatorSelectedParityDiagnostics(store, options) };
+    if (Buffer.byteLength(JSON.stringify(value)) > SELECTED_PARITY_LIMITS.responseBytes) {
+      value.messageParityDiagnostics.rooms = [{ roomId: options.parityRoom, status: 'unknown', complete: false, proofsVerified: false, exactLegacyShapeOnly: false, reason: 'response_limit' }];
+    }
+    return value;
+  }
   const tables = collectLargestTables(store.db, options);
   return {
     version: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
@@ -80,6 +88,7 @@ export function operatorStatus(store, options = {}) {
     // sanitized detail (code, sub-check, class, and the failing room's
     // id). Stores predating batch isolation have no such rows.
     integrityFailures: typeof store.integrityFailures === "function" ? store.integrityFailures() : [],
+    messageParityDiagnostics: operatorParityDiagnostics(store),
     lastColdStart: lastColdStart(store),
     tables: tables.tables,
     partial: tables.partial,
@@ -93,6 +102,14 @@ export function operatorStatus(store, options = {}) {
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
     messagesBackfillBlocks: messagesBackfillBlocks(store),
+    // Latest patrol findings (r67): unlike the public job heartbeat, this
+    // operator-token-gated surface names the room, event and exact detail
+    // needed to distinguish a legal-transition modelling gap from genuine
+    // claim corruption. Keep the journal bounded; patrolFindings returns
+    // newest first and parses its stored detail JSON.
+    patrolFindings: typeof store.patrolFindings === "function"
+      ? store.patrolFindings({ limit: 25 })
+      : [],
     // Rooms the patrol parked (r67): the patrol_blocks rows (room, cursor,
     // head, error class, one-line error). The public health surface carries
     // only "patrol could not process a room (<class>)" and a count, so

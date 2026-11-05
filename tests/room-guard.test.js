@@ -146,3 +146,15 @@ test('a lease a few minutes past its stamp still blocks, and a bad path does not
   const usage = await runGuard({ files: ['../outside'], client: strictDouble({ workClaims: async () => { throw new Error('room should not be called'); } }), memberId: 'me' });
   assert.equal(usage.code, 2);
 });
+
+test('partial claim coverage is unknown in advisory and strict guards', async () => {
+  const client = strictDouble({ workClaims: async () => ({ claims: [], hasMore: true, nextCursor: 'later' }) });
+  for (const strict of [false, true]) {
+    const result = await runGuard({ files: ['server/a.mjs'], client, strict });
+    assert.equal(result.code, strict ? 3 : 0);
+    assert.equal(result.incomplete, true);
+    assert.equal(result.nextCursor, 'later');
+    assert.match(result.lines.join('\n'), /overlap safety unknown/);
+    assert.doesNotMatch(result.lines.join('\n'), /clear of/);
+  }
+});

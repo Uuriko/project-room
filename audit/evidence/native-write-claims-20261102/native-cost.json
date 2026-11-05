@@ -1,0 +1,209 @@
+{
+  "coverage": "adapter-observed physical rows; native permit SQL not included",
+  "costs": [
+    {
+      "surface": "small",
+      "expired": 0,
+      "active": 0,
+      "source": {
+        "calls": 1,
+        "rowsRead": 1,
+        "returnedRows": 0
+      },
+      "cost": [
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "other",
+          "statements": 194,
+          "rowsRead": 1373,
+          "rowsWritten": 34,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": false,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "work-claims",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "surface": "large",
+      "expired": 100,
+      "active": 0,
+      "source": {
+        "calls": 1,
+        "rowsRead": 1,
+        "returnedRows": 0
+      },
+      "cost": [
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "other",
+          "statements": 196,
+          "rowsRead": 1375,
+          "rowsWritten": 34,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": false,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "work-claims",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "surface": "live",
+      "expired": 100,
+      "active": 40,
+      "source": {
+        "calls": 3,
+        "rowsRead": 41,
+        "returnedRows": 40
+      },
+      "cost": [
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "other",
+          "statements": 622,
+          "rowsRead": 1878,
+          "rowsWritten": 34,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": false,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "background",
+          "operation": "other",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        },
+        {
+          "event": "room.sql_cost",
+          "coverage": "adapter-observed",
+          "scopeKind": "request",
+          "operation": "work-claims",
+          "statements": 0,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "sqlErrors": 0,
+          "unknownRowCosts": 0,
+          "pendingStatements": 0,
+          "complete": true,
+          "outcome": "completed"
+        }
+      ]
+    }
+  ]
+}

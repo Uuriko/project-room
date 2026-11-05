@@ -65,11 +65,15 @@ async function authorizeLease(env, state, token, { needLease, slotHint, tool, no
     expiresAt: new Date(claims.exp * 1000).toISOString(),
     caps: claims.caps,
   };
-  if (needLease) rememberLease(state, lease);
+  // REL-C1: the tool/capability checks run BEFORE the lease is installed,
+  // mirroring authorizePassthrough below. rememberLease first would let a
+  // denied call squat the slot (persisted by the DO's exclusive section,
+  // which saves state even when the handler throws) until token expiry.
   if (needLease && tool) {
     if (!toolAllowed(tool)) throw relayError(403, "tool_not_allowed", `${tool} is not an allowed machine tool`);
     if (!capsCover(claims.caps, tool)) throw relayError(403, "capability_denied", `The lease does not cover ${tool}`);
   }
+  if (needLease) rememberLease(state, lease);
   return { identity: { memberId: claims.sub, identityId: claims.sub }, lease: publicLease(lease) };
 }
 

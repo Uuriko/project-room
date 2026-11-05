@@ -77,3 +77,17 @@ test('Graphify CAS refuses changed content at the same Git revision', async t =>
   const actual = readProjectMap(store, 'commons', { q: 'second' });
   assert.equal(actual.found, true); assert.equal(actual.provenance.graphSha256, second.provenance.graphSha256);
 });
+
+
+test('oversize Graphify definition storage rejects atomically without replacing the previous graph', async t => {
+  const store = fixture(t);
+  store.featureEnv = {ROOM_PROJECT_MAP_GRAPHIFY: 'on', ROOM_PROJECT_MAP_REPO: update.repo};
+  const body = (graph, revision) => ({repo: update.repo, revision, graphify: {repo: update.repo, revision, graph}});
+  await pushProjectMap(store, 'commons', body({nodes: [{id: 0, file: 'one.js', label: 'original'}], edges: []}, 'previous'));
+  const before = store.db.prepare('SELECT * FROM project_maps WHERE room_id=? AND repo=?').get('commons', update.repo);
+  const graph = {nodes: Array.from({length: 10000}, (_, i) => ({id: i, file: 'one.js', label: String(i).padStart(8, '0')+'x'.repeat(150)})), edges: []};
+  await assert.rejects(pushProjectMap(store, 'commons', body(graph, 'oversize')), {status: 422});
+  assert.deepEqual(store.db.prepare('SELECT * FROM project_maps WHERE room_id=? AND repo=?').get('commons', update.repo), before);
+  const current = readProjectMap(store, 'commons', {q: 'original'});
+  assert.equal(current.found, true); assert.equal(current.revision, 'previous');
+});
