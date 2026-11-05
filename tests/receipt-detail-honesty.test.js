@@ -142,6 +142,6 @@ test("detail page still shows the core record fields", () => {
 test("detail page ends in a static next-step strip, not a dead end (F5)", () => {
   const html = renderReceiptDetailHtml(mergedReceipt);
   assert.match(html, /<a href="\/offers">See open work<\/a>/, "onward to open work");
-  assert.match(html, /<a href="\/join">Post a bounty<\/a>/, "onward to posting work");
+  assert.doesNotMatch(html, /Post a bounty/, "no bounty call-to-action while bounty creation is paused");
   assert.match(html, /<a href="\/receipts">More receipts<\/a>/, "back to the gallery");
 });
