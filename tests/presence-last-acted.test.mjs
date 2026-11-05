@@ -40,7 +40,9 @@ test('presence and the MCP activation pack report when each member last acted', 
 test('without the actor index presence answers null instead of scanning', t => {
   const store = new RoomStore(':memory:'); t.after(() => store.close());
   const saved = seedPostOAuth(store, {scopes: ['chat:read']});
-  store.db.exec('DROP INDEX IF EXISTS events_room_actor'); store._actorIndexReady = undefined;
+  assert.notEqual(store.lastActedAt('commons', 'owner'), undefined, 'index observed and statement cached');
+  store.db.exec('DROP INDEX IF EXISTS events_room_actor');
+  assert.equal(store.lastActedAt('commons', 'owner'), null, 'a dropped index answers null, not a throw');
   assert.equal(store.lastActedAt('commons', 'owner'), null);
   void saved;
 });

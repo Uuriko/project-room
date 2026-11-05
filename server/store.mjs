@@ -3701,7 +3701,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this._actorIndexReady = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_room_actor'").get()) || undefined;
       if (!this._actorIndexReady) return null;
     }
-    const row = this.db.prepare("SELECT json_extract(body,'$.at') AS at FROM events INDEXED BY events_room_actor WHERE room_id=? AND json_extract(body,'$.actorId')=? ORDER BY sequence DESC LIMIT 1").get(roomId, memberId);
+    let row;
+    try {
+      this._lastActedStatement ??= this.db.prepare("SELECT json_extract(body,'$.at') AS at FROM events INDEXED BY events_room_actor WHERE room_id=? AND json_extract(body,'$.actorId')=? ORDER BY sequence DESC LIMIT 1");
+      row = this._lastActedStatement.get(roomId, memberId);
+    } catch {
+      // The index went away after it was observed: re-check next time, never scan.
+      this._actorIndexReady = undefined; this._lastActedStatement = undefined;
+      return null;
+    }
     return typeof row?.at === "string" ? row.at : null;
   }
   roomsNeedingProvenanceReplay() {
