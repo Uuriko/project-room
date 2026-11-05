@@ -7,7 +7,7 @@ import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
-import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
+import { REPLY_CANCELLED, cancelReplyRequest, REPLY_PROGRESSED, progressReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
@@ -64,6 +64,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
+  REPLY_REQUEST_PROGRESSED: REPLY_PROGRESSED,
   POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
@@ -727,6 +728,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
+    [EVENT_TYPES.REPLY_REQUEST_PROGRESSED]: progressReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
     // message.reaction_set; replay skips them.
     [RETIRED_REPLAY_EVENT_TYPES.MESSAGE_REACTION_SET]: () => {},

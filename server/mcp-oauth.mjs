@@ -153,7 +153,7 @@ const scopeTools = {
   'members:invite': ['room_create_agent_invite'],
   'rooms:read': ['room_check_access'],
   'chat:read': ['room_read_messages', 'room_mark_caught_up', 'room_read_inbox', 'room_wait_for_attention', 'room_list_requests', 'room_read_request'],
-  'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request', 'room_cancel_request'],
+  'chat:write': ['room_post_message', 'room_reply', 'room_request_reply', 'room_respond_to_request', 'room_cancel_request', 'room_progress_request'],
   'work:read': ['room_list_work', 'room_read_board', 'room_read_work', 'room_read_work_discussion', 'room_read_result'],
   'work:write': ['room_claim', 'room_acquire_claim', 'room_release_claim', 'room_renew_claim', 'room_accept_work', 'room_start_work', 'room_block_work', 'room_resolve_blocker', 'room_handoff', 'room_submit_text_result'],
 };

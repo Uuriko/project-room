@@ -17,6 +17,7 @@ import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
 import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
 import { listOperatorRooms, operatorRoomExport } from "./operator-rooms.mjs";
+import { writeGrantCensus } from "./operator-write-grant-census.mjs";
 
 const POST = "POST";
 const GET = "GET";
@@ -51,6 +52,7 @@ const ROUTES = Object.freeze({
   "/api/operator/status": GET,
   "/api/operator/drift": GET,
   "/api/operator/rooms": GET,
+  "/api/operator/write-grants/census": GET,
   [ROOM_EXPORT_ROUTE]: GET
 });
 
@@ -88,6 +90,13 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     if (!expected) reject(404, "not_found", "Not found");
     if (req.method !== expected) reject(405, "method_not_allowed", "Method not allowed");
     res.setHeader("Cache-Control", "no-store");
+    if (routeKey === "/api/operator/write-grants/census") {
+      let result;
+      try { result = writeGrantCensus(store, { after: url.searchParams.get("after"), scan: url.searchParams.get("scan") }); }
+      catch (error) { if (error?.code === "invalid_scan" || error?.code === "invalid_cursor") reject(422, error.code, error.message); throw error; }
+      json(res, 200, result);
+      return true;
+    }
     if (routeKey === "/api/operator/rooms") {
       json(res, 200, listOperatorRooms(store, url.searchParams.get("limit")));
       return true;

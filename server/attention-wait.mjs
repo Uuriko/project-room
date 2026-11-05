@@ -5,6 +5,15 @@ import {nextWorkStep} from '../src/workflow.js';
 // Only resource accounting lives here. Attention and delivery cursors remain in
 // the existing protected inbox; a process restart never acknowledges anything.
 const pending = new WeakMap();
+// Courier liveness: when each member last started a wait on this server, and
+// whether one is open now. In-process only; a restart forgets, which reads as
+// "no courier seen" until the next wait.
+const lastWaits = new WeakMap();
+export function attentionWaitStatus(store, roomId, memberId) {
+  const key = JSON.stringify([roomId, memberId]);
+  const startedAt = lastWaits.get(store)?.get(key) ?? null;
+  return {waiting: Boolean(pending.get(store)?.has(key)), lastWaitAt: startedAt === null ? null : new Date(startedAt).toISOString()};
+}
 const MAX_PROBES = 4;
 const MAX_PENDING = 32;
 // Events that can leave a task waiting on its next member. Opt-in only, so a
@@ -95,6 +104,9 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     const fail = error => { if (!done) { done = true; clean(); reject(error); } };
     generation.supersede = () => fail(new ServiceError(409, 'attention_wait_superseded', 'A newer wait for this room member replaced this request; use the newer request result'));
     active.set(key, generation); // Supersede is initialized before this slot is visible.
+    let waits = lastWaits.get(store);
+    if (!waits) lastWaits.set(store, waits = new Map());
+    waits.delete(key); waits.set(key, started); if (waits.size > 4096) waits.delete(waits.keys().next().value);
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.

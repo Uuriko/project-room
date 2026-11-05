@@ -29,4 +29,4 @@
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
+        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, at most 50 in any one room, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }

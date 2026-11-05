@@ -494,9 +494,10 @@ export function initializeCurrentRoom(store,state,events,{adoptExisting=null}={}
     return roomId;
   });
 }
-export function currentRoomAuthority(db,roomId,{memberId=null}={}) {
+export function currentRoomAuthority(db,roomId,{memberId=null,activeOnly=false}={}) {
   const b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  return memberId===null?currentAuthorityFromHead(db,roomId,head,b):currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  if(memberId!==null)return currentMemberAuthorityFromHead(db,roomId,head,b,memberId);
+  return activeOnly?currentActiveAuthorityFromHead(db,roomId,head,b):currentAuthorityFromHead(db,roomId,head,b);
 }
 // Owner-only authority: protected head and room record, no member census.
 // For callers that need only ownerId/sequence; cost is constant in member count.
@@ -521,6 +522,29 @@ function currentMemberAuthorityFromHead(db,roomId,head,b,memberId) {
     }
   }
   if(!Object.hasOwn(members,room.ownerId))corrupt('missing owner authority');
+  return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
+}
+// Active-roster authority (W3200 R-01): the roster presence serves. The full
+// census above counts TOTAL member records and refuses past 100, so a room
+// that churned past 101 records (join, deactivate, replace) lost presence
+// even at <=100 active members, although admission caps ACTIVE members at
+// 100. This variant selects active records in SQL (bounded: at most 101 keys
+// are ever read, deactivated records are never loaded or charged), then
+// verifies each selected record through readCurrentRecord's proof/hash
+// checks exactly like the census. The cap and refusal are unchanged: more
+// than 100 ACTIVE members refuses with the census's error shape.
+function currentActiveAuthorityFromHead(db,roomId,head,b) {
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);
+  if(!room||!validId(room.ownerId))corrupt('missing owner authority');
+  const keys=db.prepare(`SELECT r.record_key FROM current_room_records r
+    JOIN current_room_record_proofs p ON p.room_id=r.room_id AND p.domain=r.domain AND p.record_key=r.record_key AND p.present=1
+    WHERE r.room_id=? AND r.domain='members' AND COALESCE(json_extract(r.payload,'$.active'),1)!=0
+    ORDER BY r.record_key LIMIT 101`).all(roomId);
+  charge(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+  if(keys.length>100)refuse('Room authority requires bounded membership');
+  const members={};
+  for(const {record_key:key} of keys)Object.defineProperty(members,key,{value:readCurrentRecord(db,roomId,'members',key,b),enumerable:true,writable:true,configurable:true});
+  if(!Object.hasOwn(members,room.ownerId)&&readCurrentRecord(db,roomId,'members',room.ownerId,b)===undefined)corrupt('missing owner authority');
   return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
 }
 function currentAuthorityFromHead(db,roomId,head,b) {
@@ -596,7 +620,7 @@ export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)?
   return {row,value};
 }
 
-const supported = new Set(['message.pinned','message.unpinned','member.sponsor_transferred','channel.created','work.public_set','capabilities.advertised','bond.propose','bond.accept','bond.decline','bond.revoke','bond.proposed','bond.activated','bond.revoked','dm.posted','claim.acquired','claim.renewed','claim.released','room.spend_pricing_set','room.spend_allowance_set','room.archived','room.exported','room.charter_updated','room.policy_set','room.trust_set','message.deleted','message.edited','work.superseded','ownership.transferred','reply_request.cancelled','work_claim.updated','message.posted','work.proposed','work.accepted','work.started','work.completed','work.handoff_recorded','work.halt_cleared','work.blocked','work.blocker_resolved','verification.recorded','owner.decision_recorded']);
+const supported = new Set(['message.pinned','message.unpinned','member.sponsor_transferred','channel.created','work.public_set','capabilities.advertised','bond.propose','bond.accept','bond.decline','bond.revoke','bond.proposed','bond.activated','bond.revoked','dm.posted','claim.acquired','claim.renewed','claim.released','room.spend_pricing_set','room.spend_allowance_set','room.archived','room.exported','room.charter_updated','room.policy_set','room.trust_set','message.deleted','message.edited','work.superseded','ownership.transferred','reply_request.cancelled','reply_request.progressed','work_claim.updated','message.posted','work.proposed','work.accepted','work.started','work.completed','work.handoff_recorded','work.halt_cleared','work.blocked','work.blocker_resolved','verification.recorded','owner.decision_recorded']);
 const contextBudgets = new WeakMap();
 export function withCurrentServingWriter(db,roomId,operation) {
   if(!isCurrentRoom(db,roomId) && !db.prepare("SELECT 1 FROM current_room_record_proofs WHERE room_id=? AND domain='migrationFence' AND record_key='active' AND present=1").get(roomId))return operation();
@@ -761,7 +785,7 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
     const request=readCurrentRecord(db,roomId,'replyRequests',id,b);if(request!==undefined)(state.replyRequests??={})[id]=request;
   }
   let selectedRequest;
-  if(command.type==='reply_request.cancelled'&&typeof command.data.requestMessageId==='string'){
+  if(['reply_request.cancelled','reply_request.progressed'].includes(command.type)&&typeof command.data.requestMessageId==='string'){
     const id=command.data.requestMessageId;selectedRequest=readCurrentRecord(db,roomId,'replyRequests',id,b);
     if(selectedRequest!==undefined){
       const opening=loadMessage(id);
@@ -1419,6 +1443,29 @@ export function publishCurrentCandidate(store,head,{generation,qualificationRece
 export function admitCurrentCandidateBudget(db,b) { admitCurrentSchema(db,b); return b; }
 
 // Selected work context never opens the legacy room or unrelated work bodies.
+// Wake policy needs only the room record, the actor and target member records,
+// for a work wake that one item, and for a message wake that message and its
+// channel. The message and channel go through their witnessed readers so a
+// corrupt or witnessed-but-missing record throws and the delivery stays
+// pending, as the legacy whole-room read does. Bounded like any selected read.
+export function readCurrentWakePolicyState(store,roomId,memberIds,{workItemId=null,messageId=null}={}) {
+  const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);if(!room)corrupt('missing wake policy room authority');
+  const members=Object.create(null);
+  for(const id of new Set(memberIds.filter(id=>typeof id==='string'))){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
+  const workItems=Object.create(null);
+  if(typeof workItemId==='string'){const item=readCurrentWorkItem(db,roomId,workItemId,b);if(item)workItems[workItemId]=item;}
+  const channels=Object.create(null);
+  if(typeof messageId==='string'){
+    const message=readCurrentMessage(db,roomId,messageId,b);
+    if(message){
+      const channelId=message.value?.channelId??'general',channel=readCurrentRecord(db,roomId,'channels',channelId,b);
+      if(channel===undefined)corrupt('wake message channel missing');
+      channels[channelId]=channel;
+    }
+  }
+  return {room,members,workItems,channels};
+}
 export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{includeOffers=false}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
   if(includeOffers)refuse('Cross-work offers require an indexed selected dependency context');
