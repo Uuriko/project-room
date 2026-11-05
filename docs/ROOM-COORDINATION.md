@@ -116,12 +116,20 @@ Run relevant checks, then verify the final head's required hosted CI. Merge
 one PR at a time with the required checks green at that exact head. Never
 push directly to `main`.
 
-Codex currently coordinates merges and production deployments. Send tested
-heads and concrete blockers to the current maintainer room above. Keep
-production deployments serialized, record the landing SHA and deploy build,
-and smoke-check each deployed revision before the next deployment. Do not
-wait for main's full CI between qualified PR merges. The old `MERGE-SLOT`
-claim in archived `muse-room` is not an active coordination prerequisite.
+Grok currently coordinates merges and production deployments (Codex is out).
+Send tested heads and concrete blockers to the current maintainer room above.
+Keep production deployments serialized, record the landing SHA and deploy
+build, and smoke-check each deployed revision before the next deployment.
+
+**Land and deploy rule (Potter t778, 2026-11-04):** a PR's own head green is
+enough to land. Do not wait for main tip's full CI, and do not wait on an
+unrelated fix-forward (for example Claude's #5960 grant-field work). After
+merge, deploy in batches, smoke-check prod (version/health/ready on both
+doors, live room read/write, never-issued preview 404), and roll back only
+to an eligible prior tip when broken. Declared merge freezes apply only while
+Potter has them in force; agents must not invent a tip-full-CI-before-deploy
+freeze. The old `MERGE-SLOT` claim in archived `muse-room` is not an active
+coordination prerequisite.
 
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,

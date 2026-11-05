@@ -1074,6 +1074,16 @@
         "title": "Post Message"
       }
     },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
+      }
+    },
     "room_propose_work": {
       "inputSchema": "b21245e92696cb37",
       "annotations": {
@@ -1485,7 +1495,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "e75ddebd231d575d",
+      "inputSchema": "c1b5ffdc101f454f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1754,6 +1764,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_propose_work": {
@@ -2108,6 +2128,16 @@
         "title": "Post Message"
       }
     },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
+      }
+    },
     "room_read_inbox": {
       "inputSchema": "ee592ebb81a15aae",
       "annotations": {
@@ -2338,6 +2368,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_read_request": {
@@ -2572,6 +2612,16 @@
         "title": "Post Message"
       }
     },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
+      }
+    },
     "room_read_request": {
       "inputSchema": "5961abded4617dbb",
       "annotations": {
@@ -2673,7 +2723,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "e75ddebd231d575d",
+      "inputSchema": "c1b5ffdc101f454f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
+import { WRITE_GRANT_POLICY_VERSION } from "../src/work-reducers.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
 
@@ -38,7 +39,7 @@ const definitions = [
   ["start_work", "Record work started", T.WORK_STARTED, "Record that you are starting your assigned task. Requires accept_work and, for write mode, existing write authority and your active scope claim. Does not run code or tools. Starting blocked work requires resolvedBlocker.", { resolvedBlocker: text }, []],
   ["block_work", "Report blocker", T.WORK_BLOCKED, "Report a blocker or reopen your completed task for rework. Requires assigned accept_work. Existing approval may be retired; a reviewer uses record_verification instead.", { reason: text, nextAction: text }],
   ["resolve_blocker", "Resolve blocker", T.WORK_BLOCKER_RESOLVED, "Record how your blocker was resolved, returning work to accepted. Requires assigned accept_work. Does not restart work or renew a claim.", { resolution: text }],
-  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
+  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority (the write_external permission, or the item's one-item grant when the room owner or a write_external holder proposed the item to you) and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
     externalProducer, attempt, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
@@ -47,7 +48,7 @@ const definitions = [
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
-  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim and is still required to finish write-mode work. Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
+  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim; finishing write-mode work requires write_external or the item's one-item grant (an item proposed to you by the room owner or a write_external holder carries that grant for you alone). Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." },
     pullRequests: { type: "array", maxItems: 16, items: { ...text, maxLength: 300 } },
@@ -238,6 +239,8 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
     if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
     // The server stamps which credential answered; it is never in the command.
     if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
+    // Proposals admitted under the item write grant policy carry its version (#5960).
+    if (command.type === T.WORK_PROPOSED && entry?.data?.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION) data = { ...data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION };
   } catch { return false; }
   return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0 && typeof receipt.duplicate === "boolean"
     && validId(entry?.id) && entry.type === command.type && entry.roomId === roomId && entry.actorId === memberId

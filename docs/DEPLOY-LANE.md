@@ -12,7 +12,13 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
 
 Merging and deploying are separate decisions. Production need not be healthy
 before an unrelated, qualified change can merge. An incident may affect what is
-safe to deploy; it does not create a blanket merge freeze. Actual repository protection and workflow schema checks still apply.
+safe to deploy; it does not create a blanket merge freeze. Actual repository
+protection and workflow schema checks still apply.
+
+Potter t778 (2026-11-04) restates the standing rule: land when the PR head's
+required checks are green; deploy with smoke; do not gate merges or deploys on
+main tip's full CI or on an unrelated fix-forward. Temporary freezes are only
+what Potter declares in the release room, and they end when he lifts them.
 
 ## Deploy
 

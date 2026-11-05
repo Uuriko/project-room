@@ -5,7 +5,25 @@ import { nativeTextEvidence, reportedProducer, validateResultSegments } from './
 import { normalizeWorkDependencies } from './work-dependencies.js';
 import { applySessionFields, completionAttemptSnapshot } from './work-item-session.js';
 
+export const WRITE_GRANT_POLICY_VERSION = 1;
+
 export function createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource }) {
+// Item-scoped implied write grant (FUNNEL-FIXES pack 01, Option D): an item
+// proposed by the room owner or a write_external holder carries a stamp
+// naming the proposer and the accountable member it was granted to. The
+// stamp satisfies the write-mode write_external check for that member on
+// that item only; it is a stateless comparison, so any reassignment of
+// accountability (e.g. member.merged) voids it while accountability sits
+// elsewhere, and it revives for the original member if accountability
+// returns. It never modifies member.permissions.
+function stampSatisfies(item, actorId) {
+  return Boolean(item.externalWriteGrantBy) && item.externalWriteGrantFor === actorId;
+}
+function requireWriteAuthority(state, item, incoming) {
+  if (hasPermission(state, incoming.actorId, "write_external")) return;
+  if (stampSatisfies(item, incoming.actorId)) return;
+  requirePermission(state, incoming.actorId, "write_external");
+}
 function proposeWork(state, incoming) {
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
@@ -56,11 +74,23 @@ function proposeWork(state, incoming) {
     throw new Error("Source message must exist in this Room");
   }
 
+  // Option D stamp: born with the item iff the proposer is the room owner or
+  // holds write_external at proposal time. Only proposals admitted under the
+  // policy carry writeGrantPolicyVersion (stamped by the store at admission,
+  // like pinDmPartyPolicyVersion), so every proposal recorded before it
+  // replays exactly as it was reduced then: no stamp, no implied grant.
+  if (incoming.data.writeGrantPolicyVersion !== undefined && incoming.data.writeGrantPolicyVersion !== WRITE_GRANT_POLICY_VERSION)
+    throw new Error("Unknown write grant policy version");
+  const externalWriteGrant = incoming.data.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION
+    && (incoming.actorId === state.room.ownerId || hasPermission(state, incoming.actorId, "write_external"))
+    ? { externalWriteGrantBy: incoming.actorId, externalWriteGrantFor: incoming.data.accountableMemberId }
+    : {};
   state.workItems[incoming.data.workItemId] = {
     id: incoming.data.workItemId,
     title: incoming.data.title,
     definitionOfDone: incoming.data.definitionOfDone,
     accountableMemberId: incoming.data.accountableMemberId,
+    ...externalWriteGrant,
     verifierMemberId: incoming.data.verifierMemberId || null,
     independentVerificationRequired,
     ownerDecisionRequired,
@@ -101,7 +131,7 @@ function startWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.BLOCKED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may start work");
   requirePermission(state, incoming.actorId, "accept_work");
-  if (item.mode === "write") requirePermission(state, incoming.actorId, "write_external");
+  if (item.mode === "write") requireWriteAuthority(state, item, incoming);
   if (item.state === WORK_STATES.BLOCKED) requireFields(incoming.data, ["resolvedBlocker"]);
   if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
     throw new Error("Contested writes require a current exact-scope claim");
@@ -196,7 +226,7 @@ function completeWork(state, incoming) {
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may report completion");
   requirePermission(state, incoming.actorId, "complete_work");
   if (item.mode === "write") {
-    requirePermission(state, incoming.actorId, "write_external");
+    requireWriteAuthority(state, item, incoming);
     if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
   }
   let nativeText = null, signedEvidence = null;

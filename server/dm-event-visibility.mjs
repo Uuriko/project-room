@@ -23,7 +23,8 @@ export const DM_FOLLOW_UP_TYPES = new Set([
   T.MESSAGE_UNPINNED,
   // A formal request is always addressed (toMemberId), so its cancellation
   // reason is as private as the request body. Keyed by requestMessageId.
-  T.REPLY_REQUEST_CANCELLED
+  T.REPLY_REQUEST_CANCELLED,
+  T.REPLY_REQUEST_PROGRESSED
 ]);
 const referencedMessage = event => event.data?.messageId ?? event.data?.requestMessageId;
 
