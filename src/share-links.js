@@ -5,6 +5,7 @@ import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
 import { uiText } from "./strings.js";
 import { roomAcpCommand } from "./agent-invite-ui.js";
 import { canInviteMembers } from "./events.js";
+import { isDeadLinkCode } from "./error-copy.js";
 
 export function canOpenAgentInvitation(state, session) {
   return Boolean(session && state?.room?.id === session.roomId
@@ -759,7 +760,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } catch (error) {
       if (version !== joinVersion) return;
-      if (resume && error.code === "link_unavailable") {
+      if (resume && isDeadLinkCode(error?.code)) {
         // The earlier join may have consumed the final place. Preview refuses
         // new joins, but the authenticated idempotent replay can still recover it.
         previewRoomId = resume.roomId; previewRoomTitle = resume.roomTitle;
@@ -769,7 +770,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         await performJoin({ resume: true });
         return;
       }
-      if (!resume && error?.code === "link_unavailable") {
+      if (!resume && isDeadLinkCode(error?.code)) {
         const dead = deadInviteCopy();
         // A signed-in person needs neither the Log in choice nor the guest
         // hint; they keep the fresh-link ask and a link back to their rooms.
@@ -899,7 +900,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         $("#join-link-retry").textContent = "Review browser session";
       }
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
-      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
+      // The client drops a lost anonymous session (cookie gone), so a missing
+      // session is still a guest browser; only a signed-in account is not.
+      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated !== true;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
       $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Log out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";

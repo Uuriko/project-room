@@ -141,6 +141,8 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // current-room-events.mjs loop guard: boolean expression of identifiers, not a credential.
+  "boundedWindow||trimmed||events.length>=limit||!chunk.hasMore||chunk.next<=scanAfter||source.bytes>=CURRENT_EVENT_SOURCE_BYTES",
   // Public Apache license URL in the home page structured data; not a credential.
   "https://www.apache.org/licenses/LICENSE-2.0",
   // Public relative documentation link embedded by wiki-build, not a credential.
@@ -194,6 +196,11 @@ export const SAFE_ENTROPY_TOKENS = [
   "docs/PRIVATE-INBOX-FOUNDATION-2026-09-08.md.",
   "docs/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md",
   "docs/REPLY-REQUESTS-FOUNDATION-CHECKPOINT-2026-09-08.md",
+  // server/share-links.mjs AGENT_INVITE_CODE_PATTERN character classes — invite
+  // code shape alphabets (Crockford / base32-ish), not credentials. Exact tokens
+  // only; a real credential on the same line still trips pattern rules.
+  "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "ABCDEFGHJKMNPQRSTUVWXYZ23456789",
 ];
 
 // Directories scanned: source code where a real secret could hide.

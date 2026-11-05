@@ -12,7 +12,8 @@
         - name: after
           in: query
           description: >
-            Sequence strictly before the page. `0` or digits without a leading
+            The page holds events with a sequence strictly after this
+            value (`sequence > after`). `0` or digits without a leading
             zero (`^(0|[1-9]\d*)$`). Anything else is 422 `invalid_event_cursor`,
             and the message names `after`.
           schema: { type: integer, minimum: 0, default: 0 }

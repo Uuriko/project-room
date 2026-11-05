@@ -138,6 +138,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_reply",
   "room_respond_to_request",
   "room_cancel_request",
+  "room_progress_request",
   "bounty_list",
   "bounty_read_balances",
   "bounty_read_history",

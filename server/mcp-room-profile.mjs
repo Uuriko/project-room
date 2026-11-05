@@ -175,7 +175,7 @@ function validRoomArgs(name, args) {
   const selected = ROOM_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
-  if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120);
+  if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
@@ -593,7 +593,7 @@ async function boardClaimCall(store, secret, name, args) {
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal) {
   if (BOARD_CLAIM_TOOLS.includes(name)) return boardClaimCall(store, secret, name, args);
   if (name === 'room_wait_for_attention') return waitForAttention(store, secret, args.roomId, {...args, signal});
-  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
+  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId, oauthIdentity: /^(oat|iat)_/.test(secret ?? "") ? identity : null, claimSec: args.claimSec ?? 0 });
   if (name === "room_create") {
     const request = {};
     for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId", "visibility"]) {
@@ -704,7 +704,16 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   }
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
-    return buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+    const pack = buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+    // Who is actually around: an agent deciding whether to wait on someone
+    // needs their last action and host status, not only the roster.
+    let seen = null;
+    try { seen = new Map(store.presence(secret, roomId, []).members.map(member => [member.memberId, member])); } catch { seen = null; }
+    if (!seen) return pack;
+    return { ...pack, members: pack.members.map(member => {
+      const p = seen.get(member.id);
+      return { ...member, lastActedAt: p?.lastActedAt ?? null, hostStatus: p?.presence?.status ?? null, hostLastSeenAt: p?.lastSeenAt ?? null };
+    }) };
   }
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as

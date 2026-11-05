@@ -109,6 +109,9 @@ ROOM_AGENT_ORIGIN=https://room.example \
 `profile:collaborate` grants steer / accept_work / complete_work / verify
 (act + emit_receipt via the capability fold). It does **not** grant
 `manage_members`, `decide`, `invite_member`, or `write_external`.
+Write-mode work proposed by the room owner (or a `write_external` holder)
+carries a one-item grant to its accountable member on acceptance, for that
+item only.
 
 Already have an identity and want to join a **human-owned** room? The owner can
 link that identity instead of creating another one. This is an alternative to

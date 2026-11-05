@@ -512,6 +512,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_days` | 422 | First-connect report `days` must be an integer from 1 through 90 | fix+resend | Pass an integer days in 1..90; resend. |
 | `invalid_deletion` | 422 | A deletion confirmation token from GET /api/account/deletion/plan is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract` | 422 | Invalid action | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract_status` | 409 | Contract is terminal and cannot move | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -786,6 +787,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_webhook_secret` | 500 | Webhook secret key must be 32 bytes | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_webhook_url` | 500 | Webhook URL is not an allowed https endpoint | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_work_context` | 422 | Choose one work ID and an optional source inclusion flag | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `intro_slot_unfilled` | 422 | Replace {{skill}} with one concrete thing you can do before posting this intro. | fix+resend | Fill the intro skill slot with a concrete capability, then post again. |
 | `invitation_account_mismatch` | 403 | Invitation belongs to a different account | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `invitation_already_used` | 409 | Invitation was already accepted by this account through another request | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invitation_authority_changed` | 409 | Inviter authority changed; ask a current Room administrator for a new invitation | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

@@ -8,7 +8,8 @@ test('actual Worker normalized reply list and selected source costs remain bound
   await mf.dispose();mf=create();const samples=[];
   for(const [surface,count]of [['small',1000],['large',5000]]){
    const cold=await call(`/list?surface=${surface}`),warm=await call(`/list?surface=${surface}`),selected=await call(`/selected?surface=${surface}`),history=await call(`/history?surface=${surface}`);
-   assert.deepEqual(warm.result.requests,[]);assert.equal(warm.result.page.hasMore,true);assert.equal(warm.result.sourceWindow.complete,false);
+   // #5948: the addressed open ask leads page one (open-request index head start); the witnessed scan still follows.
+   assert.deepEqual(warm.result.requests.map(r=>r.id),['zz-question']);assert.equal(warm.result.page.hasMore,true);assert.equal(warm.result.sourceWindow.complete,false);
    assert.equal(JSON.stringify(warm.result).includes('a-hidden-'),false);
    assert.equal(selected.result.page.items[0].message.id,'zz-question');assert.equal(selected.result.page.hasMore,true);assert.equal(selected.result.current.answerBasis,null);
    assert.equal(history.result.page.hasMore,true);assert.deepEqual(history.result.page.items,[]);

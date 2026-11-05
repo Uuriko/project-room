@@ -67,6 +67,7 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
+import { currentReceiptClaim, currentReceiptClaims, currentRoomReceiptState } from "./current-receipts.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
 import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
@@ -634,7 +635,11 @@ const receiptOf = item => {
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
   const noTwin = Object.freeze({ ...receipt, publicId: null, publicUrl: null });
-  const state = store.room(roomId)?.state;
+  // N20-01: for current rooms store.room() refuses (409
+  // current_room_context_required), so the opt-in state is read from
+  // the bounded canonical metadata record; the twin logic below is
+  // unchanged for every room.
+  const state = currentRoomReceiptState(store, roomId) ?? store.room(roomId)?.state;
   if (!state || publicReceipts(state).enabled !== true) return noTwin;
   for (const publicId of [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]) {
     if (publicReceiptById(store, publicId)) {
@@ -1180,7 +1185,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
       return true;
     };
-    const ranked = registry.list(roomId)
+    // N20-01: current-format rooms never write Board rows (the sync is
+    // gated off by design), so their receipts are projected read-side
+    // from the canonical work items; legacy rooms keep the registry.
+    const ranked = (currentReceiptClaims(store, roomId) ?? registry.list(roomId))
       .filter(item => item.state === "done")
       .filter(matches)
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1201,7 +1209,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!member || member.active === false) {
       reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     }
-    const item = registry.list(roomId)
+    // B7: on current rooms the named receipt is an addressed read of
+    // that one work item, not a full-room enumeration (which 409s in
+    // mature rooms); legacy rooms keep the registry find unchanged.
+    const nativeClaim = currentReceiptClaim(store, roomId, workClaimId);
+    const item = nativeClaim !== null ? nativeClaim : registry.list(roomId)
       .find(entry => entry.state === "done" && `rc_${entry.id}` === workClaimId);
     if (!item) reject(404, "receipt_not_found", `No receipt "${workClaimId}" in this room`);
     return json(res, 200, stampReceipts({

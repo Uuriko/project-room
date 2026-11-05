@@ -49,11 +49,28 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
   ||!integer(value.after)||value.after<after||typeof value.sourceComplete!=='boolean'||value.globalAttentionComplete!==false||value.acknowledges!==false
   ||value.timeoutSec!==timeoutSec||!integer(value.waitedMs)||!Array.isArray(value.items)||value.items.length>4)throw invalid();
  const seen=new Set();
- const items=value.items.map(p=>{
-  if(!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)
-   ||!id(p.messageId,128)||!integer(p.sequence)||p.sequence<=after||p.sequence>value.after||seen.has(p.messageId))throw invalid();
-  seen.add(p.messageId);return{messageId:p.messageId,sequence:p.sequence};
+ const parsed=value.items.map(p=>{
+  // A task that now waits on this member rides the pointer shape as work:<id>.
+  // Ids too long for that key use a digest. Pointers are wake hints: the woken
+  // session lists its assigned work, so a yielded pointer loses nothing.
+  const work=p?.kind==='work';
+  if(work?!closed(p,['kind','workItemId','workRevision','sequence','nextRead'])||!id(p.workItemId,128)||!integer(p.workRevision)
+   :!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)||!id(p.messageId,128))throw invalid();
+  if(!integer(p.sequence)||p.sequence<=after||p.sequence>value.after)throw invalid();
+  // A legal work id starts with a letter or digit, so 'work::' (two colons)
+  // can never be produced by a short id: the two key spaces are disjoint.
+  const messageId=!work?p.messageId:p.workItemId.length<=123?'work:'+p.workItemId:'work::'+createHash('sha256').update(p.workItemId).digest('hex').slice(0,48);
+  return{work,messageId,sequence:p.sequence};
  });
+ // Messages keep the server's no-duplicate contract. A work pointer whose key
+ // equals a message id in the same frame yields to it: either one wakes the
+ // agent, which then reads its assigned work.
+ for(const p of parsed)if(!p.work){if(seen.has(p.messageId))throw invalid();seen.add(p.messageId);}
+ const items=[];
+ for(const p of parsed){
+  if(p.work){if(seen.has(p.messageId))continue;seen.add(p.messageId);}
+  items.push({messageId:p.messageId,sequence:p.sequence});
+ }
  if(value.status==='ready'?!items.length:items.length>0)throw invalid();
  if(value.status==='catch_up_required'&&value.after===after||value.status==='timeout'&&!value.sourceComplete)throw invalid();
  return{status:value.status,after:value.after,sourceComplete:value.sourceComplete,items}; // Discard every server nextRead.
@@ -76,7 +93,7 @@ export async function receiveCloudNotifications({connection,configFile,env=proce
   const wait=async(after,timeoutSec)=>{
    const remaining=lastStart+2500-now();if(remaining>0)await delay(remaining,signal);signal?.throwIfAborted();lastStart=now();
    const requestId=randomUUID();
-   const envelope=await room.request('/mcp',{body:{jsonrpc:'2.0',id:requestId,method:'tools/call',params:{name:'room_wait_for_attention',arguments:{roomId:connection.roomId,after,timeoutSec}}},timeoutMs:(timeoutSec+15)*1000,signal});
+   const envelope=await room.request('/mcp',{body:{jsonrpc:'2.0',id:requestId,method:'tools/call',params:{name:'room_wait_for_attention',arguments:{roomId:connection.roomId,after,timeoutSec,includeWork:true}}},timeoutMs:(timeoutSec+15)*1000,signal});
    return attentionResult(envelope,{requestId,roomId:connection.roomId,memberId:connection.memberId,after,timeoutSec});
   };
   print('Notification-only receiver: pointers to configured session; no execution, acknowledgement or closure. Bootstrap does not clear older obligations.');

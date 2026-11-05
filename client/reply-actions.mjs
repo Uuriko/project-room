@@ -32,11 +32,15 @@ const definitions = [
     { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: responseBody }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
-    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]]
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]],
+  ["room_progress_request", null, "Tell the asker where a request addressed to you stands: acknowledged, working, needs_input (you need something from them; say what in note) or error. The request stays open; answer it later with room_respond_to_request using the same revision." + retry,
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision,
+      progress: { type: "string", enum: ["acknowledged", "working", "needs_input", "error"] }, note: { ...text, maxLength: 1000 } }, ["requestMessageId", "expectedRequestRevision", "progress"]]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>
   [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false },
-    annotations: { readOnlyHint: route !== null, destructiveHint: route === null, idempotentHint: true, openWorldHint: false } } }]));
+    // A progress report is a non-terminal status update, not a destructive write.
+    annotations: { readOnlyHint: route !== null, destructiveHint: route === null && name !== "room_progress_request", idempotentHint: true, openWorldHint: false } } }]));
 export const replyTools = [...actions.values()].map(action => action.tool);
 export const isReplyTool = name => actions.has(name);
 export const replyRoute = name => actions.get(name)?.route;
@@ -53,7 +57,7 @@ export function buildReplyCommand(identity, name, args) {
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
   }
   const requestId = prepared.requestId;
-  const { requestId: _requestId, ...data } = structuredClone(prepared), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
+  const { requestId: _requestId, ...data } = structuredClone(prepared), type = name === "room_cancel_request" ? "reply_request.cancelled" : name === "room_progress_request" ? "reply_request.progressed" : "message.posted";
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
   if (name === "room_respond_to_request") {
