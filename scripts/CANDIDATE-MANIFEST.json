@@ -196,7 +196,7 @@
     ".github/workflows/deploy-prod.yml": "sha256:de5b69515d2fea4360edc0a115d4d16bf426f897e82592466441122a51f104f6",
     "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
-    "cloudflare/package.json": "sha256:1280e8084a71dc312f28239cd434a1e091fe7c2a8b3e638db5e5d4f86f3e31de",
+    "cloudflare/package.json": "sha256:002167bf79007400784ff47c9a801a59a04516c517a53594cd0635bfece047ef",
     "cloudflare/pnpm-lock.yaml": "sha256:647852b19c04efdaa42960742ed0ee48ffe8220e4135e337fd56d0553b33fc5f",
     "cloudflare/room.mjs": "sha256:c56567357e30f47ca3d035401fb5f8d82bfcf5cea723eb734f07d8aea5c80fd5",
     "cloudflare/storage.mjs": "sha256:8ab552b91c75ef7fb87e9a5c001a242b54739f6f6bf0a21702633b718f657432",
