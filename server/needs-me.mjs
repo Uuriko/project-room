@@ -1104,6 +1104,9 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };
   const landIds = { ...parsed.landIds };
+  // Land watermark each room's read started from (see suppressed-lease hold below).
+  const landStart = {};
+  const landIdStart = {};
   const native={...parsed.native},nativeCoverage=[];
   let pendingBonds = null;
   const openWork = [];
@@ -1170,6 +1173,8 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const pendingAfter = parsed.provided ? after : 0;
     const pendingMessageAfter = Math.max(pendingAfter, floor ? floor.sequence - 1 : 0);
     const landAfter = landWatermark(parsed, link.roomId);
+    landStart[link.roomId] = landAfter;
+    landIdStart[link.roomId] = landIds[link.roomId];
     const horizonScan = mentionHorizon(store, link.roomId, link.memberId, messageAfter, sessionWatermark(after, authority.sequence));
     scan.scannedRows += horizonScan.scannedRows;
     scan.scannedBytes += horizonScan.scannedBytes;
@@ -1264,6 +1269,25 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   const effectiveClaimSec = claimSec === undefined ? 0 : claimSec;
   const claim = filterClaimedNeedsMe(store.db, { items, memberByRoom, claimSec: effectiveClaimSec, run: (fn) => store.transaction(fn) });
   const claimedItems = claim.items === items ? items : claim.items;
+  // A suppressed (leased-elsewhere) item was not delivered to this caller, so
+  // this caller's cursor must not move past it: hold each room's sequence
+  // cursor just below its earliest suppressed item, and hold the land cursor
+  // where this read started when a land item was suppressed. Replaying the
+  // cursor after the lease lapses then returns the item if it is still open
+  // (the first handler crashed); a handled item is retired as usual.
+  for (const held of claim.suppressedItems ?? []) {
+    if (held.kind === "land_queue") {
+      if (held.roomId in landStart) {
+        land[held.roomId] = landStart[held.roomId];
+        if (landIdStart[held.roomId] === undefined) delete landIds[held.roomId];
+        else landIds[held.roomId] = landIdStart[held.roomId];
+      }
+      continue;
+    }
+    if (Number.isFinite(held.seq) && Number.isFinite(rooms[held.roomId])) {
+      rooms[held.roomId] = Math.min(rooms[held.roomId], held.seq - 1);
+    }
+  }
   // L1: returning a direct_ask from needs-me is delivery for poll agents.
   // Gate on claimSec>0 so ordinary GET /api/needs-me stays pure (tests + browsers);
   // MCP room_needs_me already passes claimSec=45 and gets auto-ack with the lease.

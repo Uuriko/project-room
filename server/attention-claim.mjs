@@ -49,12 +49,16 @@ function withImmediate(db, fn, run) {
 
 // Filter items through a per-(room,member,kind,id) lease. First caller wins
 // for claimSec seconds; later callers in that window omit the item. Mutates
-// nothing about cursor/retirement. Returns { items, leased, suppressed, leaseSec }.
+// nothing about cursor/retirement. Returns { items, leased, suppressed,
+// suppressedItems, leaseSec }. suppressedItems ({ roomId, kind, id, seq })
+// lets the caller hold its cursor below leased work: a suppressed handler
+// must not advance past an item it never saw, or a replay after the lease
+// lapses (first handler crashed) would never return that still-open item.
 export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = Date.now(), run = null } = {}) {
   const leaseSec = clampClaimSec(claimSec);
   if (!leaseSec || !Array.isArray(items) || items.length === 0) {
     // Copy so callers that replace `items` cannot clear through this alias.
-    return { items: Array.isArray(items) ? items.slice() : [], leased: 0, suppressed: 0, leaseSec: 0 };
+    return { items: Array.isArray(items) ? items.slice() : [], leased: 0, suppressed: 0, suppressedItems: [], leaseSec: 0 };
   }
   ensureNeedsMeClaims(db);
   const expiresAt = now + leaseSec * 1000;
@@ -72,6 +76,7 @@ export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = 
     let leased = 0;
     let suppressed = 0;
     const kept = [];
+    const suppressedItems = [];
     for (const item of items) {
       const memberId = memberByRoom?.get?.(item.roomId);
       if (!memberId || typeof item.kind !== "string" || item.id == null) {
@@ -82,12 +87,13 @@ export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = 
       const row = get.get(item.roomId, memberId, item.kind, itemId);
       if (row && row.expiresAt >= now) {
         suppressed += 1;
+        suppressedItems.push({ roomId: item.roomId, kind: item.kind, id: itemId, seq: item.seq });
         continue;
       }
       put.run(item.roomId, memberId, item.kind, itemId, now, expiresAt);
       kept.push({ ...item, claimedUntil: new Date(expiresAt).toISOString() });
       leased += 1;
     }
-    return { items: kept, leased, suppressed, leaseSec };
+    return { items: kept, leased, suppressed, suppressedItems, leaseSec };
   }, run);
 }

@@ -73,3 +73,22 @@ test("claimSec 0 return is alias-safe under clear-then-push", () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].id, "m");
 });
+
+test("suppressed items are reported so the caller can hold its cursor", () => {
+  const database = db();
+  const memberByRoom = new Map([["r1", "m1"]]);
+  const items = [
+    { roomId: "r1", kind: "direct_ask", id: "ask-1", seq: 7 },
+    { roomId: "r1", kind: "mention", id: "msg-9", seq: 9 },
+  ];
+  const now = 1_700_000_000_000;
+  const first = filterClaimedNeedsMe(database, { items, memberByRoom, claimSec: 45, now });
+  assert.deepEqual(first.suppressedItems, []);
+  const second = filterClaimedNeedsMe(database, { items, memberByRoom, claimSec: 45, now: now + 1_000 });
+  assert.deepEqual(second.suppressedItems, [
+    { roomId: "r1", kind: "direct_ask", id: "ask-1", seq: 7 },
+    { roomId: "r1", kind: "mention", id: "msg-9", seq: 9 },
+  ]);
+  const off = filterClaimedNeedsMe(database, { items, memberByRoom, claimSec: 0, now });
+  assert.deepEqual(off.suppressedItems, []);
+});
