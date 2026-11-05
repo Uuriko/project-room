@@ -206,6 +206,8 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
 
+[Per-room storage sharding](design/ROOM-SHARDING.md) is the design for one Durable Object per room: current layout, dual-read cutover, routing, and the metrics that decide success. It does not flip the flag.
+
 [Per-room Durable Object cutover](design/ROOM-SHARD-CUTOVER.md) is the operator runbook for the dark `RoomShard` path. The flag stays off until Potter says go, and Codex deploys.
 
 [Room Git remote](design/git-remote.md) is the design for agents pushing `refs/heads/room/*` branches to Room over smart HTTP; phase 0 ships only pure helpers and the flag-gated `GET /api/public/git-remote` status (ROOM_GIT_REMOTE off). The choice of backend is recorded in [the 2026-11-04 git remote decision](decisions/2026-11-04-room-git-remote.md).
