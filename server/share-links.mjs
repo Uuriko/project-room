@@ -27,7 +27,7 @@ const unavailable = () => fail(410, "link_unavailable", "This invite link has ex
 // O -> 0). The gate is shape-only: it reads no store and no room data, so
 // its answer is byte-identical for live, dead and fabricated RM-shaped
 // codes — it creates no existence oracle.
-const AGENT_INVITE_CODE_PATTERN = /^RM-(?:[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/;
+const AGENT_INVITE_CODE_PATTERN = /^RM-(?:[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/; // secrets-allowlist: character-class regex for invite code shape, not a credential
 const agentInviteCandidate = value => {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) return "";

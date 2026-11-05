@@ -217,3 +217,11 @@ export function humanErrorMessage({ status, code, message } = {}) {
   if (statusText) return statusText;
   return catalogText("error.unknown") || "Something went wrong. Please try again.";
 }
+
+// Codes for an invite link that exists but can no longer admit anyone new.
+// The authenticated preview folds them all into link_unavailable; the
+// anonymous preview names the reason (#5954). link_not_found is not here: no
+// such link was issued, so there is nothing for an existing member to reopen.
+export const DEAD_LINK_CODES = Object.freeze(["link_unavailable", "link_cancelled", "link_expired", "link_full", "link_authority_changed"]);
+const dead = new Set(DEAD_LINK_CODES);
+export const isDeadLinkCode = code => dead.has(code);
