@@ -11,7 +11,6 @@
   "dm-consents.mjs": 1,
   "event-automations.mjs": 1,
   "feedback-routes.mjs": 1,
-  "guest-invites.mjs": 1,
   "http.mjs": 2,
   "inbound-task-hooks.mjs": 1,
   "mcp-full-profile.mjs": 2,

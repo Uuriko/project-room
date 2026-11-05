@@ -1134,7 +1134,7 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
       // returned source page and acknowledge its undisclosed remainder.
       if(MAX_ITEMS-items.length<14){hasMore=true;break;}
       const page=readCurrentNeedsMePage(store,secret,link.roomId,{cursor:native[link.roomId],...(parsed.provided?{after:roomWatermark(parsed,link.roomId,store.headSequence(link.roomId),freshWindow)}:{}),freshWindow});
-      items.push(...page.items);nativeCoverage.push({roomId:link.roomId,...page.coverage});
+      items.push(...page.items);nativeCoverage.push({roomId:link.roomId,...page.coverage,complete:page.complete});
       if(page.cursor)native[link.roomId]=page.cursor;else delete native[link.roomId];
       if(page.complete)rooms[link.roomId]=page.visibleThrough;
       if(!page.complete){hasMore=true;break;}
@@ -1254,6 +1254,6 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, ...(nativeCoverage.length?{contractVersion:2,nativeCoverage}:{}),
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, complete: !hasMore, status: hasMore ? 'incomplete' : 'complete', ...(hasMore ? { nextRead: { tool: 'room_needs_me', arguments: { ...(scopedRoom ? { roomId: scopedRoom } : {}), since: cursor } }, guidance: "INCOMPLETE: this is a partial page, not an empty answer. Pass the returned cursor back unchanged as since until complete:true before concluding nothing needs you." } : {}), ...(nativeCoverage.length?{contractVersion:2,nativeCoverage}:{}),
     scan: { scannedRows: scan.scannedRows, scannedBytes: scan.scannedBytes, exhausted: scan.exhausted, replies: scan.replies, mentions: scan.mentions, rowBudgets: { replies: REPLY_SCAN_ROW_BUDGET, mentions: MENTION_SCAN_ROW_BUDGET }, byteBudgets: { replies: REPLY_SCAN_BYTE_BUDGET, mentions: MENTION_SCAN_BYTE_BUDGET }, ...(scan.exhausted ? { continuation: "pass the returned cursor back unchanged; the scan resumes at the first unscanned sequence" } : {}) } });
 }
