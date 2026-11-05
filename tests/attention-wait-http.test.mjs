@@ -93,3 +93,43 @@ test('real OAuth host timeout retry replaces the prior wait without reusing its 
   assert.deepEqual(result.items.map(item=>item.messageId),['replacement-only']);
   assert.equal(result.acknowledges,false);
 });
+
+test('includeWork wakes on a task proposed to the caller; the default wait stays message-only', async t => {
+  const f = await fixture(t);
+  const propose = (id, accountableMemberId) => f.store.command(f.saved.owner, 'commons', {id, type: 'work.proposed',
+    data: {workItemId: id, title: 'Assigned ' + id, definitionOfDone: 'Saved result', accountableMemberId}});
+  const legacy = f.call({timeoutSec: 1}), waiting = f.call({timeoutSec: 2, includeWork: true}, f.saved.token);
+  assert.match(JSON.stringify((await legacy.result).value), /attention_wait_superseded/);
+  await delay(60);
+  propose('someone-else-task', 'observer');
+  propose('my-new-task', f.saved.identityId);
+  const result = accepted(await waiting.result);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.items.map(item => [item.kind, item.workItemId]), [['work', 'my-new-task']]);
+  assert.deepEqual(result.items[0].nextRead, {tool: 'room_read_work', arguments: {roomId: 'commons', workItemId: 'my-new-task'}});
+  assert.ok(result.items[0].sequence <= result.after);
+  // Without the flag the same history yields no work pointer.
+  const plain = accepted(await f.call({timeoutSec: 0}).result);
+  assert.equal(plain.items.some(item => item.kind === 'work'), false);
+  // The caller's own work events never wake the caller.
+  const self = accepted(await f.call({timeoutSec: 0, includeWork: true, after: result.after}).result);
+  assert.deepEqual(self.items, []);
+});
+
+test('includeWork keeps the cursor honest across a gap longer than one event window', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 28; i++) f.post('filler-' + i, {body: 'noise ' + i});
+  f.store.command(f.saved.owner, 'commons', {id: 'late-task', type: 'work.proposed',
+    data: {workItemId: 'late-task', title: 'Late task', definitionOfDone: 'Saved result', accountableMemberId: f.saved.identityId}});
+  let after = f.after, found = [];
+  for (let calls = 0; calls < 12 && !found.length; calls++) {
+    const response = await f.call({timeoutSec: 0, includeWork: true, after}).result;
+    const result = accepted(response);
+    assert.ok(result.after >= after);
+    after = result.after;
+    found = result.items.filter(item => item.kind === 'work').map(item => item.workItemId);
+  }
+  assert.deepEqual(found, ['late-task']);
+  const bad = await f.call({timeoutSec: 0, includeWork: 'yes'}).result;
+  assert.ok(bad.value.error || bad.value.result?.isError, JSON.stringify(bad));
+});
