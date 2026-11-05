@@ -58,6 +58,9 @@ const PROBES = {
   "GET /extensions/work-receipt/v1": [undefined, 200],
   "HEAD /extensions/work-receipt/v1": [undefined, 200],
   "HEAD /demo": [undefined, 200],
+  // ROOM_SHOWCASE is off by default, so an anonymous probe gets 404.
+  "GET /showcase": [undefined, 404],
+  "HEAD /showcase": [undefined, 404],
   "GET /download": [undefined, 200],
   "HEAD /download": [undefined, 200],
   // Native login starts/callbacks require PKCE query shape. The exchange is
@@ -196,7 +199,8 @@ const PROBES = {
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
-  "POST /api/share-links/preview": [{ linkToken: token() }, 410],
+  // Anonymous preview of an unknown well-formed token: truthful 404 link_not_found (pack 4).
+  "POST /api/share-links/preview": [{ linkToken: token() }, 404],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   // The v0 guest-agent-links exchange was removed (#3216): its routes are
   // not open, not declared, and answer plain 404 — pinned by
