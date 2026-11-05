@@ -835,7 +835,7 @@
       }
     },
     "room_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1185,7 +1185,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1617,7 +1617,7 @@
       }
     },
     "room_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1817,7 +1817,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

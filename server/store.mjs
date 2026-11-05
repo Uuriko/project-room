@@ -780,7 +780,7 @@ const shapes = {
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
   [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer attempt evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
-  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
+  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll toMemberId`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt pullRequests blocks`,
   [T.CLAIM_RELEASED]: work,
