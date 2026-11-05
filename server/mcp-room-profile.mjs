@@ -704,7 +704,16 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
   }
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
-    return buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+    const pack = buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+    // Who is actually around: an agent deciding whether to wait on someone
+    // needs their last action and host status, not only the roster.
+    let seen = null;
+    try { seen = new Map(store.presence(secret, roomId, []).members.map(member => [member.memberId, member])); } catch { seen = null; }
+    if (!seen) return pack;
+    return { ...pack, members: pack.members.map(member => {
+      const p = seen.get(member.id);
+      return { ...member, lastActedAt: p?.lastActedAt ?? null, hostStatus: p?.presence?.status ?? null, hostLastSeenAt: p?.lastSeenAt ?? null };
+    }) };
   }
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as
