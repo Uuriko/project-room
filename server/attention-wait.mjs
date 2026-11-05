@@ -93,7 +93,7 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     active.set(key, generation); // Supersede is initialized before this slot is visible.
     let waits = lastWaits.get(store);
     if (!waits) lastWaits.set(store, waits = new Map());
-    waits.set(key, started); if (waits.size > 4096) waits.delete(waits.keys().next().value);
+    waits.delete(key); waits.set(key, started); if (waits.size > 4096) waits.delete(waits.keys().next().value);
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.
