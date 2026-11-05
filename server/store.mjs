@@ -8,7 +8,7 @@ import {ensureDefaultChannelState} from '../src/default-channel-state.js';
 import {readCurrentEventWindow,currentEventRedactionMessages} from './current-room-events.mjs';
 import { assertRestoreAdmitted, restorePending, verifyRestoreControl } from './restore-admission.mjs';
 import {readCurrentWorkListing} from './current-work-list.mjs';
-import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
+import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, currentActiveMemberAuthority, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
 import { bootstrapLegacyWriteProofs, configureWriteIntegrity, beginWriteProofFrame, endWriteProofFrame, publishProjectionWrites, projectionDigest, projectionContentHash, servingContentProof, servingProofDrift, assertProjectionWrite, assertMessageWrite, recordMessageWrite, withVerifiedRoomReconstruction } from './write-integrity.mjs';
@@ -4058,18 +4058,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   currentDmConsentTransaction(roomId,operation){
     return this.transaction(()=>withCurrentServingWriter(this.db,roomId,operation));
   }
-  currentDmConsentAuthority(roomId) {
+  currentDmConsentAuthority(roomId, memberIds = null) {
     if(!isCurrentRoom(this.db,roomId))return null;
-    return this.readTransaction(()=>withCurrentReadContext(this.db,roomId,()=>{
-      const authority=this.roomAuthority(roomId);
-      return {room:{id:roomId,ownerId:authority.ownerId},members:authority.members};
+    return this.readTransaction(()=>withCurrentReadContext(this.db,roomId,(b)=>{
+      if(memberIds&&memberIds.length){
+        // Addressed (CENSUS-DESIGN §3.3 pattern a, W3200 R-03): owner + the
+        // pair the caller names, proof-loaded one record at a time — never
+        // the total-record census.
+        const base=currentRoomAuthority(this.db,roomId,{memberId:memberIds[0]});
+        if(!base)return null;
+        const members={...base.members};
+        for(const id of new Set(memberIds.slice(1))){
+          if(!validId(id)||Object.hasOwn(members,id))continue;
+          const member=readCurrentRecord(this.db,roomId,'members',id,b);
+          if(member!==undefined)Object.defineProperty(members,id,{value:member,enumerable:true,writable:true,configurable:true});
+        }
+        return {room:{id:roomId,ownerId:base.ownerId},members};
+      }
+      // No ids in hand (the list / pendingFor moderation views render handles
+      // for arbitrary pairs): the ACTIVE roster (pattern b) on the helper's
+      // own budget — still never the total-record census.
+      const authority=currentActiveMemberAuthority(this.db,roomId);
+      return authority?{room:{id:roomId,ownerId:authority.ownerId},members:authority.members}:null;
     }));
   }
   appendSideTableEvent(roomId, event) {
     if(isCurrentRoom(this.db,roomId)){
       if(![T.DM_CONSENT_CHANGED,T.REFERRAL_COMPLETED,T.AGENT_INVITE_MINTED,T.LAND_UPDATED,T.ACCESS_REQUESTED].includes(event.type))fail(409,'current_room_context_unavailable','This side-table event has no qualified current writer');
       return this.transaction(()=>withCurrentReadContext(this.db,roomId,()=>withCurrentServingWriter(this.db,roomId,()=>{
-        const context=event.type===T.DM_CONSENT_CHANGED ? currentDmConsentEventContext(this,roomId) : currentInviteContext(this,roomId,{memberIds:[event.actorId,event.data.referrerMemberId,event.data.refereeMemberId]}),room=context.room;
+        const context=event.type===T.DM_CONSENT_CHANGED ? currentDmConsentEventContext(this,roomId,{memberIds:[event.actorId,event.data.requesterId,event.data.targetId]}) : currentInviteContext(this,roomId,{memberIds:[event.actorId,event.data.referrerMemberId,event.data.refereeMemberId]}),room=context.room;
         refuseArchivedWrite(room.state);
         if(room.sequence>=PILOT_LIMITS.eventsPerRoom)fail(409,'pilot_limit','Bounded pilot capacity reached; no data was changed');
         let state;try{state=compact(event.type===T.REFERRAL_COMPLETED ? applyEventWithGrowth(room.state,event,growthCollector).state : applyEvent(room.state,event));}catch(error){fail(422,'invalid_side_table_event',error.message);}

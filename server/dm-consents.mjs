@@ -78,8 +78,8 @@ export class DmConsents {
   }
 
   // ---- internals -------------------------------------------------------
-  _roomState(roomId) {
-    const current=this.store.currentDmConsentAuthority?.(roomId);if(current)return current;
+  _roomState(roomId, memberIds = null) {
+    const current=this.store.currentDmConsentAuthority?.(roomId, memberIds);if(current)return current;
     const room = this.store.room(roomId);
     if (!room) fail(404, "room_not_found", "No such room");
     return room.state;
@@ -157,7 +157,7 @@ export class DmConsents {
     const cleanReason = reason.trim().slice(0, MAX_DM_REASON_CHARS);
 
     return this._transaction(roomId,() => {
-      const state = this._roomState(roomId);
+      const state = this._roomState(roomId, [requesterId, targetId]);
       const requester = this._requireActiveMember(state, requesterId, "requester_not_found");
       this._requireActiveMember(state, targetId, "target_not_found");
       // Issue #995: a DM request is new outbound contact, and this write
@@ -200,7 +200,7 @@ export class DmConsents {
   decide(roomId, targetId, requesterId, decision) {
     if (!DM_CONSENT_DECISIONS.includes(decision)) fail(422, "invalid_dm_decision", "decision must be approve, reject, or block");
     return this._transaction(roomId,() => {
-      const state = this._roomState(roomId);
+      const state = this._roomState(roomId, [targetId, requesterId]);
       this._requireActiveMember(state, targetId, "target_not_found");
       this._requireActiveMember(state, requesterId, "requester_not_found");
       const existing = this._get(roomId, requesterId, targetId);
@@ -220,7 +220,7 @@ export class DmConsents {
   revoke(roomId, memberId, otherId) {
     if (typeof otherId !== "string" || !otherId) fail(422, "invalid_dm_request", "otherMemberId is required");
     return this._transaction(roomId,() => {
-      const state = this._roomState(roomId);
+      const state = this._roomState(roomId, [memberId, otherId]);
       this._requireActiveMember(state, memberId, "member_not_found");
       const forward = this._get(roomId, memberId, otherId);
       const backward = this._get(roomId, otherId, memberId);
@@ -244,7 +244,7 @@ export class DmConsents {
   // history is kept, and the requester may ask again.
   unblock(roomId, targetId, requesterId) {
     return this._transaction(roomId,() => {
-      const state = this._roomState(roomId);
+      const state = this._roomState(roomId, [targetId, requesterId]);
       this._requireActiveMember(state, targetId, "target_not_found");
       const existing = this._get(roomId, requesterId, targetId);
       if (!existing || existing.status !== "blocked") fail(409, "dm_not_blocked", "This member is not blocked");
@@ -266,7 +266,7 @@ export class DmConsents {
     if (typeof blockedId !== "string" || !blockedId) fail(422, "invalid_dm_block", "blockedMemberId is required");
     if (blockerId === blockedId) fail(422, "invalid_dm_block", "You cannot block yourself");
     return this._transaction(roomId,() => {
-      const state = this._roomState(roomId);
+      const state = this._roomState(roomId, [blockerId, blockedId]);
       this._requireActiveMember(state, blockerId, "member_not_found");
       this._requireActiveMember(state, blockedId, "blocked_not_found");
       const existing = this._get(roomId, blockedId, blockerId);
@@ -319,7 +319,12 @@ export class DmConsents {
 
   // pendingFor: incoming pending requests for a member (agentInbox surface).
   pendingFor(roomId, memberId) {
-    const state = { members: this.store.roomAuthority(roomId).members };
+    // Handles render for arbitrary requesters, so this view takes the
+    // active roster (CENSUS-DESIGN pattern b) on current rooms — not the
+    // total-record census roomAuthority runs there (W3200 R-03). Legacy
+    // rooms keep the roomAuthority projection exactly as before.
+    const current = this.store.currentDmConsentAuthority?.(roomId);
+    const state = { members: (current ?? this.store.roomAuthority(roomId)).members };
     this._requireActiveMember(state, memberId, "member_not_found");
     const rows = this.db.prepare(
       "SELECT * FROM dm_consents WHERE room_id=? AND target_id=? AND status='pending' ORDER BY created_at ASC"

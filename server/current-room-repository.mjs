@@ -187,6 +187,7 @@ CREATE INDEX IF NOT EXISTS current_native_work_held ON current_room_records(room
 CREATE INDEX IF NOT EXISTS current_native_work_proposals ON events(room_id,json_extract(body,'$.data.workItemId'),sequence) WHERE json_extract(body,'$.type')='work.proposed';
 CREATE INDEX IF NOT EXISTS current_work_summary_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='workSummary' AND present=1;
 CREATE INDEX IF NOT EXISTS current_reply_request_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='replyRequests' AND present=1;
+CREATE INDEX IF NOT EXISTS current_member_active_keys ON current_room_records(room_id,record_key) WHERE domain='members' AND COALESCE(json_extract(payload,'$.active'),1)<>0;
 CREATE INDEX IF NOT EXISTS current_messages_public_seq ON messages(room_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
 CREATE INDEX IF NOT EXISTS current_messages_channel_public_seq ON messages(room_id,channel_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
 CREATE INDEX IF NOT EXISTS current_messages_incoming_seq ON messages(room_id,to_member_id,seq DESC,message_id DESC);
@@ -523,6 +524,37 @@ function currentMemberAuthorityFromHead(db,roomId,head,b,memberId) {
   if(!Object.hasOwn(members,room.ownerId))corrupt('missing owner authority');
   return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
 }
+// Active-roster authority (CENSUS-DESIGN §2.1, W3200 R-03): the census below
+// counts TOTAL member records and refuses past 100, but admission caps
+// ACTIVE members at 100 — a room that churned past 101 records (join,
+// deactivate, replace) is not over capacity. This core enumerates ACTIVE
+// member records only, through the current_member_active_keys index, on its
+// OWN budget(1024) so a caller's reservation is never charged the roster.
+// The refusal is the census's identical shape, denominated in active
+// members: a 101st active record refuses. Values are proof-loaded exactly
+// like the census. Owner rule: ownerId comes from the room record (see the
+// wrapper); a deactivated owner's record is simply absent from the map and
+// is NOT a corruption — callers that need it read it addressed.
+function currentActiveMembersFromHead(db,roomId,head) {
+  const b=budget(1024);
+  const keys=db.prepare("SELECT r.record_key FROM current_room_records r JOIN current_room_record_proofs p ON p.room_id=r.room_id AND p.domain=r.domain AND p.record_key=r.record_key AND p.present=1 WHERE r.room_id=? AND r.domain='members' AND COALESCE(json_extract(r.payload,'$.active'),1)<>0 ORDER BY r.record_key LIMIT 101").all(roomId);
+  charge(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+  if(keys.length>100)refuse('Room authority requires bounded membership');
+  if(keys.length>head.counts.members)corrupt('active member census exceeds complete census');
+  const members={};
+  for(const {record_key:key} of keys) {
+    const member=readCurrentRecord(db,roomId,'members',key,b);
+    if(member===undefined)corrupt('active member census differs from proof index');
+    Object.defineProperty(members,key,{value:member,enumerable:true,writable:true,configurable:true});
+  }
+  return members;
+}
+export function currentActiveMemberAuthority(db,roomId) {
+  const b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);
+  if(!room||!validId(room.ownerId))corrupt('missing owner authority');
+  return {sequence:head.sequence,ownerId:room.ownerId,members:currentActiveMembersFromHead(db,roomId,head),historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
+}
 function currentAuthorityFromHead(db,roomId,head,b) {
   const room=readCurrentRecord(db,roomId,'metadata','room',b);
   const members={};
@@ -606,10 +638,24 @@ export function withCurrentServingWriter(db,roomId,operation) {
 // This existing side-table event is a reducer no-op except legacy default
 // channel normalization. Consent authority stays in dm_consents, atomically
 // committed with its sequenced receipt and the protected current head.
-export function currentDmConsentEventContext(store,roomId) {
+export function currentDmConsentEventContext(store,roomId,{memberIds=[]}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  const authority=currentAuthorityFromHead(db,roomId,head,b),state=emptyRoomState();
-  state.room=readCurrentRecord(db,roomId,'metadata','room',b);state.members=authority.members;
+  const state=emptyRoomState();
+  state.room=readCurrentRecord(db,roomId,'metadata','room',b);
+  // Addressed authority (CENSUS-DESIGN §3.3, W3200 R-03): the consent reducer
+  // needs only the actor plus the pair the event names, so members are built
+  // addressed (owner + memberIds[0], then one proof-loaded record per extra
+  // id) — never the total-record census, which bricked consent receipts in
+  // churn-heavy rooms past 101 records at <=100 active members.
+  state.members=currentMemberAuthorityFromHead(db,roomId,head,b,memberIds[0]).members;
+  for(const id of new Set(memberIds.slice(1))) {
+    if(!validId(id)||Object.hasOwn(state.members,id))continue;
+    const member=readCurrentRecord(db,roomId,'members',id,b);
+    if(member!==undefined){
+      if(member?.id!==id)corrupt('member authority identity differs');
+      Object.defineProperty(state.members,id,{value:member,enumerable:true,writable:true,configurable:true});
+    }
+  }
   const general=readCurrentRecord(db,roomId,'channels','general',b);if(general!==undefined)state.channels.general=general;
   bindCurrentRecordContext(state,{replyRequestCount:head.counts.replyRequests});
   return {room:{sequence:head.sequence,state},current:{head,before:fieldsOf(state),workRefs:new Map(),budget:b,messageRows:new Map()}};
@@ -718,9 +764,14 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
   // Mention labels include display/identity aliases and longest-match ties.
   // Only that semantic path needs the full roster; never infer its actor from
   // caller-supplied command fields. Live and durable replay pass trusted actors.
+  // The roster it resolves against is the ACTIVE roster (CENSUS-DESIGN §3.3):
+  // every other mention surface in the product (growth-mentions,
+  // human-experience) already defines mention addressing over active members,
+  // and the total-record census bricked '@' posts in churn-heavy rooms past
+  // 101 records at <=100 active members (W3200 R-03).
   const fullRoster=command.type==='message.posted'&&typeof command.data.body==='string'&&command.data.body.includes('@');
   const state=emptyRoomState();
-  state.members=fullRoster?currentAuthorityFromHead(db,roomId,head,b).members:currentMemberAuthorityFromHead(db,roomId,head,b,actorId).members;
+  state.members=fullRoster?currentActiveMembersFromHead(db,roomId,head):currentMemberAuthorityFromHead(db,roomId,head,b,actorId).members;
   const keys=db.prepare("SELECT domain,record_key FROM current_room_record_proofs WHERE room_id=? AND domain IN ('metadata','shape') AND present=1 ORDER BY domain,record_key LIMIT 33").all(roomId);
   if(keys.length>32)refuse('Current metadata shape exceeds bounded context');charge(b,keys.length*256,keys.length);
   for(const {domain,record_key:key} of keys) {
