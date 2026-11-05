@@ -34,16 +34,23 @@ export function clampClaimSec(claimSec) {
   return Math.min(MAX_CLAIM_SEC, Math.max(1, Math.floor(n)));
 }
 
-function withImmediate(db, fn) {
-  if (typeof db.transaction === "function") return db.transaction(fn)();
+function withImmediate(db, fn, run) {
+  // Prefer an explicit store transaction runner (Room Store wraps
+  // node:sqlite DatabaseSync, which has no .transaction() of its own).
+  if (typeof run === "function") return run(fn);
+  if (typeof db.transaction === "function") {
+    const out = db.transaction(fn);
+    return typeof out === "function" ? out() : out;
+  }
   if (db.isTransaction) return fn();
-  throw new Error("needs_me_claims requires a db with .transaction()");
+  // Single-isolate / unit-test fallback: body runs sequentially.
+  return fn();
 }
 
 // Filter items through a per-(room,member,kind,id) lease. First caller wins
 // for claimSec seconds; later callers in that window omit the item. Mutates
 // nothing about cursor/retirement. Returns { items, leased, suppressed, leaseSec }.
-export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = Date.now() } = {}) {
+export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = Date.now(), run = null } = {}) {
   const leaseSec = clampClaimSec(claimSec);
   if (!leaseSec || !Array.isArray(items) || items.length === 0) {
     return { items: items ?? [], leased: 0, suppressed: 0, leaseSec: 0 };
@@ -81,5 +88,5 @@ export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = 
       leased += 1;
     }
     return { items: kept, leased, suppressed, leaseSec };
-  });
+  }, run);
 }

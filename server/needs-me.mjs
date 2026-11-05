@@ -1259,7 +1259,7 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   // claimSec seconds so a second wake/check-in does not double-answer.
   // Default off (0) for GET /api/needs-me; MCP room_needs_me passes 45.
   const memberByRoom = new Map(links.map(link => [link.roomId, link.memberId]));
-  const claim = filterClaimedNeedsMe(store.db, { items, memberByRoom, claimSec: claimSec === undefined ? 0 : claimSec });
+  const claim = filterClaimedNeedsMe(store.db, { items, memberByRoom, claimSec: claimSec === undefined ? 0 : claimSec, run: (fn) => store.transaction(fn) });
   items.length = 0;
   items.push(...claim.items);
   const claimMeta = claim.leaseSec > 0 ? { claims: { leased: claim.leased, suppressed: claim.suppressed, leaseSec: claim.leaseSec } } : {};
