@@ -237,7 +237,7 @@ test('work ids up to 128 chars and work:<id> message collisions never stop the c
   const parse = items => attentionResult({jsonrpc: '2.0', id: requestId, result: {structuredContent: result(args, {after: 12, status: 'ready', items})}}, {...args, requestId});
   const long = 'w'.repeat(128);
   const [pointer] = parse([work(long)]).items;
-  assert.match(pointer.messageId, /^work:[0-9a-f]{48}$/);
+  assert.match(pointer.messageId, /^work::[0-9a-f]{48}$/);
   assert.ok(pointer.messageId.length <= 128);
   assert.equal(parse([work('x'.repeat(124))]).items.length, 1);
   // A message literally named work:task and a pointer for task: the message keeps
@@ -245,4 +245,17 @@ test('work ids up to 128 chars and work:<id> message collisions never stop the c
   const both = parse([work('task'), row(12, 'work:task')]).items;
   assert.deepEqual(both, [{messageId: 'work:task', sequence: 12}]);
   assert.throws(() => parse([row(11, 'dup'), row(12, 'dup')]), e => e.code === 'notification_context_unavailable');
+});
+
+test('a long-id digest key cannot alias any legal short work id', () => {
+  const args = {roomId, memberId, after: 10, timeoutSec: 120}, requestId = 'read';
+  const work = (id, sequence) => ({kind: 'work', workItemId: id, workRevision: 0, sequence, nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId: id}}});
+  const parse = items => attentionResult({jsonrpc: '2.0', id: requestId, result: {structuredContent: result(args, {after: 13, status: 'ready', items})}}, {...args, requestId});
+  const long = 'L'.repeat(128);
+  const digest = parse([work(long, 11)]).items[0].messageId.slice('work::'.length);
+  // The adversarial short id equal to the digest keeps its own pointer.
+  const both = parse([work(long, 11), work(digest, 12)]).items;
+  assert.equal(both.length, 2);
+  assert.notEqual(both[0].messageId, both[1].messageId);
+  assert.equal(both[1].messageId, 'work:' + digest);
 });

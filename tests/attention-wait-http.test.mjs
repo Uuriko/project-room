@@ -149,3 +149,33 @@ test('includeWork survives many small mixed-agent proposals within the read budg
   }
   assert.deepEqual([...new Set(found)].sort(), Array.from({length: 8}, (_, k) => 'mixed-' + k * 3).sort());
 });
+
+test('work pointers are hints: a work item whose pointer yields is still found in needs-me', async t => {
+  const f = await fixture(t);
+  f.store.command(f.saved.owner, 'commons', {id: 'hint-task', type: 'work.proposed',
+    data: {workItemId: 'hinted', title: 'Hint task', definitionOfDone: 'D', accountableMemberId: f.saved.identityId}});
+  f.post('work:hinted', {toMemberId: f.saved.identityId, body: 'A message whose id equals the work key'});
+  const result = accepted(await f.call({timeoutSec: 0, includeWork: true}).result);
+  assert.ok(result.items.some(item => item.messageId === 'work:hinted'), 'the message pointer is delivered');
+  assert.ok(result.items.some(item => item.kind === 'work' && item.workItemId === 'hinted'), 'the server still names the work');
+  // Whatever the courier forwards, the woken agent's needs-me read lists the task.
+  const {readCurrentWorkListing} = await import('../server/current-work-list.mjs');
+  const listing = readCurrentWorkListing(f.store, f.store.issueAccessKey('commons', f.saved.identityId), 'commons', {focus: 'needs_me'});
+  assert.ok(listing.work.some(row => row.id === 'hinted'));
+});
+
+test('a budget-sized run of other agents work resumes at the first unread candidate and finds mine', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 60; i++) f.store.command(f.saved.owner, 'commons', {id: 'other-' + i, type: 'work.proposed',
+    data: {workItemId: 'other-' + i, title: 'Other ' + 'x'.repeat(4000), definitionOfDone: 'D'.repeat(4000), accountableMemberId: 'observer'}});
+  f.store.command(f.saved.owner, 'commons', {id: 'mine-last', type: 'work.proposed',
+    data: {workItemId: 'mine-last', title: 'Mine', definitionOfDone: 'D', accountableMemberId: f.saved.identityId}});
+  let after = f.after, found = false, calls = 0;
+  for (; calls < 40 && !found; calls++) {
+    const result = accepted(await f.call({timeoutSec: 0, includeWork: true, after}).result);
+    assert.ok(result.after > after || result.items.length, 'every wait makes progress');
+    found = result.items.some(item => item.workItemId === 'mine-last');
+    after = result.after;
+  }
+  assert.equal(found, true);
+});

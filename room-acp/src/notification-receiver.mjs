@@ -51,12 +51,15 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
  const seen=new Set();
  const parsed=value.items.map(p=>{
   // A task that now waits on this member rides the pointer shape as work:<id>.
-  // Ids too long for that key use a digest; the woken session reads its work.
+  // Ids too long for that key use a digest. Pointers are wake hints: the woken
+  // session lists its assigned work, so a yielded pointer loses nothing.
   const work=p?.kind==='work';
   if(work?!closed(p,['kind','workItemId','workRevision','sequence','nextRead'])||!id(p.workItemId,128)||!integer(p.workRevision)
    :!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)||!id(p.messageId,128))throw invalid();
   if(!integer(p.sequence)||p.sequence<=after||p.sequence>value.after)throw invalid();
-  const messageId=!work?p.messageId:p.workItemId.length<=123?'work:'+p.workItemId:'work:'+createHash('sha256').update(p.workItemId).digest('hex').slice(0,48);
+  // A legal work id starts with a letter or digit, so 'work::' (two colons)
+  // can never be produced by a short id: the two key spaces are disjoint.
+  const messageId=!work?p.messageId:p.workItemId.length<=123?'work:'+p.workItemId:'work::'+createHash('sha256').update(p.workItemId).digest('hex').slice(0,48);
   return{work,messageId,sequence:p.sequence};
  });
  // Messages keep the server's no-duplicate contract. A work pointer whose key
