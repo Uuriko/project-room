@@ -149,6 +149,8 @@ test('presence shows whether a member courier is waiting and when it last waited
   assert.equal(closed.waiting, false);
   assert.equal(closed.lastWaitAt, open.lastWaitAt, 'the last wait time survives the wait ending');
   assert.equal('courier' in f.store.presence(f.saved.owner, 'commons', []).members.find(m => m.memberId === 'owner'), false, 'humans carry no courier field');
+});
+
 test('includeWork survives many small mixed-agent proposals within the read budget', async t => {
   const f = await fixture(t);
   for (let i = 0; i < 24; i++) f.store.command(f.saved.owner, 'commons', {id: 'mixed-' + i, type: 'work.proposed',
