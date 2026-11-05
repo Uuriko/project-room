@@ -1,3 +1,4 @@
+import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
 import {renderLobbyAgentPastePage} from './agent-paste-copy.mjs';
@@ -594,6 +595,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const oauthResource = mcpOAuthClients.length ? new URL("/mcp", origin).href : null;
   if (oauthResource) mcpOAuthResourceMetadata(oauthResource, origin);
   const accountAgentEnrollment = createAccountAgentEnrollment({store,resource:oauthResource,preferences:mcpOAuthClients,enabled:accountAgentEnrollmentEnabled===true&&Boolean(oauthResource)});
+  // ROOM_CONNECT_FUNNEL (off): aggregate-only connect funnel in /api/health.
+  const connectFunnel = connectFunnelEnabled() && store?.db ? createConnectFunnel({ db: store.db }) : null;
   const oauthMetadataUrl = oauthResource ? new URL("/.well-known/oauth-protected-resource/mcp", origin).href : null;
   const mcpClientIds = new Set(mcpOAuthClients.map(client => client.clientId));
   const mcpRedirects = new Set(mcpOAuthClients.flatMap(client => client.redirectUris));
@@ -1372,7 +1375,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_|oat_|iat_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, oauthMetadataUrl, signal: resolveRequestSignal() });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, oauthMetadataUrl, signal: resolveRequestSignal(), connectFunnel });
         }
         return writeRoomMcpNode(req, res, url);
       }
@@ -1454,7 +1457,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         streams,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
+        return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField, ...(connectFunnel ? { connectFunnel: connectFunnel.summary() } : {}) }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         // r56: the store's SQLite value limit (read-only probe) tells which

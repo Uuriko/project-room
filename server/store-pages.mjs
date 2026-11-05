@@ -11,6 +11,7 @@ function page(title, origin, sections) {
   const body = sections.map(([heading, lines]) => `<section><h2>${esc(heading)}</h2>${lines.map(line => `<p>${line}</p>`).join("")}</section>`).join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${esc(title)} - Project Room</title><link rel="canonical" href="${esc(origin)}/${esc(title.toLowerCase())}">
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}code{background:#f2f2f2;padding:0 .25rem;border-radius:3px}</style>
 </head><body><main><h1>Project Room ${esc(title)}</h1>

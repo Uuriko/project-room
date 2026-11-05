@@ -92,6 +92,7 @@ function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <meta name="content-trust" content="${escapeHtml(CONTENT_TRUST)}">

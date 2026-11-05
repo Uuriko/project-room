@@ -53,7 +53,7 @@ const pageFiles = new Map([
 
 // Human-facing dynamic routes (valid link targets, not link sources here).
 const dynamicRoutes = new Set([
-  "/receipts", "/demo", "/watch", "/terms", "/privacy", "/subprocessors",
+  "/receipts", "/download", "/demo", "/watch", "/terms", "/privacy", "/subprocessors",
   "/acceptable-use", "/report", "/legal", "/r/project-room-lobby",
   "/llms.txt", "/kits.txt", "/.well-known/agent.json",
 ]);

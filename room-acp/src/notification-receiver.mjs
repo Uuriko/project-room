@@ -50,9 +50,13 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
   ||value.timeoutSec!==timeoutSec||!integer(value.waitedMs)||!Array.isArray(value.items)||value.items.length>4)throw invalid();
  const seen=new Set();
  const items=value.items.map(p=>{
-  if(!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)
-   ||!id(p.messageId,128)||!integer(p.sequence)||p.sequence<=after||p.sequence>value.after||seen.has(p.messageId))throw invalid();
-  seen.add(p.messageId);return{messageId:p.messageId,sequence:p.sequence};
+  // A task that now waits on this member rides the same pointer shape as work:<id>.
+  const work=p?.kind==='work';
+  if(work?!closed(p,['kind','workItemId','workRevision','sequence','nextRead'])||!id(p.workItemId,123)||!integer(p.workRevision)
+   :!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)||!id(p.messageId,128))throw invalid();
+  const messageId=work?'work:'+p.workItemId:p.messageId;
+  if(!integer(p.sequence)||p.sequence<=after||p.sequence>value.after||seen.has(messageId))throw invalid();
+  seen.add(messageId);return{messageId,sequence:p.sequence};
  });
  if(value.status==='ready'?!items.length:items.length>0)throw invalid();
  if(value.status==='catch_up_required'&&value.after===after||value.status==='timeout'&&!value.sourceComplete)throw invalid();
@@ -76,7 +80,7 @@ export async function receiveCloudNotifications({connection,configFile,env=proce
   const wait=async(after,timeoutSec)=>{
    const remaining=lastStart+2500-now();if(remaining>0)await delay(remaining,signal);signal?.throwIfAborted();lastStart=now();
    const requestId=randomUUID();
-   const envelope=await room.request('/mcp',{body:{jsonrpc:'2.0',id:requestId,method:'tools/call',params:{name:'room_wait_for_attention',arguments:{roomId:connection.roomId,after,timeoutSec}}},timeoutMs:(timeoutSec+15)*1000,signal});
+   const envelope=await room.request('/mcp',{body:{jsonrpc:'2.0',id:requestId,method:'tools/call',params:{name:'room_wait_for_attention',arguments:{roomId:connection.roomId,after,timeoutSec,includeWork:true}}},timeoutMs:(timeoutSec+15)*1000,signal});
    return attentionResult(envelope,{requestId,roomId:connection.roomId,memberId:connection.memberId,after,timeoutSec});
   };
   print('Notification-only receiver: pointers to configured session; no execution, acknowledgement or closure. Bootstrap does not clear older obligations.');

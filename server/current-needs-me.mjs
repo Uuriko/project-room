@@ -8,6 +8,7 @@ import {ServiceError} from './service-error.mjs';
 const fail=()=>{throw new ServiceError(409,'stale_needs_me_cursor','Attention source or service changed. Restart needs-me without since.');};
 const clip=value=>String(value??'').replace(/\s+/g,' ').slice(0,140);
 const keys='kind roomId memberId credential head mode minimum after older workCursor conversationDone workDone'.split(' ');
+const MAX_NEEDS_ME_WORK_PAGES=8;
 export function readCurrentNeedsMePage(store,secret,roomId,options={}){
  return store.readTransaction(()=>readPage(store,secret,roomId,options));
 }
@@ -48,21 +49,36 @@ function readPage(store,secret,roomId,{cursor,after,freshWindow=500,expectedMode
   conversationComplete=state.conversationDone;
  }
  if(!state.workDone){
-  const page=store.currentWorkListing(secret,roomId,{focus:'needs_me',limit:1,expectedSessionBinding,...(state.workCursor?{cursor:state.workCursor}:{})});
-  for(const item of page.work)items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
-  for(const request of page.replyRequests??[]){
-   const seq=store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
-    const value=readCurrentRecord(store.db,roomId,'replyRequests',request.id);chargeCurrentReadBudget(b,256);
-    return store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?').get(roomId,value.openingEventId)?.sequence;
-   }));
-   if(!Number.isSafeInteger(seq))throw Error('current_room_corrupt: request opening is missing');
-   items.push({kind:'direct_ask',roomId,seq,id:request.id,summary:clip(`Reply requested by ${request.requesterId}`),next:{...request.nextRead,arguments:{roomId,...request.nextRead.arguments}}});
+  // Drain filtered work pages inside this one needs-me page: the listing
+  // filters after paginating at limit 1, so a non-attention candidate can
+  // eat a whole page while addressed work waits behind it. Reuse the same
+  // cursor machinery, viewer-scoped summary reader, and next-step filter
+  // per iteration — no new source, no new visibility, no budget raise.
+  // Bounded at MAX_NEEDS_ME_WORK_PAGES; hitting the bound with work left
+  // returns an honest incomplete page (see the complete field), never a
+  // forced complete.
+  let workPages=0;
+  while (!state.workDone && workPages < MAX_NEEDS_ME_WORK_PAGES) {
+   workPages++;
+   const itemsBefore=items.length;
+   const page=store.currentWorkListing(secret,roomId,{focus:'needs_me',limit:1,expectedSessionBinding,...(state.workCursor?{cursor:state.workCursor}:{})});
+   for(const item of page.work)items.push({kind:'work',roomId,seq:item.revision,id:item.id,summary:clip(item.title),next:{...item.nextRead,arguments:{roomId,...item.nextRead.arguments}}});
+   for(const request of page.replyRequests??[]){
+    const seq=store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
+     const value=readCurrentRecord(store.db,roomId,'replyRequests',request.id);chargeCurrentReadBudget(b,256);
+     return store.db.prepare('SELECT sequence FROM events WHERE room_id=? AND id=?').get(roomId,value.openingEventId)?.sequence;
+    }));
+    if(!Number.isSafeInteger(seq))throw Error('current_room_corrupt: request opening is missing');
+    items.push({kind:'direct_ask',roomId,seq,id:request.id,summary:clip(`Reply requested by ${request.requesterId}`),next:{...request.nextRead,arguments:{roomId,...request.nextRead.arguments}}});
+   }
+   state.workCursor=page.page.nextCursor;state.workDone=!page.page.hasMore;workComplete=state.workDone;visibleThrough=page.evaluatedThrough;
+   // Stop as soon as this page has yielded a standing obligation.
+   if(items.length>itemsBefore)break;
   }
-  state.workCursor=page.page.nextCursor;state.workDone=!page.page.hasMore;workComplete=state.workDone;visibleThrough=page.evaluatedThrough;
  }
  const complete=state.conversationDone&&state.workDone;
  if(complete&&!visibleThrough)visibleThrough=withCurrentReadContext(store.db,roomId,()=>currentVisibleHorizon(store,roomId,binding.memberId,binding.sequence));
  const nextCursor=complete?null:conversationCursorCodec(store).encode(state);
  if(nextCursor&&nextCursor.length>4096)throw new ServiceError(409,'current_room_context_unavailable','Attention continuation exceeds the existing cursor codec bound; inspect inbox and work separately.');
- return{items,complete,cursor:nextCursor,visibleThrough,coverage:{available:true,mode:'native_bounded',conversation:{complete:conversationComplete,examined,direction:state.mode,range:state.mode==='recent'?{recentEventWindow:freshWindow}:{afterProvided:true}},standingWorkAndRequests:{complete:workComplete},omitted:['ambient bond and peer routing presentation','legacy board presentation'],globalAttentionComplete:false}};
+ return{items,complete,cursor:nextCursor,visibleThrough,coverage:{available:true,mode:'native_bounded',complete,conversation:{complete:conversationComplete,examined,direction:state.mode,range:state.mode==='recent'?{recentEventWindow:freshWindow}:{afterProvided:true}},standingWorkAndRequests:{complete:workComplete},omitted:['ambient bond and peer routing presentation','legacy board presentation'],globalAttentionComplete:false}};
 }

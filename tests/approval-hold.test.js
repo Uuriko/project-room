@@ -73,7 +73,10 @@ test("flag on: request wakes approver, delivery refused, approve lets it through
   assert.match(last.body, /boss/, "the approver is named on the attention receipt");
   const blocked = await f.call("lead", "update", { id: "w3", body: { state: "delivered" } });
   assert.notEqual(blocked.status, 200);
-  assert.equal((await f.call("other", "approval", { id: "w3", body: { action: "approve" } })).status, 422);
+  // FUNNEL-FIXES C2: a member with no approval relationship to the claim is
+  // refused with the generic 403 work_not_owner before any load-dependent
+  // answer (deliberate change from the post-load 422, PACK-REVISION-2 §1.1).
+  assert.equal((await f.call("other", "approval", { id: "w3", body: { action: "approve" } })).status, 403);
   const ok = await f.call("boss", "approval", { id: "w3", body: { action: "approve" } });
   assert.equal(ok.status, 200);
   assert.equal(ok.value.approvalHold.status, "approved");

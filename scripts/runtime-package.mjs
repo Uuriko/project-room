@@ -72,6 +72,9 @@ optional.push("server/public-work-settlement.mjs"); // First Shift settlement ra
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
+optional.push("server/request-states.mjs"); // request lifecycle states (flag ROOM_REQUEST_STATES; imported by server/reply-requests.mjs; pure)
+optional.push("server/experiments.mjs", "server/growth-experiments.mjs"); // EXP-1 (#5982) flagged experiment helpers (imported by server/mcp-full-profile.mjs); main missed registering them
+optional.push("server/git-remote.mjs", "server/routes/git-remote.mjs"); // ROOM_GIT_REMOTE phase 0 helpers + status route (flag off = 404; route module imported by server/routes/table.mjs)
 optional.push("server/room-owner.mjs"); // owner lookup without the member census (bounty escrow)
 optional.push("server/dm-consents.mjs", "server/public-face.mjs", "server/current-public-face.mjs", "server/routes/public-lobby.mjs", "server/agent-paste-copy.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
 optional.push("server/public-agent-page.mjs", "server/routes/public-agent-page.mjs"); // public agent page (imported by server/store.mjs and server/routes/table.mjs)
@@ -129,6 +132,8 @@ optional.push("server/status-digest.mjs"); // status-only post hint (flag ROOM_S
 optional.push("server/first-connect-task.mjs"); // first-connect task hint on room_join (flag ROOM_FIRST_CONNECT_TASK; imported by server/mcp-room-profile.mjs; pure)
 optional.push("server/invite-share.mjs"); // ROOM_INVITE_SHARE teammate paste line (imported by server/mcp-room-profile.mjs; imports connect-snippets.mjs)
 optional.push("server/showcase-page.mjs"); // ROOM_SHOWCASE example room page (imported by server/routes/table.mjs; imports public-search.mjs and connect-snippets.mjs)
+optional.push("server/connect-funnel.mjs"); // ROOM_CONNECT_FUNNEL aggregate connect metrics (imported by server/http.mjs; node:crypto only)
+optional.push("server/one-click-connect.mjs"); // ROOM_ONE_CLICK_CONNECT install links for /download (imported by server/download-page.mjs; imports connect-snippets.mjs)
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/thread-mutes.mjs"); // per-thread mutes (imported by server/store.mjs; pure, no imports of its own)
 optional.push("server/human-push.mjs"); // human browser push, mentions and DMs (imported by server/store.mjs)

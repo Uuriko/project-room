@@ -830,7 +830,12 @@ response's own `hint`/`next` when it names something more specific.
 | `last_login_method` | 409 | Keep at least one active sign-in method | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `last_unverified_email` | 409 | Verify an email before removing your last email sign-in method | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `link_access_denied` | 403 | Only the room creator can make member or co-admin links | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `link_authority_changed` | 410 | This invite link is no longer valid because its issuer's authority changed. Ask for a new invite link. | follow hint | Follow this error's hint and next steps. |
+| `link_cancelled` | 410 | This invite link was cancelled. Ask for a new invite link. | follow hint | Follow this error's hint and next steps. |
+| `link_expired` | 410 | This invite link has expired. Ask for a new invite link. | follow hint | Follow this error's hint and next steps. |
+| `link_full` | 410 | This invite link has reached its join limit. Ask for a new invite link. | follow hint | Follow this error's hint and next steps. |
 | `link_integrity_error` | 503 | Invitation link history requires operator reconciliation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `link_not_found` | 404 | No invite link was issued for this token. Check for typos or ask the inviter for a fresh link. | follow hint | Follow this error's hint and next steps. |
 | `link_unavailable` | 410 | This guest invite is not valid. | follow hint | Follow this error's hint and next steps. |
 | `listener_fenced` | 409 | A live listener lease holds this agent's wake queue — ack with its fencing token | no | Re-acquire the listener lease and use its fencing token; do not ack from a second listener. |
 | `login_method_exists` | 409 | This account already has a password; change it instead | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -1172,6 +1177,7 @@ response's own `hint`/`next` when it names something more specific.
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |
 | `wrong_link_kind` | 422 | Human invitation links are not agent credentials. | follow hint | Follow this error's hint and next steps. |
+| `wrong_link_kind_agent_invite` | 422 | This is an agent invite code (RM-…), not a share link; preview it at POST /api/agent-invites/preview. The answer says nothing about whether the invite is live. | follow hint | Follow this error's hint and next steps. |
 
 ### Work-list pagination
 
