@@ -342,6 +342,12 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
+// Stream admission (R-16.5): the server-wide ceiling bounds total SSE load;
+// the per-room share keeps any single room from holding more than half of
+// the pool, so one fully-watched room cannot refuse streams to every other
+// room. The per-credential cap at the admission check stays at 3.
+const STREAM_POOL_LIMIT = 100;
+const STREAM_PER_ROOM_LIMIT = 50;
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
@@ -1098,7 +1104,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
-    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    let sameCredential = 0, sameRoom = 0;
+    for (const item of streams) {
+      if (item.credentialHash === auth.credentialHash) sameCredential++;
+      if (item.roomId === roomId) sameRoom++;
+    }
+    if (streams.size >= STREAM_POOL_LIMIT || sameRoom >= STREAM_PER_ROOM_LIMIT || sameCredential >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };

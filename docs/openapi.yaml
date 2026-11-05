@@ -100,8 +100,9 @@ info:
     other non-GET room calls) with `X-RateLimit-Limit/Remaining/Reset`
     headers; reads burst 70, then 10 per second; (c) the chat flood guard — burst 30 per (room, member),
     refilling 1 per 2 seconds on message.posted/dm.posted only, with an
-    exact `Retry-After`; (d) stream_limit — 100 streams server-wide, 3
-    per credential, recover by closing a stream; (e) web fetch/research
+    exact `Retry-After`; (d) stream_limit — 100 streams server-wide, at
+    most 50 of them in any one room, 3 per credential, recover by closing
+    a stream; (e) web fetch/research
     quotas — per-member and per-room daily budgets with `Retry-After` plus
     `retryAfterMs`/`resetAt` in the body; (f) per-endpoint per-address
     guards (join 20/min, identity-create outer 30/min, agent keys/webhooks
@@ -1662,7 +1663,7 @@ paths:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
+        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, at most 50 in any one room, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
