@@ -4,6 +4,7 @@ import {RoomStore} from '../server/store.mjs';
 import {initialRoom} from '../server/bootstrap.mjs';
 import {event} from '../src/events.js';
 import {readEventTail} from '../server/updates.mjs';
+import {redactSelectedEventPage} from '../server/current-room-events.mjs';
 import {createRoomServer} from '../server/http.mjs';
 
 // W3200 R-07/R-08: a current-format event read must scan past the old fixed
@@ -91,5 +92,51 @@ test('R-08: HTTP ?tail=50 returns a full 50 visible events in one response', asy
   const page = await res.json();
   assert.equal(res.status, 200, JSON.stringify(page));
   assert.equal(page.events.length, 50, `HTTP tail=50 returned ${page.events.length} events (16 at the old shape)`);
+  assert.equal(page.hasMore, false);
+});
+
+// Regression (lane-10d recheck of 376f1568): a tail whose fill needs more
+// than one bounded page must survive the production redaction step. 60 posts
+// of ~4 KB make one eventsAfter call from the tail start yield only ~15 of
+// 50, so readEventTail combines several pages; the combined page object is
+// the one combineCurrentEventPages registered for redaction, and any copy
+// of it (e.g. a spread) makes the HTTP layer answer 409
+// current_room_context_unavailable. Small-post fixtures never span pages,
+// which is why the tests above did not catch this.
+function largeFixture(t, posts = 60) {
+  const store = new RoomStore(':memory:'); t.after(() => store.close());
+  const events = initialRoom();
+  const add = (type, data, actorId = 'owner') => events.push(event({roomId: 'commons', actorId, type, data}));
+  for (const memberId of ['alice', 'reader']) add('member.added', {memberId, displayName: memberId, kind: 'agent', permissions: []});
+  for (let i = 0; i < posts; i++) add('message.posted', {messageId: 'big-' + i, body: 'big ' + i + ' ' + 'x'.repeat(4000)});
+  store.initialize(events, {representation: 'normalized-current-v1'});
+  const key = store.issueAccessKey('commons', 'reader');
+  return {store, key};
+}
+
+test('R-08 regression: a multi-page readEventTail page passes the production redaction step', t => {
+  const {store, key} = largeFixture(t);
+  const page = readEventTail(store, key, 'commons', 50);
+  assert.equal(page.events.length, 50, `multi-page tail=50 returned ${page.events.length} events`);
+  assert.equal(page.hasMore, false);
+  const seqs = page.events.map(x => x.sequence);
+  assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b), 'tail sequences in order');
+  assert.equal(new Set(seqs).size, 50, 'no duplicates in combined tail');
+  assert.doesNotThrow(() => store.redactionMessages('commons', page),
+    'combined tail page must carry its registered redaction context');
+  const redacted = redactSelectedEventPage(store, 'commons', page);
+  assert.equal(redacted.events.length, 50, 'redacted multi-page tail keeps all 50 events');
+});
+
+test('R-08 regression: HTTP ?tail=50 over a multi-page tail returns 200 with a full 50 events', async t => {
+  const {store, key} = largeFixture(t);
+  const server = createRoomServer({store});
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const res = await fetch('http://127.0.0.1:' + server.address().port + '/api/rooms/commons/events?tail=50',
+    {headers: {authorization: 'Bearer ' + key}});
+  const page = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(page));
+  assert.equal(page.events.length, 50, `HTTP multi-page tail=50 returned ${page.events.length} events`);
   assert.equal(page.hasMore, false);
 });

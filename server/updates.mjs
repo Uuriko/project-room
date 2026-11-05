@@ -721,7 +721,14 @@ export function readEventTail(store, token, roomId, tail, binding = null) {
     }
     if (pages.length === 1) return pages[0];
     const combined = combineCurrentEventPages(roomId, pages);
-    return { ...combined, hasMore: combined.next < sequence };
+    // Return the registered object itself: combineCurrentEventPages keys
+    // the page's redaction context to this exact object identity, so a
+    // spread copy would make the HTTP redaction step refuse with 409
+    // current_room_context_unavailable. Setting hasMore on the object is
+    // safe — it was created by the combine call above and is owned solely
+    // by this return — and keeps the value identical to the old spread's.
+    combined.hasMore = combined.next < sequence;
+    return combined;
   }
   const events = [];
   let after = start;
