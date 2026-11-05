@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {conversationCursorCodec} from './conversation-sync.mjs';
-import {withCurrentReadContext,readCurrentHead,readCurrentWorkItem} from './current-room-repository.mjs';
+import {withCurrentReadContext,readCurrentHead,readCurrentWorkItem,currentActiveMemberAuthority} from './current-room-repository.mjs';
 import {currentWorkRecord} from './work-context.mjs';
 import {charterContext} from '../src/room-charter.js';
 import {ServiceError} from './service-error.mjs';
@@ -24,7 +24,7 @@ export function readCurrentWorkSnapshot(store,token,roomId,{expectedSessionBindi
    const more=Object.keys(workItems).length<Object.keys(overview.state.workItems).length||overview.workWindow.nextAfter!==null;
    const nextCursor=more?codec.encode({...binding,after:examinedAfter}):null;
    return {snapshotView:view,snapshotVersion:2,representation:'normalized-current-v1',roomId,sequence:overview.sequence,
-    state:{room:overview.state.room,members:store.withIdentityRevoked(roomId,overview).state.members,workItems},
+    state:{room:overview.state.room,members:store.withIdentityRevoked(roomId,{...overview,state:{...overview.state,members:currentActiveMemberAuthority(store.db,roomId)?.members??overview.state.members}}).state.members,workItems},
     charter:charterContext(overview.state.room),viewerId:auth.member.id,viewerAccountId:auth.account?.id??null,viewerAuthEpoch:auth.account?.authEpoch??null,
     viewerSessionBinding:auth.sessionBinding,viewerSessionRevision:auth.sessionRevision??null,
     workWindow:{shown:Object.keys(workItems).length,complete:cursor===null&&nextCursor===null,hasMore:nextCursor!==null,nextCursor,

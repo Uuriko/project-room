@@ -2,7 +2,7 @@
 // The default GET /api/rooms/{id} and ?messages=recent are this window.
 // ?full=1 is the retired unbounded document, and only while
 // ROOM_SNAPSHOT_FULL_COMPAT=1. Older history pages through /messages.
-import { isCurrentRoom, withCurrentReadContext,withCurrentWorkSummaryReuse,readCurrentRecord,readCurrentHistoryFloor,chargeCurrentReadBudget } from './current-room-repository.mjs';
+import { isCurrentRoom, withCurrentReadContext,withCurrentWorkSummaryReuse,readCurrentRecord,readCurrentHistoryFloor,chargeCurrentReadBudget,currentActiveMemberAuthority } from './current-room-repository.mjs';
 import {readCurrentEventWindow} from './current-room-events.mjs';
 import { readConversation } from './conversation-sync.mjs';
 import { messageSequences } from "./message-queries.mjs";
@@ -151,13 +151,16 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
 
       // This is explicitly a partial current view. Neither omitted counts nor
       // absent request/work records mean that the room contains no more work.
+      // Members are the one full-roster field: the overview is scoped to
+      // {owner, viewer}, so the roster is re-sourced from the active-member
+      // authority (active roster only, as in roomContext/activation pack).
       return {
         snapshotVersion: 2, representation: "normalized-current-v1", roomId,
         sequence: overview.sequence, viewerId: auth.member.id,cursor,catchUpCursor,
         ...(auditView==='activity'?{auditView,auditVersion:1}:{}),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
-        state: { ...overview.state,channels,eventLog,replyRequests, messages: conversation.messages,
+        state: { ...overview.state,members:currentActiveMemberAuthority(store.db,roomId)?.members??overview.state.members,channels,eventLog,replyRequests, messages: conversation.messages,
           pins:(overview.state.pins??[]).filter(pin=>conversation.messages.some(message=>message.id===pin.messageId&&!message.deletedAt&&message.body!=null)) },
         pinsWindow:{complete:false,coverage:'visible-conversation-records',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/pins`}},
         channelsWindow:{complete:true,shown:channelKeys.length},

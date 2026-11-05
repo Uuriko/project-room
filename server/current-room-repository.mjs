@@ -186,6 +186,7 @@ CREATE INDEX IF NOT EXISTS current_native_claim_held ON current_room_records(roo
 CREATE INDEX IF NOT EXISTS current_native_work_held ON current_room_records(room_id,COALESCE(json_extract(payload,'$.work.claim.holderId'),json_extract(payload,'$.work.accountableMemberId')),record_key) WHERE domain='workSummary' AND json_extract(payload,'$.work.state') IN ('working','blocked');
 CREATE INDEX IF NOT EXISTS current_native_work_proposals ON events(room_id,json_extract(body,'$.data.workItemId'),sequence) WHERE json_extract(body,'$.type')='work.proposed';
 CREATE INDEX IF NOT EXISTS current_work_summary_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='workSummary' AND present=1;
+CREATE INDEX IF NOT EXISTS current_member_active_keys ON current_room_records(room_id,record_key) WHERE domain='members' AND COALESCE(json_extract(payload, '$.active'), 1) <> 0;
 CREATE INDEX IF NOT EXISTS current_reply_request_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='replyRequests' AND present=1;
 CREATE INDEX IF NOT EXISTS current_messages_public_seq ON messages(room_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
 CREATE INDEX IF NOT EXISTS current_messages_channel_public_seq ON messages(room_id,channel_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
@@ -533,6 +534,32 @@ function currentAuthorityFromHead(db,roomId,head,b) {
   for(const {record_key:key} of keys)Object.defineProperty(members,key,{value:readCurrentRecord(db,roomId,'members',key,b),enumerable:true,writable:true,configurable:true});
   if(!room||!Object.hasOwn(members,room.ownerId))corrupt('missing owner authority');
   return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
+}
+// Active-only roster authority: proof-verified ACTIVE member records only,
+// enumerated through current_member_active_keys and charged to its own
+// budget(1024) — never the caller's shared read budget. Refuses above 100
+// ACTIVE members with the census's identical refusal; deactivated records
+// are neither loaded nor counted. The deactivated owner's record is simply
+// absent (no corruption): callers that need it do an addressed read.
+function currentActiveMembersFromHead(db,roomId,head) {
+  const b=budget(1024);
+  const keys=db.prepare("SELECT record_key FROM current_room_records INDEXED BY current_member_active_keys WHERE room_id=? AND domain='members' AND COALESCE(json_extract(payload, '$.active'), 1) <> 0 ORDER BY record_key LIMIT 101").all(roomId);
+  charge(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+  if(keys.length>100)refuse('Room authority requires bounded membership');
+  if(keys.length>head.counts.members)corrupt('active member census exceeds complete census');
+  const members={};
+  for(const {record_key:key} of keys) {
+    const member=readCurrentRecord(db,roomId,'members',key,b);
+    if(member===undefined||member?.id!==key)corrupt('active member authority identity differs');
+    Object.defineProperty(members,key,{value:member,enumerable:true,writable:true,configurable:true});
+  }
+  return members;
+}
+export function currentActiveMemberAuthority(db,roomId) {
+  const b=budget(1024),head=readCurrentHead(db,roomId,b);if(!head)return null;
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);
+  if(!room||!validId(room.ownerId))corrupt('missing owner authority');
+  return {sequence:head.sequence,ownerId:room.ownerId,members:currentActiveMembersFromHead(db,roomId,head)};
 }
 export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)??budget()) {
   if(!b.schemaVerified&&!readCurrentHead(db,roomId,b))corrupt('message namespace is not initialized');
@@ -1463,7 +1490,10 @@ export function readCurrentOverviewWindow(store,roomId,{workAfter='',limit=8,vie
   const scoped=viewerAuthority&&typeof viewerId==='string';
   const authority=scoped?currentMemberAuthorityFromHead(db,roomId,head,b,viewerId):currentAuthorityFromHead(db,roomId,head,b),room=readCurrentRecord(db,roomId,'metadata','room',b);
   const state={room,members:authority.members,workItems:{},messages:[],pins:[]};
-  if(!scoped){const pins=readCurrentRecord(db,roomId,'metadata','pins',b);if(pins!==undefined)state.pins=pins;}
+  // Pins are a single O(1) metadata record, not a census: load them in both
+  // branches. current-search reads state.pins from this overview, so skipping
+  // them when scoped would silently empty pinned search in every room.
+  const pins=readCurrentRecord(db,roomId,'metadata','pins',b);if(pins!==undefined)state.pins=pins;
   const rows=db.prepare("SELECT record_key FROM current_room_record_proofs INDEXED BY current_work_summary_keys WHERE room_id=? AND domain='workSummary' AND present=1 AND record_key>? ORDER BY record_key LIMIT ?").all(roomId,workAfter,limit+1);
   charge(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
   let after=workAfter,returned=0;

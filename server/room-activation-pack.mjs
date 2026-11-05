@@ -1,4 +1,5 @@
 import {readCurrentPinsWindow} from './current-pins.mjs';
+import {currentActiveMemberAuthority} from './current-room-repository.mjs';
 // Room activation pack (quill lane, RC-2026-09-18-040).
 //
 // One machine-readable fetch giving an agent everything it needs to start
@@ -161,8 +162,11 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
   if(overview) {
     const {state,visibleSequence:sequence,workWindow}=overview;
     const pins=store.readTransaction(()=>readCurrentPinsWindow(store,roomSlug,viewerId));
+    // The overview is scoped to {owner, viewer}; the pack's member list is
+    // re-sourced from the active-member authority (active roster only).
+    const roster=store.readTransaction(()=>currentActiveMemberAuthority(store.db,roomSlug));
     return withContentTrust({room:{slug:state.room.id,title:state.room.title,state:state.room.archivedAt?'archived':'active',kind:roomKind(state.room),owner:state.room.ownerId},
-      members:Object.values(state.members).filter(member=>member.active!==false).map(memberOf),
+      members:Object.values(roster?.members??state.members).filter(member=>member.active!==false).map(memberOf),
       openWork:Object.values(state.workItems).filter(item=>OPEN_WORK_STATES.has(item.state)).map(item=>workOf(item,new Date(store.now()).toISOString())),
       workWindow,workScope:'workWindow',participationRules:{...roomPolicy(state),trust:roomTrust(state).enabled},coordinationNorms:{...COORDINATION_NORMS},
       pinnedResources:pins.items.map(pinnedOf),pinWindow:{sourceWindow:pins.sourceWindow,page:pins.page},
