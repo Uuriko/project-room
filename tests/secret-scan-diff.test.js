@@ -20,13 +20,14 @@
 // (GitHub push protection). Probe repos live under os.tmpdir() (the
 // worktree .tmp/ when run via scripts/test-env.sh) and are destroyed with it.
 
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
-  mkdtempSync,
+  mkdtempSync as mkdtempRaw,
+  rmSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -44,6 +45,19 @@ import {
 } from "../scripts/secret-scan-diff.mjs";
 import { ALLOWLIST, SKIP_FILES, SAFE_ENTROPY_TOKENS } from "../scripts/secret-scan-check.mjs";
 import { scanText } from "../server/secret-scan.mjs";
+
+// Every temp dir this file creates is removed when the file finishes, pass
+// or fail. The HEAD-tree acceptance test extracts the whole repo (~74 MB),
+// so leaking it on every run fills the disk.
+const tempDirs = [];
+const mkdtempSync = (prefix) => {
+  const dir = mkdtempRaw(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const GATE = path.join(REPO_ROOT, "scripts", "secret-scan-diff.mjs");
