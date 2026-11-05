@@ -1,5 +1,5 @@
 import { uiText } from "./strings.js";
-import { humanErrorMessage } from "./error-copy.js";
+import { humanErrorMessage, isDeadLinkCode } from "./error-copy.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
@@ -334,7 +334,7 @@ export class AccountClient {
     try {
       preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
     } catch (error) {
-      if (error.code !== "link_unavailable") throw error;
+      if (!isDeadLinkCode(error.code)) throw error;
       const session = this.session ?? await this.restore();
       if (!session?.authenticated) throw error;
       const generation = this.generation;

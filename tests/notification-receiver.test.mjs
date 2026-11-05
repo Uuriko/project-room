@@ -206,3 +206,27 @@ test('saved prefix compatibility still rejects credentials, query, fragment and 
   await assert.rejects(()=>receiveCloudNotifications({...f,connection:{...f.connection,apiBase},fetchImpl:()=>{throw Error('No fetch allowed');},notifierFactory:()=>{throw Error('No actuator allowed');}}),e=>e.code==='notification_context_unavailable');
  }
 });
+
+test('work pointers map to work:<id> and stay closed-shape; the wait always asks for them',()=>{
+ const args={roomId,memberId,after:10,timeoutSec:120},requestId='read';
+ const work={kind:'work',workItemId:'task-1',workRevision:0,sequence:11,nextRead:{tool:'room_read_work',arguments:{roomId,workItemId:'task-1'}}};
+ const parse=items=>attentionResult({jsonrpc:'2.0',id:requestId,result:{structuredContent:result(args,{after:12,status:'ready',items})}},{...args,requestId});
+ assert.deepEqual(parse([work,row(12)]).items,[{messageId:'work:task-1',sequence:11},{messageId:'message-12',sequence:12}]);
+ for(const bad of [{...work,messageId:'x'},{...work,workRevision:'0'},{...work,workItemId:'a'.repeat(124)},{...work,sequence:13},{...work,kind:'mention'}])
+  assert.throws(()=>parse([bad]),e=>e.code==='notification_context_unavailable');
+});
+
+test('actual normalized server wakes the courier for a task proposed to the worker',async t=>{
+ const {RoomStore}=await import('../server/store.mjs'),{createRoomServer}=await import('../server/http.mjs'),{seedScopedInbox}=await import('./helpers/scoped-inbox-source.mjs');
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const saved=seedScopedInbox(store);
+ const f=fixture(t,{bootstrapAfter:store.headSequence('commons')});
+ store.room=()=>{throw Error('No whole-room hydration');};
+ const server=createRoomServer({store}),seen=[];server.on('request',req=>seen.push(req.method+' '+req.url));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeStreams();server.closeAllConnections();server.close();});
+ f.connection.apiBase='http://127.0.0.1:'+server.address().port;f.connection.credential=saved.token;
+ store.command(saved.owner,'commons',{id:'assign',type:'work.proposed',data:{workItemId:'assigned-card',title:'Assigned card',definitionOfDone:'Saved result',accountableMemberId:'worker'}});
+ const cancel=new AbortController(),received=[];
+ await receiveCloudNotifications({...f,signal:cancel.signal,notifierFactory:()=>async batch=>{received.push(batch);return{state:'accepted'};},print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
+ assert.deepEqual(received.map(batch=>batch.items.map(item=>item.messageId)),[['work:assigned-card']]);
+ assert.ok(seen.every(path=>path==='POST /mcp'||path==='GET /api/rooms/commons?view=identity'));
+});

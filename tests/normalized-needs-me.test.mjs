@@ -16,6 +16,9 @@ test('normalized needs-me discovers recent replies and late standing obligations
  assert.ok(readCurrentNeedsMePage(s,owner.secret,room).items.some(x=>x.kind==='work'));
  const parsed=parseNeedsMeBody(page);assert.deepEqual(parsed.nativeCoverage,page.nativeCoverage);
  assert.throws(()=>parseNeedsMeBody({...page,nativeCoverage:[{...page.nativeCoverage[0],globalAttentionComplete:true}]}),e=>e.code==='invalid_needs_me');
+ assert.equal(page.complete,true);assert.equal(page.status,'complete');
+ assert.throws(()=>parseNeedsMeBody({...page,complete:true,hasMore:true}),e=>e.code==='invalid_needs_me');
+ assert.throws(()=>parseNeedsMeBody({...page,complete:true,cursor:{...page.cursor,native:{[room]:'pending-token'}}}),e=>e.code==='invalid_needs_me');
  assert.throws(()=>parseNeedsMeBody({...page,contractVersion:1}),e=>e.code==='invalid_needs_me');
 });
 test('normalized catch-up carries empty private windows without exposing excluded IDs or acknowledging them',t=>{
