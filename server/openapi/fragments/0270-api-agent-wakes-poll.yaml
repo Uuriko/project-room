@@ -55,8 +55,10 @@
             Send the same input host name used for heartbeat reports.
             Optional when the identity has exactly one registered host —
             that host is derived and echoed as `hostId` in the response.
-            Required when the identity has several registered hosts (the
-            422 names them).
+            Required when the identity has several registered hosts: for
+            an identity-wide credential the 422 names them; for a
+            room-scoped credential the 422 names none and instead says
+            to pass the hostId you heartbeat with.
         - name: order
           in: query
           required: false
