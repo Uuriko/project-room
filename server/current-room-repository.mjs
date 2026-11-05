@@ -1111,7 +1111,7 @@ export function currentMessageMayBeVisible(db,roomId,messageId,viewerId,b=contex
   return false;
 }
 export function currentConversationRows(store,roomId,{viewerId,limit,before,beforeId,messageId,channelId,peerMemberId,floor,liveOnly=false}) {
-  if(limit>64)refuse('Current conversation pages support at most64 messages');
+  if(limit>100)refuse('Current conversation pages support at most 100 messages');
   const db=store.db,b=contextBudgets.get(db)??budget();
   if(messageId!==null) {
     // An unverified index may deny access, never grant it. Avoid loading a
@@ -1153,7 +1153,11 @@ export function currentConversationRows(store,roomId,{viewerId,limit,before,befo
     if(rows.length){stream.before=rows.at(-1).seq;stream.beforeId=rows.at(-1).message_id;}
   };
   const rows=[],seen=new Set();let examined=0,last=null,interrupted=false;
-  while(rows.length<limit&&examined<64) {
+  // The examined window must cover at least the requested page: with the old
+  // flat 64 cap a validated limit of 65..100 could never be filled even when
+  // every candidate was visible. The 64 floor keeps the historical bound for
+  // smaller pages, so existing small-limit callers are unchanged.
+  while(rows.length<limit&&examined<Math.max(64,limit)) {
     try{for(const stream of streams)refill(stream);}
     catch(error){if(error.code==='current_room_context_unavailable'&&last){interrupted=true;break;}throw error;}
     const available=streams.filter(stream=>stream.rows.length);if(!available.length)break;

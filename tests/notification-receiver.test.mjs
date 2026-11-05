@@ -212,7 +212,7 @@ test('work pointers map to work:<id> and stay closed-shape; the wait always asks
  const work={kind:'work',workItemId:'task-1',workRevision:0,sequence:11,nextRead:{tool:'room_read_work',arguments:{roomId,workItemId:'task-1'}}};
  const parse=items=>attentionResult({jsonrpc:'2.0',id:requestId,result:{structuredContent:result(args,{after:12,status:'ready',items})}},{...args,requestId});
  assert.deepEqual(parse([work,row(12)]).items,[{messageId:'work:task-1',sequence:11},{messageId:'message-12',sequence:12}]);
- for(const bad of [{...work,messageId:'x'},{...work,workRevision:'0'},{...work,workItemId:'a'.repeat(124)},{...work,sequence:13},{...work,kind:'mention'}])
+ for(const bad of [{...work,messageId:'x'},{...work,workRevision:'0'},{...work,workItemId:'a'.repeat(129)},{...work,sequence:13},{...work,kind:'mention'}])
   assert.throws(()=>parse([bad]),e=>e.code==='notification_context_unavailable');
 });
 
@@ -229,4 +229,33 @@ test('actual normalized server wakes the courier for a task proposed to the work
  await receiveCloudNotifications({...f,signal:cancel.signal,notifierFactory:()=>async batch=>{received.push(batch);return{state:'accepted'};},print:line=>{if(line.startsWith('Notification accepted'))cancel.abort();}});
  assert.deepEqual(received.map(batch=>batch.items.map(item=>item.messageId)),[['work:assigned-card']]);
  assert.ok(seen.every(path=>path==='POST /mcp'||path==='GET /api/rooms/commons?view=identity'));
+});
+
+test('work ids up to 128 chars and work:<id> message collisions never stop the courier', () => {
+  const args = {roomId, memberId, after: 10, timeoutSec: 120}, requestId = 'read';
+  const work = id => ({kind: 'work', workItemId: id, workRevision: 0, sequence: 11, nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId: id}}});
+  const parse = items => attentionResult({jsonrpc: '2.0', id: requestId, result: {structuredContent: result(args, {after: 12, status: 'ready', items})}}, {...args, requestId});
+  const long = 'w'.repeat(128);
+  const [pointer] = parse([work(long)]).items;
+  assert.match(pointer.messageId, /^work::[0-9a-f]{48}$/);
+  assert.ok(pointer.messageId.length <= 128);
+  assert.equal(parse([work('x'.repeat(124))]).items.length, 1);
+  // A message literally named work:task and a pointer for task: the message keeps
+  // its slot, the work pointer yields, nothing throws.
+  const both = parse([work('task'), row(12, 'work:task')]).items;
+  assert.deepEqual(both, [{messageId: 'work:task', sequence: 12}]);
+  assert.throws(() => parse([row(11, 'dup'), row(12, 'dup')]), e => e.code === 'notification_context_unavailable');
+});
+
+test('a long-id digest key cannot alias any legal short work id', () => {
+  const args = {roomId, memberId, after: 10, timeoutSec: 120}, requestId = 'read';
+  const work = (id, sequence) => ({kind: 'work', workItemId: id, workRevision: 0, sequence, nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId: id}}});
+  const parse = items => attentionResult({jsonrpc: '2.0', id: requestId, result: {structuredContent: result(args, {after: 13, status: 'ready', items})}}, {...args, requestId});
+  const long = 'L'.repeat(128);
+  const digest = parse([work(long, 11)]).items[0].messageId.slice('work::'.length);
+  // The adversarial short id equal to the digest keeps its own pointer.
+  const both = parse([work(long, 11), work(digest, 12)]).items;
+  assert.equal(both.length, 2);
+  assert.notEqual(both[0].messageId, both[1].messageId);
+  assert.equal(both[1].messageId, 'work:' + digest);
 });
