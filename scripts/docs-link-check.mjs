@@ -167,6 +167,7 @@ export function orphanedDocs(exceptions = ORPHAN_EXCEPTIONS) {
   // tree — same spirit as skipping archive history — so do not require every
   // research file to be INDEX-reachable. Broken links inside research are
   // still checked above via maintainedMarkdown().
+  // Prefix exception only; INDEX may still link selective research notes.
   const isExcepted = absPath => {
     const r = rel(absPath);
     return r in exceptions || r.startsWith("docs/research/");
