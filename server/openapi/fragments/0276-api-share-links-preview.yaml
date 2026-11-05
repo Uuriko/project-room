@@ -12,7 +12,7 @@
         link_unavailable. A fully anonymous preview names the link's own
         state instead: link_cancelled, link_expired, link_full or
         link_authority_changed, or link_not_found for an unknown token. An
-        RM- agent invite code is answered 422 wrong_link_kind_agent_invite
+        RM-… agent invite code is answered 422 wrong_link_kind_agent_invite
         (shape-only; it says nothing about whether the invite is live).
         Join doors are unchanged: joins keep the folded 410 link_unavailable.
       security: []
