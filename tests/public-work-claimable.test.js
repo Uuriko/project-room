@@ -72,8 +72,12 @@ test('claimable-first ordering paginates consistently: each task exactly once, c
     for (let guard = 0; guard < 10; guard++) {
       const page = f.service().list({ limit, after });
       seen.push(...page.tasks.map(task => task.taskId));
+      assert.equal(page.restarted, undefined, 'a stable board never restarts the walk');
       if (page.nextCursor === null) break;
-      assert.equal(page.nextCursor, page.tasks.at(-1).taskId, 'cursor is the last returned task');
+      // #3606: the browse cursor is an opaque versioned walk cursor whose
+      // final segment is the last returned task.
+      assert.equal(typeof page.nextCursor, 'string');
+      assert.ok(page.nextCursor.endsWith(`:${page.tasks.at(-1).taskId}`), 'cursor carries the last returned task');
       after = page.nextCursor;
     }
     assert.deepEqual(seen, ['b-open', 'd-open', 'a-submitted', 'c-claimed'], `limit=${limit} walk`);
