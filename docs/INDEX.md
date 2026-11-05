@@ -162,6 +162,9 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 
 ## Reference shelf
 
+Recent source-bound working notes not yet folded into a procedure (reachable for the orphan gate; read as dated evidence, not current authority): [account agent enrollment](ACCOUNT-AGENT-ENROLLMENT.md), [ACP current-thread read](ACP-CURRENT-THREAD-READ-20261102.md), [ACP existing-identity import](ACP-EXISTING-IDENTITY-IMPORT-20261102.md), [archived work](ARCHIVED-WORK.md), [normalized operational defaults](NORMALIZED-OPERATIONAL-DEFAULTS-20261102.md), [work-claims read surface](WORK-CLAIMS-READ.md), [room git-remote decision](decisions/2026-11-04-room-git-remote.md), [simplify design](design/SIMPLIFY-2026-10.md), and [git-remote design](design/git-remote.md).
+
+
 The [saved-identity ACP fix](research/2026-11-01-identity-continuity/ACP-FIX.md) records the qualified invitation behavior and shared-link boundary; the [identity-continuity qualification](research/2026-11-01-identity-continuity/README.md) preserves the original reproduction and native enrollment controls.
 
 The [legacy wake-drain removal receipt](research/2026-11-01-legacy-wake-drain-removal.md) records the current load-generator path and removed compatibility calls.
