@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+// The Worker's own readiness probe budget (HEALTH_PROBE_TIMEOUT_MS). A stale
+// literal here turned every cold-start readiness timeout into a rollback.
+import { HEALTH_PROBE_TIMEOUT_MS } from '../cloudflare/health-probe.mjs';
 
 // Narrow evidence gate, not a health verdict. The digest comes from the failed
 // smoke step, not from the recovery caller recomputing an expected digest.
@@ -32,7 +35,7 @@ export function timeoutOnlyEvidence(raw, { digest, sha, origin, entry }) {
       if (ready.status !== 200 || ready.body !== 'ready' || ready.do?.status !== 'ok'
           || ready.emailVerification !== 'enforced' || ready.emailVerificationScope !== 'durable-object') return false;
     } else if (ready?.pass === false && ready.status === 503 && ready.body === 'degraded'
-        && ready.do?.status === 'timeout' && ready.do.timeoutMs === 1000 && ready.transport === undefined
+        && ready.do?.status === 'timeout' && ready.do.timeoutMs === HEALTH_PROBE_TIMEOUT_MS && ready.transport === undefined
         && ['unknown', 'enforced'].includes(ready.emailVerification)
         && ['unknown', 'durable-object'].includes(ready.emailVerificationScope)) timeouts++;
     else return false;

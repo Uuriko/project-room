@@ -165,17 +165,12 @@ jobs:
           key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
       - if: needs.changes.outputs.docs_only != 'true' && steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci
-      # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, runs
-      # alongside eslint.
-      - name: Lint and the untested-module gate
+      # The untested-module gate was cut (Potter t779): it blocked main on a
+      # test-naming heuristic, not on real harm. scripts/untested-modules-lint.mjs
+      # stays available as an advisory local tool.
+      - name: Lint
         if: needs.changes.outputs.docs_only != 'true'
-        run: |
-          npm run lint &
-          pid=$!
-          node scripts/untested-modules-lint.mjs
-          status=$?
-          wait "$pid" || status=$?
-          exit "$status"
+        run: npm run lint
   # One unit job. Hosted shards on 2026-10-24 were 4–6 minutes each,
   # including setup, and they queued behind the two-job account limit, so
   # the split cost three runner slots without overlapping. One process is
@@ -691,6 +686,9 @@ jobs:
   # named, never folded into green. Mapping: success -> PASSED,
   # skipped -> NOT-RUN, failure or cancelled -> FAILED.
   ci-verdict:
+    # Actions cannot report "neutral", and a skipped suite still shows a green
+    # check, so a run that tested nothing says so in the check's own name.
+    name: ${{ needs.test.result == 'skipped' && 'ci-verdict (NOTHING RAN - add ready-to-land)' || 'ci-verdict' }}
     needs: [changes, contract, lint, unit, browser-shards, browser, cloudflare, cloudflare-shard-2, visual-refresh-guard, friend-agent-e2e, coverage, safety-net, test]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -719,6 +717,7 @@ jobs:
           {
             echo "## CI verdict"
             echo ""
+            if [ "$TEST" = "skipped" ]; then echo "**NOTHING RAN.** Every suite was skipped; this green check is not a test result. Add the ready-to-land label to run CI."; echo ""; fi
             echo "Subject: pull request #$PR_NUMBER at head $HEAD_SHA (event: $EVENT_ACTION, ready-to-land label present: $READY_TO_LAND)"
             echo ""
             echo "| Job | Verdict |"

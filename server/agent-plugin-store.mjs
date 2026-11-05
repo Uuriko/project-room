@@ -1634,7 +1634,7 @@ export class AgentPluginStore {
         SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
             signature=?, payload_json=?, claim_expires_at=NULL, updated_at=?
         WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
-        .run(attempts, result.error, now + backoffDelayMs(attempts), signature,
+        .run(attempts, result.error, now + Math.max(backoffDelayMs(attempts), Number(result.retryAfterMs) || 0), signature,
           JSON.stringify(envelope), now, row.delivery_id, claimExpiresAt).changes;
       return changed ? "retried" : "skipped";
     });
@@ -1887,6 +1887,10 @@ export class AgentPluginStore {
         within3 += row.within3 ?? 0;
       }
       const terminal = byState.delivered + byState.dead_letter;
+      const deadLetterReasons = { subscription_removed: 0, receiver_rejected: 0, url_not_public: 0, retries_exhausted: 0, not_attemptable: 0, other: 0 };
+      const reasonRows = this.db.prepare(
+        "SELECT last_error FROM agent_webhook_deliveries WHERE agent_id = ? AND state = 'dead_letter'").all(identityId);
+      for (const row of reasonRows) deadLetterReasons[deadLetterReason(row.last_error)] += 1;
       return Object.freeze({
         claim: "signed webhook dispatch delivers \u226599% of events within 3 attempts",
         totalTerminal: terminal,
@@ -1898,6 +1902,10 @@ export class AgentPluginStore {
         failedAwaitingRetry: byState.failed,
         maxAttempts: MAX_DELIVERY_ATTEMPTS,
         byState: Object.freeze({ ...byState }),
+        // Fixed buckets only. The raw journal text can carry receiver hosts
+        // and is already available per delivery to the owner; the summary
+        // never echoes it.
+        deadLetterReasons: Object.freeze(deadLetterReasons),
       });
     });
   }
@@ -1907,4 +1915,16 @@ export class AgentPluginStore {
   pluginManifest(serviceOrigin) {
     return buildPluginManifest({ serviceOrigin, roomId: null });
   }
+}
+
+// Buckets a dead-letter journal reason (written by markDeadLetter callers in
+// this file) into a fixed, non-identifying category for metrics.
+export function deadLetterReason(lastError) {
+  const text = String(lastError ?? "");
+  if (/^subscription removed/.test(text)) return "subscription_removed";
+  if (/not_public|not public|private address|ssrf/i.test(text)) return "url_not_public";
+  if (/^receiver rejected the delivery/.test(text)) return "receiver_rejected";
+  if (/^gave up after \d+ attempts/.test(text)) return "retries_exhausted";
+  if (/^stored delivery cannot be attempted/.test(text)) return "not_attemptable";
+  return "other";
 }

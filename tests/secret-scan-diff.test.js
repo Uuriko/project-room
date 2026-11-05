@@ -386,3 +386,23 @@ test("exact entropy exceptions retain other entropy tokens and credential patter
   assert.ok(scanText(shapedCredential, { safeEntropyTokens: [shapedCredential] }).some(finding => finding.rule === "github-token"),
     "an entropy exception never exempts credential-shaped tokens from pattern rules");
 });
+
+test("share-links invite-code alphabet is quiet but a real credential still trips", () => {
+  // Contract scanner (secret-scan-check) ignores the // secrets-allowlist marker.
+  // The AGENT_INVITE_CODE_PATTERN alphabets are exact SAFE_ENTROPY_TOKENS so the
+  // shape regex stays quiet; a real credential in the same file must still flag.
+  const inviteLine = "const AGENT_INVITE_CODE_PATTERN = /^RM-(?:[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/;";
+  assert.deepEqual(
+    scanText(inviteLine, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS }),
+    [],
+    "invite-code shape regex must not trip high-entropy"
+  );
+  const withCred = `${inviteLine}
+const leaked = "${fakeGithubToken()}";`;
+  const findings = scanText(withCred, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+  assert.ok(
+    findings.some((f) => f.rule === "github-token"),
+    "a real token in the same file must still trip"
+  );
+});
+

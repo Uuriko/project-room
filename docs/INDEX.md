@@ -208,6 +208,8 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 [Per-room Durable Object cutover](design/ROOM-SHARD-CUTOVER.md) is the operator runbook for the dark `RoomShard` path. The flag stays off until Potter says go, and Codex deploys.
 
+[Room Git remote](design/git-remote.md) is the design for agents pushing `refs/heads/room/*` branches to Room over smart HTTP; phase 0 ships only pure helpers and the flag-gated `GET /api/public/git-remote` status (ROOM_GIT_REMOTE off). The choice of backend is recorded in [the 2026-11-04 git remote decision](decisions/2026-11-04-room-git-remote.md).
+
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
 
 [Current state first; history on demand](research/2026-11-01-member2-current-state-alternative.md) compares normalized current authority with replay-led operation and records the conditional-context freshness falsifier.

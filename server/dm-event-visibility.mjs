@@ -20,8 +20,13 @@ export const DM_FOLLOW_UP_TYPES = new Set([
   T.MESSAGE_REDACTED,
   T.POLL_VOTED,
   T.MESSAGE_PINNED,
-  T.MESSAGE_UNPINNED
+  T.MESSAGE_UNPINNED,
+  // A formal request is always addressed (toMemberId), so its cancellation
+  // reason is as private as the request body. Keyed by requestMessageId.
+  T.REPLY_REQUEST_CANCELLED,
+  T.REPLY_REQUEST_PROGRESSED
 ]);
+const referencedMessage = event => event.data?.messageId ?? event.data?.requestMessageId;
 
 function partiesFromMessages(messages) {
   const parties = new Map();
@@ -72,7 +77,8 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = [], lookupPa
     // An archived DM is not in the projection; ask the table so its follow-up
     // events stay hidden from non-parties.
     const { parties, known } = getResolved();
-    const pair = parties.get(event.data?.messageId) ?? lookupParties?.(event.data?.messageId);
+    const ref = referencedMessage(event);
+    const pair = parties.get(ref) ?? lookupParties?.(ref);
     if (pair) return pair.includes(viewerId);
     // No pair resolved. The follow-up is visible only when the referenced
     // message itself was resolved and is not a DM (a known public message).
@@ -83,7 +89,7 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = [], lookupPa
     // carry the edited DM body (T3-L10b-C1 / G12). This is the same
     // fail-closed posture as historyFloor (history-visibility.mjs) and
     // peerEventVisible for dm.posted (bonds.mjs).
-    return known.has(event.data?.messageId);
+    return known.has(ref);
   };
 }
 

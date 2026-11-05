@@ -1,15 +1,73 @@
-import {isCurrentRoom} from './current-room-repository.mjs';
+import {isCurrentRoom, readCurrentRecord, readCurrentWorkItem, withCurrentReadContext} from './current-room-repository.mjs';
 import {ServiceError} from './service-error.mjs';
+import {nextWorkStep} from '../src/workflow.js';
 
 // Only resource accounting lives here. Attention and delivery cursors remain in
 // the existing protected inbox; a process restart never acknowledges anything.
 const pending = new WeakMap();
+// Courier liveness: when each member last started a wait on this server, and
+// whether one is open now. In-process only; a restart forgets, which reads as
+// "no courier seen" until the next wait.
+const lastWaits = new WeakMap();
+export function attentionWaitStatus(store, roomId, memberId) {
+  const key = JSON.stringify([roomId, memberId]);
+  const startedAt = lastWaits.get(store)?.get(key) ?? null;
+  return {waiting: Boolean(pending.get(store)?.has(key)), lastWaitAt: startedAt === null ? null : new Date(startedAt).toISOString()};
+}
 const MAX_PROBES = 4;
 const MAX_PENDING = 32;
+// Events that can leave a task waiting on its next member. Opt-in only, so a
+// receiver built before work pointers never sees an unknown item kind.
+const WORK_EVENT_TYPES = ['work.proposed', 'work.accepted', 'work.started', 'work.blocked', 'work.blocker_resolved',
+  'work.completed', 'work.handoff_recorded', 'work.halt_cleared', 'verification.recorded', 'owner.decision_recorded'];
+const MAX_WORK_WINDOWS = 8;
+// About 6 records per candidate on top of the wait's own reads; 12 stays well
+// inside the 200-record context, and the catch below remains a backstop.
+const MAX_WORK_CANDIDATES = 12;
 
-export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25, signal} = {}) {
-  if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutSec) || timeoutSec < 0 || timeoutSec > 120) {
-    throw new ServiceError(422, 'invalid_attention_wait', 'after must be a nonnegative integer and timeoutSec an integer from 0 to 120');
+// Work in (from, through] whose current next step waits on this member. The
+// event log scans 16 rows per window; a longer gap returns a lower `through`
+// so nothing in between is skipped by the caller's next cursor.
+function workAttention(store, secret, roomId, memberId, from, through) {
+  const ids = new Map();
+  let scanned = from;
+  for (let windows = 0; scanned < through && windows < MAX_WORK_WINDOWS; windows++) {
+    const page = store.eventsAfter(secret, roomId, scanned, 16, null, {types: WORK_EVENT_TYPES, throughSequence: through});
+    for (const {sequence, event} of page.events) {
+      const id = event.data?.workItemId;
+      if (typeof id === 'string' && event.actorId !== memberId) ids.set(id, sequence);
+    }
+    if (!(page.next > scanned)) break;
+    scanned = page.next;
+  }
+  if (!ids.size) return {through: scanned, items: []};
+  // One bounded read context for the whole wait, as before: candidates are
+  // read oldest event first, and when the budget runs out after at least one
+  // read (or four pointers are found) the cursor stops just before the first
+  // unread candidate, so the next wait resumes there. A single candidate too
+  // large for the budget alone still refuses, as it did. Pointers are wake
+  // hints: the woken agent lists its work, so a yielded pointer loses nothing.
+  const ordered = [...ids].sort((a, b) => a[1] - b[1]), items = [];
+  store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
+    const ownerId = readCurrentRecord(store.db, roomId, 'metadata', 'room', b)?.ownerId ?? null, now = store.now();
+    let lastRead = null, read = 0;
+    for (const [workItemId, sequence] of ordered) {
+      if (items.length >= 4 || read >= MAX_WORK_CANDIDATES) { scanned = Math.min(scanned, sequence - 1); break; }
+      let item;
+      try { item = readCurrentWorkItem(store.db, roomId, workItemId, b); }
+      catch (error) { if (error?.code === 'current_room_context_unavailable' && lastRead !== null) { scanned = Math.min(scanned, sequence - 1); break; } throw error; }
+      lastRead = sequence; read++;
+      const next = item ? nextWorkStep(item, now, ownerId) : null;
+      if (next?.needsAttention && next.memberId === memberId) items.push({kind: 'work', workItemId, workRevision: item.revision, sequence,
+        nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId}}});
+    }
+  }));
+  return {through: scanned, items};
+}
+
+export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25, includeWork = false, signal} = {}) {
+  if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutSec) || timeoutSec < 0 || timeoutSec > 120 || typeof includeWork !== 'boolean') {
+    throw new ServiceError(422, 'invalid_attention_wait', 'after must be a nonnegative integer, timeoutSec an integer from 0 to 120 and includeWork a boolean');
   }
   const auth = store.authenticate(secret, roomId);
   const memberId = auth.member.id;
@@ -46,6 +104,9 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
     const fail = error => { if (!done) { done = true; clean(); reject(error); } };
     generation.supersede = () => fail(new ServiceError(409, 'attention_wait_superseded', 'A newer wait for this room member replaced this request; use the newer request result'));
     active.set(key, generation); // Supersede is initialized before this slot is visible.
+    let waits = lastWaits.get(store);
+    if (!waits) lastWaits.set(store, waits = new Map());
+    waits.delete(key); waits.set(key, started); if (waits.size > 4096) waits.delete(waits.keys().next().value);
     const cancelled = () => fail(signal.reason ?? new DOMException('Request cancelled', 'AbortError'));
     const finish = (status, items = [], sourceComplete = true) => {
       // Access can expire or be revoked while no event is appended.
@@ -63,19 +124,29 @@ export function waitForAttention(store, secret, roomId, {after, timeoutSec = 25,
         requireSameMember();
         probes++;
         const page = store.agentInbox(secret, roomId, {after: cursor, limit: 4});
-        cursor = page.cursor.after;
+        const from = cursor, work = includeWork ? workAttention(store, secret, roomId, memberId, from, page.cursor.after) : null;
+        // A capped work scan holds the cursor back; messages past it return on the next wait.
+        const capped = work !== null && work.through < page.cursor.after;
+        cursor = capped ? work.through : page.cursor.after;
         const seen = new Set(), items = [];
         for (const [kind, rows] of [['direct_message', page.directMessages], ['reply', page.replies], ['mention', page.directMentions]]) {
           for (const row of rows) {
-            if (row.sequence <= after || seen.has(row.messageId)) continue;
+            if (row.sequence <= after || row.sequence > cursor || seen.has(row.messageId)) continue;
             seen.add(row.messageId);
             items.push({kind: row.requestKind === 'reply' ? 'reply_request' : kind,
               messageId: row.messageId, sequence: row.sequence,
               nextRead: row.nextRead ?? {tool: 'room_read_inbox', arguments: {roomId, after: row.sequence - 1, limit: 1}}});
           }
         }
-        if (items.length) finish('ready', items, !page.cursor.hasMore);
-        else if (page.cursor.hasMore || probes >= MAX_PROBES) finish('catch_up_required', [], !page.cursor.hasMore);
+        let overflow = false;
+        if (work) {
+          for (const item of work.items) if (item.sequence > after) items.push(item);
+          items.sort((a, b) => a.sequence - b.sequence);
+          // Four pointers per result; an overflow resumes right after the fourth.
+          if ((overflow = items.length > 4)) { cursor = items[3].sequence; items.length = 4; }
+        }
+        if (items.length) finish('ready', items, !page.cursor.hasMore && !capped && !overflow);
+        else if (page.cursor.hasMore || capped || probes >= MAX_PROBES) finish('catch_up_required', [], !page.cursor.hasMore && !capped);
         else if (timeoutSec === 0) finish('timeout');
       } catch (error) { fail(error); }
     };

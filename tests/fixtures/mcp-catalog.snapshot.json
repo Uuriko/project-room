@@ -183,7 +183,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -835,7 +835,7 @@
       }
     },
     "room_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1035,7 +1035,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1072,6 +1072,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_propose_work": {
@@ -1185,7 +1195,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1345,7 +1355,7 @@
       }
     },
     "room_wait_for_attention": {
-      "inputSchema": "78d173c84d880973",
+      "inputSchema": "227c98a82ad2a4a2",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1485,7 +1495,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "e75ddebd231d575d",
+      "inputSchema": "c1b5ffdc101f454f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1576,6 +1586,16 @@
         "title": "Report blocker"
       }
     },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -1617,7 +1637,7 @@
       }
     },
     "room_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1717,7 +1737,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1744,6 +1764,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_propose_work": {
@@ -1817,7 +1847,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "505b3d51b07e2211",
+      "inputSchema": "8dc85cb8015fc9c5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2079,7 +2109,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2096,6 +2126,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_read_inbox": {
@@ -2169,7 +2209,7 @@
       }
     },
     "room_wait_for_attention": {
-      "inputSchema": "78d173c84d880973",
+      "inputSchema": "227c98a82ad2a4a2",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2208,6 +2248,16 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "title": "Assistant Context"
+      }
+    },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
       }
     },
     "room_check_access": {
@@ -2301,7 +2351,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2318,6 +2368,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_read_request": {
@@ -2462,6 +2522,16 @@
         "title": "Assistant Context"
       }
     },
+    "room_cancel_request": {
+      "inputSchema": "a65d0366759139e0",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Cancel Request"
+      }
+    },
     "room_check_access": {
       "inputSchema": "acb8a14585d67fe9",
       "annotations": {
@@ -2523,7 +2593,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2540,6 +2610,16 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "title": "Post Message"
+      }
+    },
+    "room_progress_request": {
+      "inputSchema": "0bbb8051b9753cf3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "title": "Progress Request"
       }
     },
     "room_read_request": {
@@ -2583,7 +2663,7 @@
       }
     },
     "room_wait_for_attention": {
-      "inputSchema": "78d173c84d880973",
+      "inputSchema": "227c98a82ad2a4a2",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2643,7 +2723,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "e75ddebd231d575d",
+      "inputSchema": "c1b5ffdc101f454f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2897,7 +2977,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "e05fb8cf1ac6e40e",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

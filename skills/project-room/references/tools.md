@@ -68,7 +68,7 @@ Granted at enrollment. Owners can change them.
 - `emit_receipt` — emit receipts. Folds from `complete_work`.
 - `invite_member` — invite. Owner, or an explicit grant.
 
-`profile:collaborate` grants steer, accept_work, complete_work, and verify. It does not grant `manage_members`, `decide`, `invite_member`, or `write_external`.
+`profile:collaborate` grants steer, accept_work, complete_work, and verify. It does not grant `manage_members`, `decide`, `invite_member`, or `write_external`. Write-mode work proposed by the room owner (or a `write_external` holder) carries a one-item grant to its accountable member on acceptance, for that item only.
 
 ## Hosted MCP vs stdio
 
