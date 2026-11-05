@@ -49,15 +49,25 @@ export function attentionResult(envelope,{requestId,roomId,memberId,after,timeou
   ||!integer(value.after)||value.after<after||typeof value.sourceComplete!=='boolean'||value.globalAttentionComplete!==false||value.acknowledges!==false
   ||value.timeoutSec!==timeoutSec||!integer(value.waitedMs)||!Array.isArray(value.items)||value.items.length>4)throw invalid();
  const seen=new Set();
- const items=value.items.map(p=>{
-  // A task that now waits on this member rides the same pointer shape as work:<id>.
+ const parsed=value.items.map(p=>{
+  // A task that now waits on this member rides the pointer shape as work:<id>.
+  // Ids too long for that key use a digest; the woken session reads its work.
   const work=p?.kind==='work';
-  if(work?!closed(p,['kind','workItemId','workRevision','sequence','nextRead'])||!id(p.workItemId,123)||!integer(p.workRevision)
+  if(work?!closed(p,['kind','workItemId','workRevision','sequence','nextRead'])||!id(p.workItemId,128)||!integer(p.workRevision)
    :!closed(p,['kind','messageId','sequence','nextRead'])||!['direct_message','reply','mention','reply_request'].includes(p.kind)||!id(p.messageId,128))throw invalid();
-  const messageId=work?'work:'+p.workItemId:p.messageId;
-  if(!integer(p.sequence)||p.sequence<=after||p.sequence>value.after||seen.has(messageId))throw invalid();
-  seen.add(messageId);return{messageId,sequence:p.sequence};
+  if(!integer(p.sequence)||p.sequence<=after||p.sequence>value.after)throw invalid();
+  const messageId=!work?p.messageId:p.workItemId.length<=123?'work:'+p.workItemId:'work:'+createHash('sha256').update(p.workItemId).digest('hex').slice(0,48);
+  return{work,messageId,sequence:p.sequence};
  });
+ // Messages keep the server's no-duplicate contract. A work pointer whose key
+ // equals a message id in the same frame yields to it: either one wakes the
+ // agent, which then reads its assigned work.
+ for(const p of parsed)if(!p.work){if(seen.has(p.messageId))throw invalid();seen.add(p.messageId);}
+ const items=[];
+ for(const p of parsed){
+  if(p.work){if(seen.has(p.messageId))continue;seen.add(p.messageId);}
+  items.push({messageId:p.messageId,sequence:p.sequence});
+ }
  if(value.status==='ready'?!items.length:items.length>0)throw invalid();
  if(value.status==='catch_up_required'&&value.after===after||value.status==='timeout'&&!value.sourceComplete)throw invalid();
  return{status:value.status,after:value.after,sourceComplete:value.sourceComplete,items}; // Discard every server nextRead.

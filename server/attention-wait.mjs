@@ -12,6 +12,7 @@ const MAX_PENDING = 32;
 const WORK_EVENT_TYPES = ['work.proposed', 'work.accepted', 'work.started', 'work.blocked', 'work.blocker_resolved',
   'work.completed', 'work.handoff_recorded', 'work.halt_cleared', 'verification.recorded', 'owner.decision_recorded'];
 const MAX_WORK_WINDOWS = 8;
+const MAX_WORK_CANDIDATES = 32;
 
 // Work in (from, through] whose current next step waits on this member. The
 // event log scans 16 rows per window; a longer gap returns a lower `through`
@@ -29,17 +30,21 @@ function workAttention(store, secret, roomId, memberId, from, through) {
     scanned = page.next;
   }
   if (!ids.size) return {through: scanned, items: []};
-  const items = store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
-    const ownerId = readCurrentRecord(store.db, roomId, 'metadata', 'room', b)?.ownerId ?? null, now = store.now();
-    const found = [];
-    for (const [workItemId, sequence] of ids) {
-      const item = readCurrentWorkItem(store.db, roomId, workItemId, b);
-      const next = item ? nextWorkStep(item, now, ownerId) : null;
-      if (next?.needsAttention && next.memberId === memberId) found.push({kind: 'work', workItemId, workRevision: item.revision, sequence,
-        nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId}}});
-    }
-    return found;
-  }));
+  // Each candidate is read in its own bounded context, newest-event order, so
+  // many small proposals cannot exhaust one shared read budget (409). Stop at
+  // four pointers or MAX_WORK_CANDIDATES examined, holding the cursor at the
+  // last examined event so the rest are read on the next wait.
+  const ownerId = store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => readCurrentRecord(store.db, roomId, 'metadata', 'room', b)?.ownerId ?? null));
+  const now = store.now(), items = [], ordered = [...ids].sort((a, b) => a[1] - b[1]);
+  let examined = 0;
+  for (const [workItemId, sequence] of ordered) {
+    if (items.length >= 4 || examined >= MAX_WORK_CANDIDATES) { scanned = Math.min(scanned, ordered[examined - 1][1]); break; }
+    examined++;
+    const item = store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => readCurrentWorkItem(store.db, roomId, workItemId, b)));
+    const next = item ? nextWorkStep(item, now, ownerId) : null;
+    if (next?.needsAttention && next.memberId === memberId) items.push({kind: 'work', workItemId, workRevision: item.revision, sequence,
+      nextRead: {tool: 'room_read_work', arguments: {roomId, workItemId}}});
+  }
   return {through: scanned, items};
 }
 

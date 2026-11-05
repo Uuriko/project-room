@@ -133,3 +133,19 @@ test('includeWork keeps the cursor honest across a gap longer than one event win
   const bad = await f.call({timeoutSec: 0, includeWork: 'yes'}).result;
   assert.ok(bad.value.error || bad.value.result?.isError, JSON.stringify(bad));
 });
+
+test('includeWork survives many small mixed-agent proposals within the read budget', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 24; i++) f.store.command(f.saved.owner, 'commons', {id: 'mixed-' + i, type: 'work.proposed',
+    data: {workItemId: 'mixed-' + i, title: 'T' + i, definitionOfDone: 'D', accountableMemberId: i % 3 === 0 ? f.saved.identityId : 'observer'}});
+  let after = f.after; const found = [];
+  for (let calls = 0; calls < 12; calls++) {
+    const result = accepted(await f.call({timeoutSec: 0, includeWork: true, after}).result);
+    assert.ok(result.items.length <= 4);
+    found.push(...result.items.filter(item => item.kind === 'work').map(item => item.workItemId));
+    if (result.after === after && result.status !== 'ready') break;
+    after = result.after;
+    if (result.status === 'timeout') break;
+  }
+  assert.deepEqual([...new Set(found)].sort(), Array.from({length: 8}, (_, k) => 'mixed-' + k * 3).sort());
+});
