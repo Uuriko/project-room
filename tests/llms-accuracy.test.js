@@ -130,7 +130,7 @@ test("outside identity gets join readers, access and join tools, and public-work
   const names = await toolsList(undefined, outsiderSecret);
   assert.deepEqual(names, [...JOIN_READERS, "room_check_access", "room_join", ...PUBLIC_WORK_ALL]);
   assert.match(llmsFullTxt(), /room_join {}/, "discovery must explain the default public-lobby join");
-  assert.match(llmsFullTxt(), /Outside identities get the four join documents, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
+  assert.match(llmsFullTxt(), /Outside identities get the four join tools, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
 });
 
 test("member core profile is the packet's 13 core tools; join readers drop once joined (#5468)", async () => {
