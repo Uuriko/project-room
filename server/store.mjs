@@ -8,6 +8,7 @@ import {ensureDefaultChannelState} from '../src/default-channel-state.js';
 import {readCurrentEventWindow,currentEventRedactionMessages} from './current-room-events.mjs';
 import { assertRestoreAdmitted, restorePending, verifyRestoreControl } from './restore-admission.mjs';
 import {readCurrentWorkListing} from './current-work-list.mjs';
+import { WRITE_GRANT_POLICY_VERSION } from '../src/work-reducers.js';
 import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
@@ -7378,6 +7379,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             ...(requestMode === "respond" ? { answerCredential: auth.kind === "session" && auth.credentialScope === "account-session"
               && auth.account && auth.member.kind === "human" ? "account_session" : "room_credential" } : {}) }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
+          // Server-derived: new proposals are admitted under the item-scoped
+          // write grant policy (#5960); proposals recorded before it carry no
+          // version and replay without a grant.
+          : command.type === T.WORK_PROPOSED ? { ...command.data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION }
           : command.data
       });
       // Observed transport only, never a runner/capability or ownership claim.

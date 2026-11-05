@@ -5,6 +5,8 @@ import { nativeTextEvidence, reportedProducer, validateResultSegments } from './
 import { normalizeWorkDependencies } from './work-dependencies.js';
 import { applySessionFields, completionAttemptSnapshot } from './work-item-session.js';
 
+export const WRITE_GRANT_POLICY_VERSION = 1;
+
 export function createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource }) {
 // Item-scoped implied write grant (FUNNEL-FIXES pack 01, Option D): an item
 // proposed by the room owner or a write_external holder carries a stamp
@@ -73,9 +75,14 @@ function proposeWork(state, incoming) {
   }
 
   // Option D stamp: born with the item iff the proposer is the room owner or
-  // holds write_external at proposal time. Omitted otherwise, so items from
-  // non-qualifying proposers carry no stamp keys at all.
-  const externalWriteGrant = incoming.actorId === state.room.ownerId || hasPermission(state, incoming.actorId, "write_external")
+  // holds write_external at proposal time. Only proposals admitted under the
+  // policy carry writeGrantPolicyVersion (stamped by the store at admission,
+  // like pinDmPartyPolicyVersion), so every proposal recorded before it
+  // replays exactly as it was reduced then: no stamp, no implied grant.
+  if (incoming.data.writeGrantPolicyVersion !== undefined && incoming.data.writeGrantPolicyVersion !== WRITE_GRANT_POLICY_VERSION)
+    throw new Error("Unknown write grant policy version");
+  const externalWriteGrant = incoming.data.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION
+    && (incoming.actorId === state.room.ownerId || hasPermission(state, incoming.actorId, "write_external"))
     ? { externalWriteGrantBy: incoming.actorId, externalWriteGrantFor: incoming.data.accountableMemberId }
     : {};
   state.workItems[incoming.data.workItemId] = {

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
+import { WRITE_GRANT_POLICY_VERSION } from "../src/work-reducers.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
 
@@ -238,6 +239,8 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
     if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
     // The server stamps which credential answered; it is never in the command.
     if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
+    // Proposals admitted under the item write grant policy carry its version (#5960).
+    if (command.type === T.WORK_PROPOSED && entry?.data?.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION) data = { ...data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION };
   } catch { return false; }
   return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0 && typeof receipt.duplicate === "boolean"
     && validId(entry?.id) && entry.type === command.type && entry.roomId === roomId && entry.actorId === memberId
