@@ -52,7 +52,7 @@ async function doors(t, failure) {
       res.writeHead(200, { "content-type": "application/json" }).end("{}");
       return;
     }
-    const match = req.url.match(/^\/(canonical|room)(\/api\/(version(?:\/worker)?|health|ready)|\/terms|\/privacy|\/|\/\.well-known\/agent-card\.json)$/);
+    const match = req.url.match(/^\/(canonical|room)(\/api\/(version(?:\/worker)?|health(?:\/jobs)?|ready)|\/terms|\/privacy|\/|\/\.well-known\/agent-card\.json)$/);
     if (req.method !== "GET" || !match) return res.writeHead(404).end("Unexpected request");
     if (match[2] === "/.well-known/agent-card.json") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -61,7 +61,11 @@ async function doors(t, failure) {
     }
     let body = { sourceRevision: revision }, code = 200;
     if (match[3] === 'version/worker') body = { ...body, status: 'ok', servedBy: 'worker' };
-    if (match[3] === "health") body = { status: "ok" };
+    // #5487: the strict smoke reads truthful health (liveness plus a job
+    // summary) and the room.job-health/1 view; serve both as healthy.
+    if (match[3] === "health") body = { status: "ok", liveness: "ok", jobs: { status: "ok" } };
+    if (match[3] === "health/jobs") body = { schema: "room.job-health/1", status: "ok", generatedAt: new Date().toISOString(),
+      jobs: [{ name: "room-backup", status: "ok", required: true, stale: false, consecutiveFailures: 0 }] };
     if (match[3] === "ready") body = { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" };
     if (failure?.ready && match[1] === failure.door && match[3] === "ready") body = failure.body;
     if (!match[3]) body = "<!doctype html><title>Room</title>";
@@ -194,17 +198,18 @@ console.log(JSON.stringify(same(production) ? recorded.prod : recorded.entry));
     SMOKE_AGENT_CARD_FETCHES: "1" };
   const job = parse(readFileSync(join(root, ".github/workflows/rollback-prod.yml"), "utf8")).jobs.rollback;
   const start = job.steps.findIndex(step => step.name === "Roll back") + 1;
-  const end = job.steps.findIndex(step => step.name === "Receipt to muse-room");
+  const end = job.steps.findIndex(step => step.name === "Receipt to Project Room");
   assert.ok(start > 0 && end >= start, "known post-rollback boundary");
-  let result = { code: 0 }, readbackOutcome = "skipped";
+  let result = { code: 0 }, readbackOutcome = "skipped", smokeOutcome = "skipped";
   for (const step of job.steps.slice(start, end).filter(step => step.run)) {
     const flags = step.shell === "bash" ? ["--noprofile", "--norc", "-e", "-o", "pipefail"] : ["-e"];
     result = await run("bash", [...flags, "-c", step.run], { env, cwd: join(root, step["working-directory"] ?? "") });
     if (step.id === "readback") readbackOutcome = result.code === 0 ? "success" : "failure";
+    if (step.id === "smoke") smokeOutcome = result.code === 0 ? "success" : "failure";
     if (result.code !== 0) break;
   }
   const receipt = await run("bash", ["-e", "-c", job.steps[end].run], { cwd: root, env: { ...env,
-    ROOM_RECEIPT_TOKEN: "synthetic-local-token", RECEIPT_ROOM: "local-room", OUTCOME: result.code === 0 ? "success" : "failure",
+    ROOM_RECEIPT_TOKEN: "synthetic-local-token", RECEIPT_ROOM: "local-room", ROLLBACK_OUTCOME: "success", STRICT_OUTCOME: smokeOutcome,
     READBACK_OUTCOME: readbackOutcome, PREFLIGHT_OUTCOME: 'success', REASON: "local rollback verification test", RUN_URL: "https://example.invalid/run/1" } });
   assert.equal(receipt.code, 0, receipt.stderr);
   return { ...result, work, http };

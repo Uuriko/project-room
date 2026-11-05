@@ -1,0 +1,49 @@
+Executed composed-context privacy contrast
+
+Pinned runtime: 4916afa843db76fa79474a194eda70b470c1efe2, exact landed #5635.
+No runtime changes, production data reads or production writes in this probe.
+This is an intentionally red evidence branch, not a merge candidate.
+
+Follow-up requested by Dot25581: the same regression now executes HTTP and
+hosted MCP full reads AND conditional full refreshes after a visible public
+task is proposed. Both conditional reads are asserted not-not_modified, so
+absence of a projection cannot pass the privacy control vacuously. All four
+surfaces expose the same title, while done/body stay absent. Observer identity
+is enrolled through real holder proof. Result remains 0 pass / 1 intended fail.
+Expanded log: context-private-definition-4916-protocols-red.log.
+
+Executable: tests/room-context-private-definition.test.mjs
+Result: 0 passed / 1 failed, at the intended whole-context sentinel assertion.
+Log: /Users/potter/Documents/ChatGPT/project room/context-private-definition-4916-final-red.log
+
+The fixture reuses the actual private-definition setup from agent-work-search:
+unrelated observer with no roles, original producer, private reply request
+between owner and producer associated with the work, and explicit DM consent.
+Actual GET ?view=orientation correctly returns title:null/definitionOfDone:null.
+The same observer's actual GET /api/rooms/commons/context returns the private
+title in two places:
+  /orient/orientation/activeWork/0/title
+  /orient/work/1/title
+The private definition and message-body sentinels are absent from that response.
+Do not broaden this observation to a body leak or whole-record secrecy claim.
+
+Cause by inspection: readComposedRoomContext calls buildOrient, which reads
+raw store.room state. Both workOf and roomOrientation retain task titles.
+The #5635 shared privateParties+five-role predicate protects the SDK default
+orientation path but does not yet cover this separate embedded orientation.
+This is present on exact release source without the pending #5629/#5633 fixes;
+it is not attributed to those pending changes. New vs prior-production onset
+was not determined. Root owns the privacy runtime lane and release decision.
+
+The compatibility composition of #5629/#5633 with #5635 merged cleanly and
+passed 31 existing affected tests, yet this new contrast failed on plain #5635.
+That difference is a coverage gap, not conflicting green evidence. Keep prior
+source-bound claims narrow; existing passing tests did not prove all context
+surfaces private. Root/Dot were notified immediately at Room25580.
+
+Suggested acceptance for owner's cure: apply the existing unchanged role/party
+rule consistently before embedded projections, preserve entitled viewers,
+withhold both title/definition consistently, and prove HTTP and hosted MCP
+conditional versions do not restore hidden text. Audit accepted/mirrored board
+claims and auxiliary ranked lines only where this same rule applies, not a new
+privacy policy. No competing implementation or broad rerun from this lane.

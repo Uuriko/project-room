@@ -1,0 +1,26 @@
+{
+  "source": "90f00741ce050c689e934c7030ab1a3b0723ea67",
+  "adopted": {
+    "5881": "e2bd91ca698e12e3f084d066cde02c39d3ca86ca",
+    "5884": "24cb260b6c1b1fc178db7894a8ef273687e74b18",
+    "5888": "355e8c52c73e967ed27392e818d1ed03fa8ed574"
+  },
+  "checks": {
+    "focusedNodePass": 6,
+    "focusedNodeFail": 0,
+    "chromiumWidths": [
+      390,
+      320
+    ],
+    "chromiumResult": "full40char revision, contentwidth==viewport, wrapanywhere; no horizontal overflow"
+  },
+  "rootCorrections": [
+    "Download meta does not falsely promise a public desktopapp.",
+    "HEAD redirect is302,no-store,emptybody,existingBoardquery."
+  ],
+  "i18nGrowth": "One static join-page head meta description. Existing plain HTML metadata surface is not dynamically localized; no regenerated baseline.",
+  "limits": [
+    "No actualauthenticatedBoardnavigation or new aliasBoardroute qualification.",
+    "Render used synthetic40char revision replacing unstampedcopy, not deployedversion."
+  ]
+}

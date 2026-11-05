@@ -1,0 +1,23 @@
+{
+  "landSource": "4e8912637",
+  "observationSource": "2f7b3689a",
+  "landTests": {
+    "pass": 44,
+    "fail": 0
+  },
+  "observations": {
+    "pass": 71,
+    "fail": 0
+  },
+  "spendBeforeObservationPort": {
+    "pass": 30,
+    "fail": 1
+  },
+  "mcpAuthRemaining": "Previously blocked bond path passes after composed cd1659797",
+  "productionChanged": false,
+  "composedBondsSource": "cd1659797",
+  "composedBondsLand": {
+    "pass": 17,
+    "fail": 0
+  }
+}

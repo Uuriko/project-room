@@ -31,8 +31,8 @@ and the page is live — not a snapshot fenced by the room event sequence.
 
 Same read guard as the other room routes:
 
-- Bearer <redacted> credential or browser session. No credential → `401 unauthenticated`.
-- A bearer <redacted> whose credential scope is not the room → `403 access_denied`.
+- Bearer credential or browser session. No credential → `401 unauthenticated`.
+- A bearer credential whose scope is not the room → `403 access_denied`.
 - API keys need the `rooms:read` (or `rooms:*`) scope, else `403 insufficient_scope`.
 - The caller must be an active member of the room, else `403 not_member`.
 

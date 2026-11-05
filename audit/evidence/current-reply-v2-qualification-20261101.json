@@ -1,0 +1,244 @@
+{
+  "sourceHead": "6375621cc4c5e57886ea90825cf1bb22755fd9ae",
+  "runtimeHead": "9deb0b1ff7565faf182631b11656a16eb535ff3a",
+  "base": "330ee89f4ff9ed2963e202266d386fb8cced06fb",
+  "status": "offline qualified; root composition/release only",
+  "node": {
+    "tests": 124,
+    "passed": 123,
+    "failed": 0,
+    "skipped": 1,
+    "command": "node --test tests/current-reply-reader.test.mjs tests/current-reply-cancellation.test.mjs tests/reply-actions.test.js tests/reply-response-validation.test.js tests/reply-requests.test.js tests/reply-agent.test.js tests/reply-context-query.test.js"
+  },
+  "newReaderTests": 14,
+  "worker": {
+    "passed": 1,
+    "failed": 0,
+    "samples": [
+      {
+        "count": 1000,
+        "cold": {
+          "statements": 80,
+          "rowsRead": 1789,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 57078,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "warm": {
+          "statements": 80,
+          "rowsRead": 203,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 57078,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "selected": {
+          "statements": 105,
+          "rowsRead": 227,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 86938,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "history": {
+          "statements": 73,
+          "rowsRead": 195,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 55568,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "plans": {
+          "list": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 46,
+              "detail": "SEARCH current_room_record_proofs USING COVERING INDEX current_reply_request_keys (room_id=? AND record_key>?)"
+            }
+          ],
+          "selected": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH messages USING INDEX messages_room_thread_seq (room_id=? AND thread_root_id=? AND seq>? AND seq<?)"
+            },
+            {
+              "id": 49,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+            }
+          ],
+          "history": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 46,
+              "detail": "SEARCH events USING COVERING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ]
+        }
+      },
+      {
+        "count": 5000,
+        "cold": {
+          "statements": 80,
+          "rowsRead": 1789,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 49216,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "warm": {
+          "statements": 80,
+          "rowsRead": 203,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 49216,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "selected": {
+          "statements": 107,
+          "rowsRead": 229,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 94748,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "history": {
+          "statements": 73,
+          "rowsRead": 195,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 47704,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        },
+        "plans": {
+          "list": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 46,
+              "detail": "SEARCH current_room_record_proofs USING COVERING INDEX current_reply_request_keys (room_id=? AND record_key>?)"
+            }
+          ],
+          "selected": [
+            {
+              "id": 7,
+              "parent": 0,
+              "notused": 49,
+              "detail": "SEARCH messages USING INDEX messages_room_thread_seq (room_id=? AND thread_root_id=? AND seq>? AND seq<?)"
+            },
+            {
+              "id": 49,
+              "parent": 0,
+              "notused": 0,
+              "detail": "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+            }
+          ],
+          "history": [
+            {
+              "id": 6,
+              "parent": 0,
+              "notused": 46,
+              "detail": "SEARCH events USING COVERING INDEX sqlite_autoindex_events_2 (room_id=? AND sequence>? AND sequence<?)"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "logs": {
+    "node": {
+      "path": "audit/evidence/current-reply-v2-final-node-20261101.log",
+      "sha256": "6537fe07a9fbcdaa4b9af52207f07098f6797afa46b7d405e94c15aca26c17e5",
+      "exitCode": 0
+    },
+    "worker": {
+      "path": "audit/evidence/current-reply-v2-final-worker-20261101.log",
+      "sha256": "7bc6163a19cad1ea2d42566e553a3820c97b9b7852b65333cdb81586eed89292",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/current-reply-v2-final-lint-20261101.log",
+      "sha256": "cc6b65eef33e5ca529dfebfe7c8f240e7e281b5962faa8aaaf4eb43fd2bde2c0",
+      "exitCode": 0
+    },
+    "secretScan": {
+      "path": "audit/evidence/current-reply-v2-final-secretScan-20261101.log",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    }
+  },
+  "sourceDigests": {
+    "server/current-reply-reader.mjs": "5d88879ac48aec47ab32cd87dc3f71b830d44dc3929d9d878ec44e0966bc4a22",
+    "server/reply-requests.mjs": "dc19b3e4fc4ebbcaaeb2b3a25b936f0ee4e9c217e013611377c1f542835981bc",
+    "client/reply-actions.mjs": "b7193a4bce145c9c2fcf6830a69806bca1fc1212d183be74c511c94586dac407",
+    "server/http.mjs": "ebc4364fc07a969a38e4c43b08f37967bd034ef8e6b1a885cff61248ed8259ec",
+    "server/mcp-full-profile.mjs": "c7b215ae915dcac3645cd5219878238e208da2148cb6815a748dae88a61b4626",
+    "scripts/runtime-package.mjs": "b9332dde9d9a8b0cf9f95035b47559249230e29054ad946e5f048d9cf02a55f9",
+    "tests/current-reply-reader.test.mjs": "8d9670b3b22d322aecb274ad7e9b94981b265dbcf444a6b7f36b94fae15fa6c3",
+    "cloudflare/current-replies-worker.test-fixture.mjs": "b4191312cf6097f120fefcd5eb6bb5706abaa022c50892bae5dac17aeaaf8cd0",
+    "cloudflare/current-replies-worker.check.mjs": "c3eb2b39be3c8074387f035bec0a6eb302a5e3114c404ab295807c805c1697ab"
+  },
+  "causalEvidence": {
+    "original": "audit/evidence/current-reply-original-red-20261101.log",
+    "credentialTransfer": "audit/evidence/current-reply-cross-credential-red-20261101.log",
+    "illegalSeed": "audit/evidence/current-reply-worker-illegal-cap-red-20261101.log",
+    "exactEquality": "audit/evidence/current-reply-worker-exact-equality-red-20261101.log"
+  },
+  "limits": [
+    "500 total requests is the established legal cap; Worker growth uses 1000/5000 other messages with499 excluded requests and1 selected request, not invalid1000/5000 requests.",
+    "List completeness is current-per-page ordered-source end, not frozen status census. Restart to reconsider earlier newly inserted keys.",
+    "At most8 source candidates pervisit; shared200record/256KiB proof input remains enforced. Numeric exposed evaluatedThrough is visible encountered anchors only.",
+    "Same-pair prior preparation retains established8exchange/100message/64KiB limits; required missing/withdrawn/oversized context refuses rather than silently omits.",
+    "Opaque per-store random-key continuations bind viewer/account/authEpoch/credential/session/revision plus selection; cold restart invalidates them and requires explicit reconciliation.",
+    "Physical SQL returned text bytes vary with bounded immutable proof envelopes; list warm203/203 andhistory195/195 rows, selected227/229. Exact-selected-equality assertion retained as red, replaced by source-derived reservation of at most2 indexed receipt point reads per8 admitted source candidates.",
+    "EXPLAIN selected uses existing(room,thread,seq) index plus last-term tie sorting; no new index or DDL introduced.",
+    "Normalized consent mutation remains separately unported at this base; gate test seeds persisted authoritative consent row and exercises real deniedDirection reader.",
+    "Root candidate manifest/archive reconciliation pending on current composed source; no deployment, live migration, provider execution, new grants or history certification."
+  ]
+}

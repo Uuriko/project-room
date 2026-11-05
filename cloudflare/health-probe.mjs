@@ -1,21 +1,32 @@
-// Shared probe for /api/ready. /api/health is Worker liveness and does not
-// enter the Durable Object. Readiness asks invite-only-pilot to run SELECT 1.
+// Shared bounded probe for readiness and job health (separate instances).
+// Readiness asks invite-only-pilot to run SELECT 1.
 // One in-flight probe is shared so a 1 Hz checker does not queue a call per
-// tick while the constructor holds the input gate. Each caller still gets its
-// own answer once the object is awake, because Origin checks and HEAD/GET are
-// per request.
+// tick while the constructor holds the input gate. Concurrent callers share
+// only the storage snapshot: Origin is checked before this helper, and each
+// caller shapes its own response (including HEAD) through onSnapshot.
+// One helper instance must address one authority with request-independent start().
 
-// Warm production storage answers in tens of milliseconds. A cold
-// invite-only-pilot used to block the same check for 6–20 s. After one second
-// the probe answers 503 with status "degraded" and do.status "timeout". The
-// same bound covers a local workerd isolate's first boot.
-export const HEALTH_PROBE_TIMEOUT_MS = 1000;
+// Warm reads are usually fast, but finite production observations include
+// successful RPCs around 1.7s. Allow 2.5s for readiness and job-health probes;
+// slower or stalled RPCs still return the existing timeout/unready verdict.
+// This is a bounded tolerance, not a retry or completed-result cache.
+export const HEALTH_PROBE_TIMEOUT_MS = 2500;
+
+// cacheMs (default 0 = off): reuse the last successful snapshot for that long
+// in this isolate. Only for job health, whose answer changes on cron cadence;
+// readiness never passes it. Capped at MAX_HEALTH_CACHE_MS.
+export const MAX_HEALTH_CACHE_MS = 30000;
+export const healthCacheMs = value => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_HEALTH_CACHE_MS) : 0;
+};
 
 export function createHealthProbe() {
-  let inflight = null;
-  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil }) {
+  let inflight = null, cached = null;
+  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil, cacheMs = 0 }) {
     const started = performance.now();
     const timing = () => ({ elapsedMs: Math.round(performance.now() - started), timeoutMs });
+    if (cacheMs > 0 && cached && started - cached.at <= cacheMs) return onSnapshot(cached.snapshot, timing());
     // A returned health response must not cancel the probe. The runtime drops
     // in-flight I/O that is not passed to waitUntil, which would abort the
     // constructor every 200 ms and never let the object become ready.
@@ -27,20 +38,7 @@ export function createHealthProbe() {
       const joined = await race(inflight, timeoutMs);
       if (joined.timeout) track(inflight);
       if (joined.timeout || joined.error) return onUnready(joined.timeout ? "timeout" : "error", timing());
-      // The joiner's own start() is per-request, but it is not exempt from
-      // the budget: bound it by the time left after waiting for the gate,
-      // not a fresh timeoutMs, so the caller still answers within its
-      // overall timeout. On timeout keep its I/O alive via waitUntil,
-      // exactly as the leader branch does for its task.
-      const remainingMs = Math.max(0, timeoutMs - (performance.now() - started));
-      const own = (async () => snapshotResponse(await start()))();
-      const racedOwn = await race(own, remainingMs);
-      if (racedOwn.timeout) {
-        track(own);
-        return onUnready("timeout", timing());
-      }
-      if (racedOwn.error) return onUnready("error", timing());
-      return onSnapshot(racedOwn, timing());
+      return onSnapshot(joined.snapshot, timing());
     }
     let settle;
     const gate = new Promise(resolve => { settle = resolve; });
@@ -48,7 +46,8 @@ export function createHealthProbe() {
     const task = (async () => {
       try {
         const snapshot = await snapshotResponse(await start());
-        settle({ error: false });
+        if (snapshot.status === 200) cached = { snapshot, at: performance.now() };
+        settle({ error: false, snapshot });
         return { snapshot, timing: timing() };
       } catch (error) {
         settle({ error: true });
@@ -86,13 +85,14 @@ async function snapshotResponse(response) {
   };
 }
 
-export function workerLivenessResponse(request, { mode, deployment, emailVerification }) {
+export function workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus = "unknown" }) {
   // emailVerification is part of the documented /api/health contract
   // (docs/openapi.yaml): the Node handler reports it so a deploy that lost
   // its mail secret cannot silently relax every email gate. #3272: the Worker
   // liveness answer describes this Worker only. An entry Worker may bind a
   // different Worker's Durable Object; /api/ready reports that authority's policy.
-  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification, emailVerificationScope: "worker" } : {}) };
+  const jobStatus = ["ok", "stale", "failing", "degraded", "timeout", "error"].includes(jobsStatus) ? jobsStatus : "unknown";
+  const body = { status: jobStatus === "ok" ? "ok" : "degraded", liveness: "ok", jobs: { status: jobStatus }, mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification, emailVerificationScope: "worker" } : {}) };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 200,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
@@ -133,3 +133,13 @@ export function healthLivenessResponse(request, { mode, deployment, readiness, e
   });
 }
 
+
+// Only the existing job-health classifier determines readiness. Missing or
+// malformed snapshots must never turn a live Worker into a false health pass.
+export function jobHealthSnapshotStatus(snapshot) {
+  try {
+    const body = JSON.parse(new TextDecoder().decode(snapshot.body));
+    if (body.schema !== 'room.job-health/1') return 'unknown';
+    return ['ok', 'stale', 'failing', 'degraded'].includes(body.status) ? body.status : 'unknown';
+  } catch { return 'unknown'; }
+}

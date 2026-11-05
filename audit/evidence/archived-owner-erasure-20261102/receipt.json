@@ -1,0 +1,89 @@
+{
+  "runtime": "28853dd4d",
+  "base": "d6d186b531250435b72b816c82e9f87f592fb561",
+  "syntheticOnly": true,
+  "causalBefore": {
+    "tests": 3,
+    "pass": 0,
+    "fail": 3,
+    "adaptation": "New test copied into exact base archive, future helper import/test omitted; runtime unchanged. Two archived owner deletions refused and unarchived capacity control hit pilot_limit."
+  },
+  "focused": {
+    "tests": 15,
+    "pass": 15
+  },
+  "neighbors": {
+    "tests": 42,
+    "pass": 41,
+    "fail": 1,
+    "unrelatedFailure": "tests/room-lifecycle.test.js:252 calls room() on newly normalized account room; current_room_context_required"
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "savedAdapter": {
+      "statements": 198,
+      "rowsRead": 7080,
+      "rowsWritten": 44,
+      "unknown": 0
+    },
+    "coldRetryAdapter": {
+      "statements": 119,
+      "rowsRead": 4235,
+      "rowsWritten": 0,
+      "unknown": 0
+    },
+    "costScope": "Adapter statement observer only; excludes raw native runtime permit SQL. Small 32-history-message causal fixture, not scaling or CPU proof."
+  },
+  "lint": {
+    "errors": 0,
+    "inheritedWarnings": 30
+  },
+  "fullOracleMandatory": true,
+  "strictReplayDeletion": "unsupported event_dependency_plan_incomplete",
+  "wholePurgeBounded": false,
+  "browserQualified": false,
+  "logs": {
+    "archived-owner-causal-before": {
+      "sha256": "c1df856cb0e8a21ade57be41d7522a812e3eaf8f6d11331d2eda791cefb6de25",
+      "bytes": 10131
+    },
+    "archived-owner-final-focused": {
+      "sha256": "be61f52d501bcf3a41911f34a370762c90c215873fc8eba438e15fc159c7e605",
+      "bytes": 11098
+    },
+    "archived-owner-final-neighbors": {
+      "sha256": "3b522acc119a2fbdd0970da05e46a9ee85d84803f3d32a3b070417b921d4135e",
+      "bytes": 35073
+    },
+    "archived-owner-final-lint": {
+      "sha256": "7b0ff93a025fefa7871d10bb7527affe6872407e79d8c9edba4a1e1c437c8f75",
+      "bytes": 6293
+    },
+    "archived-owner-native": {
+      "sha256": "b799d4d1e741c1c12c58896b5ed0b88b8aed347388c296593402e15909b0ba33",
+      "bytes": 5844
+    },
+    "archived-owner-native-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "sourceSha256": {
+    "cloudflare/archived-owner-erasure-native.check.mjs": "02d10f834cdf1ab4b72fc2a3732a90c07d486d7ffa1ef2eaa446ffc1ee521c29",
+    "cloudflare/current-message-redaction-native.test-fixture.mjs": "fae725762da4e3901ea38669e96f6b86ae49456a377a486f60b5fb862af7984e",
+    "docs/openapi.yaml": "0cf2cb31c9faca6963ce0fcf0594d6842c0454b3d8fa1aea1f4a89a47d429501",
+    "plugins/project-room/skills/project-room/references/errors-catalog.md": "e3ad1d1ca8a5ab45320d6f952f1d3c8a5bafb760fbb9ad33cc75d6757efb117b",
+    "server/account-deletion.mjs": "db1614377be4b7b7a17ba325b563175a394b92a632947f33d33934d37fc4c183",
+    "server/message-redaction.mjs": "5b61a67785618d88c9bfb39d246b848e83d5c126db8687d248933254e5450335",
+    "server/openapi/fragments/0029-api-rooms-roomId-commands.yaml": "15d17bd90df14f29b9a568fd9b7309fbf6dbf3ca66df96a0d1d952dff15a0849",
+    "server/room-lifecycle.mjs": "288e7b999db6b0d243e184cbdc5ae0f5f811a06ea41a099beda5bbdf18d26edd",
+    "server/store.mjs": "0eb16a3908c1404a7fbe5095570803cee783544f69e358f0304d00dbadc357cd",
+    "skills/project-room/references/errors-catalog.md": "e3ad1d1ca8a5ab45320d6f952f1d3c8a5bafb760fbb9ad33cc75d6757efb117b",
+    "src/app.js": "6dfa0ba1ca02a8d2fb98724c0b3f65e0e8c045fb63de8c34a074e67504a2ba38",
+    "src/events.js": "c3baa520ddd21afb8a5107415de96271793239e3b19ba49443d5d84a399a4280",
+    "tests/archived-owner-erasure.test.mjs": "bdb17a54b14fe141ea9c455e8a982ba771aa27ece3a77dd33a194233df98c882",
+    "tests/current-account-deletion.test.mjs": "996a4d2d74998e361f9d1556a4ee3cc798b1deb535a25e1a7e00e209a1945bf0",
+    "tests/current-attachment-lifecycle.test.mjs": "cabe119004f08592f63517095c248211915195ea8effb8d639128d4ee86f076a"
+  }
+}

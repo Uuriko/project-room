@@ -278,8 +278,9 @@ try {
   const chatSame = heldAfter.owner === chat.memberId && heldAfter.state === "claimed" && heldAfter.leaseExpiresAt === heldAtChat.leaseExpiresAt;
   guard(
     "C2",
-    "renew and release by a non-holder are refused with 403 work_not_owner, and a chat-profile holder is refused renew with 403 work_claims_not_permitted; owner, state, and lease stay unchanged",
-    renewRelease.every(line => line.includes("403 work_not_owner"))
+    "renew by a non-holder non-writer is refused with 403 work_claims_not_permitted (FUNNEL-FIXES C2 gate-before-load) and release by a non-authority caller with 403 work_not_owner, and a chat-profile holder is refused renew with 403 work_claims_not_permitted; owner, state, and lease stay unchanged",
+    renewRelease.filter(line => line.includes(" renew ")).every(line => line.includes("403 work_claims_not_permitted"))
+      && renewRelease.filter(line => line.includes(" release ")).every(line => line.includes("403 work_not_owner"))
       && midSame
       && chatRenew.status === 403
       && codeOf(chatRenew) === "work_claims_not_permitted"

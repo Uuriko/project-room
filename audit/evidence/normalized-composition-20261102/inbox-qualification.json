@@ -1,0 +1,41 @@
+{
+  "runtime": [
+    "9a44d6334",
+    "a13648d9a"
+  ],
+  "node": {
+    "inbox": 18,
+    "neighbor": 64,
+    "failed": 0
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "tombstones": [
+      4,
+      130
+    ],
+    "sourceAdmitted": [
+      4,
+      4
+    ],
+    "sqlRowsRead": [
+      326,
+      328
+    ],
+    "sqlRowsWritten": [
+      0,
+      0
+    ],
+    "sqlStatements": [
+      119,
+      121
+    ],
+    "limits": "Synthetic local Worker measurements, not production CPU/latency or exactly constant total SQL work."
+  },
+  "separateHistoricalComparison": {
+    "status": "failed",
+    "reason": "Historical baseline34f63174e cannot boot: no such table main.current_restore_audit_scratch. Not waived or counted pass."
+  },
+  "productionChanged": false
+}

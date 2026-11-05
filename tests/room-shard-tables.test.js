@@ -6,13 +6,13 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import { assertShardClassification, roomKeyColumn, tableHome } from "../server/room-shard.mjs";
-import { ROOM_TABLE_KEYS } from "../server/room-shard-tables.mjs";
+import { ROOM_TABLE_KEYS, LOCAL_TABLES } from "../server/room-shard-tables.mjs";
 
 function liveNames(db) {
   return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(row => row.name);
 }
 
-test("a fresh store's tables are classified room or directory", t => {
+test("a fresh store's tables are classified room, directory or target-local", t => {
   const directory = mkdtempSync(join(tmpdir(), "room-shard-tables-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -31,7 +31,11 @@ test("a fresh store's tables are classified room or directory", t => {
     assert.ok(columns.includes(column), `${table} keeps its room key ${column}`);
     assert.equal(roomKeyColumn(table), column);
   }
-  for (const name of REPLAY_SKIPPED_TABLES) {
+  for (const name of LOCAL_TABLES) {
+    assert.equal(tableHome(name), "local");
+    assert.equal(homes.has(name), true);
+  }
+  for (const name of REPLAY_SKIPPED_TABLES.filter(name => !LOCAL_TABLES.includes(name))) {
     assert.equal(tableHome(name), "skipped");
     assert.equal(homes.has(name), false);
   }

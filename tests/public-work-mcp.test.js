@@ -1,5 +1,6 @@
 // Exercises server/mcp-public-work.mjs through the actual hosted HTTP boundary.
 import test from 'node:test';
+import { readCurrentRoomForAudit } from '../server/current-room-repository.mjs';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -32,7 +33,7 @@ test('actual MCP anonymous recommendations and task reads discover auth without 
  assert.deepEqual(unknown.body.error.data.next,[{command:'tools/list'}]);
  assert.match(unknown.body.error.data.hint,/tools\/list/);
  const listed=await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list'});
- assert.deepEqual(listed.body.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task','room_identity_mint']);
+ assert.deepEqual(listed.body.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task','room_identity_mint','room_check_access']);
  const recommendation=value(await f.call('public_work_recommend',{skills:['JavaScript']}));assert.equal(recommendation.claim,null);assert.equal(recommendation.recommendations[0].task.taskId,'mcp:task');
  assert.equal(value(await f.call('public_work_read_task',{taskId:'mcp:task'})).claim.state,'unclaimed');
  const unauthorized=await f.call('public_work_claim',claim);assert.equal(unauthorized.body.error.code,-32001);
@@ -79,7 +80,7 @@ test('strict MCP schemas reject excessive arguments and notifications never muta
  // Three real dispatch profiles: anonymous join, outside public-work, room member.
  const created=await fetch(f.origin+'/api/agent-rooms',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+f.second.secret},body:JSON.stringify({roomId:'qa2-member-room',title:'Synthetic member room',purpose:'Envelope error boundary',kind:'personal'})});
  assert.equal(created.status,201);
- const memberBefore=JSON.stringify(f.store.room('qa2-member-room'));
+ const memberBefore=JSON.stringify(f.store.readTransaction(() => readCurrentRoomForAudit(f.store,'qa2-member-room')));
  const afterSetup=state(f.store);
  for(const [profile,secret,method,params] of [
   ['anonymous',undefined,'ping',{}],
@@ -97,7 +98,7 @@ test('strict MCP schemas reject excessive arguments and notifications never muta
    assert.ok(error.data.next.length>0,profile);
    assert.ok(error.data.next.every(step=>typeof step.command==='string' || typeof step.tool==='string'),profile);
    assert.match(error.data.operationId,/^op_[A-Za-z0-9_-]+$/,profile);
-   assert.equal(state(f.store),afterSetup,profile);assert.equal(JSON.stringify(f.store.room('qa2-member-room')),memberBefore,profile);
+   assert.equal(state(f.store),afterSetup,profile);assert.equal(JSON.stringify(f.store.readTransaction(() => readCurrentRoomForAudit(f.store,'qa2-member-room'))),memberBefore,profile);
   }
  }
  // Room creation is fixture setup; refusals and the retained notification have no effects.
@@ -147,7 +148,7 @@ test('catalog selection uses live usable membership, preserves Room core size an
  room.members[member]={id:member,displayName:'Outside member',kind:'agent',active:true,permissions:['read']};f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');f.store.db.prepare('INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)').run('commons',f.first.identityId,member,Date.now());
  const list=params=>f.rpc({jsonrpc:'2.0',id:1,method:'tools/list',...(params?{params}:{})},f.first.secret);
  const normal=(await list()).body;assert.ok(normal.result.tools.some(tool=>tool.name==='room_needs_me'));assert.ok(!normal.result.tools.some(tool=>tool.name==='public_work_claim'));assert.ok(Buffer.byteLength(JSON.stringify(normal))<17*1024); // QA7-04: room_read_messages gained the latest flag (+44 bytes)
- const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
+ const publicFocus=(await list({focus:'public_work'})).body;assert.deepEqual(publicFocus.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','room_check_access','room_join',...PUBLIC_WORK_MCP_TOOLS]);assert.ok(Buffer.byteLength(JSON.stringify(publicFocus))<16384);
  assert.deepEqual((await list()).body.result.tools,normal.result.tools);
  room.members[member].active=false;f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(room),'commons');
  const inactive=(await list()).body;assert.deepEqual(inactive.result.tools.map(tool=>tool.name),publicFocus.result.tools.map(tool=>tool.name));

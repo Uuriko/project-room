@@ -1,3 +1,5 @@
+import {readCurrentRecord,withCurrentReadContext} from "../server/current-room-repository.mjs";
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A2: an account that administers membership creates a room from Rooms,
@@ -38,7 +40,8 @@ async function setup(t, viewport) {
     await page.locator("#account-rooms-panel").waitFor();
   };
   const roomCount = () => f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n;
-  return { ...f, page, origin, login, roomCount };
+  const roomMetadata = id => withCurrentReadContext(f.store.db, id, () => readCurrentRecord(f.store.db, id, "metadata", "room"));
+  return { ...f, page, origin, login, roomCount, roomMetadata };
 }
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
@@ -57,17 +60,21 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#account-room-purpose").fill("Plan the synthetic pilot together.");
     await page.locator("#account-room-kind").selectOption("organization");
     await page.locator("#account-room-name").fill("Test admin");
+    await captureDesignEvidence(page, { id: "create-room", title: "Create room form", fixture: "acceptance admin account; existing room membership", testName: t.name, component: "form controls" });
     const before = f.roomCount();
     await page.locator("#account-room-submit").click();
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-title").textContent(), "Pilot planning");
     assert.equal(await page.locator("#room-kind-badge").textContent(), "Organization");
     assert.equal(f.roomCount(), before + 1);
-    const created = f.store.db.prepare("SELECT id FROM rooms WHERE json_extract(projection,'$.room.title')='Pilot planning'").get().id;
+    const created = new URL(page.url()).searchParams.get("room");
+    assert.ok(created); assert.ok(f.store.db.prepare("SELECT id FROM rooms WHERE id=?").get(created));
+    assert.equal(f.roomMetadata(created).title, "Pilot planning");
     assert.equal(f.store.accountForMember(created, "owner").id, "admin-account", "the creator owns the room through the same account");
-    assert.equal(f.store.room(created).state.room.kind, "organization");
+    assert.equal(f.roomMetadata(created).kind, "organization");
     assert.equal(await page.locator("#room-archived-note").isHidden(), true);
     assert.equal(await page.locator("#message-input").isDisabled(), false);
+    await captureDesignEvidence(page, { id: "created-room", title: "Created room and empty composer", fixture: "actual room creation from Rooms", testName: t.name, component: "empty state and composer" });
     await page.locator("#message-input").fill("First note before archiving.");
     await page.locator('#message-form button[type="submit"]').click();
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
@@ -86,7 +93,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.match(await page.locator("#room-about-status").textContent(), /Couldn’t archive the room/);
     assert.equal(await page.locator("#settings-dialog").evaluate(node => node.open), true, "the dialog stays where the reader is");
     assert.equal(await page.locator("#room-archive-button").isDisabled(), false, "and the control is ready to try again");
-    assert.equal(f.store.room(created).state.room.archivedAt ?? null, null, "nothing was archived");
+    assert.equal(f.roomMetadata(created).archivedAt ?? null, null, "nothing was archived");
     await page.unroute("**/commands");
     await page.locator("#room-archive-button").click();
     // The note lives in the sidebar, which is behind the Menu button on a
@@ -94,16 +101,16 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // screen. The toast the archive raises is the immediate signal there.
     await ensureSidebarOpen(page);
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
-    assert.match(await page.locator("#room-archived-note").textContent(), /^Archived .+ · read only\. Reading and export stay available; nothing new is recorded\.$/);
+    assert.match(await page.locator("#room-archived-note").textContent(), /^Archived .+ · read only\. Reading, export and explicit owner erasure stay available; ordinary coordination is closed\.$/);
     await ensureSidebarClosed(page);
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), true);
     assert.equal(await page.locator("#new-work-button").isHidden(), true);
     assert.equal(await page.locator("#room-archive-button").isHidden(), true);
-    const state = f.store.room(created).state;
+    const state = { room: f.roomMetadata(created) };
     assert.equal(typeof state.room.archivedAt, "string"); assert.equal(state.room.archivedById, "owner");
     assert.equal(f.store.db.prepare("SELECT archived_at FROM rooms WHERE id=?").get(created).archived_at, state.room.archivedAt);
-    const sequence = f.store.room(created).sequence;
+    const sequence = f.store.headSequence(created);
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
     // Switcher: the archived room is listed read only, never as a working "Open" button.
     await clickChrome(page, "#choose-room");
@@ -120,8 +127,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
-    assert.equal(f.store.room(created).sequence, sequence, "reading an archived room records nothing");
-    assert.equal(f.store.room(created).state.room.archivedAt, state.room.archivedAt);
+    assert.equal(f.store.headSequence(created), sequence, "reading an archived room records nothing");
+    assert.equal(f.roomMetadata(created).archivedAt, state.room.archivedAt);
   });
 }
 
@@ -136,13 +143,13 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await openSettings(page, "room-about");
   await page.locator("#room-leave-button").waitFor({ state: "visible" });
   assert.equal(await page.locator("#room-archive-button").isHidden(), true, "only the owner archives");
-  const sequence = f.store.room("commons").sequence;
+  const sequence = f.store.headSequence("commons");
   await page.locator("#room-leave-button").click();
   // Access ends with the leave; the account home lands on Rooms, which no longer lists the room.
   await page.locator("#main").waitFor({ state: "hidden" });
   await page.locator("#account-rooms-panel").waitFor({ state: "visible" });
-  assert.equal(f.store.room("commons").state.members.guest.active, false);
-  assert.equal(f.store.room("commons").sequence, sequence + 1, "leaving is one recorded access change");
+  assert.equal(f.store.roomAuthority("commons", { memberId: "guest" }).members.guest.active, false);
+  assert.equal(f.store.headSequence("commons"), sequence + 1, "leaving is one recorded access change");
   await page.getByText("No rooms yet.", { exact: true }).waitFor();
   assert.equal(await page.locator("#account-rooms-list button").count(), 0);
   const before = f.roomCount();

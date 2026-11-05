@@ -1,3 +1,4 @@
+import {legacyAccountRoom} from './helpers/legacy-account-room.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -48,7 +49,7 @@ async function deletionAccount(origin, f) {
   assert.ok(token, "signup sets a fresh account_session cookie");
   const session = f.store.authenticateAccountSession(token);
   f.store.accountLogins.markEmailVerified(session.account.id, email);
-  return { token, binding: session.sessionBinding, creds: { cookie: `account_session=${token}`, csrf: session.csrf } };
+  return { token, accountId:session.account.id, binding: session.sessionBinding, creds: { cookie: `account_session=${token}`, csrf: session.csrf } };
 }
 
 function parityAtSeq(store, roomId) {
@@ -60,12 +61,12 @@ function certify(store, roomId) {
   assert.ok(parityAtSeq(store, roomId) !== null, `parity certifies ${roomId}`);
 }
 
-test("account deletion in an already-archived room leaves rows parity can certify", async t => {
+for (const canonical of [false, true]) test(`account deletion in an already-archived room leaves rows parity can certify (canonical=${canonical})`, async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const ctx = await deletionAccount(origin, f);
   const roomId = "solo-parity";
-  f.store.createAccountRoom(ctx.token, ctx.binding, {
+  legacyAccountRoom(f.store, ctx.accountId, {
     roomId, title: "Solo parity", purpose: "Deletion parity coverage", kind: "personal", displayName: "Owner"
   });
   const key = f.store.issueAccessKey(roomId, "owner");
@@ -78,6 +79,7 @@ test("account deletion in an already-archived room leaves rows parity can certif
   assert.equal(f.store.backfillMessages({ limit: 1000 }).done, true);
   certify(f.store, roomId);
 
+  if (canonical) f.store.migrateMessageAuthority(roomId);
   // The owner archives the room, and the machinery catches up again.
   send(T.ROOM_ARCHIVED, {});
   assert.equal(f.store.backfillMessages({ limit: 1000 }).done, true);
@@ -103,6 +105,7 @@ test("account deletion in an already-archived room leaves rows parity can certif
     assert.equal(record.redacted, true);
   }
 
+  if (canonical) assert.equal(JSON.parse(f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get(roomId).projection).messageAuthority.version, 1);
   // Parity certifies the room again instead of mismatching it forever...
   certify(f.store, roomId);
 

@@ -1,0 +1,12 @@
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +38
+++++++++++++++++++++++++++++++++++++++
+Progress: resolved 38, reused 38, downloaded 0, added 38, done
+
+devDependencies:
++ esbuild 0.28.2
++ miniflare 4.20260730.0
++ wrangler 4.116.0
+
+Done in 302ms using pnpm v10.34.9

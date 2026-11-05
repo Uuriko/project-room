@@ -182,8 +182,8 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.locator('#channel-list [data-channel="general"]').click();
   await ensureSidebarClosed(page);
 
-  // Reopening the same search hit after a channel change refreshes its return
-  // context without adding another copy of the canonical destination to history.
+  // A channel change leaves the work destination. Opening the search hit again
+  // creates a new destination whose Back returns to that conversation.
   await search.fill('telescope');
   await target.press('Enter');
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
@@ -192,12 +192,14 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.locator('#channel-list [data-channel="design"]').click();
   await ensureSidebarClosed(page);
   assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+  assert.equal(await page.locator('#message-list [data-work-record-id]').count(), 0);
+  assert.equal(new URL(page.url()).hash, '#pr-view/rooms');
   const channelDraft = 'Keep this design channel thought.';
   await page.locator('#message-input').fill(channelDraft);
   await target.press('Enter');
   await page.waitForFunction(id => document.activeElement?.dataset.workRecordId === id, pair);
   assert.equal(await page.locator('#conversation-title').textContent(), '# general');
-  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
+  assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength + 1);
   await back.press('Enter');
   await page.waitForFunction(id => document.activeElement?.dataset.openWork === id, pair);
   assert.equal(await page.locator('#conversation-title').textContent(), '# design', 'the same search hit returns to its latest originating channel');

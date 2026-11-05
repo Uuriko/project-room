@@ -353,6 +353,15 @@ test("delegate expiry sweep attributes to the owner with delegation provenance",
   });
   store.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,0,NULL,NULL)")
     .run(createHash("sha256").update(`ga1.${randomBytes(32).toString("base64url")}`).digest("hex"), "commons", guestMemberId);
+  // A failed projection write must roll back the event and credential
+  // revocation as well, so retrying still performs the whole expiry.
+  const head = store.headSequence("commons");
+  store.db.exec("CREATE TRIGGER fail_guest_expiry BEFORE UPDATE OF projection ON rooms BEGIN SELECT RAISE(ABORT,'injected expiry failure'); END");
+  assert.throws(() => store.guestAgentLinks.sweepExpired(agent.secret, "commons", null), /injected expiry failure/);
+  assert.equal(store.headSequence("commons"), head);
+  assert.equal(store.room("commons").state.members[guestMemberId].active, true);
+  assert.equal(store.db.prepare("SELECT revoked FROM credentials WHERE room_id='commons' AND member_id=?").get(guestMemberId).revoked, 0);
+  store.db.exec("DROP TRIGGER fail_guest_expiry");
   // The delegate runs the mechanical sweep on their own secret.
   store.guestAgentLinks.sweepExpired(agent.secret, "commons", null);
   assert.equal(store.room("commons").state.members[guestMemberId].active, false, "guest member swept");

@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
@@ -32,7 +33,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "people-panel starts collapsed in the human sidebar");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
-    assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
+    assert.equal(await page.locator("#message-list [data-work-record-id]").count(), 0, "human conversation starts without full work cards");
     // C3 rest state, before any screenshot (Chromium 151 captures reset touch
     // emulation): quiet on pointer devices, always visible on touch.
     const restAction = page.locator('[data-message-record-id="test-request"] [data-message-action="work"]');
@@ -87,7 +88,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#require-decision").isChecked(), true);
     await page.locator("#cancel-work-button").click();
 
-    const card = page.locator('[data-work-record-id="test-handoff"]');
+    const card = await openConversationWork(page, 'test-handoff');
     // C2: the primary work line comes first and expanded details never compete with it.
     const nextStep = card.locator(".work-next-step");
     await nextStep.waitFor({ state: "visible" });

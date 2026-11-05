@@ -1,0 +1,13 @@
+{
+  "base": "08f1cd18ed40d68438d432a135417102233caac3",
+  "source": "c47419c54c2e7c50e008dc49956d4eab1890fb78",
+  "node": "24.22.1",
+  "result": "8/8 + original causal control green",
+  "change": "Fresh distinct coalesced signal resets retries/liveness; same-ID reoffer does not replenish retry budget, burst window and ack preserved.",
+  "redBefore": "Regression tests fail on exact original author source; logs retained. Original QA red controls retained at76acfb856.",
+  "commands": [
+    "node --test tests/wake-adapters.test.js",
+    "node audit/evidence/successor-wake/original-probe.mjs"
+  ],
+  "limits": "Node synthetic only; flags remain default off; no providers/browser/Native/live/merge/deploy. Author branches untouched. Deadline scan now considers all room IDs; no large-room-count benchmark. Legacy recognition depends on persisted events, matching existing dedup lifetime."
+}

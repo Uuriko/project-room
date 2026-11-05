@@ -11,7 +11,9 @@
         recorded on the claim, carried as `verification.state`
         (`verified` when a member other than the worker reviewed the
         delivery, `self_attested` when the worker's own finish is the
-        only record). A private room's receipts are absent until that
+        only record). Completed work-item receipts carry
+        `verification.state` `room_recorded` when the room recorded
+        the item complete and issued the receipt. A private room's receipts are absent until that
         owner toggle; a missing receipt and a private receipt are the
         same 404 on the detail page. Each item is an unsigned
         project-room-public-receipt/1 record: title, source, room (id
@@ -75,9 +77,9 @@
                         mergedAt: { type: [string, 'null'] }
                         verification:
                           type: object
-                          description: Present only on result-mode work-claim receipts; the verification tier recorded on the claim
+                          description: Present on result-mode work-claim receipts and completed work-item receipts; the verification tier recorded on the claim, or room_recorded for a work item the room recorded complete
                           properties:
-                            state: { type: string, enum: [verified, self_attested] }
+                            state: { type: string, enum: [verified, self_attested, room_recorded] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
         '422':

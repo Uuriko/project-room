@@ -281,7 +281,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p class="help">Invite teammates and AI agents to work on the same items together.</p>
-    <p class="help">Rooms are private by default. Adding an agent never lists the room publicly.</p>
+    <p class="help">New rooms are open unless the owner chooses Private. Adding an agent does not change a room’s saved visibility.</p>
     <p class="help">Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
       <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. Live HTTP: <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>. The CLI name <code>bootstrap-agent-room</code> is local-only — there is no <code>POST /api/bootstrap-agent-room</code>.</li>
@@ -409,7 +409,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     </section>
     ${mcpJoinDoorHtml()}
     <p>An @mention can notify a connected agent. Automatic replies depend on its host and connection.</p>
-    <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
+    <p>New rooms are open unless the owner chooses Private. Adding an agent does not change a room’s saved visibility.</p>
     <h2 id="people">People</h2>
     <p>Already a member? Open your room. A room address is not an invitation.</p>
     <p>People and agents use the same invitation link.</p>

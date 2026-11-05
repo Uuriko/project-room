@@ -1,0 +1,111 @@
+{
+  "base": "a17d3065dd3783fb64b5319e42c95436b55fd05f",
+  "runtimeCommit": "2133d7fefd4cd1ac61cb909ae470306ddcb484cb",
+  "sourceHead": "a5afc293e5586c9f977706c5ea1301346d37aa7c",
+  "sourceHashes": {
+    "cloudflare/attachment-lifecycle-native.check.mjs": "4986c563983a5c6370dab93151916e4c4170c1656af6d641a1aed915877b8e59",
+    "cloudflare/attachment-lifecycle-native.test-fixture.mjs": "d0b6fb19823416e03f08c70b0b41979bf1bbf2078714a1ad1aa2b84bb6f32449",
+    "server/account-deletion.mjs": "958942c7de993a45e95ec4873acf4b07728919e48d8324a4376fdcd19b9e7af2",
+    "server/message-redaction.mjs": "5eca46b4b4662348ace2efb1b78f8cf15f25bde50e4ed3315647195b421b4cdd",
+    "server/room-attachment-bytes.mjs": "d88a66c7637ce1b6653c517f0bb7e7b192aeceaa6ba1963ce3b85c48e9aa4465",
+    "tests/current-attachment-lifecycle.test.mjs": "19b0140f0bfc56104029e8e077c8eafaf2c9e87e44c5889e6ee5fb4316edfc67"
+  },
+  "logs": [
+    {
+      "name": "attachment-lifecycle-before",
+      "bytes": 6498,
+      "sha256": "e950f711c298c6157e9f2a210b72bd9677f92b2ed5ff0fb989d33277ea2771fd"
+    },
+    {
+      "name": "attachment-account-fault-before",
+      "bytes": 1516,
+      "sha256": "b8e4c6e87b195244d50af4994a32d5c168293e34c7684ef349f5521259d43606"
+    },
+    {
+      "name": "attachment-lifecycle-native-before",
+      "bytes": 1641,
+      "sha256": "7b4d4496cad0f3526dd38fe2880471fb4174ff270b24e9f7f898114f86f7ad8e"
+    },
+    {
+      "name": "attachment-lifecycle-focused",
+      "bytes": 17096,
+      "sha256": "f94e7ccfee18f8e4082881750888fa462d5323331e720bb0f00437d5bfaec298"
+    },
+    {
+      "name": "attachment-lifecycle-neighbors",
+      "bytes": 16155,
+      "sha256": "f7e064489d4d0d7e5b1bb4f198331a707cc2095e6c93495e2d40196030d5add7"
+    },
+    {
+      "name": "attachment-lifecycle-final-own",
+      "bytes": 4237,
+      "sha256": "104b0c4c9acf1a56506f5d5daa572f2e542c381de02a596210c722a131e27267"
+    },
+    {
+      "name": "attachment-lifecycle-native",
+      "bytes": 2252,
+      "sha256": "41b91992cc9d0611e2594dc63a1e2bc4fde083e745ee8fedac58ecbc40c4609c"
+    },
+    {
+      "name": "attachment-lifecycle-secret",
+      "bytes": 53,
+      "sha256": "2af685e9d95accd01029b800f6ff32c8f7b7675cf0b2eb592b90ebb20bdb3f1c"
+    }
+  ],
+  "commands": [
+    {
+      "command": "node --test tests/current-attachment-lifecycle.test.mjs (initial three tests, base runtime)",
+      "exit": 1,
+      "pass": 0,
+      "fail": 3
+    },
+    {
+      "command": "node --test --test-name-pattern=\"account erasure fails closed on attachment storage fault\" tests/current-attachment-lifecycle.test.mjs (base account-deletion module)",
+      "exit": 1,
+      "pass": 0,
+      "fail": 1
+    },
+    {
+      "command": "node --test cloudflare/attachment-lifecycle-native.check.mjs (all three runtime files restored to exact base in isolated tree; restored patched files in finally)",
+      "exit": 1,
+      "fail": 1
+    },
+    {
+      "command": "node --test tests/current-attachment-lifecycle.test.mjs tests/room-attachment-committed-delete.test.js tests/room-attachments-autonomy-tier.test.mjs tests/room-attachment-quota-ratchet.test.js tests/message-redaction.test.js",
+      "exit": 0,
+      "pass": 27,
+      "skip": 0
+    },
+    {
+      "command": "node --test tests/current-attachment-lifecycle.test.mjs tests/current-browser-attachments.test.mjs tests/account-deletion-delete-errors.test.js tests/account-deletion-rooms.test.js tests/retention-live-store.test.js",
+      "exit": 0,
+      "pass": 27,
+      "skip": 0
+    },
+    {
+      "command": "node --test tests/current-attachment-lifecycle.test.mjs (final seven tests)",
+      "exit": 0,
+      "pass": 7,
+      "skip": 0
+    },
+    {
+      "command": "node --test cloudflare/attachment-lifecycle-native.check.mjs",
+      "exit": 0,
+      "pass": 1,
+      "skip": 0
+    },
+    {
+      "command": "node scripts/secret-scan-check.mjs",
+      "exit": 0,
+      "files": 1795,
+      "findings": 0
+    }
+  ],
+  "nativeScope": "Miniflare/workerd actual native Durable Object SQLite through real DurableDatabase+RoomStore, fixture extends existing CurrentAttachmentsRoom. Not installed macOS application or live production.",
+  "limits": [
+    "No full normalized message-redaction/account-deletion/operator-purge protocol port",
+    "No schema, format, permissions, runtime-package, live install, push or deployment changes",
+    "No flat-cost or bounded whole-store expiry claim; existing expiry scans due staged rows within room; committed lifetime unchanged",
+    "Existing normalized get returns410 for elapsed staged deadline without performing cleanup; staging/commit/discard invoke expiry, direct expire qualified; no new scheduler"
+  ]
+}

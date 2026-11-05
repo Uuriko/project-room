@@ -4,9 +4,11 @@ Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicit
 
 Plan date: 2026-10-18. Starting local checkpoint: `973260d6`.
 Owner: Codex implementation, coordinating shared lanes before changes.
-Status: planned execution; the overhaul is not finished.
+Status: historical package sequence; the overhaul is not finished. Use the active
+plan above for current execution, preserving retained acceptance requirements.
 
-This is the execution order for the [delivery ledger](DELIVERY-LEDGER.md).
+This records the October 18 package mapping for the [delivery ledger](DELIVERY-LEDGER.md),
+not a current instruction to execute B00–B09 in order.
 The [master vision](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) explains the product;
 this document defines build packages, dependencies, outputs and finish gates.
 Detailed invariants in the [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md),
@@ -244,8 +246,9 @@ capability requirements.
 - Verify export/import, recovery drills, operational runbooks and observability.
 - Publish internal comparative results with uncertainty, limitations and failed
   scenarios. Product ambitions remain hypotheses until evidence supports them.
-- Prepare rollout/rollback artifacts. Deploy only with current-session authorization
-  and the serialized lane; verify the deployed version before declaring shipped.
+- Prepare rollout/rollback artifacts. Use existing authorization and the [serialized lane](DEPLOY-LANE.md);
+  standing authorization does not expire per session. Verify the deployed version
+  before declaring shipped, following current [repository instructions](../AGENTS.md).
 
 **Exit:** every required ledger item has implementation and verification evidence;
 research items have explicit outcomes; all original seven architecture exit criteria

@@ -1,0 +1,83 @@
+{
+  "at": "2026-11-01T19:38:43.170047+00:00",
+  "runtimeCommit": "1b10efeb4",
+  "composedCommit": "8708e00f75989ff7e2eb6848716c95207b7ec1a7",
+  "base": "9c1bc9555f78283290fdd7d12bac75f0bc133cd3",
+  "problem": "A legitimate exact null private-definition pair caused the client to reject every task. Default orientation also omitted the existing private-party definition filter.",
+  "liveReadOnlyObservation": {
+    "source": "513d3ee8471464803fd3c70dea2fe9ce30f27ad0",
+    "httpStatus": 200,
+    "bytes": 219942,
+    "members": 67,
+    "workItems": 166,
+    "withheldDefinitions": 42,
+    "clientBefore": "invalid_response",
+    "cachedSnapshotSha256": "69ad9e6cb16af4b48ee87849cc4920e979f6b444c54dc0c991e964b30a8cc8ea",
+    "samePrivateCachedResponseWithFixedValidator": "all166 records validate, zero failures; no additional production data read or mutation",
+    "rawResponse": "private0600 localcache; not committed/exported; no private titles,definitions,bodies or credentials in this receipt"
+  },
+  "sourceProof": "agent-orientation.mjs is byte-identical between production513d and main3a; privacy leak reproduced with synthetic localHTTP, not a claim private production text was fetched for this test.",
+  "originalCausalReproduction": {
+    "runtime": "3a091d68154efb4a2f7b1aa0b432891b53cb3a38",
+    "fixture": "41cb0c6b0 tests/agent-work-search.test.js",
+    "result": "two tests fail as intended: rawHTTP orientation exposes synthetic title to observer; work client rejects legitimate null pair"
+  },
+  "fix": "Only exact null/null definitions are accepted; partial null, empty, missing or object definitions refuse. Orientation uses the existing private-parties map and byte-identical five-role predicate shared with Store. No grant/privacy rule or stored task is changed.",
+  "composedTests": {
+    "pass": 48,
+    "fail": 0,
+    "skip": 0
+  },
+  "ci": "CI-mode contract at1b10 passed15tests; full Node intentionally skipped there; composed affected group separately passed48. Final separate lint pending at receipt creation.",
+  "logs": {
+    "initialFixtureOriginFailure": {
+      "path": "/tmp/private-work-snapshot-client-red-1101.log",
+      "sha256": "7855b427a155ee8c48e991f7c7f534a5a8e7cb17bdc38b1156fa757efc8c404a"
+    },
+    "initialHumanAsAgentFailure": {
+      "path": "/tmp/private-work-snapshot-client-causal-red-1101.log",
+      "sha256": "5ee0b36bfc897706e3de6719ea5a93da033907b9dadf63edea0072c01dcf8834"
+    },
+    "qualifiedClientRed": {
+      "path": "/tmp/private-work-snapshot-client-qualified-red-1101.log",
+      "sha256": "a4ddbf13d53f5354293ccb314c3e31853cb69768adc1c61754c52d0502945ba9"
+    },
+    "clientOnlyPrivacyFailure": {
+      "path": "/tmp/private-work-snapshot-client-green-1101.log",
+      "sha256": "67f8aecd4103320a9eff83cdd7a250d7e309d192d98651422bc4909b36d865fe"
+    },
+    "twoOriginalCausalReds": {
+      "path": "/tmp/private-work-snapshot-two-causal-reds-1101.log",
+      "sha256": "e1ca2c6c4ab1ca68d8445ebf86d02005b648b8c61066300c5aae9b45e1d94fca"
+    },
+    "composed48": {
+      "path": "/tmp/private-work-snapshot-composed-final-1101.log",
+      "sha256": "cf11fe6bb2471ad2a65952d0cb9bef7f2bbd3854b520d42859627caa5f0e1008"
+    },
+    "ciSource1b10": {
+      "path": "/tmp/private-work-snapshot-contract-1101.log",
+      "sha256": "9838e4a8cd38ce05db5e76a4ac5b94bcf9096e1830c80de8a74278ec69905e9b"
+    }
+  },
+  "limits": [
+    "Full room/work snapshot transfer remains; this is compatibility/privacy correctness, not bounded-list optimization.",
+    "No live deployment or host/Android/idle-wake qualification.",
+    "Privacy scope is title/definition; not whole-record secrecy. Role predicate preserved byte-identically; each role not separately tested in this slice."
+  ],
+  "finalLint": {
+    "command": "I18N_BASE_REF=9c1bc9555f78283290fdd7d12bac75f0bc133cd3 npm run lint",
+    "exit": 0,
+    "errors": 0,
+    "warnings": 335,
+    "i18n": "clean",
+    "logSha256": "b7acf42f2a5ee7185a1836e41ba4480295fd01e92012b80890fc205f81f4e638"
+  },
+  "independentReview": {
+    "reviewer": "Dot",
+    "source": "1b10efeb4c482978a2dc2d1f638ade51f12e3e3c",
+    "roomSequence": 25559,
+    "result": "No new source blocker in exact-null-pair/party/five-role boundary; title/definition privacy only, not whole-record secrecy. Reviewer did not run tests or inspect production private text.",
+    "delta": "Requested extra whole-output absence and hidden-title/done no-hit assertions added; two focused boundary tests pass, runtime unchanged. Each five-role case not independently isolated; predicate lifted byte-identically from existing Store.",
+    "logSha256": "17594252d05b11e054c1f06ef057241ebebc6bf1b8f287ec85c211eb37ce44b9"
+  }
+}

@@ -54,13 +54,13 @@ test("tablet widths (761-1024px) get a two-column find-work grid", () => {
   const blocks = mediaBlocks().filter((b) => b.width > 760 && b.width <= 1024);
   assert.ok(blocks.length > 0, "expected a @media(max-width:<=1024px) tablet block");
   const ok = blocks.some((b) => {
-    const form = gridColumns(b.body, ".find-work form");
+    const form = gridColumns(b.body, ".match-fields");
     const list = gridColumns(b.body, ".find-work ul");
     return form === "1fr 1fr" && list === "repeat(2,minmax(0,1fr))";
   });
   assert.ok(
     ok,
-    "tablet block must set .find-work form to 1fr 1fr and .find-work ul to repeat(2,minmax(0,1fr))",
+    "tablet block must set .match-fields to 1fr 1fr and .find-work ul to repeat(2,minmax(0,1fr))",
   );
 });
 
@@ -70,14 +70,14 @@ test("the phone single-column find-work rule still wins below 760px", () => {
   const phone = blocks.filter((b) => b.width <= 760);
   assert.ok(tablet.length > 0 && phone.length > 0, "expected both tablet and phone media blocks");
   const phoneSingle = phone.some((b) => {
-    const form = gridColumns(b.body, ".find-work form");
+    const form = gridColumns(b.body, ".match-fields");
     const list = gridColumns(b.body, ".find-work ul");
     return form === "minmax(0,1fr)" && list === "minmax(0,1fr)";
   });
   assert.ok(phoneSingle, "a <=760px block must keep .find-work stacked single-column");
   const latestTablet = Math.max(...tablet.map((b) => b.start));
   const latestPhone = Math.max(...phone.filter((b) => {
-    const form = gridColumns(b.body, ".find-work form");
+    const form = gridColumns(b.body, ".match-fields");
     return form === "minmax(0,1fr)";
   }).map((b) => b.start));
   assert.ok(

@@ -114,6 +114,29 @@ test("dmEventVisibility: messages thunk stays lazy until a follow-up is checked"
   assert.equal(calls, 1, "parties are memoized, not re-decoded");
 });
 
+test("dmEventVisibility: follow-ups whose parties resolve nowhere are hidden from everyone", async t => {
+  const { dmEventVisibility } = await import("../server/dm-event-visibility.mjs");
+  // T3-L10b-C1 / G12: the referenced message is in none of the projection,
+  // the same-page rows, or the archived-parties lookup. The predicate must
+  // fail closed (nobody sees the follow-up, edit body included), not treat
+  // the unresolvable party set as unrestricted.
+  const edit = { type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "m-dm-1", body: "EDITED" } };
+  for (const viewer of ["third-member", "owner", "alice", "bob"]) {
+    assert.equal(dmEventVisibility(viewer, [], [], null)(edit), false, `unresolvable follow-up is hidden from ${viewer}`);
+    assert.equal(dmEventVisibility(viewer, [], [], () => null)(edit), false, `lookup-miss follow-up is hidden from ${viewer}`);
+  }
+  for (const type of [T.MESSAGE_DELETED, T.MESSAGE_REDACTED, T.MESSAGE_PINNED, T.MESSAGE_UNPINNED]) {
+    assert.equal(dmEventVisibility("third-member", [], [], null)({ type, actorId: "alice", data: { messageId: "m-dm-1" } }), false, `unresolvable ${type} is hidden`);
+  }
+  // Controls: a follow-up the archived lookup does resolve stays party-only,
+  // and a follow-up of a resolved public message stays visible.
+  assert.equal(dmEventVisibility("third-member", [], [], () => ["alice", "bob"])(edit), false, "archived DM follow-up stays hidden from a non-party");
+  assert.equal(dmEventVisibility("bob", [], [], () => ["alice", "bob"])(edit), true, "archived DM follow-up stays visible to a party");
+  const pubPost = { type: T.MESSAGE_POSTED, actorId: "alice", data: { messageId: "m-pub-1" }, id: "ev-9" };
+  const pubEdit = { type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "m-pub-1", body: "fixed" } };
+  assert.equal(dmEventVisibility("third-member", [], [{ event: pubPost }], null)(pubEdit), true, "public follow-up known only from page rows stays visible");
+});
+
 test("dmEventVisibility: rows fallback covers DMs from the same event page", async t => {
   const { dmEventVisibility } = await import("../server/dm-event-visibility.mjs");
   const dmPost = { type: T.MESSAGE_POSTED, actorId: "alice", data: { messageId: "dm-new", toMemberId: "bob" }, id: "ev-1" };

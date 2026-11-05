@@ -8,8 +8,10 @@
 // Mention semantics mirror the product's own detection
 // (messageMentionsMember in src/conversation.js, which drives mention
 // notifications, and the mentionHtml chip renderer): a mention is the exact
-// text "@" + displayName (the registered handle) or "@" + member id,
-// followed by end-of-string or whitespace. Matching is exact and
+// text "@" + displayName (the registered handle), followed by
+// end-of-string or whitespace. Member ids are NOT mention labels — the
+// room does not recognise "@" + id — and a displayName shared by several
+// agents is one label, counted once. Matching is exact and
 // case-sensitive — never substring-fuzzy — so analytics counts exactly the
 // mentions the room itself recognizes.
 //
@@ -58,20 +60,10 @@ const agentRoster = context => {
   );
 };
 
-// Candidate mention labels for one agent: the registered handle
-// ("@" + displayName, exactly as the composer inserts it) and the exact
-// member id ("@" + id). Display-name handles win when both spell the same
-// label. Id labels containing whitespace or "@" are unusable as handles and
-// are skipped.
-const mentionLabels = agent => {
-  const labels = new Map();
-  labels.set(`@${agent.displayName}`, agent.id);
-  if (!agent.id.includes("@") && !/\s/.test(agent.id)) {
-    const idLabel = `@${agent.id}`;
-    if (!labels.has(idLabel)) labels.set(idLabel, agent.id);
-  }
-  return labels;
-};
+// The one mention label for an agent: the registered handle
+// ("@" + displayName, exactly as the composer inserts it — the only label
+// messageMentionsMember recognises).
+const mentionLabel = agent => `@${agent.displayName}`;
 
 const memberIndex = context => {
   const raw = context?.members ?? (Array.isArray(context) ? context : undefined);
@@ -133,13 +125,19 @@ export function detectMentions(roomEvent, context = {}) {
   const actor = actorOf(roomEvent, context, membersById);
   const occurredAt = context?.occurredAt ?? roomEvent.at;
 
+  // Resolve labels globally, in agent-id order: a displayName shared by
+  // several agents is a single label and its mentions are counted once,
+  // attributed to the first agent (by id) carrying that name — never once
+  // per agent, which would double-count one textual mention.
+  const labelOwner = new Map();
+  for (const agent of [...agents].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const label = mentionLabel(agent);
+    if (!labelOwner.has(label)) labelOwner.set(label, agent.id);
+  }
   const counts = new Map();
-  for (const agent of agents) {
-    let count = 0;
-    for (const [label] of mentionLabels(agent)) {
-      count += countLabelMentions(data.body, label);
-    }
-    if (count > 0) counts.set(agent.id, (counts.get(agent.id) ?? 0) + count);
+  for (const [label, agentId] of labelOwner) {
+    const count = countLabelMentions(data.body, label);
+    if (count > 0) counts.set(agentId, count);
   }
   return [...counts.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

@@ -1,0 +1,22 @@
+{
+  "initial-fixed-native-results.json": {
+    "decodedSha256": "bb73232972b0e55c1902942cb6305a317f7ff8f335d4d7ea6e85d56c62fddf85",
+    "decodedBytes": 75764,
+    "gzipBytes": 1852
+  },
+  "initial-native-results.json": {
+    "decodedSha256": "54a6df09badf44d33a384fa84f1275c430f944235af99698c90bbcdff339a024",
+    "decodedBytes": 149078,
+    "gzipBytes": 2562
+  },
+  "native-fleet-results.json": {
+    "decodedSha256": "6816eeb62cb3c1892464a298e96409e12b3472946c6c7acdee32f4d9eeccefa5",
+    "decodedBytes": 442777,
+    "gzipBytes": 4644
+  },
+  "readiness-results.json": {
+    "decodedSha256": "6380549c1213831307543e5e3af1f4578a738d500cad72c9d8ce561c6c1c46cf",
+    "decodedBytes": 129811,
+    "gzipBytes": 2724
+  }
+}

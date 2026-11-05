@@ -1,0 +1,49 @@
+{
+  "runtimePin": "ac02fd33e",
+  "qualification": "protocol16 integration before current-main composition and pending-constructor cure",
+  "node": {
+    "pass": 143,
+    "fail": 0,
+    "skip": 0
+  },
+  "native": {
+    "pass": 1
+  },
+  "package": {
+    "pass": 3
+  },
+  "manifest": {
+    "pass": 8
+  },
+  "publication": {
+    "pass": 15,
+    "fullNodeSuite": "explicitly skipped in CI mode",
+    "unusedImportRemoved": true
+  },
+  "logs": {
+    "node": {
+      "sha256": "d2e8a096420b7172527064f17081a61715180c6d58c4251c39d8c1b1117c9add",
+      "path": "node.log.gz"
+    },
+    "native": {
+      "sha256": "c41a4a5d6d2f6496c6a962e371454afd40d0f173723420ae9af475dddb1ec054",
+      "path": "native.log.gz"
+    },
+    "package": {
+      "sha256": "850bcbf583a8484fd9b814cce4de6e267878203751b8cdbeaa8c246aca1141f7",
+      "path": "package.log.gz"
+    },
+    "manifest": {
+      "sha256": "f4aa6b6b120146720442878292055751b9cc11bc0177996919d6ff30567d6005",
+      "path": "manifest.log.gz"
+    },
+    "publication": {
+      "sha256": "7d1dc9dc9a43edff6bbae0cb1e28826f87561e3a1935a8c21ad96fc093988ed3",
+      "path": "publication.log.gz"
+    }
+  },
+  "fullOriginalOracleRequired": true,
+  "deployed": false,
+  "liveVerified": false,
+  "knownBlocker": "Pending-constructor publication then writes omit entity proof; separate narrow fix in progress."
+}

@@ -1,0 +1,19 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":33686672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":46,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":41,"heapBytes":32402680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ legal long fingerprint survives bounded scratch parts, unicode boundaries and cold adapter (21.758959ms)
+✔ missing, reordered, mutated and ambiguous base64 parts fail closed (7.34675ms)
+✔ insufficient transaction row admission leaves old working head and all parts unchanged (4.838792ms)
+✔ source scalar admission and exact part index are enforced (1.162625ms)
+✔ existing guarded SQLite scratch atomically checkpoints large replay value and survives cold reopen (71.950916ms)
+✔ actual process exit preserves reducer patch parts and exact independently folded cursor together (1055.796916ms)
+✔ declared entity bytes are admitted before allocating or fetching any large body part (2.514291ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1265.64575

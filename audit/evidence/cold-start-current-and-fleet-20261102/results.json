@@ -1,0 +1,23 @@
+{
+  "coldStart": {
+    "before": "missing populated current_room_records fixture",
+    "after": {
+      "passed": 6,
+      "failed": 0,
+      "cpuBudgetMs": 500,
+      "unchangedBudget": true,
+      "legacyEventCount": 200000,
+      "normalizedRoom": "actual initialization and saved post survive cold reopen"
+    }
+  },
+  "i18n": {
+    "plainLocalCheck": "four sentence-concatenation growth reports remain",
+    "ciEquivalentContext": "actual PR5655 API response used as pull_request event; existing declared i18n-growth policy, no regenerated baseline"
+  },
+  "runtime": "Node24.22.1",
+  "fleet": {
+    "passed": 6,
+    "failed": 0,
+    "usesActualPrDeclaredGrowth": true
+  }
+}

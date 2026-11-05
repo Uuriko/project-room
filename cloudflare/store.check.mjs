@@ -8,6 +8,24 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
+test('handoff discovery qualifies selected canonical work across Worker restart and bind chunks', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const persistence = await mkdtemp(join(tmpdir(), 'project-room-cf-handoff-'));
+  const config = { modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } }, durableObjectsPersist: persistence };
+  let mf = new Miniflare(config);
+  try {
+    for (const path of ['/handoff-discovery-setup', '/handoff-discovery-resume']) {
+      if (path.endsWith('resume')) { await mf.dispose(); mf = new Miniflare(config); }
+      const response = await mf.dispatchFetch('http://localhost' + path);
+      assert.equal(response.status, 200, await response.clone().text());
+      assert.deepEqual(await response.json(), { available: ['accepted', 'native-next'], inbox: ['accepted', 'native-next'], savedRows: 107, selected: 1 });
+    }
+  } finally { await mf.dispose(); }
+});
+
 test('human push uses real Worker crypto and committed Durable Object state with a synthetic delivery service', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });

@@ -49,16 +49,30 @@ export function runCommand(command, args, {
     }
     const out = [];
     const err = [];
-    let outLen = 0;
+    let retainedBytes = 0;
     let capped = false;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killGroup(child); }, timeoutMs);
-    child.stdout.on("data", chunk => {
-      outLen += chunk.length;
-      if (outLen > maxBytes) { capped = true; killGroup(child); return; }
-      out.push(chunk);
-    });
-    child.stderr.on("data", chunk => { err.push(chunk); });
+    // One budget covers both pipes. Ignore already-queued chunks after killing
+    // the producer; stderr must not keep growing while termination completes.
+    const retain = (chunks, chunk) => {
+      if (capped) return;
+      const remaining = maxBytes - retainedBytes;
+      if (chunk.length <= remaining) {
+        chunks.push(chunk);
+        retainedBytes += chunk.length;
+        return;
+      }
+      if (remaining > 0) {
+        // Copy the prefix so a tiny retained slice cannot pin a large buffer.
+        chunks.push(Buffer.from(chunk.subarray(0, remaining)));
+        retainedBytes += remaining;
+      }
+      capped = true;
+      killGroup(child);
+    };
+    child.stdout.on("data", chunk => retain(out, chunk));
+    child.stderr.on("data", chunk => retain(err, chunk));
     child.on("error", error => {
       clearTimeout(timer);
       resolve({ code: null, stdout: Buffer.concat(out), stderr: Buffer.concat(err), timedOut, capped, error: error.message });

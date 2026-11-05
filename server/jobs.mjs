@@ -3,7 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { staleSweepDueAt, syncClaimPullRequests, publicNamespaceSqlExclusion } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
@@ -11,7 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
-import { patrolPending, runPatrolTick } from "./patrol.mjs";
+import { patrolPending, patrolPendingSince, runPatrolTick } from "./patrol.mjs";
 import { drainProjectMapQueue, projectMapPending } from "./project-map-store.mjs";
 import { projectMapEnabled } from "./project-map.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -20,7 +20,7 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { backupFailureDetail, verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { relieveProjectionsIncrementally } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
@@ -44,6 +44,43 @@ export const ALARM_RETRY_MS = MINUTE_MS;
 export const SLOW_JOB_DUE_SLACK_MS = 60 * 1000;
 
 const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+
+// The Node scheduler's lastError is free error text served on the same
+// unauthenticated GET /api/health/jobs surface as the Worker heartbeat's.
+// It is redacted with the same pattern set as redactError in
+// cloudflare/job-heartbeat.mjs (the two modules cannot import each other:
+// the heartbeat reads this registry). tests/job-health-redaction.test.js
+// pins both copies to the same battery so they cannot drift apart. The
+// Node channel keeps its historic 200-char cap (the Worker caps at 240).
+const MAX_JOB_ERROR = 200;
+export function redactJobError(value) {
+  const text = String(value ?? "unknown error")
+    .replace(/([A-Za-z0-9+/_=-]{8,})(?:\r\n|\n|\\n)([A-Za-z0-9+/_=-]{8,})/g, "$1$2")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/-----BEGIN [A-Z0-9 ]*-----[\s\S]*?-----END [A-Z0-9 ]*-----/g, "[redacted]")
+    .replace(/-----BEGIN [A-Z0-9 ]*-----[\s\S]*/g, "[redacted]")
+    .replace(/(\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]*:)[^\s/@]+(@)/g, "$1[redacted]$2")
+    .replace(/([A-Za-z0-9_-]*(?:password|passwd|secret|token|api[-_]?key|private[-_]?key|account[-_]?key|credential)[A-Za-z0-9_-]*)(\s*"?\s*[:=]\s*"?)([^\s"',;}]{8,})/gi, "$1$2[redacted]")
+    .replace(/\b(bearer|token|secret|password|authorization)(\s*[:=]?\s*)\S+/gi, "$1$2[redacted]")
+    .replace(/\b(?:(?:pri|ghp|gho|ghs|ghu|github_pat|sk|xox[abpr]|whsec|re)_|glpat-|pypi-|dckr_pat_)[A-Za-z0-9_-]{6,}/g, "[redacted]")
+    .replace(/(https?:\/\/[^\s?#]+)[?#]\S*/g, "$1")
+    .replace(/[A-Za-z0-9+/_-]{32,}={0,2}/g, "[redacted]")
+    .trim();
+  return text.length > MAX_JOB_ERROR ? text.slice(0, MAX_JOB_ERROR - 1) + "…" : text;
+}
+
+// Mirrors the Worker heartbeat's errorText: a job whose registry entry
+// sets redactErrors (gmail-sync) has a thrown error collapsed to its
+// stable code or a fixed line — never free text. The Node scheduler
+// previously never read the flag, so the author's opt-in was silently
+// dropped on this runtime.
+export function nodeJobErrorText(job, error) {
+  if (job?.redactErrors) {
+    const code = typeof error?.code === "string" && /^[a-z][a-z0-9_]{0,63}$/i.test(error.code) ? error.code : null;
+    return code ?? `${job.name} tick failed`;
+  }
+  return redactJobError(error?.message ?? error);
+}
 
 function read(store, sql, params = []) {
   if (!store?.db?.prepare) return null;
@@ -76,9 +113,9 @@ function webhookDueAt(store) {
 function webhookNextDue(store) {
   const webhook = webhookDueAt(store);
   const missed = missedWakeDueAt(store);
-  if (webhook == null) return missed;
-  if (missed == null) return webhook;
-  return Math.min(webhook, missed);
+  const rewake = store.agentPlugin?.nextRewakeAt?.() ?? null;
+  const pending = [webhook, missed, rewake].filter(value => value != null);
+  return pending.length ? Math.min(...pending) : null;
 }
 
 function landDueAt(store, now) {
@@ -91,6 +128,7 @@ function landDueAt(store, now) {
 }
 
 function claimDueAt(store, now) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   const row = read(store, `SELECT MIN(COALESCE(
       json_extract(item_json, '$.data.pullRequest.nextPollAt'),
       json_extract(item_json, '$.pullRequest.nextPollAt'),
@@ -100,11 +138,11 @@ function claimDueAt(store, now) {
     WHERE (
       json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.data.pullRequest.url')) = 'text'
-      AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL
+      AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL${exclusion}
     ) OR (
       json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
-      AND json_extract(item_json, '$.pullRequest.outcome') IS NULL
+      AND json_extract(item_json, '$.pullRequest.outcome') IS NULL${exclusion}
     )`);
   if (!row?.n) return null;
   const due = Number(row.due);
@@ -116,6 +154,7 @@ function claimDueAt(store, now) {
 // fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
 // only decides whether the job wakes at all.
 function autolinkDueAt(store, now) {
+  const exclusion = publicNamespaceSqlExclusion(store);
   const row = read(store, `SELECT COUNT(*) AS n
     FROM work_claims
     WHERE (
@@ -125,7 +164,7 @@ function autolinkDueAt(store, now) {
         json_extract(item_json, '$.data.pullRequests') IS NULL
         OR json_array_length(json_extract(item_json, '$.data.pullRequests')) = 0
       )
-      AND json_extract(item_json, '$.data.pullRequest.url') IS NULL
+      AND json_extract(item_json, '$.data.pullRequest.url') IS NULL${exclusion}
     ) OR (
       json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
       AND typeof(json_extract(item_json, '$.repo')) = 'text'
@@ -133,7 +172,7 @@ function autolinkDueAt(store, now) {
         json_extract(item_json, '$.pullRequests') IS NULL
         OR json_array_length(json_extract(item_json, '$.pullRequests')) = 0
       )
-      AND json_extract(item_json, '$.pullRequest.url') IS NULL
+      AND json_extract(item_json, '$.pullRequest.url') IS NULL${exclusion}
     )`);
   if (!row?.n) return null;
   return now;
@@ -160,7 +199,7 @@ const PUBLIC_BLOCK_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips", "verifiedRooms", "blockedFailures", "blockedSince", "baselineUpgraded", "contentDrift", "baselineUnverifiable"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   for (const key of ["blockReason", "blockComponent"]) {
@@ -182,7 +221,7 @@ export const INTEGRITY_SUBCHECKS = Object.freeze([
   "share_links", "agent_connections", "inbox", "email", "channel_updates",
   "quarantine_splits", "room_lifecycle", "identity_expiry", "referral_depth",
   "messages_backfill", "messages_parity", "invitation_audit", "help_history",
-  "incremental", "snapshot", "unknown"
+  "projection_content", "incremental", "snapshot", "unknown"
 ]);
 const INTEGRITY_RECORD_CLASS = Object.freeze({
   share_links: "journal", agent_connections: "journal", inbox: "journal",
@@ -190,6 +229,7 @@ const INTEGRITY_RECORD_CLASS = Object.freeze({
   room_lifecycle: "room", identity_expiry: "unknown", referral_depth: "invitation",
   messages_backfill: "message", messages_parity: "message",
   invitation_audit: "invitation", help_history: "invitation",
+  projection_content: "room",
   incremental: "room", snapshot: "room", unknown: "unknown"
 });
 const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
@@ -205,7 +245,7 @@ const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 // all) stays off every surface, exactly as #3334 required, as do message
 // bodies and secrets.
 export const INTEGRITY_ROOM_RECORD_STEPS = Object.freeze(new Set([
-  "messages_backfill", "messages_parity", "help_history"
+  "messages_backfill", "messages_parity", "help_history", "projection_content"
 ]));
 export const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -254,11 +294,16 @@ async function runNodeRetention(store, ctx) {
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
   try {
-    webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
+    webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries({ cursor: ctx.webhookRetentionCursor });
+    ctx.webhookRetentionCursor = webhookDeliveries.nextCursor;
     oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
     abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
   } catch { /* a room that has never stored these caches has no table */ }
   return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+}
+
+export function scheduledPatrolEnabled(env = {}) {
+  return env.ROOM_PATROL_ENABLED !== "0";
 }
 
 function defineJob(job) {
@@ -278,8 +323,8 @@ function defineJob(job) {
 // no production-runtime job watched its aggregate size approach the
 // store's limits (growth-watch tracks product-growth events off a
 // process-local collector and is node-only for that reason). The gauges
-// are one aggregate read over the rooms table plus the SQLite page
-// count — cheap at any room count. The limits are the lines where an
+// use one aggregate over rooms plus native database bytes (Node uses
+// SQLite page counts). The limits are the lines where an
 // operator must act, not the hard caps: the largest room projection is
 // escalated at 3.5 MB against the 4 MiB application cap, and the
 // database at 8 GB against the 10 GB Durable Object SQLite limit.
@@ -293,14 +338,21 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
 
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
-    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+    COALESCE(MAX(LENGTH(CAST(projection AS BLOB))), 0) AS maxProjectionBytes FROM rooms`).get();
   let dbBytes = 0;
   try {
-    const pages = store.db.prepare("PRAGMA page_count").get();
-    const size = store.db.prepare("PRAGMA page_size").get();
-    const count = Number(pages?.page_count);
-    const bytes = Number(size?.page_size);
-    if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+    // Workers exposes the complete SQLite size directly. Page PRAGMAs are
+    // unsupported there and previously made a nonempty store report zero.
+    // https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#databasesize
+    const nativeBytes = store.db.storage?.sql?.databaseSize;
+    if (Number.isSafeInteger(nativeBytes) && nativeBytes >= 0) dbBytes = nativeBytes;
+    else {
+      const pages = store.db.prepare("PRAGMA page_count").get();
+      const size = store.db.prepare("PRAGMA page_size").get();
+      const count = Number(pages?.page_count);
+      const bytes = Number(size?.page_size);
+      if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+    }
   } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
   return {
     rooms: Number(row?.rooms) || 0,
@@ -329,7 +381,31 @@ export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
   return null;
 }
 
+function nativeMcpEventDueAt(store) {
+  return read(store, "SELECT MIN(CASE WHEN state='leased' THEN lease_until ELSE next_at END) AS due FROM mcp_event_outbox WHERE state IN ('pending','leased')")?.due ?? null;
+}
+
 export const JOBS = Object.freeze([
+  defineJob({
+    name: "native-mcp-events",
+    cadenceMs: 1000,
+    heartbeatCadenceMs: MINUTE_MS, // A bounded network attempt may take ten seconds.
+    budgetMs: 11000,
+    singleRuntimeReason: "Node uses its bounded Events runtime timer; Workers require durable alarms across isolate eviction.",
+    runtimes: Object.freeze(["worker"]),
+    enabled(_env, store) { return store?.nativeMcpEventsEnabled === true && nativeMcpEventDueAt(store) != null; },
+    disabledReason: () => "No native event delivery is waiting",
+    nextDueAt: store => nativeMcpEventDueAt(store),
+    async run(_store, ctx) {
+      const deliveries = await ctx.room.drainMcpEvents() ?? [];
+      // Numeric counts survive compactSummary and make terminal callback losses
+      // visible to scheduler health without exposing callback URLs or secrets.
+      const count = classification => deliveries.filter(row => row.classification === classification).length;
+      return { checked: deliveries.length, delivered: count("delivered"), retrying: count("retry"),
+        exhausted: count("exhausted"), dead: count("dead"), expired: count("expired"),
+        revoked: count("revoked"), superseded: count("superseded"), errors: count("exhausted") + count("dead") };
+    }
+  }),
   defineJob({
     name: "gmail-sync",
     cadenceMs: MINUTE_MS,
@@ -366,6 +442,8 @@ export const JOBS = Object.freeze([
     disabledReason: () => "No webhook delivery is waiting",
     nextDueAt: store => webhookNextDue(store),
     async run(store, ctx) {
+      try { store.agentPlugin?.sweepRewakes?.(); }
+      catch (error) { console.error(`wake adapter re-wake failed: ${error?.message ?? "failed"}`); }
       const drained = ctx.room?.drainWebhookDeliveries
         ? await ctx.room.drainWebhookDeliveries()
         : await store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
@@ -440,10 +518,21 @@ export const JOBS = Object.freeze([
     disabledReason: () => null,
     async run(store, ctx) {
       let integrity;
+      // Whether the scan result itself carried the outstanding-failure
+      // list, and how many of its records the partition below rode as
+      // parked. The real scan always carries the list (every return
+      // shape has `failures`); a result without one never isolated its
+      // parked rooms into per-room records this tick, so the
+      // durable-count guard after the scan remains that park's only —
+      // and therefore failing — signal.
+      let scanReportedFailures = false;
+      let scanParkedCount = 0;
+      let scanParkedRooms = new Set();
       try {
         integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        scanReportedFailures = Array.isArray(integrity?.failures ?? integrity?.deferred?.failures);
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
@@ -456,29 +545,182 @@ export const JOBS = Object.freeze([
         // reachable from the operator surfaces, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
-          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
-            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
-          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
-          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
-          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
-            failure.recordId = first.recordId;
+          // Per-room isolation at the summary level, NARROWED at the
+          // C6 reconcile. A room parked by the messages backfill on a
+          // stored EVENT (its durable block carries the event's id) is
+          // UNSCANNABLE, not a failed verification: it is recorded
+          // durably by name, every later sweep skips it, and failing
+          // the whole tick for it zeroed the fleet's integrity signal
+          // for exactly as long as a park lasted. Such records never
+          // fail the tick on their own; they ride the summary as their
+          // own numbers (blockedFailures here, blockedRooms below,
+          // blockedSince = the oldest parked record's first sighting)
+          // beside verifiedRooms, the count of rooms that stand
+          // verified at head. A parked room still reads blocked — its
+          // record stays outstanding and is re-reported every tick —
+          // it is never laundered into a pass for the room itself.
+          //
+          // A LOG-GAP park is carved out and stays FATAL. The log
+          // ending before the room's head is data loss, and main's
+          // post-#4758 contract (the block-health fixture; the
+          // observation comment below) is that it still fails the
+          // tick. A gap record is recognisable two ways, either
+          // sufficient: its stored message is the allowlisted
+          // backfill-stop line, or its block row carries event_id
+          // NULL — the blocks table's own encoding of a head the log
+          // does not reach. Partitioning requires positive
+          // corroboration from the block map (see
+          // isCorroboratedEventPark below): if the map cannot be read,
+          // or carries no same-room row with a non-null event_id, the
+          // record stays fatal — the partition fails closed.
+          //
+          // Every other failure keeps the tick failing, with the
+          // detail chosen from the fatal set only: a parked room must
+          // never mask a real failure behind its name.
+          let blocksByRoom = null;
+          let validatedBlocks = null;
+          try {
+            blocksByRoom = new Map(store.db.prepare(
+              "SELECT room_id, event_id, sequence FROM messages_backfill_blocks WHERE skipped=0"
+            ).all().map(row => [row.room_id, row.event_id]));
+            // Vc ruling (b) (room seq 23428): the validated set — the
+            // blocks whose (room_id, event_id, sequence) exactly
+            // matches a stored event row for that room. The join is
+            // the validation: a block naming a nonexistent event, an
+            // event stored under another room, or an event at a
+            // different sequence produces no row here and so can
+            // never corroborate. Either read failing leaves both maps
+            // null and the partition fails closed, exactly as a
+            // missing block map does.
+            validatedBlocks = new Map(store.db.prepare(
+              `SELECT b.room_id AS room_id, b.event_id AS event_id, b.sequence AS sequence
+               FROM messages_backfill_blocks b
+               JOIN events e ON e.room_id = b.room_id AND e.id = b.event_id AND e.sequence = b.sequence
+               WHERE b.skipped = 0`
+            ).all().map(row => [row.room_id, { eventId: row.event_id, sequence: row.sequence }]));
+          } catch { blocksByRoom = null; validatedBlocks = null; }
+          const isLogGapPark = failure => {
+            if (typeof failure.message === "string" && failure.message.startsWith("messages backfill stopped at ")) return true;
+            return blocksByRoom !== null && blocksByRoom.has(failure.recordId)
+              && blocksByRoom.get(failure.recordId) === null;
+          };
+          // #4930 cure (independent review, room seqs 23355/23365/
+          // 23366): a failure is downgraded to parked ONLY on positive
+          // corroboration — the block map was read, it carries a row
+          // for THIS room, and that row's event_id is non-null (a
+          // stored event). A missing row, an unreadable map
+          // (blocksByRoom === null), or a row for a different room
+          // leaves the failure FATAL. The partition this replaces
+          // parked every non-gap failure on no evidence at all, so an
+          // empty block table, a failed map read, and a wrong-room
+          // block each produced a false healthy summary.
+          //
+          // Vc ruling (b) strengthens the corroboration (room seq
+          // 23428, ruling integrity-4930-vc-ruling-02): a non-null
+          // event_id is not enough — at the first cured head a seeded
+          // same-room block naming "ev-UNRELATED-999", an event that
+          // does not exist, still parked an unrelated failure. The
+          // block must now appear in validatedBlocks (its room, event
+          // id and sequence all match a real stored event), and when
+          // the failure record itself carries the structured event
+          // identity threaded from runMessagesBackfill through
+          // runIntegrityBackfillStep (failure.eventId /
+          // failure.eventSequence — never parsed out of diagnostic
+          // strings), that identity must match the validated block.
+          // A record carrying no identity (written before the
+          // threading, or by a direct record call) is judged on the
+          // validated block alone, so genuine parks keep parking.
+          const isCorroboratedEventPark = failure => {
+            if (validatedBlocks === null || !validatedBlocks.has(failure.recordId)) return false;
+            const block = validatedBlocks.get(failure.recordId);
+            if (typeof failure.eventId === "string" && failure.eventId !== "" && failure.eventId !== block.eventId) return false;
+            if (Number.isInteger(failure.eventSequence) && failure.eventSequence !== block.sequence) return false;
+            return true;
+          };
+          // Recovery leg (regression found at re-qualification, room
+          // seq 23565): an operator repair lifts a park — the import
+          // repair deletes the room's block row and cursor — but the
+          // durable failure record stays outstanding until the rotating
+          // backfill step next visits the room and clears it (its
+          // cleanup retires records whose park is gone). The narrowed
+          // partition corroborated only via a standing block, so every
+          // tick in that window went fatal and the parked-summary
+          // recovery case ("no tick fails during recovery", passing
+          // 5/5 at pre-cure 87188ace) failed at both cured heads. The
+          // window is corroborated on positive evidence, never on the
+          // block's absence alone: the block map was read and carries
+          // NO standing block for this room (the park is lifted — a
+          // standing block is judged by the block leg above, so an
+          // unvalidated standing block cannot be bypassed here), and
+          // the record carries the threaded identity that
+          // runIntegrityBackfillStep wrote from the standing block
+          // while the park stood, and that identity still validates
+          // against a real stored event for this room at that
+          // sequence — the same join the block leg requires, applied
+          // to the record's own structured identity (never parsed
+          // from diagnostic strings). An identity-less record, an
+          // identity naming a nonexistent or wrong-sequence event, or
+          // an unreadable event log corroborates nothing: the failure
+          // stays FATAL, exactly as the empty-block specimen requires.
+          // The window is bounded by construction: the next backfill
+          // visit either clears the record (repair held) or re-parks
+          // the room under a fresh validated block (it did not).
+          const isRecoveryCorroboratedPark = failure => {
+            if (blocksByRoom === null || validatedBlocks === null) return false;
+            if (blocksByRoom.has(failure.recordId)) return false;
+            if (typeof failure.eventId !== "string" || failure.eventId === "") return false;
+            if (!Number.isInteger(failure.eventSequence)) return false;
+            try {
+              return Boolean(store.db.prepare(
+                "SELECT 1 AS found FROM events WHERE room_id=? AND id=? AND sequence=?"
+              ).get(failure.recordId, failure.eventId, failure.eventSequence));
+            } catch { return false; }
+          };
+          const parked = [];
+          const fatal = [];
+          for (const failure of failures) {
+            if (failure.step === "messages_backfill" && typeof failure.recordId === "string"
+              && failure.recordId !== "" && !isLogGapPark(failure)
+              && (isCorroboratedEventPark(failure) || isRecoveryCorroboratedPark(failure))) parked.push(failure);
+            else fatal.push(failure);
           }
-          // The operator line carries the allowlisted fields only —
-          // sub-check, record id, stable code, class, count. The stored
-          // failure message is a diagnostic for the record's owner, not
-          // log text: re-emitting it here every tick would republish
-          // whatever a record's error once contained.
-          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          scanParkedCount = parked.length;
+          scanParkedRooms = new Set(parked.map(failure => failure.recordId));
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips", "verifiedRooms", "budgetExceeded", "baselineUpgraded", "contentDrift", "baselineUnverifiable"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          integrity = {
-            ...summary,
-            errors: failures.length,
-            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-            failureDetail: failure
-          };
+          if (parked.length) {
+            summary.blockedFailures = parked.length;
+            const firstSeen = parked.reduce((oldest, failure) => Number.isFinite(failure.firstSeenAt) ? Math.min(oldest, failure.firstSeenAt) : oldest, Infinity);
+            if (Number.isFinite(firstSeen)) summary.blockedSince = firstSeen;
+          }
+          if (fatal.length) {
+            const first = fatal.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+              && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? fatal[0];
+            const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+            if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+            if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+              failure.recordId = first.recordId;
+            }
+            // The operator line carries the allowlisted fields only —
+            // sub-check, record id, stable code, class, count. The
+            // stored failure message is a diagnostic for the record's
+            // owner, not log text: re-emitting it here every tick
+            // would republish whatever a record's error once
+            // contained.
+            console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${fatal.length} outstanding)`);
+            integrity = {
+              ...summary,
+              errors: fatal.length,
+              scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+              failureDetail: failure
+            };
+          } else {
+            const names = parked.map(failure => failure.recordId).filter(id => SAFE_RECORD_ID.test(id));
+            console.error(`[integrity] ${parked.length} room(s) parked in messages backfill${names.length === parked.length ? ` (${names.join(", ")})` : ""}; every scannable room verified`);
+            integrity = summary;
+          }
         }
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
@@ -499,6 +741,7 @@ export const JOBS = Object.freeze([
         try { healBackfillQuarantines(store); } catch { /* the read below reports an unreadable table */ }
         const observed = store.db.prepare(`SELECT
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0) AS n,
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0 AND event_id IS NULL) AS gapBlocks,
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=1) AS quarantined,
           (SELECT reason FROM messages_backfill_blocks WHERE skipped=0 AND reason<>'' LIMIT 1) AS blockReason,
           (SELECT component FROM messages_backfill_blocks WHERE skipped=0 AND component<>'' LIMIT 1) AS blockComponent,
@@ -518,7 +761,50 @@ export const JOBS = Object.freeze([
         integrity = { ...integrity, ...extra };
         const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
           || integrity?.failureDetail?.code === "messages_backfill_failed";
-        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+        // The #3855 force-fail stands for any standing block the scan
+        // did not itself account: a log-gap block (gapBlocks > 0 — a
+        // gap's record is fatal in the partition, so a gap block under
+        // a non-failing summary means its record has not been written
+        // yet), or a block recorded after the scan read its list. The
+        // guard is suppressed only when the scan carried its list and
+        // every standing skipped=0 block is one of the event parks
+        // the partition just rode as blockedFailures: those rooms are
+        // already named in the summary, and failing the tick for them
+        // would re-zero the signal the partition exists to save.
+        // #4930 cure: the coverage check above is an identity check,
+        // never a count. The suppression this replaces compared
+        // scanParkedCount === blockedRooms, so a standing block for a
+        // DIFFERENT room satisfied it whenever the counts happened to
+        // match (seq 23366). Suppression now requires the standing
+        // skipped=0 room set, read here, to equal the set of rooms the
+        // partition just parked — and the parked count to equal that
+        // set's size, so duplicate records for one room cannot cover
+        // a second room either. An unreadable standing set never
+        // suppresses: the guard fails closed.
+        let standingBlockRooms = null;
+        try {
+          standingBlockRooms = new Set(store.db.prepare(
+            "SELECT room_id FROM messages_backfill_blocks WHERE skipped=0"
+          ).all().map(row => row.room_id));
+        } catch { standingBlockRooms = null; }
+        // Recovery-leg amendment (seq 23565 regression): coverage is
+        // standing ⊆ parked, not set equality. A recovery park (above)
+        // is positively corroborated yet has no standing block — its
+        // park was lifted — so the parked set may legitimately exceed
+        // the standing set by exactly those rooms. What suppression
+        // still requires is that every standing block is one of the
+        // parks the partition just rode: a standing block for a room
+        // the scan did not park (the seq 23366 shape) is never
+        // covered, and the count pin still bars duplicate records
+        // from inflating the parked set.
+        const guardCoveredByScan = scanReportedFailures
+          && Number(observed?.gapBlocks) === 0
+          && standingBlockRooms !== null
+          && scanParkedCount === scanParkedRooms.size
+          && standingBlockRooms.size <= scanParkedRooms.size
+          && [...standingBlockRooms].every(roomId => scanParkedRooms.has(roomId));
+        if (blockedRooms > 0 && !summaryFailed(integrity)
+          && !guardCoveredByScan) {
           const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
           if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
           if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
@@ -559,9 +845,9 @@ export const JOBS = Object.freeze([
     name: "public-work-reseed",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    // #3530: the keeper is due only when the public board's claimable
-    // supply is exactly zero and at least one anchored starter seed has
-    // a fully submitted latest round to advance.
+    // Request a cadence-limited check after an original anchored submission.
+    // This cheap conservative signal is not a zero-supply certificate; the
+    // scheduled runner still requires exact global-zero before replenishing.
     enabled(_env, store) {
       if (!store?.publicWorkClaims) return false;
       return store.publicWorkClaims.starterPoolPending();
@@ -592,6 +878,7 @@ export const JOBS = Object.freeze([
   defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
+    failureRetryMs: 30 * MINUTE_MS,
     slow: true,
     // #3894: a required job's disable is a configuration failure, not
     // healthy idle. Work-gated jobs are disabled whenever nothing is
@@ -608,8 +895,9 @@ export const JOBS = Object.freeze([
       if (!ctx.room) return { skipped: 1 };
       try { return await writeDailyBackup(ctx.env, ctx.room); }
       catch (error) {
-        console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
-        return { errors: 1 };
+        const failureDetail = backupFailureDetail(error);
+        console.error(`[room-backup] ${failureDetail.code}`);
+        return { errors: 1, failureDetail };
       }
     }
   }),
@@ -620,14 +908,16 @@ export const JOBS = Object.freeze([
     // ClueBot phase 1: enabled only while some room has events the patrol
     // has not tailed, so an idle room never wakes for it (the registry's
     // standing rule). Read-only: the patrol files findings, it never acts.
-    enabled: (_env, store) => (store ? patrolPending(store) : true),
-    disabledReason: () => "No unpatrolled events are waiting",
+    enabled: (env, store) => scheduledPatrolEnabled(env) && (store ? patrolPending(store) : true),
+    disabledReason: env => scheduledPatrolEnabled(env) ? "No unpatrolled events are waiting" : "Scheduled patrol disabled by ROOM_PATROL_ENABLED=0",
+    healthPendingSince: (store, now) => patrolPendingSince(store, now),
     // Due at the caller's `now`, never a live Date.now(): a fresh clock
     // read lands a hair past the arming computation, slips past the
     // registry's push-out-by-one-cadence rule, and arms the alarm
     // immediately — an idle room would wake at once (jobs-alarm proof).
     nextDueAt: (store, now) => (patrolPending(store) ? now : null),
     async run(store, ctx) {
+      if (!scheduledPatrolEnabled(ctx.env)) return { skipped: 1, disabled: 1 };
       if (ctx.room?.patrolTick) return ctx.room.patrolTick();
       return runPatrolTick(store, { deadline: ctx.deadline });
     }
@@ -725,6 +1015,12 @@ export function jobNextDue(job, store, now, lastRanAt) {
   return last + job.cadenceMs;
 }
 
+// Failed backups retry on the existing slow cron; successful runs remain daily.
+export function jobRetryCadence(job, record) {
+  return Number(record?.consecutiveFailures) > 0 && Number.isFinite(job.failureRetryMs)
+    ? job.failureRetryMs : job.cadenceMs;
+}
+
 export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) {
   if (typeof job.nextDueAt === "function") {
     const next = jobNextDue(job, store, now, lastRanAt);
@@ -733,7 +1029,7 @@ export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) 
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
   // Only slow jobs get slack: they run from the safety-net cron, so a tick
   // landing a few seconds before the anchor would otherwise skip a period.
-  const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
+  const slack = job.slow && cadenceMs === job.cadenceMs ? SLOW_JOB_DUE_SLACK_MS : 0;
   return last + cadenceMs - slack <= now;
 }
 
@@ -787,6 +1083,36 @@ export function budgetExhaustedWithoutProgress(result) {
     if (typeof value === "number" && Number.isFinite(value) && value > 0) return false;
   }
   return true;
+}
+
+// #3334 parity with the Worker heartbeat's sanitizeFailureDetail: a
+// failing tick keeps a sanitized failure detail (token-shaped fields
+// only) so the Node health surface can name the failing sub-check too.
+// This is an allowlist rebuild, not a free-text redactor: any value that
+// is not itself one anchored token is dropped whole. Field limits match
+// the Worker copy exactly — code and recordId up to 64 chars, the class
+// and token fields up to 41 (this copy previously admitted 42–64 chars
+// for subcheck/errorClass/recordClass; aligned so the two health
+// surfaces cannot diverge). Module scope, not a scheduler closure, so
+// tests/job-health-redaction.test.js can pin it field-for-field
+// against the Worker copy.
+const DETAIL_TOKEN_41 = /^[a-z][a-z0-9_]{0,40}$/i;
+export function failureDetailOf(source) {
+  const detail = source?.failureDetail;
+  if (!detail || typeof detail !== "object") return null;
+  const out = {};
+  if (typeof detail.code === "string" && SAFE_CARRIED_CODE.test(detail.code)) out.code = detail.code;
+  for (const key of ["subcheck", "errorClass", "recordClass"]) {
+    if (typeof detail[key] === "string" && DETAIL_TOKEN_41.test(detail[key])) out[key] = detail[key];
+  }
+  for (const key of ["reason", "component"]) {
+    if (typeof detail[key] === "string" && PUBLIC_BLOCK_TOKEN.test(detail[key])) out[key] = detail[key];
+  }
+  // A room id named by the integrity job (room-record steps only; the
+  // job attaches it, this layer only shape-checks it). Ids contain
+  // hyphens, which the token pattern above does not allow.
+  if (typeof detail.recordId === "string" && SAFE_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
+  return Object.keys(out).length ? out : null;
 }
 
 // Node has no Durable Object alarm. One unref'd timer asks each node job
@@ -844,26 +1170,6 @@ export function startNodeScheduler({
   const lastRan = new Map();
   // REL-24: per-job run record for GET /api/health/jobs on Node.
   const records = new Map();
-  // #3334 parity with the Worker heartbeat: a failing tick keeps a sanitized
-  // failure detail (token-shaped fields only) so the Node health surface can
-  // name the failing sub-check too.
-  const detailToken = /^[a-z][a-z0-9_]{0,63}$/i;
-  const failureDetailOf = source => {
-    const detail = source?.failureDetail;
-    if (!detail || typeof detail !== "object") return null;
-    const out = {};
-    for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
-      if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
-    }
-    for (const key of ["reason", "component"]) {
-      if (typeof detail[key] === "string" && PUBLIC_BLOCK_TOKEN.test(detail[key])) out[key] = detail[key];
-    }
-    // A room id named by the integrity job (room-record steps only; the
-    // job attaches it, this layer only shape-checks it). Ids contain
-    // hyphens, which the token pattern above does not allow.
-    if (typeof detail.recordId === "string" && SAFE_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
-    return Object.keys(out).length ? out : null;
-  };
   const record = (name, at, ok, { error = null, failure = null, grade = null, durationMs = null } = {}) => {
     const prior = records.get(name) ?? { consecutiveFailures: 0 };
     // #3767: the grade names a success that did no work (budget exhausted
@@ -874,7 +1180,11 @@ export function startNodeScheduler({
     records.set(name, ok
       ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null,
         lastGrade: grade, consecutiveNoProgressExhaustions: exhausted ? (prior.consecutiveNoProgressExhaustions ?? 0) + 1 : 0 }
-      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure,
+      // Redacted at record time, whatever the caller passed: lastError is
+      // served unauthenticated, so no call site can store raw error text
+      // on this channel. Redaction is idempotent over its own output, so
+      // the already-redacted texts runOnce builds pass through unchanged.
+      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error != null ? redactJobError(error) : (prior.lastError ?? null), consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure,
         lastGrade: null, consecutiveNoProgressExhaustions: 0 });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
@@ -917,7 +1227,7 @@ export function startNodeScheduler({
           // cooperative, and the next tick continues the remainder.
           const grade = !failed && budgetExhaustedWithoutProgress(result) ? BUDGET_EXHAUSTED_NO_PROGRESS : null;
           record(job.name, at, !failed, {
-            error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
+            error: failed ? (result.scanError ? `scanError: ${redactJobError(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
             failure: failed ? failureDetailOf(result) : null,
             grade,
             durationMs: now() - startedAt
@@ -925,7 +1235,7 @@ export function startNodeScheduler({
           outcomes.push(grade ? { job: job.name, ok: true, grade, result } : { job: job.name, ok: true, result });
         } catch (error) {
           lastRan.set(job.name, at);
-          record(job.name, at, false, { error: oneLine(error?.message ?? error), failure: failureDetailOf(error), durationMs: now() - startedAt });
+          record(job.name, at, false, { error: nodeJobErrorText(job, error), failure: failureDetailOf(error), durationMs: now() - startedAt });
           console.warn(`[${job.name}] tick failed: ${oneLine(error?.message ?? error)}`);
           outcomes.push({ job: job.name, ok: false });
         }
@@ -959,7 +1269,8 @@ export function startNodeScheduler({
           name: job.name, runtime: inRuntime ? "node" : "worker-only", enabled, reason,
           periodSeconds: Math.round((overrides.get(job.name) ?? job.cadenceMs) / 1000),
           lastRunAt: iso(rec.lastRunAt), lastSuccessAt: iso(rec.lastSuccessAt), lastErrorAt: iso(rec.lastErrorAt),
-          lastError: rec.lastError ?? null,
+          // Public health reports failure facts, never free-form diagnostics.
+          lastError: rec.lastError == null ? null : "Job failed",
           lastErrorCode: rec.lastFailure?.code ?? null,
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,

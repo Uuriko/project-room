@@ -1,0 +1,122 @@
+{
+  "sourceHead": "42e0ca1c108212a4348a9243fea6f7a1a95d5b52",
+  "base": "bf089acfcf7dd1987ca3f04753264a4a1bcb88d2",
+  "runtimeEquivalence": "Parent verified bf089 runtime identical deployed main7ee5ad65a6628cd2b959c4561889e5741b3561e7; source store diff6a64..bf089 empty. Measured actual bf089 checkout, not production.",
+  "node": {
+    "focused": 3,
+    "neighbors": 48,
+    "failures": 0,
+    "skips": 0,
+    "privacyOracleCases": 90
+  },
+  "native": {
+    "initialSamples": 36,
+    "finalFleetSamples": 12,
+    "members": 64,
+    "requestsPerConcurrentSample": 2,
+    "responseHashesEqualBeforeAfter": true,
+    "rawSqlUnknownCounters": 0,
+    "rawSqlRowsWrittenAllSamples": 0,
+    "constructorExcluded": true,
+    "outerWorkerEdgeExcluded": true,
+    "backgroundScope": "Request response-body completion window only; waitUntil tasks after closure not counted. Cold DO constructor outside counters; timing is observed wall, never CPU/SLA."
+  },
+  "limitations": [
+    "History-proportional query and temporary membership sets, not constant bounded presence.",
+    "Full legacy room/projection/body/work hydration cold; full workClaims.list board decode still remains even warm.",
+    "No real room/backup used and no production calls; local results do not prove production readiness or sole cause of incident.",
+    "5,000 posts plus5,000 edits and64members refused during seed by actual Native projection row ceiling; no measured query and not suppressed.",
+    "Initial fixture failures: missing edit expectedMessageRevision; missing trusted Host; missing internal visitor IP header. Guards unchanged, failures retained."
+  ],
+  "sources": {
+    "server/store.mjs": "ca6135f5ac19f918fb447d6c5f4b8b31b12df72f3fcffe0ee3f11035def78247",
+    "server/http.mjs": "c7072f5584e0c6e0d221c6910c50d898bde03522e4be38e5d1121a3c74e23c1f",
+    "cloudflare/room.mjs": "b687582a481a100ce8ed45b5e6adcde2a7426b563f9c4d24cee63c8d633f9299",
+    "server/projection-at-rest.mjs": "e126394f34e89a12a1d81e69c5a378039cc0eb126ce751e5f822971999d47648",
+    "server/work-repository.mjs": "486d47729f304a87eec4198d77b9bb761c6fc0fb694f6705bf1b4ff93beb4f47",
+    "server/agent-heartbeats.mjs": "1f051efa7336e7d40bd37fa69b723734a1098ace5126e14058e5e0e1f8d2516a",
+    "tests/presence-private-target-query.test.mjs": "19b29ae02b3599d6ff6d6a3374d780283b373251ee91ef3be051e94065816b47"
+  },
+  "artifacts": {
+    "fixture.template.mjs": {
+      "sha256": "40f9b9277fd09130511d09b91ca6e036481ab2f0146e15e57145bc376cf86bad",
+      "bytes": 3613
+    },
+    "run-final.mjs": {
+      "sha256": "fbdde330ab98f9562901593bdad9af44ee8d2779415bc18237d202d567d6db90",
+      "bytes": 2260
+    },
+    "run-native.log": {
+      "sha256": "7b21969eca60f118bbfc39ef5b039597d598ae154849c9710dfadab1f2a82587",
+      "bytes": 19740
+    },
+    "run-final.log": {
+      "sha256": "45b35e0dc32fbc389440cbecf2e47838f2647d68ab46f031a0480dc6b48c3d7f",
+      "bytes": 11593
+    },
+    "run-fleet.log": {
+      "sha256": "80980bd15e50956bddb34993d5c253123a1321e911147f1ab4a85e5e4e713733",
+      "bytes": 2519
+    },
+    "node-focused.log": {
+      "sha256": "5165ab907a77e904dec0e890491c3354804b37f8d7e9bd4c103c0f12b2967dcc",
+      "bytes": 2477
+    },
+    "node-neighbors.log": {
+      "sha256": "b870a13d258d6605195ae81c064833aceec5b0e9dbd8db76e81ad230a9254b2e",
+      "bytes": 22906
+    },
+    "lint-final.log": {
+      "sha256": "83bcdeb043e1382e6503f765babc5a31942e38383bbb857a7182e5890261ba25",
+      "bytes": 6300
+    },
+    "run.log": {
+      "sha256": "63e09cd80c81d59727e1f6d08c8f463a48b40689fac04b93ddad9957c68d23ad",
+      "bytes": 2473
+    },
+    "run-fixed.log": {
+      "sha256": "5ef16afa3b1ad2da0eaf8d8827f6dcc6585ec79497d8a4030a3f0f6113c51d6e",
+      "bytes": 5365
+    },
+    "run-host-fixed.log": {
+      "sha256": "180d96bf067b3fddcd7bda6e70249e906f0aa208034816eca5074d3438051e0f",
+      "bytes": 5370
+    },
+    "run-proxy-fixed.log": {
+      "sha256": "0c4074d5244685e7b0e9678b5fc41369acad82a6fbbbad111d60b79806085e3d",
+      "bytes": 5369
+    },
+    "readiness.template.mjs": {
+      "sha256": "5b6a46a68208654e9e37bf48167849169bd57098a01ca5cc0fbd716e5861bace",
+      "bytes": 3740
+    },
+    "run-readiness.mjs": {
+      "sha256": "83c3ece15056d260f4798d8fbd65d1743f8935237c15e4ff76386ea0b410ef2d",
+      "bytes": 2376
+    },
+    "run-readiness.log": {
+      "sha256": "d5d569ad849f06e995c2cc698196d31df4b3e1a5ce483ce0e9468c0e7512904d",
+      "bytes": 10227
+    },
+    "readiness-results.json": {
+      "sha256": "6380549c1213831307543e5e3af1f4578a738d500cad72c9d8ce561c6c1c46cf",
+      "bytes": 129811
+    }
+  },
+  "readinessSupplement": {
+    "sourceHead": "42e0ca1c108212a4348a9243fea6f7a1a95d5b52",
+    "exitCode": 0,
+    "bothHTTP200": true,
+    "before": {
+      "controllerReadyMs": 4909.780792,
+      "workerProbeWaitMs": 2445,
+      "probeBudgetMs": 2500
+    },
+    "after": {
+      "controllerReadyMs": 22.126958,
+      "workerProbeWaitMs": 9
+    },
+    "timeoutReproduced": false,
+    "description": "Two HTTP presence service calls alongside actual outer Worker /api/ready forwarding RPC to same synthetic DO; namespace name remapped only in fixture. Underlying SELECT1 elapsed0 is IO-bound, not CPU. Local scheduler/arrival ordering and constructor exclusion limit production inference."
+  }
+}

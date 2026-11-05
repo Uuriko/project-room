@@ -1,0 +1,31 @@
+Independent #5636 round-2 qualification
+
+Exact runtime: 31bc41b2d6d49260488133f541ec6e378003983c.
+No runtime edits. Local synthetic HTTP fixture, not production data.
+
+Three prior controls pass independently:
+- Original unrelated-observer denial, HTTP and MCP full/conditional.
+- Accepted and then claimed linked private Board title denial.
+- Separate private parties and four isolated live work-role entitlement.
+No independent claim-holder-only role proof is claimed.
+
+One new native-card positive control fails. Actual HTTP first creates a public
+native Board card and claims it as the observer. A later canonical work proposal
+uses the same id, names a different accountable producer, gets a private reply
+request, then is accepted. Existing supported divergence handling preserves the
+native live card; its workItemId is null and owner remains observer. Default
+orientation correctly withholds the private canonical task title.
+
+The context response does not leak that private title, but its own-claims
+projection incorrectly replaces the independent public native title with the
+id. Stored Board state is unchanged. Cause: withheldIds.has(row.id) treats an
+id collision as canonical linkage. Use the actual row.workItemId relation,
+as Root already requested for the encoded-id denial defect. Preserve unlinked
+native/public rows. This is a public-title suppression, not secret exposure.
+
+Executable: tests/room-context-native-board-title.test.mjs.
+Run with prior controls: 3 passed / 1 failed at intended public-title assertion.
+Log: /Users/potter/Documents/ChatGPT/project room/context-5636-r2-independent.log.
+Root's separate encoded-ID denial counterexample is already owned and was not
+rerun or duplicated here. Grok owns cure, Root owns integration/release.
+This evidence branch is intentionally red and must not land without the cure.

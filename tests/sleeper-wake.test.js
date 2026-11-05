@@ -150,3 +150,39 @@ test("dispatch catch-up journals a missed wake once, stays in the flagged room, 
   assert.equal(catchUpMissedWakes(f.store).replayed, 0);
   assert.equal(job.enabled({}, f.store), false);
 });
+
+// T2-L03a-C1: catch-up must re-take the delivery decision at replay time.
+// A signal queued while everything was in order must not be replayed after
+// the room is archived, the member is removed, or the member's wakes are
+// paused — the live wake path checks all three when the signal is fresh.
+test("catch-up does not replay a wake queued before the room was archived", async t => {
+  const { f, identity, wakeCount } = await hostlessAgent(t, "on");
+  f.store.agentHeartbeats.enqueueWake({
+    agentId: identity.identityId, kind: "mention", roomId: "commons", messageId: "before-archive",
+  });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "room.archived", data: {} });
+  assert.ok(f.store.room("commons").state.room.archivedAt, "room is archived at replay time");
+  assert.equal(catchUpMissedWakes(f.store).replayed, 0);
+  assert.equal(wakeCount(), 0, "no wake ping is journaled for an archived room");
+});
+
+test("catch-up does not replay a wake queued before the member was removed", async t => {
+  const { f, identity, wakeCount } = await hostlessAgent(t, "on");
+  f.store.agentHeartbeats.enqueueWake({
+    agentId: identity.identityId, kind: "mention", roomId: "commons", messageId: "before-removal",
+  });
+  f.store.identities.unlink(f.keys.owner, "commons", identity.identityId);
+  assert.equal(catchUpMissedWakes(f.store).replayed, 0);
+  assert.equal(wakeCount(), 0, "no wake ping is journaled for a member who left the room");
+});
+
+test("catch-up does not replay a wake queued before the member's wakes were paused", async t => {
+  const { f, identity, wakeCount } = await hostlessAgent(t, "on");
+  f.store.agentHeartbeats.enqueueWake({
+    agentId: identity.identityId, kind: "mention", roomId: "commons", messageId: "before-pause",
+  });
+  f.store.wakeQueue.pause(identity.secret, "commons", { requestId: randomUUID(), reason: "away" });
+  assert.ok(f.store.wakeQueue.pauseStatus("commons", "sleeper"), "sleeper's wakes are paused at replay time");
+  assert.equal(catchUpMissedWakes(f.store).replayed, 0);
+  assert.equal(wakeCount(), 0, "no wake ping is journaled while the member's wakes are paused");
+});

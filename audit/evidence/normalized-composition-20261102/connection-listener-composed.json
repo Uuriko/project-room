@@ -1,0 +1,18 @@
+{
+  "runtimeHead": "3e3209a16",
+  "node": {
+    "tests": 10,
+    "pass": 10,
+    "fail": 0,
+    "head": "5af74279e"
+  },
+  "native": {
+    "tests": 2,
+    "pass": 2,
+    "fail": 0,
+    "head": "3e3209a16"
+  },
+  "scope": "Post-normalization managed connection create/rotate/disconnect and listener qualification; composed selected tests, not full-suite clearance",
+  "productionChanged": false,
+  "preserveAccountsAndConnections": true
+}

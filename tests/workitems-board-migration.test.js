@@ -208,38 +208,42 @@ test("mapping: superseded -> closed with supersededBy and a supersede chain link
   assert.deepEqual(row.chain, [{ kind: "supersede", targetId: "task-b", at: at(8 * H), actorId: "owner", note: "replanned" }]);
 });
 
-test("plan: successor lineage matches the mirror's cards (dependsOn on the successor, phantom when cardless)", () => {
+test("plan: supersession lineage does not become a prerequisite on replacement cards", () => {
   const source = item({ id: "task-a", state: "superseded", supersededBy: "task-b" });
   const supersede = ev("work.superseded", 8 * H, "owner", { workItemId: "task-a", supersededByWorkItemId: "task-b", reason: "replanned" });
-  // Target is not a work item in the room: phantom card, dependsOn [source].
+  // A cardless successor has no prerequisites; history stays on the source.
   const phantomPlan = planWorkItemBoardBackfill({ items: [source], events: [supersede], existing: new Map(), nowMs: NOW });
   const phantom = phantomPlan.rows.get("task-b");
   assert.ok(phantom);
   assert.equal(phantom.title, "task-b");
   assert.equal(phantom.workItemId, "task-b");
-  assert.deepEqual(phantom.dependsOn, ["task-a"]);
+  assert.deepEqual(phantom.dependsOn, []);
   // Target is a PROPOSED work item (no mapped row of its own): the
   // mirror still created the successor card at supersede time.
   const proposedPlan = planWorkItemBoardBackfill({ items: [source, item({ id: "task-b", state: "proposed" })], events: [supersede], existing: new Map(), nowMs: NOW });
   assert.equal(proposedPlan.rows.get("task-b").title, "task-b");
-  assert.deepEqual(proposedPlan.rows.get("task-b").dependsOn, ["task-a"]);
-  // Target is an ACCEPTED work item: its mapped card gains the lineage
-  // dependsOn (and keeps its own title).
+  assert.deepEqual(proposedPlan.rows.get("task-b").dependsOn, []);
+  // An accepted successor keeps its own title without a synthetic edge.
   const target = item({ id: "task-b", title: "Replacement", state: "accepted" });
   const realPlan = planWorkItemBoardBackfill({ items: [source, target], events: [supersede], existing: new Map(), nowMs: NOW });
-  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, ["task-a"]);
+  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, []);
   assert.equal(realPlan.rows.get("task-b").title, "Replacement");
-  // And once the phantom exists, the target's own mapping preserves the
-  // dependsOn while replacing the phantom title with the item's title.
+  // Growing the phantom into an accepted item preserves its explicit edges.
   const grown = boardClaimForWorkItem(target, factsFor([]), { nowMs: NOW, existing: phantom });
   assert.equal(grown.title, "Replacement");
-  assert.deepEqual(grown.dependsOn, ["task-a"]);
-  // Handoff: "-next" phantom titled by the FIRST handoff's nextAction.
+  assert.deepEqual(grown.dependsOn, []);
+  // Historical Board edges may have been explicitly authored. Without
+  // provenance, do not silently waive them just because a source supersedes.
+  const existingDependency = { ...phantom, dependsOn: ["task-a"] };
+  const preserved = planWorkItemBoardBackfill({ items: [source, target], events: [supersede], existing: new Map([["task-b", existingDependency]]), nowMs: NOW });
+  assert.deepEqual(preserved.rows.get("task-b").dependsOn, ["task-a"]);
+  // Handoff: partial-progress lineage points to the original canonical task.
   const handed = item({ id: "task-c", state: "working", claim: liveClaimFields(), handoff: { nextAction: "Second step" } });
   const handoff1 = ev("work.handoff_recorded", 5 * H, "worker", { workItemId: "task-c", nextAction: "First step" });
   const handoffPlan = planWorkItemBoardBackfill({ items: [handed], events: [handoff1], existing: new Map(), nowMs: NOW });
-  assert.equal(handoffPlan.rows.get("task-c-next").title, "First step");
-  assert.deepEqual(handoffPlan.rows.get("task-c-next").dependsOn, ["task-c"]);
+  assert.equal(handoffPlan.rows.has("task-c-next"), false);
+  assert.equal(handoffPlan.rows.get("task-c").chain[0].targetId, "task-c");
+  assert.equal(handoffPlan.rows.get("task-c").chain[0].note, "First step");
   assert.equal(handoffPlan.rows.get("task-c").chain[0].kind, "handoff");
 });
 
@@ -587,7 +591,7 @@ test("sync: release returns the card to unclaimed and renew extends it, with the
   assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
 });
 
-test("sync: handoff leaves a -next phantom and supersede closes the source, like the mirror did", async (t) => {
+test("sync: handoff keeps the original task and supersede closes the source", async (t) => {
   const f = fixture(t);
   f.send(f.ownerKey, "propose", "work.proposed", {
     workItemId: "task-hand", title: "Handoff task", definitionOfDone: "x",
@@ -604,8 +608,8 @@ test("sync: handoff leaves a -next phantom and supersede closes the source, like
     nextAction: "Finish it", limitReason: "time",
   });
   const next = f.store.workClaims.get("commons", "task-hand-next");
-  assert.equal(next.title, "Finish it");
-  assert.deepEqual(next.dependsOn, ["task-hand"]);
+  assert.equal(next, null);
+  assert.equal(f.store.workClaims.get("commons", "task-hand").chain[0].targetId, "task-hand");
   assert.equal(f.store.workClaims.get("commons", "task-hand").chain[0].kind, "handoff");
 
   f.send(f.ownerKey, "propose-2", "work.proposed", {
@@ -619,7 +623,7 @@ test("sync: handoff leaves a -next phantom and supersede closes the source, like
   assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
 });
 
-test("sync: the mirror's caps and occupied-successor refusal still roll commands back", async (t) => {
+test("sync: claim caps roll back and handoff does not touch an unrelated next-id card", async (t) => {
   const f = fixture(t);
   f.store.workClaims.configure("commons", { maxOpenClaims: 2, maxMemberOpenClaims: 1 });
   const propose = (id, n) => f.send(f.ownerKey, `propose-${n}`, "work.proposed", {
@@ -640,16 +644,17 @@ test("sync: the mirror's caps and occupied-successor refusal still roll commands
     error => error.code === "too_many_open_claims");
   assert.equal(f.item("task-cap-b").claim, null); // the command rolled back, projection included
 
-  // Occupied successor: a live board-native claim sits at the -next id.
+  // A matching suffix grants no lineage or authority over unrelated work.
   const { createWork, claimWork } = await import("../server/work-claims.mjs");
   const foreign = claimWork(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
   f.store.workClaims.set("commons", foreign);
-  assert.throws(
-    () => f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-cap-a", {
-      doneSummary: "Part", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "Next", limitReason: "time",
-    }),
-    error => error.code === "work_claim_conflict");
-  assert.ok(!f.item("task-cap-a").handoff); // rolled back (no handoff recorded)
+  const before = f.store.workClaims.get("commons", foreign.id);
+  f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-cap-a", {
+    doneSummary: "Part", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "Next", limitReason: "time",
+  });
+  assert.ok(f.item("task-cap-a").handoff);
+  assert.deepEqual(f.store.workClaims.get("commons", foreign.id), before);
+
 });
 
 test("work fact read uses the type index and excludes unrelated conversation events", t => {
@@ -838,4 +843,43 @@ test("#3712: a projected basis survives a subsequent sync", () => {
   assert.deepEqual(resynced.reviews, row.reviews);
   assert.deepEqual(resynced.attestations, row.attestations);
   assert.equal(close3712(resynced), true);
+});
+
+
+test("settled many-room backfill avoids returning the corpus and still retries pending rooms", t => {
+  const f = fixture(t), db = f.store.db;
+  for (let i = 0; i < 128; i++) f.store.initialize(initialRoom(`settled-${i}`));
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 129);
+  // Observe actual SQLite results, not a fake query implementation. This cost
+  // contract allows SQL/index changes while forbidding corpus materialization.
+  const prepare = db.prepare.bind(db); let returned = 0; const plans = [];
+  db.prepare = sql => {
+    const statement = prepare(sql), all = statement.all.bind(statement);
+    statement.all = (...args) => {
+      const rows = all(...args); returned += rows.length;
+      if (/^SELECT/i.test(sql.trim())) plans.push(...prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args));
+      return rows;
+    };
+    return statement;
+  };
+  let settled;
+  try { settled = f.store.backfillWorkItemClaims(); } finally { db.prepare = prepare; }
+  assert.equal(settled.rooms, 0);
+  assert.equal(returned, 0, "settled room/marker rows must stay in SQLite, not be materialized in JavaScript");
+  t.diagnostic(`settled selection query plan: ${JSON.stringify(plans)}`);
+  const version = db.prepare("SELECT version FROM work_item_board_backfill WHERE room_id='commons'").get().version;
+  db.prepare("UPDATE work_item_board_backfill SET version=? WHERE room_id='settled-0'").run(version - 1);
+  f.store.initialize(initialRoom("new-room"));
+  f.store.initialize(initialRoom("retry-room"));
+  const good = db.prepare("SELECT projection FROM rooms WHERE id='retry-room'").get().projection;
+  db.prepare("UPDATE rooms SET projection='invalid-json' WHERE id='retry-room'").run();
+  const pending = f.store.backfillWorkItemClaims();
+  assert.equal(pending.rooms, 3);
+  assert.deepEqual(pending.errors, ["retry-room: projection_unparseable"]);
+  assert.equal(db.prepare("SELECT version FROM work_item_board_backfill WHERE room_id='retry-room'").get(), undefined);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 1, "only the failed room remains pending");
+  db.prepare("UPDATE rooms SET projection=? WHERE id='retry-room'").run(good);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 1);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 0);
+  assert.equal(f.store.backfillWorkItemClaims({ force: true }).rooms, 131);
 });

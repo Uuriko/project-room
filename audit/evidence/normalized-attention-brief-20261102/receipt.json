@@ -1,0 +1,54 @@
+{
+  "runtime": "7c3ff61b5",
+  "base": "00888c52110d36250d3e07629036701b72926d09",
+  "red": "eb6cd9928",
+  "parserDependency": {
+    "original": "c2dcfe42e",
+    "local": "d56a5d7d5"
+  },
+  "node": {
+    "tests": 56,
+    "pass": 56
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "pages": 15,
+    "privateEmptyPages": 11,
+    "cold": true,
+    "fullOracle": true,
+    "firstAttention": {
+      "rowsRead": 1548,
+      "statements": 228
+    },
+    "finalBrief": {
+      "rowsRead": 984,
+      "statements": 152
+    },
+    "unknownCounters": 0
+  },
+  "browser": {
+    "tests": 2,
+    "pass": 2,
+    "widths": [
+      1280,
+      390
+    ],
+    "attentionPagesEach": 7,
+    "historyPagesEach": 2,
+    "zeroUpdateMarkPOSTs": true,
+    "explicitAcknowledgment": true
+  },
+  "packageClosureAndPreflight": 2,
+  "openApi": "pass after independent lexical parser cure",
+  "scope": "local only; not integrated, deployed or live verified",
+  "newSchema": false,
+  "limits": [
+    "Needs me remains native_bounded, not global attention completeness",
+    "Return brief current work is unobserved; addressed pointers supplied",
+    "Visible-horizon existing16-event private-tail admission can refuse longer hidden tails",
+    "Legacy Updates normalized aggregate returns explicit409 and alternate pointer",
+    "No requestRuns or notifications compatibility port in this slice",
+    "Isolated global module lint reports preexisting agent-sponsor-transfer missing direct test reference; new current-return-brief has meaningful direct provenance test"
+  ]
+}

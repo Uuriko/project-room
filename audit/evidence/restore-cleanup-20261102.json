@@ -1,0 +1,218 @@
+{
+  "base": "14cc486a175bfc7aa9a107a23e5a98fd1d6e2cb5",
+  "runtime": "e4fb4700f",
+  "astIdenticalSpacing": "bf35c0046",
+  "restoreAuditProtocol": 17,
+  "schema": 45,
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "fullOracleRequired": true,
+  "deployed": false,
+  "tests": {
+    "focusedNode": {
+      "pass": 10,
+      "skip": 0
+    },
+    "matchedNative": {
+      "pass": 1,
+      "skip": 0,
+      "sourceFixtureMessages": 1002,
+      "events": 1009,
+      "coverageSteps": 496,
+      "cleanupCalls": 45,
+      "frozenGuards": 663,
+      "remaining": 0,
+      "afterDropAndCheckpointFaultRollback": true,
+      "coldCleanup": true,
+      "exactEveryCleanupRetry": true
+    },
+    "packageFocused": {
+      "pass": 3
+    },
+    "lintFindings": 0,
+    "secretScanFinal": "clean without exemptions"
+  },
+  "baseline": {
+    "source": "482c2766bd771499ea4ea3b71e78b4df21ae0d35",
+    "retainedAtRoot": "a2fb0c7cb9f8d77d5b594cf9880319ef5a3ffe14",
+    "publicationRowsRead": 944950,
+    "dropTriggerStatementsTotal": 666,
+    "recoverySeedSha256": "d264e2050e41960377e80d00c5e98b2bb2e73cd52969a72eb0c081653c76b7ef",
+    "recoveryNativeFixtureSha256": "d8dcd37619ae2f821662a772d6803d306b1cbc828bdeb346c9f6fa77a2907a7a",
+    "qualification": "same exact seed/native fixture bytes and legal synthetic data grammar; random seed IDs differ; runtime baseline differs, no blanket causal attribution"
+  },
+  "measurements": {
+    "publicationSamples": {
+      "statements": 14974,
+      "rowsRead": 157289,
+      "rowsWritten": 8,
+      "materializedBytes": 6778291
+    },
+    "cleanupSamples": {
+      "statements": 1653,
+      "rowsRead": 1277791,
+      "rowsWritten": 180,
+      "materializedBytes": 15498574
+    },
+    "cleanupRetrySamples": {
+      "statements": 360,
+      "rowsRead": 132427,
+      "rowsWritten": 90,
+      "materializedBytes": 6826406
+    },
+    "faultSamples": {
+      "statements": 41,
+      "rowsRead": 40502,
+      "rowsWritten": 4,
+      "materializedBytes": 795267
+    },
+    "ordinary": {
+      "statements": 687,
+      "rowsRead": 11681,
+      "rowsWritten": 42,
+      "materializedBytes": 1270540
+    },
+    "publicationFirst": {
+      "statements": 14965,
+      "rowsRead": 154218,
+      "rowsWritten": 6,
+      "materializedBytes": 6743590
+    },
+    "publicationExactRetry": {
+      "statements": 9,
+      "rowsRead": 3071,
+      "rowsWritten": 2,
+      "materializedBytes": 34701
+    },
+    "normalPublicationAndCleanup": {
+      "statements": 16618,
+      "rowsRead": 1432009,
+      "rowsWritten": 186,
+      "materializedBytes": 22242164
+    },
+    "maxCleanupRowsRead": 36874,
+    "maxCleanupPhysicalDrop": 16,
+    "cleanupFrozenDrops": 663,
+    "cleanupAllDrops": 708,
+    "coldConstructor": {
+      "statements": 39,
+      "rowsRead": 5246,
+      "rowsWritten": 6,
+      "materializedBytes": 6747,
+      "unknown": 0
+    },
+    "allMeasuredCounterUnknown": 0,
+    "ordinaryByLabel": [
+      {
+        "label": "before-cleanup-post",
+        "statements": 196,
+        "rowsRead": 5415,
+        "rowsWritten": 40,
+        "materializedBytes": 250581
+      },
+      {
+        "label": "before-cleanup-read",
+        "statements": 127,
+        "rowsRead": 850,
+        "rowsWritten": 0,
+        "materializedBytes": 256334
+      },
+      {
+        "label": "interleaved-exact-message-retry",
+        "statements": 106,
+        "rowsRead": 2218,
+        "rowsWritten": 2,
+        "materializedBytes": 244359
+      },
+      {
+        "label": "after-cleanup-read",
+        "statements": 129,
+        "rowsRead": 1599,
+        "rowsWritten": 0,
+        "materializedBytes": 259633
+      },
+      {
+        "label": "after-cleanup-cold-read",
+        "statements": 129,
+        "rowsRead": 1599,
+        "rowsWritten": 0,
+        "materializedBytes": 259633
+      }
+    ]
+  },
+  "sourceSha256": {
+    "server/restore-cleanup.mjs": "32b220c3dbf2460236260410d6e2a9ee555508edde63f2c017c1620cd07b307e",
+    "server/restore-admission.mjs": "81df09f931a45fc689e6f78e62abc3e06c8ac0da8ea27a837103f8092063ecbc",
+    "server/restore-ndjson.mjs": "61a537f374998876e8b166f8e9f5fea1dee1f5747abf6cc5a9e6256e3fc41c56",
+    "scripts/runtime-package.mjs": "18096aba0d7256dbc2109fca81f925eab885b0dcc758779d8e885abc73c43a42",
+    "cloudflare/restore-cleanup-cost.check.mjs": "6b8a31cae98f0b512a53750799fd54349ba3ed6b6daaa55b5c54f2687978f912",
+    "cloudflare/restore-cleanup-cost.test-fixture.mjs": "31a81e3b5c062c2dc2413c161f6168aef260869ea659b6cb00feac684a787c60"
+  },
+  "logs": [
+    {
+      "source": "/tmp/restore-cleanup16-publication-spike-red.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup16-publication-spike-red.log.gz",
+      "sha256": "21812bf01bcb02195908a52d93aa2727909dc10cc46c3e6e948f16681ba36bc8",
+      "compressedSha256": "e16395abfe22edfe76f29c6253c34fdc7c757f76cec22582eda3b640253437a4"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-node-final.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-node-final.log.gz",
+      "sha256": "94374eada97761a25cdd3657595ca3c2d5ba044375124ae97b1fe70358f273d3",
+      "compressedSha256": "a005ba4cd1edda7a20a9417531cb2682a64b89dae6cbb1dd6e34552ff762bfa4"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-matched-native-final.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-matched-native-final.log.gz",
+      "sha256": "bdb8bfe65af1af4cee41f87788b0cf362bd29f918a1059ae36153c69ec76ce71",
+      "compressedSha256": "1b586012ff821babaed27d9d112e087cbd32864318b6d7feb8ef66602f4dcc88"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-package-final.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-package-final.log.gz",
+      "sha256": "07eb0232135dd0a5e12e8f490a828014b83250c582d27834d0e3bfaf8543e036",
+      "compressedSha256": "d0942cb51f3659ef683956a4968a8e320e4ff4f3894d84747119a02e5a553499"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-final-lint.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-final-lint.log.gz",
+      "sha256": "649d8095c75b5a81db93a16539bf3f1686919ca8bdddbafd89281e18161e9fe8",
+      "compressedSha256": "286673c54a60f4843e691758dce25b57f1ef44b1e3283e76126c5ae161fac9f0"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-native-secret.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-native-secret.log.gz",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "compressedSha256": "e7c7cd96c65009a7fb69bda792d31999cad4cf5590cbd1c248092ae9ae8c926b"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-spacing-secret.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-spacing-secret.log.gz",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "compressedSha256": "e7c7cd96c65009a7fb69bda792d31999cad4cf5590cbd1c248092ae9ae8c926b"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-spacing-ast.log",
+      "retained": "audit/evidence/restore-cleanup-20261102/restore-cleanup17-spacing-ast.log.gz",
+      "sha256": "d0c75797837f3cd7e811c5be88d1096edd6f9b101072c41035583c17d796feb9",
+      "compressedSha256": "d32e31faec743cf43fc2853219d94e1bcdc151267de80b5168053a498c90cf96"
+    },
+    {
+      "source": "/tmp/restore-cleanup17-native-cost/result.json",
+      "retained": "audit/evidence/restore-cleanup-20261102/result.json.gz",
+      "sha256": "df79d316fa234283503a7f693a35687827fa65ec0356e162fec968b4493f265c",
+      "compressedSha256": "5d4cb725f3bf2dcdf10e01da9e647caaf74e469a19ff06b559751a41c0e7f118"
+    }
+  ],
+  "limits": [
+    "Normal publication plus cleanup physical rows INCREASE to1432009 from944950 baseline publication; this removes the DDL spike, not cumulative work.",
+    "At most15 frozen guards plus1 control UPDATE guard DROP per cleanup; originalfulloracle still unbounded.",
+    "All45cleanup exactretry samples and2injectedfaults measured separately; not hidden in successfulpath totals.",
+    "Native rowsRead/rowsWritten are consumed cursor counters, not universal engine/disk IO; DDL reports0rowsWritten despite schema mutation.",
+    "Materialized JSON bytes are UTF8 serialized result values, not peakheap/storage/wirebytes or CPU.",
+    "Raw constructor scope separately measured after cleanup; before super failed exec calls not captured, successful cursor unknown0.",
+    "No productiondata/calls/migration/deploy/push/grant changes.",
+    "Current TABLE-NAME inventory changes deliberately refuse cleanup; no source businessrow revalidation after publication.",
+    "Original publication result stays byte-equivalent and its initial nextCleanup hint stays stale; supported driver must persist exact outstandingcleanupinput before each send.",
+    "Old16 CLEAR constructor can return, but oldcontrol admission/guard/operator must refuse17 beforeDROP; not a claim oldbusinessschema45authority was universally revoked."
+  ]
+}

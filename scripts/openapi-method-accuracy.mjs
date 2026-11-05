@@ -19,7 +19,10 @@
 // A 401/422/400/409/422 answer proves the route matched and dispatched; only
 // 405 and the double-404 speak to the contract itself. Probes are anonymous
 // with empty/shape-empty bodies so nothing persistent is created (and the
-// scratch store is deleted either way).
+// scratch store is deleted either way). Operator-token operations instead use
+// a generated scratch-only credential to reach method dispatch; the empty
+// bodies still refuse the actual operation. Production credentials are not used.
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,12 +56,12 @@ export function classify({ status, code, other404 }) {
   return { verdict: "ok", detail: `served (${status}${code ? " " + code : ""})` };
 }
 
-async function raw(origin, path, { method }) {
+async function raw(origin, path, { method, authorization }) {
   const body = ["POST", "PUT", "PATCH"].includes(method) ? "{}" : undefined;
   const res = await fetch(`${origin}${path}`, {
     method,
     signal: AbortSignal.timeout(15000),
-    headers: { Origin: origin, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    headers: { Origin: origin, ...(authorization ? { Authorization: authorization } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     ...(body === undefined ? {} : { body }),
   });
   // Only the two contract-relevant statuses need their JSON body; every
@@ -85,35 +88,52 @@ export function scratchParent() {
   return dir;
 }
 
-export async function serveScratch() {
+export async function serveScratch({ operatorEnabled = false } = {}) {
   const directory = mkdtempSync(join(scratchParent(), "project-room-method-accuracy-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
   // Probe the complete implementation inventory, including archived routes.
   // The v1 endpoint-denial checks separately verify the default server surface.
-  const server = createRoomServer({ store, enableDeferredInbox: true });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const previous = process.env.ROOM_OPERATOR_TOKEN_SHA256;
+  const token = operatorEnabled ? randomBytes(32).toString("hex") : null;
+  const restoreOperator = () => {
+    if (!operatorEnabled) return;
+    if (previous === undefined) delete process.env.ROOM_OPERATOR_TOKEN_SHA256;
+    else process.env.ROOM_OPERATOR_TOKEN_SHA256 = previous;
+  };
+  if (operatorEnabled) process.env.ROOM_OPERATOR_TOKEN_SHA256 = createHash("sha256").update(token).digest("hex");
+  let server;
+  try {
+    server = createRoomServer({ store, enableDeferredInbox: true });
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  } catch (error) {
+    restoreOperator(); store.close(); rmSync(directory, { recursive: true, force: true }); throw error;
+  }
   const origin = `http://127.0.0.1:${server.address().port}`;
   const close = async () => {
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    store.close(); rmSync(directory, { recursive: true, force: true });
+    try {
+      server.closeStreams(); server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    } finally {
+      restoreOperator(); store.close(); rmSync(directory, { recursive: true, force: true });
+    }
   };
-  return { origin, close };
+  return { origin, close, operatorAuthorization: token ? "Operator " + token : undefined };
 }
 
 export async function probeMethodAccuracy({ openapi }) {
   const operations = openapiOperations(openapi).filter(op => !op.workerOnly);
   if (operations.length < 50) throw new Error("openapi parse sanity failed");
-  const { origin, close } = await serveScratch();
+  const { origin, close, operatorAuthorization } = await serveScratch({ operatorEnabled: true });
   const results = [];
   try {
     for (const op of operations) {
       const path = concrete(op.path, pathParameterSamples(op.parameterLines));
-      const first = await raw(origin, path, { method: op.method });
+      const authorization = op.security?.includes("operatorToken") ? operatorAuthorization : undefined;
+      const first = await raw(origin, path, { method: op.method, authorization });
       let verdict = classify({ status: first.status, code: first.code, other404: false });
       if (first.status === 404 && first.code === "not_found") {
-        const alt = await raw(origin, path, { method: alternateMethod(op.method) });
+        const alt = await raw(origin, path, { method: alternateMethod(op.method), authorization });
         verdict = classify({ status: first.status, code: first.code, other404: alt.status === 404 && alt.code === "not_found" });
       }
       results.push({ method: op.method, path: op.path, security: op.security, ...verdict });

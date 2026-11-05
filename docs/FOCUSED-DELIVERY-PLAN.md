@@ -1,15 +1,500 @@
 # Project Room: six-outcome delivery plan
 
-Execution: [evidence-gated build prompt and plan](CONTINUITY-BUILD-PLAN.md); current [work lifecycle build and qualification](WORK-LIFECYCLE-BUILD-PLAN.md) and [canonical work cutover](WORK-CUTOVER-PLAN.md). The latest scope rule applies to every retained item too: previous discussion or implementation is not sufficient justification; retain only supported benefits over simpler alternatives.
+## Scope reassessment — 2026-11-02
 
-2026-10-18. This is the revised active planning scope following the request to cut,
-combine and shrink the total backlog. The execution evidence below records actual
-progress; the six outcomes remain acceptance criteria. The [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
-remains the evidence index, not a promise to build 773 things.
+John owns outside-account testing; do not ask him again for a tester or make that
+qualification an agent-imposed gate on useful releases. The retained dated
+acceptance scenarios below are evidence and examples, not an instruction to
+finish every proposed feature before using the product.
 
-The product test: two people and an authorized agent turn a conversation into an
-accepted result, change direction, survive a disconnect, and return without
-reconstructing the project or losing control.
+The useful minimum is an existing agent joining the intended project, finding
+its next useful action, obtaining relevant context, saving a result and resuming
+without duplicated actions or a human reconstructing the project. Rooms are an
+optional project interface. A durable project does not require an always-running
+agent, a mandatory chat visit, a new orchestrator or a universal wake service.
+Reuse existing host execution and pull/resume; qualify unattended operation for
+a concrete requested workflow rather than promise it for every connected host.
+
+Prioritize actual blocked participation and work: surface existing join approvals,
+make genuinely open rooms joinable through the existing admission/invitation
+mechanism, and preserve existing identities. Public showcase pages disclose only
+selected information; publishing one does not silently grant access to the room's
+private history. Give owners one clear way to choose open participation. Ordinary
+joining does not confer room administration or outside-host permissions.
+
+Generic native administration, physical per-room placement and a new experiment
+platform are not MVP requirements. Add a specific administrative action only for
+an actual authorized workflow; preserve existing membership checks. Physical
+sharding must earn its complexity through measured contention or isolation needs.
+Read improvements should reduce accepted-job latency, cost or failures; repeated
+SQL counts alone are not a user-level performance target. Use a small comparison
+on existing useful work when it resolves a real decision, not as another launch
+ceremony. Keep correctness, privacy, durable results and retry recovery.
+
+Research supports selective cooperation, not a universal agent topology:
+[Google's controlled architecture comparison](https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/)
+finds task-dependent gains and losses;
+[Anthropic's October 22 engineering guidance](https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop)
+recommends folding unnecessary agent layers into a main loop while retaining
+useful parallel work and verification. These are supporting evidence, not proof
+of demand or automatic instructions to replace our working hosts.
+
+## Sharp MVP decision — 2026-10-31
+
+The product is a shared project where a person can bring an existing agent,
+hand it useful work, follow progress, and review a result alongside other people
+and agents. The first demonstration is the friend's existing Dot, not a newly
+created substitute. The friend may participate through their connected agent;
+Room human signup is optional, while host installation/consent remains explicit.
+
+The default interface is under evaluation. Compare a person using their primary
+agent, a headless API/CLI workflow, and direct participation in the Room workspace
+against the same useful-work and recovery criteria. Keep one durable project,
+work and evidence model across these interfaces. The workspace can provide
+inspection, collaboration and review without becoming a required entry point.
+Choose the default from accepted results, human effort, setup, reliability and
+cost; compare against completing the same work with a strong single agent.
+
+The default journey is **invite → connect → assign → progress → result → review
+or correction**. A successful connection is not successful execution, and a
+submitted result is not human acceptance. Show the actual state and the next
+useful action without requiring users to understand internal leases or schemas.
+
+- **Keep prominent:** current work and its result, relevant conversation and
+  resources, one connection entry, and actions needing this actor's attention. Reuse the
+  existing workspace and work model; do not add another dashboard or task system.
+- **Combine:** repeated progress/result summaries into their work context;
+  alternate invitation methods behind one entry; secondary settings and actions
+  into contextual menus. Preserve audience, permissions, drafts and recovery.
+- **Cut from the default product:** bounty/spend expansion, growth/SEO probes,
+  public-work recruitment, graphs and peripheral operational dashboards. Existing
+  records remain available through their supported recovery/administration paths;
+  hiding a control does not authorize deleting data or abandoning obligations.
+- **Reduce actual cost:** avoid loading inactive panes; use bounded agent reads;
+  eliminate unnecessary whole-room hydration; bound caches and background batches.
+  Finish message/entity write boundaries incrementally. Do not label small response
+  payloads or body indirection as elimination of the full projection rewrite.
+- **Defer:** new integrations, autonomous fleet machinery, speculative subsystems
+  and broad placement migrations unless the supported journey proves a need.
+
+Recheck earlier paused or trigger-gated work against current evidence. A label is
+not a current scope decision. Preserve each useful requirement and existing
+obligation; record whether its premise still holds, its actual dependencies and
+its completion or retirement condition. The canonical message/entity writer
+cutover remains on the critical path whichever interface is selected.
+
+Qualify the same invitation-to-reviewed-result journey before and after each
+cut, including a disconnect, correction, permission loss, keyboard use and a
+narrow screen. Record steps, visible controls, loaded requests/bytes, time to
+useful result and duplicate/lost actions. Fewer controls alone is insufficient.
+Changes below retain their original evidence; this decision does not assert
+that prepared candidates have been deployed or that every existing defect is fixed.
+
+
+This page owns active scope. The six outcomes below retain the acceptance criteria
+from the 2026-10-18 scope reduction; the [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
+is an evidence index, not 773 promised features or an independent execution queue.
+Previous discussion or implementation alone does not justify adoption: retain
+supported benefits over simpler alternatives, including slower or failed trials.
+
+## Capability status
+
+### 2026-10-31 consolidation checkpoint
+
+Owner split confirmed in muse-room 24135: the other laptop owns the ordered
+security/reliability release, pending onboarding/accessibility PRs and Stage 4
+server/MCP/work-state/OAuth work. CX2 owns the narrow Board status repair and
+human journey audit. Do not create a parallel release or worker system.
+
+- **Merged and observed live:** `6f5ffa01f8e38cea7fa56f32c7d1ba4977355cc6`
+  matched the canonical `/api/version` and `/api/version/worker` on Oct 31.
+  Peer receipt 24138 reports both public doors plus strict smoke 16/16. This
+  observation establishes the release identity, not every feature's usability.
+- **Local, not shipped:** CX2 `3b526f6ec` repairs Board placement: an open PR
+  must not hide a blocked claim or revive a closed/cancelled claim. PR #5480
+  is open. The other laptop independently reproduced the failing base and
+  passed 36/36 checks on the repair (24141); it confirmed exact product/test
+  parity with the PR and accepted release ownership (24147). Held for the
+  post-reliability UI batch; required release checks still apply. Author-side
+  verification: 59 focused tests, lint, and browser block/resume/close.
+- **Tested locally:** a human typed a useful audit-summary request, created
+  assigned work, saw agent acceptance and progress, read its native text result,
+  requested a correction, then approved a new exact result after a new review.
+  The producer/reviewer roles were simulated by one operator. This proves the
+  local interaction path, not independent review or unattended agent execution.
+  Fourteen agent/discovery/recovery tests also passed, including lost-response
+  retry, duplicate suppression and actual local child execution.
+- **Stopped stale activity:** CX2 paused its `0e50e157` background campaign and
+  stopped the automatic request listener. Journals and evidence remain. The
+  local worker catalog/priority/release-evidence stack is not in this main
+  checkout; do not describe it as an installed product capability. Passing
+  repeated old-candidate checks is not release qualification or user value.
+- **Not established in this pass:** installed desktop revision, current desktop
+  human/agent isolation, a fresh production Google sign-in-to-result journey,
+  and autonomous cross-laptop dispatch. A stale human tab recovered its sign-in
+  screen after full reload; Google navigation did not visibly complete.
+
+Next work, in dependency order:
+
+1. Finish required checks on existing PR #5480. The peer has accepted the
+   independently checked candidate into its post-reliability release lane
+   (24147); no second PR is needed. Peer owns merge/deploy; CX2 verifies the
+   delivered blocked/open-PR and retired-work behavior. Accepted handoff and
+   passing local checks do not establish deployment.
+2. Keep the ongoing security/reliability release ahead of cosmetic work. The
+   peer's diagnostic findings in 24137 include two legacy-shape mismatches and
+   one bounded scan with unknown completeness; this audit does not clear them.
+3. Simplify the existing human journey without adding a second work model:
+   Board creation/admin controls currently push all work below the first screen;
+   result and decision summaries repeat under every linked message. Establish
+   a single primary result/next action before moving secondary controls.
+4. Stage 4 owner aligns recovery wording with the structured action: a human
+   change request says the agent should “accept a revised direction,” but
+   `work.accepted` is rejected while blocked. `room_resolve_blocker` followed by
+   start is the supported recovery. Keep exact evidence/version checks intact:
+   the audit correctly rejected a command ID used as a message event ID.
+5. Admit laptop work only against an explicit current candidate and consequential
+   suite. Run finite complementary checks; preserve the requester/work allowlist.
+   Expand the unmerged worker machinery only when a real release bottleneck
+   demonstrates a benefit beyond the existing runner and CI.
+
+Local screenshots and logs remain on CX2; the room handoff 24142 records the
+journey and design findings. No production approval, merge or deploy follows
+from the disposable room's simulated human decision.
+
+Rules: **Works** means deployed and verified on production, with the evidence linked. **In progress** means merged or in a PR, not yet verified on production. **Designed** means a plan only. Change a row in the same PR that changes the capability. (#5383)
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Agent creates its own room (`POST /api/agent-rooms`) | Works | Live E2E on production, 2026-10-29 (scripts/room-acp-e2e.mjs, throwaway qa- room) |
+| One-time agent invite, redeem to a room-scoped key | Works | Same live E2E |
+| Wakes: heartbeat with listener lease, long-poll, fenced ack | Works | Same live E2E |
+| Threads: post a reply, read a thread with its replies | Works | Same live E2E |
+| Hosted MCP endpoint (`/mcp`) and agent card (`/.well-known/agent-card.json`) | Works | Both answer 200 on production, 2026-10-29 |
+| room-acp bridge: Claude Code, Codex and other ACP agents on your machine | In progress | PRs #5385 to #5391; not yet on npm |
+| Simple permissions: Guest, Member, Owner; who can talk to an agent; one-use hashed approval tokens | In progress | PRs #5392 to #5394 (#5384) |
+| Remote agents always reachable, "queued" while the bridge is away | In progress | #5382 |
+| One thread per Board claim that the Board and PRs post into | Designed | #5378 |
+| Signed event log; answers with receipts | Later | #5379, #5380: no current demand |
+
+## Current execution pointers
+
+| Need | Maintained source | How to use it |
+| --- | --- | --- |
+| Decide the next bounded implementation | F1–F6 below and [delivery control](DELIVERY-CONTROL-PLAN.md) | Use current failures, measured bottlenecks and unfinished journeys; distinguish proposed, merged, deployed and verified. |
+| Understand current release and rejected candidates | [Delivery evidence checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Follow exact-source receipts and retained failures; do not revive a reverted optimization merely because its tests passed. |
+| Coordinate overlapping work and releases | [Room coordination](ROOM-COORDINATION.md), [AGENTS](../AGENTS.md), [deployment lane](DEPLOY-LANE.md) | Read current ownership and candidate state; dated claims below are not live leases or approval requirements. |
+| Trace an older unfinished requirement | [Total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
+| Implement a retained work/continuity boundary | [Continuity plan](CONTINUITY-BUILD-PLAN.md), [work lifecycle](WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
+
+The product test remains: two people and an authorized agent turn a conversation
+into an accepted result, change direction, survive a disconnect, and return
+without reconstructing the project or losing control. Physical sleep/wake,
+installed-host adoption and human productivity evidence remain separate from
+protocol fixtures and synthetic measurements.
+
+## MVP qualification priority — 2026-10-30
+
+The first external collaborator is a friend's existing ChatGPT Dot. Human Room
+signup is optional: the primary path is an agent invitation, native connection,
+addressed work, useful result, review and correction through the friend's own
+agent. Human-first account enrollment remains an alternative. A Codex ACP adapter
+starts Codex; it does not connect an existing Dot or inherit its context.
+
+Keep one integrated candidate, PR #5428, with two implementation boundaries:
+native agent connection/wake and existing-runtime correctness/recovery. Candidate
+checks, deployed verification and an actual external-host demonstration are separate.
+The [onboarding acceptance matrix](AGENT-ONBOARDING-ACCEPTANCE.md) records test
+conditions and limitations; it is not another roadmap or release approval.
+Inviter sponsorship grants Room access, not control over the friend's host tools.
+
+## Agent workflow improvements — 2026-10-29
+
+Grok Bot's competitive review is being reconciled against the existing contracts,
+not treated as eleven missing subsystems. Codex owns follow-through and integration;
+Room work records carry current claims. [Linear's activity/session model](https://linear.app/developers/agent-interaction)
+is a useful interaction reference, not evidence that Room needs the same state machine.
+The acceptance journey is: find executable work, understand its dependencies, act,
+show an inspectable result, obtain the applicable human decision, and resume after
+interruption without reconstructing history.
+
+| Proposal | Existing contract and disposition | Owner / next evidence |
+| --- | --- | --- |
+| Human acceptance as value | `recordOwnerDecision` already binds the designated human and decision permission to the exact completion and evidence version. Board verification is a different contract. Reuse these boundaries; no parallel approval events. | Codex: test discoverability in selected agent reads and PR mirrors before adding presentation. |
+| Provider/model/client provenance | Merged bounded declared provider/client metadata into the existing attempt model and bind completion receipts to an explicit immutable attempt. These declarations are not independently verified provenance and stay out of public summaries. | Merged [#5351](https://github.com/Uuriko/project-room/pull/5351): 88 focused checks, 1 Chromium journey and 10 independent checks passed. A new public accepted-work list remains separate until opt-in visibility is qualified; no deployment claim. |
+| Task dependencies | Board `dependsOn`, available-work filtering and claim-time refusal already exist. Extend canonical proposal/read/acquire integration using that relation, with mutation-time checks. | Merged [#5350](https://github.com/Uuriko/project-room/pull/5350): canonical proposals, selected reads and mutation checks reuse Board dependencies. 2,651 affected checks passed on Node24; no new blocked/unblocked state or deployment. |
+| Typed activity | Work-linked messages, formal reply requests, blockers and results already exist. A bounded activity annotation may improve scanning; it must not become another authority or task state. | Codex follow-up: demonstrate a useful read/UI consumer first. Elicitation links a real request; reported action/response/error does not prove execution or completion. “Thought” means a concise progress summary. |
+| Derived session status | Existing `workContinuity`, cancellation and resume projections reach `room_read_work`. No additional session model. | Codex: test UI/MCP presentation parity for revoked access and budget stops; silence stays unknown. |
+| Fingerprinted skill discovery | Salvaged unfinished #4811 into [#5342](https://github.com/Uuriko/project-room/pull/5342). Exact served bytes are hashed; downloads stay on the requested origin. | Merged; 58 focused tests and 2 Workerd checks. Fingerprints are not authenticity or permission. Deployment remains separate. |
+| Cross-vendor retries | Commands already deduplicate by room, actor and command ID with fingerprint conflict rejection. A header adapter is compatibility work, not missing replay protection. | Codex: add only for a demonstrated client need; one retry identity/store, reject header/body conflicts. Latest-read scan fixed separately in [#5344](https://github.com/Uuriko/project-room/pull/5344). |
+| Reviewer credit | Current verdicts reject self-review, require visible summaries and bind the reviewed revision. | Codex follow-up: expose distinct current qualified verdicts if useful; no reward for empty notes, stale reviews or review volume. |
+| Decision tamper evidence | Shared invitation journal hashing already exists. Extending coverage to decisions needs a defined threat model and atomic verification boundary. | Retained design decision; do not claim an unkeyed chain prevents an administrator rewriting data. |
+| Repository room file | Private connection settings, `.github/project-room.yml` and explicit Graphify repository bindings already have consumers. | Deferred: require a named missing CLI journey before another schema. Any future checked-in hint is secret-free and cannot grant authority or execute commands. |
+| Evidence-linked public metrics | Current counters use public records; merge-linked receipt rows are not necessarily unique merges. | Merged [#5348](https://github.com/Uuriko/project-room/pull/5348): request timestamp, counting definitions and source links; 19 focused checks preserve public visibility and count semantics. No deployment claim. |
+
+Qualification records distinguish a reported implementation, a merged change and
+a capability verified on the serving revision. Follow-through counts accepted
+journeys and corrected failures, not proposal count or coordination volume.
+
+## Sustained two-laptop execution — 2026-10-29
+
+This sequence expands investigation across F1–F6 while keeping implementation
+small enough to integrate. It is an execution plan under this page, not another
+feature backlog. The owner asked for continued work without creating a Codex goal
+or a scheduled routine. Progress follows useful evidence and available access;
+unknown outcomes remain visible rather than being relabeled complete.
+
+1. **Finish the current release.** Verify the exact merged source at both public
+   entry points, retain the original failed rollout report, and run independent
+   strict/live and authenticated checks. Complete runtime packaging and publication
+   separately from Worker deployment; activate the matching Graphify map with its
+   actual coverage limits. Do not upload the Workers again to retry packaging.
+   Finish with a receipt and release the shared deploy role.
+2. **Close recurring reliability failures.** Reproduce the wake listener's handling
+   of rate limits and non-JSON proxy failures; retain HTTP status and retry guidance
+   without accepting malformed success payloads. Review the patrol lifecycle fix
+   against the actual allowed transitions, including invalid transitions. Reconcile
+   older integrity diagnostic/repair PRs before selecting one; public health alone
+   cannot justify a data repair. Investigate recurring readiness timeouts using
+   retained attempt timing and exact Worker/room-service revisions. Prefer bounded
+   diagnosis and a safe verification/publication resume path over another upload.
+3. **Exercise complete human and agent journeys.** The other laptop independently
+   checks hosted sign-in and return, naming any unavailable real-provider session.
+   This laptop tests a fresh agent's discovery, read, action, interrupted response,
+   retry and recovery. Extend an existing fixture for each reproduced failure.
+   Next UI probes include startup module failure, keyboard action discovery and
+   item-specific accessible names. A source hypothesis is not a reproduced bug;
+   browser semantics are not a real screen-reader session.
+4. **Reconcile what already exists.** Use the existing ecosystem catalogue, backlog
+   IDs and PRs. The other laptop contributes its supplemental asset inventory,
+   local preservation evidence and documentation contradictions; this laptop
+   integrates canonical pointers and archive decisions. For each selected piece,
+   choose retain, connect, finish, merge, supersede or defer with its source and
+   reason. Preserve unique content and restoration evidence before retirement.
+   Generated copies are not automatically duplicate authorities. No bulk closure
+   or deletion follows from filenames, titles or an inventory count.
+5. **Integrate the next useful slice.** Keep one implementation owner and a second
+   laptop or agent for review/testing. Hand off exact source/tree, changed scope,
+   test commands/results, limitations and the next action. Receiver acknowledgement
+   establishes receipt, not execution. Compose compatible fixes, run affected
+   checks, merge and verify the actual shipped journey. Reuse unchanged evidence.
+   Move immediately to the strongest remaining reproduced failure when a slice is
+   complete; an unavailable credential or human session blocks only that dependent
+   check, not unrelated useful work.
+6. **Measure whether the process helps.** For ordinary tasks, observe time to find
+   the right context, time to an accepted result, rework/duplicate effects and
+   maintenance cost. Include setup, review, compute and documentation effort.
+   Preserve slower and failed trials. Expand tooling only when a repeated need
+   or measured bottleneck warrants it; stop research when the decision is answerable.
+   Do not aggregate unrelated test totals into a product-quality claim.
+   Use the [active comparison and measurement protocol](COLLABORATION-EXPERIMENTS.md#measuring-development-inside-project-room--active-protocol-2026-10-29)
+   to separate Room benefit from additional workers and count coordination cost.
+
+Initial coordination: this laptop owns release recovery, canonical catalogue
+integration and backend/agent repairs; the other laptop owns supplemental local
+preservation, documentation contradictions and independent hosted journeys.
+Live room ownership supersedes these dated assignments. Research can proceed
+concurrently, but implementation still uses the bounded active slices below.
+
+### Cleanup follow-ups observed on 2026-10-29
+
+The [integrated cleanup checkpoint](DELIVERY-CONTROL-PLAN.md#integrated-cleanup-checkpoint--2026-10-29-2201-utc)
+records the private-history paging repair; do not reopen that exact old-cap defect
+from an earlier plan. Hosted rollout and broader private-thread journeys still
+need their own evidence. Directory query/refresh cost, first-attempt Google sign-in
+reliability, readiness recovery, installed native adoption/signing and storage
+migration remain separate follow-ups under F1–F6.
+
+The other laptop reproduced a floating message toolbar overlapping a date/unread
+divider at 320 CSS pixels in a desktop-pointer fixture. This is a narrow layout
+finding, not evidence about a touch phone. Its isolated follow-up belongs to the
+peer; the release candidate was left unchanged. Room ownership supersedes this
+dated assignment. Source: `local-catalog-content-refresh-1030`, sequence 23267.
+
+### Archived handbook decisions retained in this plan
+
+The other laptop supplied sanitized revision-33 excerpts on 2026-10-29 (room
+message `handbook-content-reconcile`, sequence 23111). These are historical design
+decisions, not fresh status or a complete archive migration. Their useful content
+maps to the existing outcomes:
+
+- F3/F4 share one work record from human request through acknowledgement and
+  progress to an inspectable result. Human and agent interactions can differ
+  without creating competing work models. Participation and resource pooling
+  remain owner-controlled.
+- F2/F3 use existing execution/context contracts for scope, exact source,
+  workspace, budget, timeout, idempotency, cancellation and result destination.
+  Validate those protocols before inventing another adapter. A laptop being
+  healthy, listening and authorized are different observations; laptops are not
+  the sole production availability strategy. Coordination is event-driven and
+  does not depend on a Codex scheduled routine.
+- F5 evaluates adoption by problem, integration cost, license, owner, exit path
+  and an executable test. Contributions can include prompts, skills, tests,
+  reviews, translations and fixtures. Marketplace/payment expansion remains
+  deferred until the basic contribution loop is demonstrated.
+- F6 preserves exact revisions, failed evidence and recovery/setup costs. Large
+  framework, CRDT, cache, secrets or billing additions need demonstrated demand;
+  deferral is not a permanent rejection. Install tools for a supported task, not
+  merely because a catalogue lists them.
+
+Historical status blocks, obsolete SHAs and duplicated queues remain archived.
+The current index and this scope page own navigation and active outcomes. Further
+archive content requires its own reconciliation; these excerpts do not establish
+that every surviving decision has been migrated.
+
+## Active list — six outcomes
+
+| ID | Outcome and bounded scope | Finish condition |
+|---|---|---|
+| F1 | **Finish the core overhaul.** One owner for each domain and execution transition; canonical message/work/attempt/artifact records; narrow commands and repositories; shared authorization; transactions and due-effect intent. Migrate existing data and remove replaced writers, serializers and callers. | A normal change does not require unrelated central-file edits; tested migration/restore works; no competing writer or permanent compatibility layer remains in the changed scope. |
+| F2 | **Make work survive interruption.** One durable scheduler and attempt/effect journal; revision fencing, idempotency, truthful stop/redirect, reconnect and unknown-outcome reconciliation. Integrate one supported Mac host path using existing work. | A real task survives sleep/crash/reconnect, respects a changed request, cannot duplicate a known effect, and exposes unreconciled outcomes honestly. |
+| F3 | **Give every task the right context and a reviewable result.** Compact versioned context from existing Room sources, bounded agent reads, source-linked artifacts, evidence freshness and one review packet. Use existing result viewers first. | A fresh participant can understand, verify, correct and continue the task without reading the whole conversation; stale evidence is visible. |
+| F4 | **Make the complete human journey usable.** Join/sign-in, conversation, task handoff, feedback, draft/attachment recovery, review and return; contextual controls, honest availability, keyboard and mobile usability. | Two people and an agent complete the product test on supported surfaces without a broken door, lost draft, misleading completion or inaccessible required control. |
+| F5 | **Prove a useful advantage.** Fix measured bottlenecks and collect four primary measures: accepted outcomes per human hour, elapsed time to acceptance, seven-day rework, and total cost per accepted outcome. Keep privacy/correctness/accessibility as non-tradeable gates. | A reproducible pilot comparison reports benefits and uncertainty at acceptable quality/cost; ordinary operations do not scale with unrelated history. No universal speedup claim from a microbenchmark. |
+| F6 | **Integrate, release and retire.** Reuse or replace existing candidates, establish a supported green baseline, qualify the combined tree, rehearse backup/restore and rollback, remove obsolete paths, and verify the shipped journey when release is authorized. | Exact candidate and deployment evidence, successful recovery rehearsal, no known unresolved critical security/data-loss issue in supported scope, and explicit residual limitations. |
+
+F1 and F4 can advance together against agreed contracts. F2 depends on F1's
+execution/storage contracts. F3 builds on those contracts and connects to F4.
+F5 instrumentation starts immediately and comparison follows a usable slice.
+F6 integration discipline starts immediately; its final gate follows F1–F5.
+Keep at most two implementation slices active and one shared integrated candidate.
+This is a work-in-progress limit, not permission to start extra agents.
+
+## Actual reductions
+
+### Remove from the current delivery commitment
+
+- A general self-improving orchestration platform, automatic model/tool generation,
+  and speculative multi-agent execution. These are research options, not foundations.
+- Collaborative CRDT editing, arbitrary interactive apps and a new document editor.
+  Deliver versioned results, targeted feedback and existing viewer integration first.
+- A broad local knowledge index and universal project memory. Use explicitly linked
+  Room evidence and scoped direct reads first; add indexing only for observed retrieval gaps.
+- Broad connector/environment expansion. Support the existing interfaces and one
+  complete Mac host workflow before increasing the compatibility matrix.
+- Optional Mac menu-bar polish, Spotlight, AppIntents, multiwindow, voice, closed-app
+  push and capture expansion. Preserve required native security and recovery tests.
+- Commerce/public-marketplace expansion, pricing guidance, contribution scoring,
+  semantic calendars, meeting automation and generated task dashboards.
+- A standalone automation product. Keep deterministic recovery, evidence freshness
+  and review-packet preparation inside the existing work lifecycle.
+- A large ongoing benchmark/research bureaucracy. Run experiments attached to a
+  concrete failure or bottleneck, with a baseline, budget and decision.
+
+These are deferrals or rejected *release requirements*, not deletion of user data,
+existing contracts, security repairs, financial obligations or historical ideas.
+Existing public-work/commerce surfaces still need privacy, correctness and recovery
+repairs; F6 must triage those findings before judging the candidate releasable.
+
+### Conditional architecture work
+
+Per-room placement migration, advanced incremental views, more elaborate replay
+engines and additional services are not automatic release prerequisites. Preserve
+single-authority and bounded-storage contracts now. Activate the larger implementation
+only if the chosen pilot's measured concurrency, recovery, fairness or storage limits
+cannot be met with the simpler supported deployment. Record the actual trigger and
+failed simpler option. This explicitly narrows A5/R1/R2's unconditional scheduling;
+it does not mark those ledger entries complete or remove their safety requirements.
+
+Community-operated resources remain a deferred direction: useful local workers,
+cooperative execution and review, portable self-hosting, local continuity, and
+potential independent hosting/federation. Keep complexity proportional to actual
+need. Activate wider resource-network work only when measured availability,
+privacy, portability or execution cost blocks real work and a simpler option has
+failed. This does not add a scheduler, marketplace or global hosting requirement
+to the MVP. Independent laptops can perform bounded testing and existing local
+agent work now without creating that infrastructure.
+
+### Stop doing
+
+- Treating every issue, PR or historical proposal as an independent feature promise.
+- Exhaustive historical reading as a prerequisite to every implementation step.
+  Reconcile sources affecting the current boundary first; retain unknown coverage.
+- Opening new research tracks while an existing implementation lacks integration.
+- Repeated local micro-optimizations without checking complete workflow impact.
+- Cosmetic file splitting that leaves authority and dependency coupling unchanged.
+- Maintaining several competing active roadmap documents. This plan owns active scope;
+  earlier documents provide acceptance detail where retained and historical rationale
+  where deferred. A deferred scope cannot silently return through an older checklist.
+
+## What combines into what
+
+| Existing scope | Disposition |
+|---|---|
+| ARC, MSG, DAT; A1/A2/A2.1/A3 | F1; preserve local qualified evidence, finish remaining cutovers and retirement |
+| EXE, SCH; A4/R3/R4; required MAC recovery | F2; one lifecycle, scheduler and journal rather than multiple recovery systems |
+| CTX, API, ART; P1/P2/P4 | F3's compact context and reviewable-result slice; advanced indexing/editing/tools deferred |
+| UI, required MAC/SEC/WRK behavior | F4 plus F1/F2 policy; ship complete supported journeys |
+| PERF, MET, PRO; M1/M2/R5 | F5; four primary measures, diagnostic metrics only when needed |
+| COV, ENG, OPS; G1/A7/P3 | F6 and per-slice qualification; source records are evidence rather than additional products |
+| AU1–AU6 | Inventory only relevant existing automation; recovery in F2, freshness/review in F3, regression prevention in F6; other automation deferred |
+| AD1–AD4, RES, novel features | Deferred research pool; ordinary versioned telemetry/evidence retained, adaptive platform deferred |
+| ISO/A5, R1/R2 | Conditional experiments/implementation triggered by measured supported-workload limits |
+| GH issues/PRs | Triage evidence, not 403 delivery outcomes; see rules below |
+| 48 Mac checks | Required supported-path acceptance under F2/F4/F6; optional-feature checks inactive until that feature enters scope |
+
+## Brainstorm dispositions
+
+Use four ideas as small acceptance/design requirements, not standalone systems:
+
+- I01 commitment preservation: source IDs and explicit scope decisions in the backlog;
+  no new intent-compiler product.
+- I10 forgetfulness testing: a fresh-agent continuation test in F2/F3.
+- II01 bottleneck optimization: inspect review/coordination queues in F5 before adding capacity.
+- III12 project reality view: accurate state/evidence labels in F3/F4, not another dashboard.
+
+The other 30 proposals remain in the research pool. Their principles may inform an
+ordinary implementation, but they do not authorize additional feature work.
+Reopen an idea only with an observed failure or repeated need, a baseline, a small
+experiment and a decision about what active work it replaces or simplifies.
+
+## Important additions to the smaller plan
+
+1. A single acceptance story shared by architecture, UX, agents, native and release.
+2. An explicit supported-path matrix: client, host, environment and failure behavior.
+   Unsupported combinations must be named, not implicitly promised.
+3. A deletion/retirement gate in each architectural slice; migration alone is not completion.
+4. An integration/WIP limit so another collection of qualified but disconnected branches
+   cannot masquerade as progress.
+5. A scope substitution rule: new noncritical work must replace, simplify or demonstrably
+   unblock active work. Security/data-loss findings can interrupt, with the displaced work recorded.
+
+## How to handle the 403 GitHub entries
+
+Keep their IDs and source records. During reconciliation assign each to one of:
+
+- Required fix/acceptance evidence for F1–F6.
+- Already satisfied; verify on the actual integrated revision.
+- Duplicate/superseded; select one implementation and retain the source links.
+- Existing out-of-focus obligation needing maintenance/security repair.
+- Deferred feature or experiment, with a reopen condition.
+
+Read bodies, review objections, changed heads and exact code before an individual
+closure/merge decision. The current title inventory cannot justify bulk closure.
+Bundled vulnerabilities and data-loss findings must be split and assessed; they do
+not disappear because their parent workstream is deferred. No issue/PR is closed
+by this scope document.
+
+## Selecting the next execution slice
+
+For a canonical message boundary slice, retain these acceptance requirements:
+reader/caller census, atomic entity/event/effect writes, privacy/order parity, migration
+and recovery, then remove superseded serialization. Attach the existing user send/edit/
+return journey and a fresh-agent read to that slice. Baseline first, exact-tree evidence
+at completion. This advances F1, F3 and F4 without starting three independent products.
+
+## Historical integration evidence and retained acceptance
+
+The following records describe October 18 candidates, test outcomes and then-open
+tasks. Their imperative instructions, exact SHAs, required test sequences and
+release-pause observations are **historical**, not directions to operate those
+branches or evidence of current ownership. F1–F6 and the current pointers above
+govern selection; current repository policy governs validation and delivery.
+Acceptance conditions such as privacy, recovery, physical sleep/wake and the
+human pilot remain unresolved unless newer source-bound evidence closes them.
+
+<details>
+<summary>October 18 architecture and continuity records (retained for traceability)</summary>
 
 ## Architecture integration prompt: reconcile with deployed storage
 
@@ -90,11 +575,9 @@ continuity work, exact-head Linux checks, supported-host sleep/wake, deployment
 rehearsal and the human productivity pilot are not silently marked complete by
 this integration.
 
-## Active list — six outcomes
+## Historical execution: work continuity (2026-10-18)
 
-## Current execution: work continuity (2026-10-18)
-
-### Next execution: qualify and integrate the existing slice
+### Then-planned execution: qualify and integrate the existing slice
 
 Finish the existing architecture/continuity candidates before adding features.
 This sequence owns the immediate work; it does not replace C1–C8 or count
@@ -122,7 +605,8 @@ all allowlisted runtime imports and candidate-manifest drift. It warns about Nod
 does not install or switch runtimes, and leaves cold-package and full-suite
 qualification intact. The Node engine range remains unchanged.
 
-This section owns the next concrete tasks; the six outcomes below remain the scope.
+At the October 18 checkpoint, this section listed the next concrete tasks.
+For current selection, use the six outcomes and execution pointers above.
 The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
 repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
 work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).
@@ -191,137 +675,7 @@ performance; write p95 moved from 5.79 to 8.02 ms with wide intervals. Preserve
 the full table in the continuity PR. The room benchmark does not measure native
 runtime journal overhead or model reasoning quality.
 
-| ID | Outcome and bounded scope | Finish condition |
-|---|---|---|
-| F1 | **Finish the core overhaul.** One owner for each domain and execution transition; canonical message/work/attempt/artifact records; narrow commands and repositories; shared authorization; transactions and due-effect intent. Migrate existing data and remove replaced writers, serializers and callers. | A normal change does not require unrelated central-file edits; tested migration/restore works; no competing writer or permanent compatibility layer remains in the changed scope. |
-| F2 | **Make work survive interruption.** One durable scheduler and attempt/effect journal; revision fencing, idempotency, truthful stop/redirect, reconnect and unknown-outcome reconciliation. Integrate one supported Mac host path using existing work. | A real task survives sleep/crash/reconnect, respects a changed request, cannot duplicate a known effect, and exposes unreconciled outcomes honestly. |
-| F3 | **Give every task the right context and a reviewable result.** Compact versioned context from existing Room sources, bounded agent reads, source-linked artifacts, evidence freshness and one review packet. Use existing result viewers first. | A fresh participant can understand, verify, correct and continue the task without reading the whole conversation; stale evidence is visible. |
-| F4 | **Make the complete human journey usable.** Join/sign-in, conversation, task handoff, feedback, draft/attachment recovery, review and return; contextual controls, honest availability, keyboard and mobile usability. | Two people and an agent complete the product test on supported surfaces without a broken door, lost draft, misleading completion or inaccessible required control. |
-| F5 | **Prove a useful advantage.** Fix measured bottlenecks and collect four primary measures: accepted outcomes per human hour, elapsed time to acceptance, seven-day rework, and total cost per accepted outcome. Keep privacy/correctness/accessibility as non-tradeable gates. | A reproducible pilot comparison reports benefits and uncertainty at acceptable quality/cost; ordinary operations do not scale with unrelated history. No universal speedup claim from a microbenchmark. |
-| F6 | **Integrate, release and retire.** Reuse or replace existing candidates, establish a supported green baseline, qualify the combined tree, rehearse backup/restore and rollback, remove obsolete paths, and verify the shipped journey when release is authorized. | Exact candidate and deployment evidence, successful recovery rehearsal, no known unresolved critical security/data-loss issue in supported scope, and explicit residual limitations. |
-
-F1 and F4 can advance together against agreed contracts. F2 depends on F1's
-execution/storage contracts. F3 builds on those contracts and connects to F4.
-F5 instrumentation starts immediately and comparison follows a usable slice.
-F6 integration discipline starts immediately; its final gate follows F1–F5.
-Keep at most two implementation slices active and one shared integrated candidate.
-This is a work-in-progress limit, not permission to start extra agents.
-
-## Actual reductions
-
-### Remove from the current delivery commitment
-
-- A general self-improving orchestration platform, automatic model/tool generation,
-  and speculative multi-agent execution. These are research options, not foundations.
-- Collaborative CRDT editing, arbitrary interactive apps and a new document editor.
-  Deliver versioned results, targeted feedback and existing viewer integration first.
-- A broad local knowledge index and universal project memory. Use explicitly linked
-  Room evidence and scoped direct reads first; add indexing only for observed retrieval gaps.
-- Broad connector/environment expansion. Support the existing interfaces and one
-  complete Mac host workflow before increasing the compatibility matrix.
-- Optional Mac menu-bar polish, Spotlight, AppIntents, multiwindow, voice, closed-app
-  push and capture expansion. Preserve required native security and recovery tests.
-- Commerce/public-marketplace expansion, pricing guidance, contribution scoring,
-  semantic calendars, meeting automation and generated task dashboards.
-- A standalone automation product. Keep deterministic recovery, evidence freshness
-  and review-packet preparation inside the existing work lifecycle.
-- A large ongoing benchmark/research bureaucracy. Run experiments attached to a
-  concrete failure or bottleneck, with a baseline, budget and decision.
-
-These are deferrals or rejected *release requirements*, not deletion of user data,
-existing contracts, security repairs, financial obligations or historical ideas.
-Existing public-work/commerce surfaces still need privacy, correctness and recovery
-repairs; F6 must triage those findings before judging the candidate releasable.
-
-### Conditional architecture work
-
-Per-room placement migration, advanced incremental views, more elaborate replay
-engines and additional services are not automatic release prerequisites. Preserve
-single-authority and bounded-storage contracts now. Activate the larger implementation
-only if the chosen pilot's measured concurrency, recovery, fairness or storage limits
-cannot be met with the simpler supported deployment. Record the actual trigger and
-failed simpler option. This explicitly narrows A5/R1/R2's unconditional scheduling;
-it does not mark those ledger entries complete or remove their safety requirements.
-
-### Stop doing
-
-- Treating every issue, PR or historical proposal as an independent feature promise.
-- Exhaustive historical reading as a prerequisite to every implementation step.
-  Reconcile sources affecting the current boundary first; retain unknown coverage.
-- Opening new research tracks while an existing implementation lacks integration.
-- Repeated local micro-optimizations without checking complete workflow impact.
-- Cosmetic file splitting that leaves authority and dependency coupling unchanged.
-- Maintaining several competing active roadmap documents. This plan owns active scope;
-  earlier documents provide acceptance detail where retained and historical rationale
-  where deferred. A deferred scope cannot silently return through an older checklist.
-
-## What combines into what
-
-| Existing scope | Disposition |
-|---|---|
-| ARC, MSG, DAT; A1/A2/A2.1/A3 | F1; preserve local qualified evidence, finish remaining cutovers and retirement |
-| EXE, SCH; A4/R3/R4; required MAC recovery | F2; one lifecycle, scheduler and journal rather than multiple recovery systems |
-| CTX, API, ART; P1/P2/P4 | F3's compact context and reviewable-result slice; advanced indexing/editing/tools deferred |
-| UI, required MAC/SEC/WRK behavior | F4 plus F1/F2 policy; ship complete supported journeys |
-| PERF, MET, PRO; M1/M2/R5 | F5; four primary measures, diagnostic metrics only when needed |
-| COV, ENG, OPS; G1/A7/P3 | F6 and per-slice qualification; source records are evidence rather than additional products |
-| AU1–AU6 | Inventory only relevant existing automation; recovery in F2, freshness/review in F3, regression prevention in F6; other automation deferred |
-| AD1–AD4, RES, novel features | Deferred research pool; ordinary versioned telemetry/evidence retained, adaptive platform deferred |
-| ISO/A5, R1/R2 | Conditional experiments/implementation triggered by measured supported-workload limits |
-| GH issues/PRs | Triage evidence, not 403 delivery outcomes; see rules below |
-| 48 Mac checks | Required supported-path acceptance under F2/F4/F6; optional-feature checks inactive until that feature enters scope |
-
-## Brainstorm dispositions
-
-Use four ideas as small acceptance/design requirements, not standalone systems:
-
-- I01 commitment preservation: source IDs and explicit scope decisions in the backlog;
-  no new intent-compiler product.
-- I10 forgetfulness testing: a fresh-agent continuation test in F2/F3.
-- II01 bottleneck optimization: inspect review/coordination queues in F5 before adding capacity.
-- III12 project reality view: accurate state/evidence labels in F3/F4, not another dashboard.
-
-The other 30 proposals remain in the research pool. Their principles may inform an
-ordinary implementation, but they do not authorize additional feature work.
-Reopen an idea only with an observed failure or repeated need, a baseline, a small
-experiment and a decision about what active work it replaces or simplifies.
-
-## Important additions to the smaller plan
-
-1. A single acceptance story shared by architecture, UX, agents, native and release.
-2. An explicit supported-path matrix: client, host, environment and failure behavior.
-   Unsupported combinations must be named, not implicitly promised.
-3. A deletion/retirement gate in each architectural slice; migration alone is not completion.
-4. An integration/WIP limit so another collection of qualified but disconnected branches
-   cannot masquerade as progress.
-5. A scope substitution rule: new noncritical work must replace, simplify or demonstrably
-   unblock active work. Security/data-loss findings can interrupt, with the displaced work recorded.
-
-## How to handle the 403 GitHub entries
-
-Keep their IDs and source records. During reconciliation assign each to one of:
-
-- Required fix/acceptance evidence for F1–F6.
-- Already satisfied; verify on the actual integrated revision.
-- Duplicate/superseded; select one implementation and retain the source links.
-- Existing out-of-focus obligation needing maintenance/security repair.
-- Deferred feature or experiment, with a reopen condition.
-
-Read bodies, review objections, changed heads and exact code before an individual
-closure/merge decision. The current title inventory cannot justify bulk closure.
-Bundled vulnerabilities and data-loss findings must be split and assessed; they do
-not disappear because their parent workstream is deferred. No issue/PR is closed
-by this scope document.
-
-## First execution slice
-
-Finish the canonical message read/write boundary on the reconciled current candidate:
-reader/caller census, atomic entity/event/effect writes, privacy/order parity, migration
-and recovery, then remove superseded serialization. Attach the existing user send/edit/
-return journey and a fresh-agent read to that slice. Baseline first, exact-tree evidence
-at completion. This advances F1, F3 and F4 without starting three independent products.
-
-## Current execution: continuity on the reconciled architecture
+## Historical execution: continuity on the reconciled architecture
 
 Integrate PR #4118 `d611d138` with qualified architecture source `aa69cf95`.
 Preserve both histories and every retained C1–C8 acceptance task. Resolve planning
@@ -352,3 +706,5 @@ code are unchanged from #4114; its performance evidence is reused with that scop
 not represented as another measured speedup. Current main's later `f18cd508`
 escrow/heartbeat change remains outside this pinned stack. Exact-head hosted checks,
 release reconciliation, sleep/wake and the human pilot remain open.
+
+</details>

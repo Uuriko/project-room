@@ -154,6 +154,9 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await openConsentDetails(bobAlice2);
   await bobAlice2.getByRole("button", { name: "Block", exact: true }).click();
   await b.page.locator("#status.visible").getByText(/Alice blocked/).waitFor();
+  // The notification precedes the asynchronously refreshed consent row.
+  // Wait for the actionable postcondition rather than counting mid-refresh.
+  await consentSection(b.page, "alice").getByRole("button", { name: "Unblock", exact: true }).waitFor();
   assert.equal(await consentSection(b.page, "alice").getByRole("button", { name: "Unblock", exact: true }).count(), 1);
   await a.page.reload();
   await a.page.locator("#main").waitFor({ state: "visible" });

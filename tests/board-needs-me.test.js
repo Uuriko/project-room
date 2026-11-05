@@ -35,9 +35,31 @@ test("leases under an hour, quiet claims and reviews owed are sorted into the in
   assert.equal(LEASE_SOON_MS, 3600000);
 });
 
-test("blocked claims are listed as yours, not as expiring or quiet", () => {
-  const w = myBoardWork([claim("b", { state: "blocked", leaseExpiresAt: iso(now + 60000), updatedAt: iso(now - 9 * 3600000) })], me, members, now);
-  assert.deepEqual([w.expiring.length, w.quiet.length, w.owned.length], [0, 0, 1]);
+test("blocked claims surface as expiring when their lease is expiring or ended", () => {
+  // T2-L04c-C2: blocked is an active claim state in the kernel
+  // (ACTIVE_CLAIM_STATES in server/work-claims.mjs) and releaseExpired
+  // auto-releases a blocked claim when its lease lapses, clearing the
+  // owner. A blocked claim whose lease is about to lapse must therefore
+  // surface in the expiring bucket with a Renew action, not sit silently
+  // in owned until the lease is lost.
+  const soon = myBoardWork([claim("b", { state: "blocked", leaseExpiresAt: iso(now + 60000), updatedAt: iso(now - 9 * 3600000) })], me, members, now);
+  assert.deepEqual([soon.expiring.length, soon.quiet.length, soon.owned.length], [1, 0, 0]);
+  assert.equal(soon.expiring[0].item.id, "b");
+  const ended = myBoardWork([claim("b2", { state: "blocked", leaseExpiresAt: iso(now - 60000) })], me, members, now);
+  assert.deepEqual([ended.expiring.length, ended.owned.length], [1, 0]);
+  // A blocked claim with a healthy lease stays parked in owned: blocked is
+  // a deliberate park, so it is not nagged as quiet either.
+  const parked = myBoardWork([claim("b3", { state: "blocked", leaseExpiresAt: iso(now + 5 * 3600000), updatedAt: iso(now - 9 * 3600000) })], me, members, now);
+  assert.deepEqual([parked.expiring.length, parked.quiet.length, parked.owned.length], [0, 0, 1]);
+});
+
+test("a blocked claim with an expiring lease renders a Renew row", () => {
+  const html = needsMeHtml([
+    claim("blk", { state: "blocked", leaseExpiresAt: iso(now + 20 * 60000) })
+  ], { id: me, write: true }, members, now);
+  assert.match(html, /<h3 id="needs-me-heading">1 needs you<\/h3>/);
+  assert.match(html, /data-claim-action="renew" data-claim-id="blk"[^>]*>Renew/);
+  assert.match(html, /Your lease ends in 20m/);
 });
 
 test("one primary action per row: Renew, Review, Hand off; titles escaped", () => {
@@ -48,7 +70,7 @@ test("one primary action per row: Renew, Review, Hand off; titles escaped", () =
   ], { id: me, write: true }, members, now);
   assert.match(html, /<h3 id="needs-me-heading">3 need you<\/h3>/);
   assert.match(html, /data-claim-action="renew" data-claim-id="soon"[^>]*>Renew</);
-  assert.match(html, /data-needs-me-open="r">Review</);
+  assert.match(html, /data-needs-me-open="r" aria-label="Review — Title r">Review</);
   assert.match(html, /data-claim-action="release" data-claim-id="q"[^>]*>Hand off</);
   assert.match(html, /Your lease ends in 20m/);
   assert.match(html, /You are tagged to review · @Jill/);

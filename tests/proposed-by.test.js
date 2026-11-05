@@ -70,7 +70,10 @@ test("reopening a pre-upgrade database repairs provenance from each item's own p
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work"] } });
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: "w-legacy", title: "Legacy item", definitionOfDone: "done", accountableMemberId: "human" } });
   // Simulate the pre-upgrade persisted shape: projection row without the field, envelope intact.
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify((() => { const s = structuredClone(store.room("commons").state); delete s.workItems["w-legacy"].proposedById; return s; })()), "commons");
+  const legacy = structuredClone(store.room("commons").state);
+  delete legacy.workItems["w-legacy"].proposedById;
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id=?")
+    .run(store.storedProjection("commons", legacy), "commons"));
   store.close();
   store = new RoomStore(filename); // reopen: repair must run deterministically, without replaying the log
   try {
@@ -103,7 +106,8 @@ test("reopening a pre-upgrade database separates legacy reporters from unknown p
     receipt.producerId = "human"; // the old reducer's unsupported reporter=producer guess
     delete receipt.producerAttribution;
   }
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id=?")
+    .run(store.storedProjection("commons", state), "commons"));
   store.close();
 
   store = new RoomStore(filename);
@@ -142,7 +146,8 @@ test("reopening backfills verification independence only from explicit producer 
   const state = structuredClone(store.room("commons").state);
   delete state.workItems["w-known-producer"].verification.independenceConfirmed;
   delete state.workItems["w-unknown-producer"].verification.independenceConfirmed;
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id=?")
+    .run(store.storedProjection("commons", state), "commons"));
   store.close();
 
   store = new RoomStore(filename);
@@ -296,8 +301,8 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     delete body.data.producerId;
     store.db.prepare("UPDATE events SET body=? WHERE id=?").run(JSON.stringify(body), completion.id);
   }
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
-  store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(store.storedProjection("commons", legacy)));
+  store.db.exec("DROP TABLE integrity_room_state; DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   const eventBodies = store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body);
   const legacyEvents = eventBodies.map(body => JSON.parse(body));
   store.close();
@@ -306,7 +311,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 42);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");
@@ -352,7 +357,7 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
     store.initialize(initialRoom());
     const originalProjection = store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
     const originalEvents = store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body);
-    store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+    store.db.exec("DROP TABLE integrity_room_state; DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
     store.db.prepare("INSERT INTO rooms(id,sequence,projection) VALUES('z-malformed',0,'{')").run();
 
     assert.throws(() => store.repairProjectionProvenance({ upgradeV1: true }), SyntaxError);
@@ -408,8 +413,9 @@ test("an item with no authoritative proposal envelope stays honestly unknown aft
   const owner = store.issueAccessKey("commons", "owner");
   // Inject an imported legacy item with NO proposal envelope anywhere in the log.
   const state = structuredClone(store.room("commons").state);
-  state.workItems["w-imported"] = { id: "w-imported", title: "Imported", state: "proposed", accountableMemberId: "owner" };
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
+  state.workItems["w-imported"] = { id: "w-imported", revision: 0, title: "Imported", state: "proposed", accountableMemberId: "owner" };
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id=?")
+    .run(store.storedProjection("commons", state), "commons"));
   store.close();
   store = new RoomStore(filename);
   try {

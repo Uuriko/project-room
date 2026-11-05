@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
@@ -37,8 +38,15 @@ for (const mobile of [false, true]) {
     await page.locator("#main").waitFor({ state: "visible" });
     const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
     const before = snapshot();
+    await openSearch(page); await page.locator("#message-search").fill(before.state.workItems["test-handoff"].title);
+    await page.locator('#search-list [data-open-work="test-handoff"]').click();
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async (result = false) => {
+      // Saving a result focuses its message; return through the visible work link.
+      if (!await card.count()) {
+        await openSearch(page); await page.locator("#message-search").fill(snapshot().state.workItems["test-handoff"].title);
+        await page.locator('#search-list [data-open-work="test-handoff"]').click();
+      }
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
       await card.getByRole("button", { name: "Use my AI", exact: true }).click();
       if (result) await page.locator("#portable-add-result").click();

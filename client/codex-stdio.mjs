@@ -6,7 +6,21 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 const METHODS = new Set(["initialize", "account/read", "thread/start", "thread/read", "thread/resume", "thread/name/set", "turn/start", "turn/steer", "turn/interrupt"]);
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
 
+// Closed local failure channel; provider error codes and private text are never
+// promoted to native setup guidance. Exit codes also cover pre-status failures.
+export const CODEX_RUNTIME_FAILURE_EXITS = Object.freeze({ profile_lock_requires_reconciliation: 70, login_required: 71, invalid_runtime: 72 });
+export class CodexRuntimeSetupError extends Error {
+  constructor(code, message) {
+    if (typeof code !== "string" || !Object.hasOwn(CODEX_RUNTIME_FAILURE_EXITS, code)) throw new TypeError('Unknown runtime setup failure');
+    super(message); this.name = 'CodexRuntimeSetupError'; this.code = code;
+  }
+}
+export const codexRuntimeSetupFailure = error => error instanceof CodexRuntimeSetupError && typeof error.code === "string" && Object.hasOwn(CODEX_RUNTIME_FAILURE_EXITS,error.code) ? error.code : undefined;
 export function validateCodexRuntimeConfig(config) {
+  try { return validateRuntimeConfig(config); }
+  catch (error) { throw new CodexRuntimeSetupError('invalid_runtime', error.message); }
+}
+function validateRuntimeConfig(config) {
   if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model", "macTools"].includes(key)))
     throw new Error("Unknown runtime config field");
   for (const key of ["command", "cwd", "codexHome"]) if (!isAbsolute(config[key] ?? "")) throw new Error(`Runtime ${key} must be absolute`);
@@ -50,13 +64,13 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const authMethods = new Set(["initialize", "account/read", "account/login/start", "account/login/cancel"]);
   const loginIds = new Set();
   const settings = validateCodexRuntimeConfig(config);
-  if (process.platform === "win32") throw new Error("This process transport currently requires macOS or Linux");
+  if (process.platform === "win32") throw new CodexRuntimeSetupError("invalid_runtime", "This process transport currently requires macOS or Linux");
   const privateHome = join(settings.codexHome, "host-home");
   if (existsSync(privateHome) && (lstatSync(privateHome).isSymbolicLink() || realpathSync(privateHome) !== privateHome))
-    throw new Error("Dedicated process HOME cannot be a symlink");
+    throw new CodexRuntimeSetupError("invalid_runtime", "Dedicated process HOME cannot be a symlink");
   mkdirSync(privateHome, { recursive: true, mode: 0o700 }); chmodSync(privateHome, 0o700);
   const lock = join(settings.codexHome, ".room-runtime.lock");
-  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error("Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"); }
+  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new CodexRuntimeSetupError("profile_lock_requires_reconciliation", "Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"); }
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
@@ -69,20 +83,30 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
       "-c", `mcp_servers.project_room_mac.tools.mac_input.approval_mode=${JSON.stringify(settings.macTools.inputApproval ?? "prompt")}`
     ] : [])];
   const child = spawn(settings.command, args, { cwd: settings.cwd, detached: true, shell: false,
-    env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin", LANG: "en_US.UTF-8" },
+    // /usr/local/bin (the Intel Homebrew prefix) is appended last, after the
+    // existing segments, so every tool that resolves today keeps resolving
+    // identically and only tools found nowhere else gain resolution — the
+    // native host already includes it (LocalRoomHost.swift PATH).
+    env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin", LANG: "en_US.UTF-8" },
     stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map(), listeners = new Set(), threads = new Set(allowedThreadIds);
   let nextId = 1, buffer = "", closed = false, initialization, cleanup;
   const MAX = 1024 * 1024;
   const kill = signal => { if (child.pid) try { process.kill(-child.pid, signal); } catch { /* group exited */ } };
-  const alive = () => { if (!child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch { return false; } };
+  const alive = () => {
+    if (!child.pid) return false;
+    try { process.kill(-child.pid, 0); return true; }
+    // Only ESRCH proves absence. EPERM can also describe a zombie-only group
+    // on macOS; an inconclusive probe must not release the private profile.
+    catch (error) { return error.code !== "ESRCH"; }
+  };
   const settle = () => cleanup ??= (async () => {
     kill("SIGTERM");
     if (alive()) await new Promise(resolve => setTimeout(resolve, 200));
     // Escalate for the entire group even if its parent already exited.
     kill("SIGKILL");
     for (let i = 0; i < 100 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 20));
-    if (alive()) throw new Error("Runtime process group is unresolved; private profile lock retained");
+    if (alive()) throw new CodexRuntimeSetupError("profile_lock_requires_reconciliation", "Runtime process group is unresolved; private profile lock retained");
     try { rmdirSync(lock); } catch { /* retain an unresolved lock */ }
   })();
   const fail = error => {
@@ -100,7 +124,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   };
   child.stderr.resume(); // Never echo potentially secret runtime diagnostics.
   child.on("error", () => {
-    fail(new Error("Runtime could not start; inspect executable and dedicated configuration"));
+    fail(new CodexRuntimeSetupError("invalid_runtime", "Runtime could not start; inspect executable and dedicated configuration"));
   });
   child.stdin.on("error", () => fail(new Error("Runtime input disconnected; reconcile original attempt")));
   child.on("exit", () => fail(new Error("Runtime disconnected; reconcile original attempt")));
@@ -151,7 +175,11 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
       if (pending.size >= 128) return Promise.reject(new Error("Too many pending runtime requests"));
       const result = new Promise((resolve, reject) => {
         const id = nextId++;
-        const timer = setTimeout(() => fail(new Error("Runtime request timed out; outcome uncertain, do not retry writes")), settings.requestTimeoutMs);
+        // A turn's first frame can legitimately take far longer than an
+        // ordinary request: turn/start is governed by the configured
+        // turnTimeoutMs, every other request by requestTimeoutMs.
+        const timeoutMs = method === "turn/start" ? settings.turnTimeoutMs : settings.requestTimeoutMs;
+        const timer = setTimeout(() => fail(new Error("Runtime request timed out; outcome uncertain, do not retry writes")), timeoutMs);
         pending.set(id, { resolve, reject, timer, method });
         try { write({ id, method, params }); } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
       });
@@ -171,9 +199,9 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
 // alone is insufficient: some bundled versions expose schemas but cannot read
 // or resume turn history. This creates no model turn or external tool action.
 export async function checkCodexProtocol(rpc, config, { threadId } = {}) {
+  try {
   await rpc.request("initialize", { clientInfo: { name: "project_room", title: "Project Room", version: "0.1.0" } });
   rpc.notify("initialized", {});
-  try {
     const id = threadId ?? (await rpc.request("thread/start", { cwd: config.cwd, ...config.policy })).thread?.id;
     if (!id) throw new Error("missing thread");
     // Empty new paginated threads are not persisted until a user turn or
@@ -184,7 +212,7 @@ export async function checkCodexProtocol(rpc, config, { threadId } = {}) {
     const resumed = await rpc.request("thread/resume", { threadId: id, cwd: config.cwd, ...config.policy });
     if (resumed.thread?.id !== id) throw new Error("invalid resume");
     return { status: "protocol_ready", modelTurnExecuted: false, historyRead: true, resume: true };
-  } catch { throw new Error("Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."); }
+  } catch { throw new CodexRuntimeSetupError("invalid_runtime", "Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."); }
 }
 
 

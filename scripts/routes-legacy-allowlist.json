@@ -15,6 +15,38 @@
     },
     {
       "method": "GET",
+      "path": "/.well-known/agent-skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/work-in-project-room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/work-in-project-room/SKILL.md"
+    },
+    {
+      "method": "GET",
       "path": "/.well-known/agent.json"
     },
     {
@@ -104,6 +136,14 @@
     {
       "method": "HEAD",
       "path": "/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/ard.json"
     },
     {
       "method": "GET",
@@ -2387,6 +2427,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/receipts/{id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/referral-invites"
     },
     {
@@ -3023,6 +3071,14 @@
     },
     {
       "method": "GET",
+      "path": "/project-room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "GET",
       "path": "/project-room/.well-known/governance.json"
     },
     {
@@ -3172,6 +3228,14 @@
     {
       "method": "HEAD",
       "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent-skills/index.json"
     },
     {
       "method": "GET",
@@ -3821,6 +3885,38 @@
     },
     {
       "method": "GET",
+      "path": "/.well-known/agent-skills"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/connect/SKILL.md"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/work-in-project-room/SKILL.md"
+    },
+    {
+      "method": "HEAD",
+      "path": "/.well-known/agent-skills/work-in-project-room/SKILL.md"
+    },
+    {
+      "method": "GET",
       "path": "/.well-known/agent.json"
     },
     {
@@ -3910,6 +4006,14 @@
     {
       "method": "HEAD",
       "path": "/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/ard.json"
     },
     {
       "method": "GET",
@@ -5997,6 +6101,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/receipts/{id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/referral-invites"
     },
     {
@@ -6641,6 +6753,14 @@
     },
     {
       "method": "GET",
+      "path": "/project-room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/project-room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "GET",
       "path": "/project-room/.well-known/governance.json"
     },
     {
@@ -6798,6 +6918,14 @@
     {
       "method": "HEAD",
       "path": "/room/.well-known/agent.json"
+    },
+    {
+      "method": "GET",
+      "path": "/room/.well-known/agent-skills/index.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/room/.well-known/agent-skills/index.json"
     },
     {
       "method": "GET",

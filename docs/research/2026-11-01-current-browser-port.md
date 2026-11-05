@@ -1,0 +1,15 @@
+# Actual current browser port
+
+The real app failed before its first API call: `src/events.js` imported the new pure current-record context module, but the public asset inventory returned404 for it. The server public inventory now includes that leaf; root owns the matching runtime-package inventory change. The actual app also configures `auditView: activity`, which the prior normalized snapshot rejected. Its render path unconditionally needs eventLog and channels.
+
+The normalized browser snapshot now serves a complete protected channel catalog (existing50-channel bound), eight recent conversation messages, eight work summaries, and an explicitly bounded event tail. Activity/full browser modes select different presentations of the same16 admitted source events. Events retain existing audience, history-floor, consent, current-body and private-work redaction checks. Reply request records are point-read for visible messages only, with explicit partial coverage. A stored cursor/protected floor supplies a conservative catch-up boundary without scanning history or acknowledging anything.
+
+History loads earlier source windows only on a button press. The existing events route has an opt-in browser identity envelope; ordinary events responses remain unchanged. Addressed event links resolve the indexed event ID then use the same visibility reader on one source candidate. Private and missing events both return404. The browser client validates room/viewer/session ownership and response shape before rendering. History states its partial coverage, and a decision-free window does not claim that the room has no decisions.
+
+The browser request action now consumes the existing normalized selected-request v2 continuation, including empty-more source pages, before using its qualified answer basis. Protected selected request metadata remains scoped rather than pretending to be a complete request map. Actual canonical answer saving is exercised in the browser.
+
+The first integration run exposed an additional real100-member regression: the event reader loaded the whole roster again inside the browser's shared reservation. It now uses existing addressed viewer/owner authority and protected addressed mention-chip names. No read cap was raised; legal100-member metadata controls pass.
+
+Validation:29 Node tests pass, including event privacy/current bodies/history floors, browser contracts, selected work consumers, bootstrap and legal100-member shared-budget behavior. The actual Playwright journey opens the app, pages History on demand, opens a DM request, saves an answer, reloads, and follows an old event deep link. No full-room hydration is permitted by the fixture.
+
+This is not product completion. The real app still issues failing background reads for request runs, needs-attention, conversation directory, assistant, presence, files, thread mutes, return brief, updates and notifications. These are logged explicitly in the browser receipt. No successful snapshot hides or clears those blockers. The root must compose the packaging entry and qualify the latest Native candidate before release; schema45 remains offline.

@@ -1,0 +1,77 @@
+{
+  "sourceCommit": "d8e6fdbcc03a0ca6fa8fa3b849c7a499f39ffaa6",
+  "offlineFormat45": true,
+  "deployed": false,
+  "qualification": {
+    "node": {
+      "tests": 23,
+      "pass": 23,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "528dc2d8e125278092999e840aeff43810625e2c020809b08a41f1e1b97ebee3"
+    },
+    "actualNativeWorker": {
+      "tests": 2,
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "logSha256": "1d20451e979e9bcf5127edeeba0977a3dad9728dac8b803bbb62994cbd888d89",
+      "metrics": {
+        "costs": [
+          {
+            "count": 32,
+            "warm": {
+              "statements": 217,
+              "rowsRead": 723,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "pages": 8
+          },
+          {
+            "count": 128,
+            "warm": {
+              "statements": 221,
+              "rowsRead": 727,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "rawRuntime": {
+              "statements": 0,
+              "rowsWritten": 0,
+              "unknown": 0
+            },
+            "pages": 32
+          }
+        ],
+        "cold": {
+          "statements": 221,
+          "rowsRead": 2313,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "coldNative": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sourceWindow": 4,
+        "filteredEmptyIsComplete": false,
+        "syntheticRooms": true,
+        "historyCertified": false
+      }
+    }
+  },
+  "limitations": [
+    "Native work inbox/events/write mirror retirement still in development.",
+    "Restore final audit remains unbounded.",
+    "Search/ranking/help_wanted reader not qualified.",
+    "Synthetic room probes are not existing human-owned room migration proof.",
+    "No schema45 production activation."
+  ]
+}

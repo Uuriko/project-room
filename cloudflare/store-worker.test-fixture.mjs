@@ -3,6 +3,9 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
+import { availableWorkInRoom } from '../server/available-work.mjs';
+import { openWorkOf } from '../server/needs-me.mjs';
+import { readWorkItems } from '../server/work-repository.mjs';
 import { createWork, claimWork } from '../server/work-claims.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
@@ -38,6 +41,26 @@ export class StoreTestRoom {
     this.store = new RoomStore(null, { database: this.db, storagePlatform: durableStorage });
   }
   async fetch(request) {
+    const handoffPath = new URL(request.url).pathname;
+    if (handoffPath === '/handoff-discovery-setup' || handoffPath === '/handoff-discovery-resume') {
+      const store = this.store;
+      if (handoffPath === '/handoff-discovery-setup') {
+        store.initialize(initialRoom());
+        const token = store.issueAccessKey('commons', 'owner');
+        const command = (id, type, data) => store.command(token, 'commons', { id, type, data });
+        command('handoff-policy', 'room.policy_set', { requireIndependentReview: false, requireOwnerDecision: false });
+        command('handoff-propose', 'work.proposed', { workItemId: 'accepted', title: 'Accepted work', definitionOfDone: 'Explicit result', accountableMemberId: 'owner', mode: 'read' });
+        command('handoff-accept', 'work.accepted', { workItemId: 'accepted', expectedRevision: 0 });
+        store.workClaims.set('commons', createWork({ id: 'native-next', title: 'Independent native work' }, { now: Date.now(), agentId: 'owner' }));
+        for (let n = 0; n < 105; n++) store.workClaims.set('commons', { ...createWork({ id: 'orphan-' + n }, { now: Date.now(), agentId: 'owner' }), workItemId: 'missing-' + n });
+      }
+      const selected = readWorkItems(store.db, 'commons', ['accepted', ...Array.from({ length: 105 }, (_, n) => 'missing-' + n)]);
+      assert.deepEqual([...selected.keys()], ['accepted']);
+      const available = availableWorkInRoom(store, 'commons', { viewerId: 'owner' });
+      const inbox = openWorkOf(store, 'commons', 'owner', store.roomAuthority('commons'));
+      return Response.json({ available: available.items.map(item => item.id).sort(), inbox: inbox.top.map(item => item.id).sort(),
+        savedRows: store.workClaims.list('commons').length, selected: selected.size });
+    }
     const store = this.store;
     const path = new URL(request.url).pathname;
     if (path === '/stale-writer-permit') {
@@ -219,7 +242,7 @@ export class StoreTestRoom {
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();
       store.shareLinks.cancel(owner, 'commons', link.id, null);
-      assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_unavailable' });
+      assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_cancelled' });
       const send = (type, data) => store.command(owner, 'commons', { id: randomUUID(), type, data });
       const session = store.createSession(owner), managedToken = randomBytes(32).toString('base64url');
       store.agentConnections.apply(session.token, 'commons', { action: 'create', requestId: randomUUID(), memberId: 'managed-reader',

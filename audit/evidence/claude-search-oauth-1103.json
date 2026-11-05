@@ -1,0 +1,35 @@
+{
+  "adoptedSearch": "e9d622ec332e5f20c1dceabf3d619c2a98cb7707",
+  "adoptedOAuthCap": "f2dadf96b328839b5ec3eabfa73facdd1051b33e",
+  "sourceBeforeMerge": "69eb59fe1e37c6c4bc45902209caa6b001a0fdf5",
+  "baseCurrent": "2821d540b0b3be9b282db466cc67f609d474ebb4",
+  "node": "24.22.1",
+  "checks": {
+    "affectedNode": {
+      "pass": 86,
+      "fail": 0
+    },
+    "nativeIngressAndColdOAuthReads": {
+      "pass": 2,
+      "fail": 0
+    },
+    "nativeAuthorizedQuery": {
+      "pass": 1,
+      "fail": 0
+    },
+    "coldExactCommitPackage": {
+      "pass": 1,
+      "fail": 0
+    },
+    "oldCapNegativeControl": "actual40k OAuth post fails413 with old regex substituted through in-memory Node load hook",
+    "sourceArtifactChecksums": "20884-byte search26a13286e116c4d6d9e16082eb01bb8e23f905364055bde273c190e47e2d2541;3819-byte OAuthcf160f9daec787bfadb2a2390fa4f648de4134ad01ec2d26ddbb0a54af067652"
+  },
+  "clarifications": [
+    "Native forged OAuth-shaped tokens get401, not413, for large bodies: this tests transport and no authentication bypass; real OAuth40k write/read is NodeHTTP.",
+    "Native actual authorized message query returned12 matched with case-insensitive keyword and honest visible scan counts; read does not hydrate whole room.",
+    "Filtering is bounded substring search over already-authorized visible page; follow existing cursor through empty match pages, not indexed room-wide search.",
+    "Production provider live proof remains pending.",
+    "Private format-patch session metadata excluded; compressed exact artifact verified and reverse-apply-check confirmed identical hunks.",
+    "Current SDK/workflow composition needed only regenerated manifest conflict resolution."
+  ]
+}

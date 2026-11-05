@@ -40,10 +40,16 @@ updated.
 1. **Telemetry is disposable; evidence is not.** Request logs and webhook
    deliveries delete themselves. Security audit rows, room events, and account
    records never auto-delete — they are the record an incident response needs.
-2. **Deletion is explicit.** The retention job plans by default and deletes
-   only when `ROOM_RETENTION_ALLOW_DELETION=1` *and* a deleter is supplied.
-   The scheduled tick never scans the live store and never deletes
-   (`scheduledRetentionTick`).
+2. **Deletion is bounded and named.** The scheduled tick scans the live
+   store only for the disposable classes: the web fetch and web research
+   logs (rows older than 30 days), finished webhook delivery records
+   (deleted only when older than 7 days and outside the newest 100 per subscription), and
+   minor expired OAuth provider grants and abuse-rate buckets.
+   Deletion applies by default; an operator can make the web-log leg
+   plan-only with `ROOM_RETENTION_ALLOW_DELETION=0`. The analytics
+   retention and the audit planner are plan-only: they classify and
+   record a plan and never delete. The plan-only entry point
+   `scheduledRetentionTick` is not wired into the production job path.
 3. **Account deletion is the PII eraser.** `server/account-deletion.mjs`
    `RETENTION_POLICY` names purged vs retained categories; purged: sign-in
    credentials, sessions, login methods, passkeys, memberships, connected

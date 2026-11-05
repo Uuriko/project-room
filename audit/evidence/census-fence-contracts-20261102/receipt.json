@@ -1,0 +1,33 @@
+{
+  "source": "3dc3cbdde0a1597fa028b24b6145bb21bc840638",
+  "base": "ca7508fd5",
+  "command": "/Users/johnpotter/.local/bin/node --test tests/workitems-board-step0-census.test.js tests/writer-fence-unfenced.test.js",
+  "before": {
+    "exit": 1,
+    "tests": 11,
+    "passed": 10,
+    "failed": 1
+  },
+  "after": {
+    "exit": 0,
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0
+  },
+  "lintExit": 0,
+  "logs": {
+    "before": {
+      "sha256": "a7f57d4efc7de6c345755f810cb5845f7f993af89674eb7335e6754b638aae7e",
+      "bytes": 11242
+    },
+    "frozen": {
+      "sha256": "3cf12babcd8287e3de9fa78f0176993461799ff51f4f8ea8f9ed15108a608f28",
+      "bytes": 3252
+    },
+    "lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

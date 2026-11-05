@@ -38,6 +38,42 @@
           description: |
             `summary` returns the compact per-claim projection (id, title,
             state, owner, leaseExpiresAt) instead of the full items.
+        - name: priority
+          in: query
+          schema: { type: number }
+          description: Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only). Tasks with this priority.
+        - name: cycleId
+          in: query
+          schema: { type: string }
+          description: Board planning fields (flag on only). Tasks in this cycle.
+        - name: milestone
+          in: query
+          schema: { type: string }
+          description: Board planning fields (flag on only). Tasks on this milestone.
+        - name: dueBefore
+          in: query
+          schema: { type: string, format: date-time }
+          description: Board planning fields (flag on only). Tasks due at or before this time.
+        - name: savedView
+          in: query
+          schema: { type: string }
+          description: Saved Board view id (ROOM_BOARD_VIEWS=1 only); its params apply under any explicit ones.
+        - name: sort
+          in: query
+          schema: { type: string, enum: [priority, dueAt, estimate] }
+          description: Board planning fields (flag on only). Ascending, unset last; a sorted page returns the first `limit` items and no cursor.
+        - name: projectId
+          in: query
+          schema: { type: string }
+          description: Board projects (ROOM_BOARD_PROJECTS=1 and planning flag). Tasks in this project.
+        - name: initiativeId
+          in: query
+          schema: { type: string }
+          description: Board projects (flag on only). Tasks in this initiative.
+        - name: groupBy
+          in: query
+          schema: { type: string, enum: [projectId, initiativeId, cycleId, milestone] }
+          description: Board projects (flag on only). Adds `groups` [{key, count, claimIds}] for this page; tasks without the key are in a final null group.
       responses:
         '200':
           description: |
@@ -95,6 +131,13 @@
                   items: { type: string, maxLength: 500 }
                   maxItems: 32
                   description: The criteria the delivery bundle must map at the delivered finish (#3546/#3547); the platform executes the coverage check itself at the verify step
+                priority: { type: number, description: 'Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only; 422 otherwise). Lower is more urgent.' }
+                estimate: { type: number, description: Board planning fields (flag on only). }
+                dueAt: { type: string, format: date-time, description: Board planning fields (flag on only). }
+                cycleId: { type: string, description: Board planning fields (flag on only). }
+                milestone: { type: string, description: Board planning fields (flag on only). }
+                projectId: { type: string, description: Board projects (ROOM_BOARD_PROJECTS=1 only). }
+                initiativeId: { type: string, description: Board projects (flag on only). }
                 note: { type: string }
                 tags:
                   type: array
@@ -143,7 +186,7 @@
                   description: work is the default. land holds a pull request. deploy names the revision that must be live.
                 revision:
                   type: string
-                  description: Required for kind deploy. A land or deploy claim closes when this server's live revision matches it.
+                  description: Required for kind deploy. A held land or deploy claim whose linked pulls are settled with at least one merged closes when this server's live revision matches it; an unclaimed claim never closes this way.
                 assignee:
                   type: string
                   description: |

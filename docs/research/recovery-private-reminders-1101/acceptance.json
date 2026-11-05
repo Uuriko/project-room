@@ -1,0 +1,43 @@
+{
+  "source": "a26743220",
+  "runtimeReminder": "360d8616f",
+  "historicalReservation": "920dd6db6",
+  "protocol": 12,
+  "reportVersion": 1,
+  "fullOracleRequired": true,
+  "tested": {
+    "nodeSemantic": {
+      "pass": 9,
+      "fail": 0
+    },
+    "nativeReminder": {
+      "pass": 1,
+      "receipts": 155,
+      "rows": 4,
+      "totalCalls": 64,
+      "reminderCalls": 4
+    },
+    "nodeLargeContext": {
+      "pass": 1,
+      "nominalQuantumBytes": 4194304,
+      "observedAtomBytes": 4196994,
+      "sealedUpperBytes": 4197056,
+      "workerQualification": false
+    },
+    "historicalReservationBytes": 393216,
+    "historicalNode": 2,
+    "historicalNative": {
+      "pass": 1,
+      "prefixErasures": 3,
+      "calls": 60
+    },
+    "prior11Fence": 2
+  },
+  "limits": [
+    "Not whole bounded recovery; original full audit remains mandatory.",
+    "One admitted legal context atom can exceed nominal4MiB quantum.",
+    "Large-context result is Node only; Worker SQL-row platform refusals unchanged.",
+    "Isolated full package suite failed missing inherited claim-overlap asset mappings and missing direct reminder test references; root combined packaging owns final verification. Direct reference lint corrected in following tests-only commit.",
+    "No integration/deployment/live verification claimed."
+  ]
+}

@@ -14,7 +14,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkClaims, publicWorkClaimsSchema, PUBLIC_WORK_STARTER_SEED_IDS, starterRoundId } from '../server/public-work-claims.mjs';
 import { publicWorkClaimFenceSchema, withPublicWorkClaimWriter } from '../server/public-work-claim-fence.mjs';
 import { claimWork } from '../server/work-claims.mjs';
-import { jobByName, jobEnabled } from '../server/jobs.mjs';
+import { jobByName, jobEnabled, startNodeScheduler, jobNextDue } from '../server/jobs.mjs';
 
 // The operator's original starter terms, mirrored from the live board so
 // the fixture anchors the same set production exhausted.
@@ -151,62 +151,65 @@ test('the public-work-reseed job is registered and its gate follows the pool', a
   assert.equal(jobEnabled(job, {}, f.store), true, 'pool exhausted: keeper is due');
   const summary = await job.run(f.store, {});
   assert.equal(summary.seeded, 4);
-  assert.equal(jobEnabled(job, {}, f.store), false, 'pool replenished: keeper stands down');
+  assert.equal(jobEnabled(job, {}, f.store), true, 'historical anchored submission requests only a periodic check');
+  assert.equal(f.service().reseedStarterPool().seeded, 0, 'fresh open work still blocks actual replenishment');
   assert.equal(f.service().list({ limit: 100 }).claimableCount, 4);
 });
 
-const assertPendingParity = f => {
+const assertExactReplenishmentGuard = f => {
   const status = f.service().starterPoolStatus();
   const expected = status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
-  assert.equal(f.service().starterPoolPending(), expected);
-  assert.equal(jobEnabled(jobByName('public-work-reseed'), {}, f.store), expected);
+  const pending=f.service().starterPoolPending();
+  if(expected)assert.equal(pending,true,'a truly due anchored pool must request a check');
+  assert.equal(jobEnabled(jobByName('public-work-reseed'), {}, f.store), pending);
+  if(!expected)assert.equal(f.service().reseedStarterPool().seeded,0,'a conservative scheduling signal must not bypass exact replenishment rules');
   return expected;
 };
 
-test('scheduler boolean stays fresh across submission, live lease, expiry, tags and replenishment', t => {
+test('scheduled checks preserve exact replenishment across submission, live lease, expiry and tags', t => {
   const f = fixture(t); let now = Date.now(); f.store.now = () => now;
-  assert.equal(assertPendingParity(f), false);
+  assert.equal(assertExactReplenishmentGuard(f), false);
   for (const id of PUBLIC_WORK_STARTER_SEED_IDS.slice(0, 3)) f.submit(id);
-  assert.equal(assertPendingParity(f), false, 'one open task blocks all reseeding');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'one open task blocks all reseeding');
   const held = PUBLIC_WORK_STARTER_SEED_IDS[3];
   f.service().act(held, f.worker.secret, 'claim', { requestId: 'pending-hold', expectedTermsVersion: 1 });
-  assert.equal(assertPendingParity(f), true, 'one live claim does not block other submitted seeds');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'one live claim does not block other submitted seeds');
   const row = f.service().task(held), item = f.store.workClaims.get(row.namespace_key, held);
   withPublicWorkClaimWriter(f.store, () => f.store.transaction(() => f.store.workClaims.set(row.namespace_key, { ...item, tags: ['never-sweep'] })));
-  assert.equal(assertPendingParity(f), true, 'sweep tags do not change public claimability');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'sweep tags do not change public claimability');
   withPublicWorkClaimWriter(f.store, () => f.store.db.prepare("UPDATE work_claims SET item_json=json_extract(item_json,'$.data') WHERE room_id=? AND claim_id=?").run(row.namespace_key, held));
-  assert.equal(assertPendingParity(f), true, 'legacy bare claims keep the same lease semantics');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'legacy bare claims keep the same lease semantics');
   now += 3600001;
-  assert.equal(assertPendingParity(f), false, 'expiry returns a task to the pool without a write');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'expiry returns a task to the pool without a write');
   f.submit(held);
-  assert.equal(assertPendingParity(f), true);
+  assert.equal(assertExactReplenishmentGuard(f), true);
   f.service().reseedStarterPool();
-  assert.equal(assertPendingParity(f), false, 'new generation is immediately visible');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'new generation is immediately visible');
 });
 
-test('scheduler boolean preserves public visibility, terms version and deadline filtering', t => {
+test('scheduled checks preserve exact public visibility, terms version and deadline filtering', t => {
   const f = fixture(t); for (const id of PUBLIC_WORK_STARTER_SEED_IDS) f.submit(id);
   const id = 'outside-starter-pool'; f.enableSeed(id);
-  assert.equal(assertPendingParity(f), false, 'unanchored public work also blocks reseeding');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'unanchored public work also blocks reseeding');
   const mutate = (sql, ...args) => f.store.transaction(() => f.store.db.prepare(sql).run(...args));
   mutate("INSERT INTO public_unpublish(kind,target,at,by_account) VALUES('room','commons',?,'test')", Date.now());
-  assert.equal(assertPendingParity(f), true, 'operator-hidden tasks do not count');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'operator-hidden tasks do not count');
   mutate("DELETE FROM public_unpublish WHERE kind='room' AND target='commons'");
-  assert.equal(assertPendingParity(f), false);
+  assert.equal(assertExactReplenishmentGuard(f), false);
   mutate("UPDATE project_offers SET version=version+1 WHERE offer_id=?", id);
-  assert.equal(assertPendingParity(f), true, 'changed terms need re-enabling');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'changed terms need re-enabling');
   mutate("UPDATE project_offers SET version=version-1 WHERE offer_id=?", id);
   mutate("UPDATE project_offers SET terms=json_set(terms,'$.deadline',?) WHERE offer_id=?", new Date(Date.now()-1000).toISOString(), id);
-  assert.equal(assertPendingParity(f), true, 'closed submission windows are not claimable');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'closed submission windows are not claimable');
   mutate("UPDATE project_offers SET terms=json_remove(terms,'$.deadline') WHERE offer_id=?", id);
-  assert.equal(assertPendingParity(f), false);
+  assert.equal(assertExactReplenishmentGuard(f), false);
 });
 
-test('scheduler eligibility has a constant SQL bound as published packets grow and renders none', t => {
+test('scheduler check signal has a constant SQL bound as published packets grow and renders none', t => {
   const f = fixture(t, { seed: false }); f.enableSeed('unanchored-task');
-  assert.equal(assertPendingParity(f), false, 'unanchored board cannot reseed');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'unanchored board cannot reseed');
   for (const id of PUBLIC_WORK_STARTER_SEED_IDS) { f.enableSeed(id); f.submit(id); }
-  const count = (expected = false) => {
+  const count = (expected = true) => {
     const db = f.store.db, prepare = db.prepare.bind(db), record = f.store.projectOffers.record.bind(f.store.projectOffers);
     let statements = 0, candidates = 0;
     f.store.projectOffers.record = row => { candidates++; return record(row); };
@@ -217,37 +220,62 @@ test('scheduler eligibility has a constant SQL bound as published packets grow a
   };
   const small = count();
   for (let i=0; i<40; i++) f.enableSeed(`extra-public-task-${i}`);
-  assert.equal(assertPendingParity(f), false);
+  assert.equal(assertExactReplenishmentGuard(f), false);
   const large = count();
   assert.equal(large.statements, small.statements, 'SQL statement count is independent of public packet count');
-  assert.equal(large.candidates, 1, 'iterator stops at the first claimable task');
+  assert.equal(large.candidates, 0, 'scheduler never hydrates any candidate');
   assert.ok(large.statements <= 6, `expected a bounded boolean probe, got ${large.statements}`);
   f.store.transaction(() => f.store.db.prepare("UPDATE project_offers SET terms=json_set(terms,'$.deadline',?)").run(new Date(Date.now()-1000).toISOString()));
-  assert.equal(assertPendingParity(f), true);
+  assert.equal(assertExactReplenishmentGuard(f), true);
   const closed = count(true);
   assert.equal(closed.statements, large.statements);
-  assert.equal(closed.candidates, 41, 'closed deadlines must scan all non-receipted candidates');
+  assert.equal(closed.candidates, 0, 'closed deadlines are not evaluated during alarm re-arm');
   f.store.transaction(() => f.store.db.prepare("UPDATE project_offers SET terms=json_remove(terms,'$.deadline')").run());
   for (const id of ['unanchored-task', ...Array.from({ length: 40 }, (_, i) => `extra-public-task-${i}`)]) {
     const row = f.service().task(id), item = f.store.workClaims.get(row.namespace_key, id);
     withPublicWorkClaimWriter(f.store, () => f.store.workClaims.set(row.namespace_key, claimWork(item, 'synthetic-lease-owner', { now: Date.now() })));
   }
-  assert.equal(assertPendingParity(f), true);
+  assert.equal(assertExactReplenishmentGuard(f), true);
   const leased = count(true);
   assert.equal(leased.statements, large.statements);
-  assert.equal(leased.candidates, 41, 'live leases require the same full candidate scan');
+  assert.equal(leased.candidates, 0, 'live leases are not evaluated during alarm re-arm');
+  t.diagnostic(JSON.stringify({small,large,closed,leased,scheduledGlobalZeroScanStillUnbounded:true}));
 });
 
 
-test('receipt state and archived publication preserve scheduler parity', t => {
+test('receipt state and archived publication preserve exact replenishment eligibility', t => {
   const f = fixture(t); for (const id of PUBLIC_WORK_STARTER_SEED_IDS) f.submit(id);
-  assert.equal(assertPendingParity(f), true);
+  assert.equal(assertExactReplenishmentGuard(f), true);
   f.store.transaction(() => f.store.db.prepare("UPDATE public_work_receipts SET receipt_json=json_set(receipt_json,'$.state','verified')").run());
-  assert.equal(assertPendingParity(f), true, 'verified receipts remain submitted for reseed eligibility');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'verified receipts remain submitted for reseed eligibility');
   f.enableSeed('visible-unclaimed-extra');
-  assert.equal(assertPendingParity(f), false);
+  assert.equal(assertExactReplenishmentGuard(f), false);
   f.store.transaction(() => f.store.db.prepare("UPDATE rooms SET archived_at=? WHERE id='commons'").run(new Date().toISOString()));
-  assert.equal(assertPendingParity(f), true, 'archived rooms do not supply claimable public work');
+  assert.equal(assertExactReplenishmentGuard(f), true, 'archived rooms do not supply claimable public work');
   f.store.transaction(() => f.store.db.prepare("UPDATE rooms SET archived_at=NULL WHERE id='commons'").run());
-  assert.equal(assertPendingParity(f), false, 'unarchiving is visible immediately');
+  assert.equal(assertExactReplenishmentGuard(f), false, 'unarchiving is visible immediately');
+});
+
+test('alarm re-arm requests a conservative indexed check without hydrating any public candidate', t => {
+ const f=fixture(t);for(const id of PUBLIC_WORK_STARTER_SEED_IDS)f.submit(id);f.enableSeed('still-useful-public-work');
+ let candidates=0;const record=f.store.projectOffers.record.bind(f.store.projectOffers);f.store.projectOffers.record=row=>{candidates++;return record(row);};
+ const service=f.service();service.packet=()=>assert.fail('scheduler must not render packets');service._starterFamily=()=>assert.fail('scheduler must not enumerate family rounds');
+ assert.equal(service.starterPoolPending(),true,'an anchored submission schedules a check even when useful public work remains');assert.equal(candidates,0);
+ assert.equal(f.service().reseedStarterPool().seeded,0,'conservative scheduling never changes exact global-zero replenishment');
+});
+
+test('actual scheduler spaces conservative no-op reseed checks by its existing cadence',async t=>{
+ const f=fixture(t);for(const id of PUBLIC_WORK_STARTER_SEED_IDS)f.submit(id);assert.equal(f.service().reseedStarterPool().seeded,4);
+ let now=Date.now(),calls=0;f.store.now=()=>now;const reseed=f.store.publicWorkClaims.reseedStarterPool.bind(f.store.publicWorkClaims);f.store.publicWorkClaims.reseedStarterPool=()=>{calls++;const result=reseed();assert.equal(result.seeded,0);return result;};
+ const scheduler=startNodeScheduler({store:f.store,now:()=>now,tickMs:0,env:{GROWTH_WATCH_INTERVAL_MS:'0',ROOM_PATROL_ENABLED:'0'},fetchImpl:async()=>{throw Error('unexpected external scheduler call');}});t.after(()=>scheduler.stop());
+ const run=async()=>{const outcomes=await scheduler.runOnce();return outcomes.filter(row=>row.job==='public-work-reseed');};
+ assert.equal((await run()).length,1);assert.equal(calls,1);for(let n=0;n<3;n++)assert.equal((await run()).length,0);now+=59999;assert.equal((await run()).length,0);now++;assert.equal((await run()).length,1);assert.equal(calls,2);
+ const health=scheduler.jobHealth().find(row=>row.name==='public-work-reseed');assert.equal(health.periodSeconds,60);assert.equal(health.consecutiveFailures,0);assert.equal(jobNextDue(jobByName('public-work-reseed'),f.store,now,now),now+60000);
+});
+
+test('missing anchors stay disabled; historical original submissions request checks after later rounds',t=>{
+ const empty=fixture(t,{seed:false});empty.enableSeed('unrelated-task');empty.submit('unrelated-task');assert.equal(empty.service().starterPoolPending(),false,'unrelated submitted work is not an operator starter anchor');
+ const f=fixture(t);assert.equal(f.service().starterPoolPending(),false,'unsubmitted anchors do not request checks');for(const id of PUBLIC_WORK_STARTER_SEED_IDS)f.submit(id);assert.equal(f.service().reseedStarterPool().seeded,4);
+ f.store.transaction(()=>{for(const id of PUBLIC_WORK_STARTER_SEED_IDS)f.store.db.prepare('UPDATE public_work_tasks SET generation=generation+1 WHERE offer_id=?').run(id);});
+ assert.equal(f.service().starterPoolPending(),true,'older generation receipts are conservative scheduling evidence, not a current terminal certificate');assert.equal(f.service().reseedStarterPool().seeded,0,'fresh round2 work still blocks actual replenishment');
 });

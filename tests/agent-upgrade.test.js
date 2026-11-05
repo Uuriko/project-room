@@ -56,6 +56,10 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.deepEqual(catalog(), oldCatalog); assert.deepEqual(oldAudit(f.store), before);
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
+  const writeProofs = current.db.prepare("SELECT projection_hash,metadata_hash FROM integrity_room_state").all();
+  assert.equal(writeProofs.length, roomsBefore.length);
+  assert.ok(writeProofs.every(row => /^[a-f0-9]{64}$/.test(row.metadata_hash)), "legacy metadata gets prospective write protection");
+  assert.ok(writeProofs.every(row => row.projection_hash === null), "opening an old schema does not certify its historical content");
   // v28 adds rooms.archived_at, so the rooms digest differs by construction; its rows are compared column-wise below.
   // Channels arrived after these baselines were frozen, and opening an old
   // database materialises the default "general" channel into each room's
@@ -128,9 +132,9 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   // agent_webhook_deliveries) had landed without being added, failing all
   // twenty versions on that alone. Deriving existence cannot rot the same way.
   const baselineTables = new Set(before.tables.map(entry => entry.table));
-  // Account-session inventory adds login provenance, not a new session or
-  // authority change. Preserve every old value and permit only the two NULL
-  // fields promised for legacy slots; the blanket digest cannot compare a
+  // Account-session inventory adds login provenance and draft recovery lineage,
+  // not a new session or authority change. Preserve every old value and permit
+  // only the documented NULL fields promised for legacy slots; the blanket digest cannot compare a
   // row whose schema intentionally gains these fields.
   const sessionSlotsAfter = current.db.prepare("SELECT * FROM account_session_slots ORDER BY hash").all();
   assert.ok(sessionSlotsBefore.length > 0, "the legacy fixture exercises existing account sessions");
@@ -139,22 +143,28 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   sessionSlotsAfter.forEach((row, index) => {
     const original = sessionSlotsBefore[index];
     const added = Object.keys(row).filter(column => !Object.hasOwn(original, column)).sort();
-    assert.deepEqual(added, ["login_method_kind", "login_method_ref"].filter(column => !Object.hasOwn(original, column)),
-      "legacy account-session slots gain only the documented login provenance fields");
+    assert.deepEqual(added, ["draft_recovery_lineage", "login_method_kind", "login_method_ref"].filter(column => !Object.hasOwn(original, column)),
+      "legacy account-session slots gain only documented nullable provenance and draft lineage fields");
     for (const column of added) assert.equal(row[column], null, `account_session_slots.${column} must start NULL`);
     for (const column of Object.keys(original)) {
       assert.deepEqual(row[column], original[column], `account_session_slots.${column} changed during the upgrade`);
     }
   });
+  assert.equal(current.authenticateAccountSession(f.owner.token).draftRecoveryLineage, null,
+    "upgrade does not mint draft continuity for an existing authenticated session");
+  assert.equal(current.accountSessionSlot(f.loggedOut.token).account, null,
+    "the original logged-out slot remains anonymous after migration");
+  assert.throws(() => current.authenticateAccountSession(f.loggedOut.token), error => error.status === 401,
+    "adding nullable lineage must not revive an existing logged-out slot");
   const comparable = row => row.table !== "account_session_slots" && row.table !== "rooms" && row.table !== "accounts" && row.table !== "credentials" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v42|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), new RegExp(`project_room_writer_v${STORE_SCHEMA_VERSION}|unsupported database writer`));
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
   current.createAccount("after-v36-upgrade");
   assert.equal(current.account("after-v36-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 42);
+  assert.equal(auditRecovery(current).schemaVersion, STORE_SCHEMA_VERSION);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];

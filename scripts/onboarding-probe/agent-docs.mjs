@@ -44,7 +44,19 @@ export async function runAgentDocs({ target, outDir = null, created = emptyCreat
     confusions.push("llms.txt did not answer, so the documented calls were not run.");
     return finish(outDir, { steps, firstPost: null, firstClose: null, closeReachable: false, confusions });
   }
-  const packet = rewriteHosts(read.text, origin);
+  let packet = rewriteHosts(read.text, origin);
+  // The small discovery index delegates operational commands to its full packet.
+  // Follow only that documented same-origin page, without credentials.
+  if (!sectionCurls(packet).length && packet.includes(`${origin}/llms-full.txt`)) {
+    const full=await probeFetch(`${origin}/llms-full.txt`);
+    calls++;
+    steps.push({step:"read-full-llms",t:elapsed(started),calls,bytes:full.bytes,status:full.status});
+    if(full.status!==200){
+      confusions.push("The linked full packet did not answer, so no documented commands were run.");
+      return finish(outDir,{steps,firstPost:null,firstClose:null,closeReachable:false,confusions});
+    }
+    packet=rewriteHosts(full.text,origin);
+  }
   const curls = sectionCurls(packet).filter(curl => !/\/llms\.txt$/.test(curl.url));
   let firstPost = null;
   for (const curl of curls) {

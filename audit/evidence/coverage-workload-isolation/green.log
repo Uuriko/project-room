@@ -1,0 +1,28 @@
+✔ groupFunctionsByUrl keeps each payload's functions separate (no cross-process range merge) (0.4195ms)
+✔ groupFunctionsByUrl skips non-file urls, node_modules, outside-root, and malformed payloads (0.064458ms)
+✔ subtractIntervals removes zero-count cuts from covered spans (0.270417ms)
+✔ coverableLines excludes blanks and comment-only lines (0.064042ms)
+✔ lineCoverage: uncalled function inside an executed file counts as uncovered (0.16525ms)
+✔ lineCoverage: untaken inner block inside a called function counts as uncovered (0.099458ms)
+✔ lineCoverage: no ranges means zero covered; no coverable lines means 100% (0.056209ms)
+✔ listModuleFiles picks up source and skips tests, checks, and node_modules (1.373625ms)
+✔ evaluateModules: a file with no coverage data drags the module down (1.066792ms)
+✔ checkThresholds: pct equal to threshold passes, below fails (0.1 precision) (0.1495ms)
+✔ loadConfig validates shape (1.2445ms)
+✔ readCoveragePayloads streams one payload at a time and tolerates truncated files (0.828458ms)
+✔ loadConfig reads the real repo config (0.321375ms)
+✔ union across payloads: a zero-count span cannot shadow another payload's coverage (0.064958ms)
+✔ coverage is monotonic: adding a payload never reduces covered lines (0.061584ms)
+✔ real V8: split-process coverage equals single-process coverage (63.748708ms)
+✔ coverage provisions the unit job's Native archive runtime before the suite (9.653708ms)
+✔ collector isolates expensive files and retains real coverage from every discovered batch (207.091083ms)
+✔ collector clears inherited test context and finishes later batches after a failure (207.862542ms)
+✔ collector partitions exactly existing Node discovery with no missing or duplicate files (331.954542ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 874.300709

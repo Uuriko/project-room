@@ -73,7 +73,7 @@ export async function handleAuthGroup(ctx) {
     // slot token and invalidates the pre-login one.
     const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, {
       method: { kind: "password", ref: methodRef },
-      rotateSlot: true
+      rotateSlot: true, renewBrowserSession: true
     });
     setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
     return loggedIn;
@@ -182,7 +182,7 @@ export async function handleAuthGroup(ctx) {
       return store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
         method: { kind: "magic", ref: method.id },
         revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-        rotateSlot: true
+        rotateSlot: true, renewBrowserSession: true
       });
     });
     setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
@@ -440,7 +440,7 @@ export async function handleAuthGroup(ctx) {
     const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(passkeyToken, verified.accountId, data.sessionRevision, {
       method: { kind: "passkey", ref: verified.methodRef },
       revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
-      rotateSlot: true
+      rotateSlot: true, renewBrowserSession: true
     });
     setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
     return json(res, 200, accountView(loggedIn));

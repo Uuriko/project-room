@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 // Simulated humans and scripted MCP over a disposable local room. No model use.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -34,6 +35,8 @@ async function setup(t, touch = false, duration = 3600000) {
     page.on("request", req => { if (req.url().endsWith("/commands") && req.method() === "POST") traffic.push({ actor, command: req.postDataJSON() }); });
     await page.goto(origin); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
+    await openSearch(page); await page.locator("#message-search").fill("Contributor guide");
+    await page.locator(`#search-list [data-open-work="${workItemId}"]`).click();
     const card = page.locator('[data-work-record-id="' + workItemId + '"]'), dialog = page.locator("#action-dialog");
     const action = async (name, offerId) => {
       const button = card.locator('[data-action="' + name + '"]' + (offerId ? '[data-offer-id="' + offerId + '"]' : ""));

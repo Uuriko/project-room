@@ -47,6 +47,7 @@ function withReceiptId(message, receiptId) {
   const out = {};
   let placed = false;
   for (const [key, value] of Object.entries(message)) {
+    if (key === "receiptId") continue; // Do not overwrite the derived ID with an old explicit null.
     out[key] = value;
     if (key === "claimId") { out.receiptId = receiptId; placed = true; }
   }

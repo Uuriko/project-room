@@ -1,0 +1,72 @@
+{
+  "capture": {
+    "elapsedSeconds": 30.72,
+    "wranglerExit": 0,
+    "parserExit": 0,
+    "newProbes": 0,
+    "rawTailSaved": false,
+    "childGroupCleaned": true
+  },
+  "envelopes": 12,
+  "outcomes": {
+    "ok": 7,
+    "canceled": 5
+  },
+  "responseStatus": {
+    "200": 3,
+    "503": 4,
+    "None": 5
+  },
+  "exceptionObjects": 0,
+  "readinessStages": [
+    {
+      "event": "room.readiness_probe",
+      "epochMs": 1793579635540,
+      "outcome": "pending",
+      "stage": "worker_wait_started",
+      "buildId": "2026-11-01T23:47:00.477Z",
+      "authoritySourceRevision": null,
+      "sourceRevision": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+      "authorityBuildId": null
+    },
+    {
+      "event": "room.readiness_probe",
+      "epochMs": 1793579635540,
+      "outcome": "pending",
+      "stage": "worker_rpc_started",
+      "buildId": "2026-11-01T23:47:00.477Z",
+      "authoritySourceRevision": null,
+      "sourceRevision": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+      "authorityBuildId": null
+    },
+    {
+      "event": "room.readiness_probe",
+      "probeWaitMs": 2500,
+      "elapsedMs": 2500,
+      "timeoutMs": 2500,
+      "epochMs": 1793579638040,
+      "outcome": "timeout",
+      "probeRole": "leader",
+      "stage": "worker_response",
+      "buildId": "2026-11-01T23:47:00.477Z",
+      "authoritySourceRevision": null,
+      "sourceRevision": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+      "authorityBuildId": null
+    },
+    {
+      "event": "room.readiness_probe",
+      "elapsedMs": 9916,
+      "epochMs": 1793579645456,
+      "outcome": "error",
+      "authorityObservation": "absent",
+      "stage": "worker_rpc_settled",
+      "buildId": "2026-11-01T23:47:00.477Z",
+      "authoritySourceRevision": null,
+      "sourceRevision": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+      "authorityBuildId": null
+    }
+  ],
+  "privateEvidence": "/private/tmp/project-room-incident-exceptions-1101",
+  "causeProven": false,
+  "serviceMutations": 0
+}

@@ -309,6 +309,42 @@ test("cap, per-tx cap, allowlist, and nonce replay are enforced", async t => {
   assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "0");
 });
 
+test("nonce replay with a different tool or price is refused, not silently substituted (T2-L10a-C1)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  issueSpendGrant(f.store.db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "1000", perTxCapCents: "100", nowMs: now,
+  });
+  const authz = (toolName, priceCents, nonce) =>
+    authorizeSpend(f.store.db, { roomId, agentId, toolName, priceCents, nonce, nowMs: now });
+  const first = authz("bounty_post", 10, "mm1");
+  assert.equal(first.toolName, "bounty_post");
+  assert.equal(first.priceCents, 10);
+  // A different tool under the same nonce: the old code returned a handle
+  // for the STORED tool/price, so the caller would execute room_put_file
+  // while the bounty_post charge settled.
+  const diffTool = spendError(() => authz("room_put_file", 5, "mm1"), { status: 409, code: "duplicate_nonce" });
+  assert.equal(diffTool.detail.storedTool, "bounty_post");
+  assert.equal(diffTool.detail.storedPriceCents, 10);
+  // Same tool, different price: likewise refused.
+  spendError(() => authz("bounty_post", 9, "mm1"), { status: 409, code: "duplicate_nonce" });
+  // The refusals changed nothing: the stored authorization is still live
+  // and an exact replay still returns it (crash recovery is intact).
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "990");
+  const exact = authz("bounty_post", 10, "mm1");
+  assert.equal(exact.replayed, "reserved");
+  assert.equal(exact.settle(), true);
+  // Settled leg: a mismatched replay of a settled nonce is refused too,
+  // while the exact replay still returns its receipt.
+  spendError(() => authz("room_put_file", 5, "mm1"), { status: 409, code: "duplicate_nonce" });
+  spendError(() => authz("bounty_post", 11, "mm1"), { status: 409, code: "duplicate_nonce" });
+  const receipt = authz("bounty_post", 10, "mm1");
+  assert.equal(receipt.replayed, "settled");
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: now }).remainingCents, "990",
+    "exactly one 10c charge ever settled for nonce mm1");
+});
+
 test("void releases the reservation; settle/void are idempotent", async t => {
   const f = roomWithPeer(t);
   const now = Date.now();
@@ -681,8 +717,9 @@ test("tools/call: priced tool without a grant is refused and never runs", async 
   assert.match(text, /5 cents/);
   assert.match(text, /room_put_file/);
   // The tool never ran: nothing staged.
-  const listed = await callTool(f.call, f.peer.secret, "room_list_files", { roomId: f.roomId });
-  assert.equal(listed.result.structuredContent.files.length, 0);
+  // Native file listing needs known message IDs; inspect the saved staging
+  // table to prove this refused upload created no bytes or attachment row.
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM room_attachments WHERE room_id=?").get(f.roomId).n, 0);
 });
 
 test("tools/call: priced tool with a grant settles exactly the price", async t => {

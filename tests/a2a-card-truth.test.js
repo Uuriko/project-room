@@ -51,7 +51,7 @@ const HTTP_PROBES = Object.freeze({
   "agent-invites": Object.freeze({ method: "POST", path: "/api/agent-invites/redeem", body: {} }),
   "agent-keys": Object.freeze({ method: "GET", path: "/api/agent-keys" }),
   "agent-rooms": Object.freeze({ method: "GET", path: "/api/agent-rooms" }),
-  "guest-agent-links": Object.freeze({ method: "GET", path: "/api/guest-agent-links" }),
+  "guest-agent-links": Object.freeze({ method: "GET", path: "/api/guest-invites" }),
   directory: Object.freeze({ method: "GET", path: "/api/agent-directory" }),
   "agent-inbox": Object.freeze({ method: "GET", path: "/api/inbox" }),
   collab: Object.freeze({ method: "GET", path: "/api/rooms/commons/collab/notes" }),

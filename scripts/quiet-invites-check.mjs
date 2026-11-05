@@ -54,8 +54,10 @@ for (const touch of [false, true]) {
     });
     await clickChrome(page, "#invite-people-button"); await oldList.promise;
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
+    assert.equal(await page.locator('#share-link-access').isVisible(), true);
+    assert.equal(await page.locator('#share-link-access').inputValue(), 'member');
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);
-    assert.equal(await page.locator('#share-settings-summary').textContent(), '24 hours · 10 guests');
+    assert.equal(await page.locator('#share-settings-summary').textContent(), '24 hours · 10 joins');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-create');
     mkdirSync('test-results', { recursive: true });
     await page.screenshot({ path: `test-results/quiet-invite-${touch ? 'touch' : 'desktop'}-start.png` });
@@ -68,7 +70,7 @@ for (const touch of [false, true]) {
     assert.equal(creates.length, 0);
     await page.locator('#share-link-limit').fill('3');
     await page.locator('#share-link-expiry').selectOption('1');
-    assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 guests');
+    assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 joins');
     await page.locator('#share-settings > summary').click();
     await page.locator('#share-link-create').click();
     await page.waitForFunction(() => document.querySelector('#share-link-status').textContent.includes('could not confirm the result'));
@@ -79,6 +81,7 @@ for (const touch of [false, true]) {
     await page.locator('#share-link-result').waitFor({ state: 'visible' });
     assert.deepEqual(creates[1], creates[0]);
     assert.equal(creates[0].maxJoins, 3);
+    assert.equal(creates[0].access, 'member');
     const invitation = await page.locator('#share-link-url').inputValue();
     const linkId = await page.locator('#share-link-url').getAttribute('data-link-id');
     await page.locator('#share-link-copy').click();
@@ -92,7 +95,7 @@ for (const touch of [false, true]) {
     await page.locator('#share-management > summary').click();
     const row = page.locator(`#share-link-list li[data-link-id="${linkId}"]`);
     await row.waitFor();
-    assert.match(await row.textContent(), /Guest · 0\/3 joined/, "invitation shows its access role and exact occupancy");
+    assert.match(await row.textContent(), /Member · 0\/3 joined/, "invitation shows its access role and exact occupancy");
     await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('Synthetic unavailable clipboard'); }; });
     await page.locator('#share-link-copy').click();
     assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-url');
@@ -105,7 +108,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator('#share-link-url').inputValue(), '');
     await page.locator('#share-link-close').click();
     await clickChrome(page, "#invite-people-button");
-    assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 guests', 'retained choices have an accurate summary');
+    assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 joins', 'retained choices have an accurate summary');
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);
     await page.locator('#share-link-close').click();

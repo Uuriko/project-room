@@ -1,0 +1,14 @@
+[
+  {
+    "mode": "reference",
+    "exit": -6,
+    "heapOOM": true,
+    "stdout": ""
+  },
+  {
+    "mode": "stream",
+    "exit": 0,
+    "heapOOM": false,
+    "stdout": "{\"mode\":\"stream\",\"pct\":100,\"elapsedMs\":180.155666,\"maxRSS\":99440}"
+  }
+]

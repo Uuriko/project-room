@@ -1,0 +1,32 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":48,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8232},"plugin":{"ms":21,"rowsRead":40866},"fence":{"ms":12,"rowsRead":45305},"verifies":{"ms":2,"rowsRead":20795},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":48,"clockSemantics":"io-bound","cpuMeasured":false}
+✖ actual Worker normalized reply list and selected source costs remain bounded across 1k and5k obligations (484.646ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 622.472167
+
+✖ failing tests:
+
+test at cloudflare/current-replies-worker.check.mjs:2:1
+✖ actual Worker normalized reply list and selected source costs remain bounded across 1k and5k obligations (484.646ms)
+  AssertionError [ERR_ASSERTION]: {"error":{"message":"Reply request capacity reached","stack":"Error: Reply request capacity reached\n    at requireValid (script-0:1124:21)\n    at prepareReplyPost (script-0:1165:5)\n    at postMessage2 (script-0:1276:25)\n    at applyEventWithJournal (script-0:2799:3)\n    at replayEvents (script-0:2688:42)\n    at script-0:63619:21\n    at run (script-0:67328:22)\n    at script-0:67359:24\n    at Object.transaction (script-0:67344:23)\n    at RoomStore.transaction (script-0:63367:37)"}}
+  
+  500 !== 200
+  
+      at call (file:///Users/johnpotter/src/pr-current-reply-reader-1101/cloudflare/current-replies-worker.check.mjs:5:124)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-reply-reader-1101/cloudflare/current-replies-worker.check.mjs:7:63)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,74 @@
+{
+  "sourceBase": "a16a99440",
+  "controls": {
+    "node": {
+      "newTests": 7,
+      "focusedNeighborhoodBeforeFinalEncryption": 23,
+      "log": "/tmp/current-work-list-encrypted-node.log"
+    },
+    "causalRed": {
+      "baseline": "706629b831bafd05f3f394c0c00772c9383073f4",
+      "selectedHostedTest": "fails through old full snapshot path",
+      "log": "/tmp/current-work-list-causal-red.log"
+    },
+    "actualWorker": {
+      "costs": [
+        {
+          "count": 32,
+          "warm": {
+            "statements": 217,
+            "rowsRead": 703,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "pages": 8
+        },
+        {
+          "count": 128,
+          "warm": {
+            "statements": 221,
+            "rowsRead": 707,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 0,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "pages": 32
+        }
+      ],
+      "cold": {
+        "statements": 221,
+        "rowsRead": 2293,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "coldNative": {
+        "statements": 0,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "sourceWindow": 4,
+      "filteredEmptyIsComplete": false,
+      "syntheticRooms": true,
+      "historyCertified": false
+    }
+  },
+  "limits": [
+    "Synthetic normalized rooms prove this read path; earlier migration qualification is separate.",
+    "Source windows examine at most four work and four requests before filtering; empty pages may have continuation.",
+    "No complete filtered match count is claimed.",
+    "Global query, curiosity and help eligibility are explicitly unavailable on normalized storage.",
+    "Default nonpaged SDK orientation, inbox, formal selected-request reads and ambient sources are separate outstanding work.",
+    "Cold constructor and credential storage work are separate from measured read-page SQL.",
+    "No history certification or live deployment."
+  ],
+  "cursor": "CORRECTION: this receipt did not prove cursor secrecy from the credential holder. Its credential-derived AES key allowed that holder to decrypt excluded private source IDs. Payload title/body redaction controls passed; cursor secrecy claim was false. Superseded by server-owned per-store random-key cure and explicit adversarial reproduction in current-work-cursor-privacy-20261101.json."
+}

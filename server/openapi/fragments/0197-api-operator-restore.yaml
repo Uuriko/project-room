@@ -17,13 +17,19 @@
         Other methods are 405.
       security:
         - bearerAuth: []
+      parameters:
+        - in: query
+          name: sourceSchemaVersion
+          required: false
+          schema: { type: integer, enum: [42, 43] }
+          description: Explicit legacy source attestation for an old unmarked export. Conflicting/current export markers are refused; historical verification is unchanged.
       requestBody:
         required: true
         content:
           application/x-ndjson:
             schema: { type: string }
       responses:
-        '200': { description: "{ ok, verified, events, ... } restore summary" }
+        '200': { description: "{ ok, verified, events, writeProofs, ... } restore summary; writeProofs reports prospective metadata adoption and unchanged historical verification" }
         '400': { description: Body could not be read }
         '401': { description: Wrong operator token }
         '404': { description: Restore is not configured }

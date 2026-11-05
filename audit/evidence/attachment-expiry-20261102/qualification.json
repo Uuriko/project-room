@@ -1,0 +1,12 @@
+{
+  "base": "a92d0ffa0",
+  "before": {
+    "pass": 0,
+    "fail": 1
+  },
+  "after": {
+    "pass": 18,
+    "fail": 0
+  },
+  "scope": "Test now supplies expired staging bytes, verifies committed and new upload quantities survive, then verifies empty sweep performs no update. Existing runtime fast path remains unchanged."
+}

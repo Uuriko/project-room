@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openWorkFromSearch } from "./room-chrome.mjs";
 // Simulated human journeys: disposable rooms, no real users or outside requests.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -75,6 +75,7 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   const card = page.locator(`[data-work-record-id="${workId}"]`), input = page.locator("#portable-result"), submit = page.locator("#portable-submit"), dialog = page.locator("#portable-dialog");
   const open = async () => {
+    if (!await card.isVisible()) await openWorkFromSearch(page, workId, snapshot().state.workItems[workId].title);
     if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
     await card.getByRole("button", { name: "Use my AI", exact: true }).click();
     await dialog.waitFor({ state: "visible" });
@@ -145,22 +146,27 @@ test("confirmed draft applies locally with failed snapshot, remains saved, and s
   await page.route("**/commands", async route => { command = route.request().postDataJSON(); failSnapshot = true; const response = await route.fetch(); return route.fulfill({ response }); });
   await f.open(); await f.input.fill(f.answer()); await f.submit.click();
   await waitForState(page, "the draft dialog to close after submit", async () => await f.dialog.isHidden().catch(() => false));
+  // Delta sync keeps the exact posted record visible even while reads fail.
   // CONTRACT CHANGE (delta sync, stated for sign-off in PR #3854): the
   // committed receipt now applies locally at once, so the draft is visible
   // immediately even though every snapshot read is failing — the notice is
-  // the visible-draft one, not "Refresh to view it", and the work card's
-  // draft link is present without any refresh. Before delta sync the same
+  // the visible-draft one, not "Refresh to view it". Opening its work record
+  // exposes the draft link without requiring a successful snapshot refresh. Before delta sync the same
   // choreography pinned the opposite: not visible, no link, refresh owed.
   const postedNotice = page.getByText("Draft posted. Work status is unchanged.", { exact: true });
   await waitForState(page, "the posted-draft notice to appear", async () => (await postedNotice.count().catch(() => 0)) > 0);
   assert.equal(await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).count(), 0);
   assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1, "the draft is saved server-side");
+  await page.locator(`[data-message-record-id="${command.data.messageId}"]`).waitFor({ state: "visible" });
+  await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId);
+  await openWorkFromSearch(page, "test-handoff", f.snapshot().state.workItems["test-handoff"].title);
   const draftLink = f.card.getByRole("link", { name: "View latest draft", exact: true });
   assert.equal(await draftLink.count(), 1, "the draft is findable immediately, with snapshot reads still failing");
   await draftLink.click({ timeout: 30000 });
   await waitForState(page, "focus to land on the posted draft record", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
   await page.locator("#session-menu-button").click();
   failSnapshot = false; await clickChrome(page, "#refresh-button");
+  await openWorkFromSearch(page, "test-handoff", f.snapshot().state.workItems["test-handoff"].title);
   // Findability after a refresh is a full snapshot round trip + re-render: the
   // leg is ~1s unloaded but blew the 8s default in three straight hosted
   // attempts (pure locator timeouts, no assertion failures). Poll the state.
@@ -198,7 +204,7 @@ test("posted draft returns to its exact conversation record and work link preser
   // on the welcome message before counting the work affordance.
   await welcome.locator(".message-more > summary").click();
   assert.equal(await welcome.getByRole("button", { name: "Make this work", exact: true }).count(), 1);
-  await f.card.locator(".work-details > summary").click();
+  await openWorkFromSearch(page, "test-handoff", f.snapshot().state.workItems["test-handoff"].title);
   const link = f.card.getByRole("link", { name: "View latest draft", exact: true });
   assert.equal(await link.isVisible(), true, "draft is reachable with Details closed");
   assert.equal(await link.getAttribute("data-open-message"), command.data.messageId);
@@ -210,6 +216,7 @@ test("posted draft returns to its exact conversation record and work link preser
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator("#message-input").inputValue(), "Private unrelated thread draft");
   await page.locator('#thread-back').click();
+  await openWorkFromSearch(page, 'test-handoff', f.snapshot().state.workItems['test-handoff'].title);
   await choices.locator('summary').click();
   await choices.locator('[data-open-message="later-work-draft"]').click();
   await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "later-work-draft");

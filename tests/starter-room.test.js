@@ -1,10 +1,12 @@
+import {initialRoom} from '../server/bootstrap.mjs';
+import {readCurrentRoomForAudit} from '../server/current-room-repository.mjs';
 // ACT-1a: starter room and Room Guide, at the HTTP and store boundary.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { seedStarter } from "../server/starter-room.mjs";
+import { seedStarter, starterTitleForIntent } from "../server/starter-room.mjs";
 import { runGuideStep } from "../server/room-guide.mjs";
 import { postReceiptCard } from "../server/receipt-cards.mjs";
 import { buildGrowthEvent } from "../src/growth-emit.js";
@@ -66,46 +68,32 @@ async function createRoom(origin, store, accountId, body) {
   return json;
 }
 
+async function createLegacyRoom(_origin,store,accountId,body){
+  signIn(store,accountId);
+  const events=initialRoom(body.roomId);Object.assign(events[0].data,{title:body.intent?starterTitleForIntent(body.intent):body.title,purpose:body.purpose,kind:body.kind});
+  events[1].data.displayName=body.displayName;store.initialize(events);store.bindHumanAccount(body.roomId,'owner',accountId);
+  if(body.intent||body.start)seedStarter(store,body.roomId,{intent:body.intent,ownerMemberId:'owner',start:Boolean(body.start)});
+  return {room:{id:body.roomId}};
+}
+
 const bearer = (origin, path, token, body) => fetch(`${origin}${path}`, {
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
   body: JSON.stringify(body)
 });
 
-test("intent seeds one guide and one starter set, and a retry does not add another", async t => {
-  const { origin, store } = await serve(t);
-  const session = signIn(store, "ada");
-  const body = { roomId: "bug-room", title: "Scratch", purpose: "Fix the crash.", kind: "personal", displayName: "Ada", intent: "bug" };
-  const post = () => fetch(`${origin}/api/account-rooms`, {
-    method: "POST", headers: accountHeaders(origin, session), body: JSON.stringify(body)
-  });
-  const createdResponse = await post();
-  const created = await createdResponse.json();
-  assert.equal(createdResponse.status, 201, JSON.stringify(created));
-  assert.equal(created.room.title, "Fix a bug");
-  const retryResponse = await post();
-  const retry = await retryResponse.json();
-  assert.equal(retryResponse.status, 200, JSON.stringify(retry));
-  assert.equal(retry.duplicate, true);
-  const before = store.room("bug-room").state;
-  seedStarter(store, "bug-room", { intent: "bug", ownerMemberId: "owner" });
-  const state = store.room("bug-room").state;
-  const guides = Object.values(state.members).filter(member => member.id === "room-guide");
-  assert.equal(guides.length, 1);
-  assert.equal(guides[0].displayName, "Room Guide");
-  assert.equal(guides[0].kind, "agent");
-  assert.equal(guides[0].agentType, "room-guide");
-  assert.equal(guides[0].system, true);
-  assert.deepEqual(guides[0].permissions, ["accept_work", "complete_work"]);
-  assert.equal(guides[0].identityId, undefined);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=? AND member_id='room-guide'").get("bug-room").n, 0);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM identity_links WHERE room_id=? AND member_id='room-guide'").get("bug-room").n, 0);
-  assert.equal(store.workClaims.list("bug-room").filter(item => item.id === "starter-receipt").length, 1);
-  assert.equal(store.workClaims.list("bug-room").filter(item => (item.tags ?? []).includes("starter-choice")).length, 3);
-  assert.equal(before.messages.filter(message => message.authorId === "room-guide").length, 1);
-  assert.equal(state.messages.filter(message => message.authorId === "room-guide").length, 1);
-  assert.equal(state.room.starterSeeded.templateSlug, "agent-pair");
-  assert.equal(state.room.starterSeeded.intentKind, "bug");
+test("intent seeds one native task and retry creates no legacy guide or board", async t => {
+  const { origin, store } = await serve(t),session=signIn(store,'ada');
+  const body={roomId:'bug-room',title:'Scratch',purpose:'Fix the crash.',kind:'personal',displayName:'Ada',intent:'bug'};
+  const post=()=>fetch(`${origin}/api/account-rooms`,{method:'POST',headers:accountHeaders(origin,session),body:JSON.stringify(body)});
+  const first=await post();assert.equal(first.status,201);assert.equal((await first.json()).room.title,'Fix a bug');
+  const retry=await post();assert.equal(retry.status,200);assert.equal((await retry.json()).duplicate,true);
+  const state=store.readTransaction(()=>readCurrentRoomForAudit(store,'bug-room')).state;
+  assert.equal(state.members['room-guide'],undefined);assert.deepEqual(state.messages,[]);
+  assert.equal(state.workItems['native-starter'].title,'Fix a bug');assert.equal(state.workItems['native-starter'].state,'proposed');
+  assert.deepEqual(store.workClaims.list('bug-room'),[]);
+  seedStarter(store,'bug-room',{intent:'bug',ownerMemberId:'owner',token:session.token,binding:session.binding});
+  assert.equal(store.db.prepare("SELECT count(*) n FROM current_room_records WHERE room_id='bug-room' AND domain='workItems'").get().n,1);
 });
 
 test("a room without intent or start has no guide", async t => {
@@ -113,7 +101,7 @@ test("a room without intent or start has no guide", async t => {
   await createRoom(origin, store, "no-intent", {
     roomId: "plain-room", title: "Plain", purpose: "No starter.", kind: "personal", displayName: "Bea"
   });
-  const state = store.room("plain-room").state;
+  const state = store.readTransaction(()=>readCurrentRoomForAudit(store,"plain-room")).state;
   assert.equal(state.room.title, "Plain");
   assert.equal(state.room.starterSeeded, undefined);
   assert.equal(state.members["room-guide"], undefined);
@@ -122,7 +110,7 @@ test("a room without intent or start has no guide", async t => {
 
 test("guide claims and closes only starter-tagged claims", async t => {
   const { origin, store } = await serve(t);
-  await createRoom(origin, store, "guide-guard", {
+  await createLegacyRoom(origin, store, "guide-guard", {
     roomId: "guard-room", title: "Guard", purpose: "Limit the guide.", kind: "personal", displayName: "Cara", intent: "bug"
   });
   const ownerKey = store.issueAccessKey("guard-room", "owner");
@@ -145,7 +133,7 @@ test("guide claims and closes only starter-tagged claims", async t => {
 
 test("a choice closes the starter with a result card, then the first agent is assigned and woken", async t => {
   const { origin, store } = await serve(t);
-  await createRoom(origin, store, "script", {
+  await createLegacyRoom(origin, store, "script", {
     roomId: "script-room", title: "Scratch", purpose: "See a close.", kind: "personal", displayName: "Dan", intent: "bug"
   });
   const state = store.room("script-room").state;
@@ -191,7 +179,7 @@ test("a choice closes the starter with a result card, then the first agent is as
 
 test("guide does not announce a chosen claim that someone else already took", async t => {
   const { origin, store } = await serve(t);
-  await createRoom(origin, store, "taken", {
+  await createLegacyRoom(origin, store, "taken", {
     roomId: "taken-room", title: "Scratch", purpose: "See a close.", kind: "personal", displayName: "Gus", intent: "bug"
   });
   const ownerKey = store.issueAccessKey("taken-room", "owner");
@@ -216,7 +204,7 @@ test("guide does not announce a chosen claim that someone else already took", as
 
 test("done claims of every delivery mode get one in-room receipt card", async t => {
   const { origin, store } = await serve(t);
-  await createRoom(origin, store, "receipts", {
+  await createLegacyRoom(origin, store, "receipts", {
     roomId: "receipt-room", title: "Receipts", purpose: "Close three ways.", kind: "personal", displayName: "Eve"
   });
   const ownerKey = store.issueAccessKey("receipt-room", "owner");
@@ -244,7 +232,7 @@ test("done claims of every delivery mode get one in-room receipt card", async t 
 
 test("a caught receipt index failure preserves the done claim without a partial receipt", async t => {
   const { origin, store } = await serve(t);
-  await createRoom(origin, store, "receipt-fault", {
+  await createLegacyRoom(origin, store, "receipt-fault", {
     roomId: "fault-room", title: "Fault", purpose: "Atomic receipt", kind: "personal", displayName: "Fay"
   });
   const ownerKey = store.issueAccessKey("fault-room", "owner");

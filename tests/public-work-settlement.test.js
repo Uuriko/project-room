@@ -57,6 +57,23 @@ const conserved = store => {
 };
 const code = expected => error => error.code === expected;
 
+test('volunteer recommendations never describe funded credit work as unpaid', t => {
+  const f = fixture(t); f.enable();
+  assert.equal(f.store.publicWorkClaims.read('paid-task').reward.kind, 'work_trade');
+  const result = f.store.publicWorkClaims.match(null, { reward: 'volunteer' });
+  assert.deepEqual(result.recommendations, []);
+  assert.equal(result.claim, null);
+  const auto = f.store.publicWorkClaims.match(f.producer.secret, { reward: 'volunteer', autoClaim: true, requestId: 'volunteer-only' });
+  assert.equal(auto.claim, null);
+  assert.equal(f.store.publicWorkClaims.read('paid-task').claim.state, 'unclaimed');
+  f.store.projectOffers.create('commons', 'owner', { requestId: 'create-unpaid', offerId: 'volunteer-task', reviewerMemberIds: ['owner'], terms: {
+    kind: 'task', title: 'Volunteer task', summary: 'Unpaid help', acceptanceCriteria: ['Correct result'],
+    repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
+  f.store.projectOffers.transition('commons', 'owner', 'volunteer-task', 'publish', { requestId: 'publish-unpaid', expectedRevision: 1 });
+  f.store.publicWorkClaims.enable('commons', 'owner', 'volunteer-task', { requestId: 'enable-unpaid', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['other.txt'] });
+  assert.deepEqual(f.store.publicWorkClaims.match(null, { reward: 'volunteer' }).recommendations.map(item => item.task.taskId), ['volunteer-task']);
+});
+
 test('reward classifier: only a positive in-cap work_trade credit price is a paid task', () => {
   // Unpaid shapes read as null (no settlement); anything that is not a
   // well-formed credit price reads as undefined (refused at enable time).

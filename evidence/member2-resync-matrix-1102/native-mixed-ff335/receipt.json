@@ -1,0 +1,126 @@
+{
+  "schema": "member2-native-mixed-maintenance-v1",
+  "pass": true,
+  "pin": "ff3350cb8d2be1d1c7278677211eeea3282b7c75",
+  "node": "v24.22.1",
+  "compatibilityDate": "2026-07-30",
+  "bundleSha256": "48285ec4bb95dc949dcc2892afdea5b8f30ba26336b8ebbd2500c5cff99c97d4",
+  "observations": [
+    {
+      "facts": {
+        "count": 1,
+        "result": {
+          "done": true,
+          "events": 3,
+          "rooms": 1,
+          "budgetExceeded": false,
+          "roomId": "z-legacy",
+          "appliedSeq": 3,
+          "replaySeq": 3,
+          "blocked": [],
+          "quarantined": [],
+          "failed": []
+        },
+        "parity": {
+          "ok": true,
+          "checked": 1,
+          "roomId": "z-legacy",
+          "projectionCount": 1,
+          "tableCount": 1,
+          "projectionLastSeq": 3,
+          "tableLastSeq": 3
+        },
+        "iterations": 1,
+        "rowsRead": 1088,
+        "nativeHeadReads": 0,
+        "nativeRecordReads": 0,
+        "selectedCandidates": 1,
+        "explicitRefusal": {
+          "status": 409,
+          "message": "Normalized messages require their independent current-record integrity audit, not legacy replay certification"
+        },
+        "oldWriterRefusal": "unsupported current room writer: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+        "unchanged": true,
+        "nativeCursors": 0
+      },
+      "cold": {
+        "count": 1,
+        "unchanged": true,
+        "nativeHeads": 1,
+        "nativeCursors": 0
+      }
+    },
+    {
+      "facts": {
+        "count": 40,
+        "result": {
+          "done": true,
+          "events": 3,
+          "rooms": 1,
+          "budgetExceeded": false,
+          "roomId": "z-legacy",
+          "appliedSeq": 3,
+          "replaySeq": 3,
+          "blocked": [],
+          "quarantined": [],
+          "failed": []
+        },
+        "parity": {
+          "ok": true,
+          "checked": 1,
+          "roomId": "z-legacy",
+          "projectionCount": 1,
+          "tableCount": 1,
+          "projectionLastSeq": 3,
+          "tableLastSeq": 3
+        },
+        "iterations": 1,
+        "rowsRead": 1322,
+        "nativeHeadReads": 0,
+        "nativeRecordReads": 0,
+        "selectedCandidates": 1,
+        "explicitRefusal": {
+          "status": 409,
+          "message": "Normalized messages require their independent current-record integrity audit, not legacy replay certification"
+        },
+        "oldWriterRefusal": "unsupported current room writer: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+        "unchanged": true,
+        "nativeCursors": 0
+      },
+      "cold": {
+        "count": 40,
+        "unchanged": true,
+        "nativeHeads": 40,
+        "nativeCursors": 0
+      }
+    }
+  ],
+  "limits": "Private synthetic local data. SQL anti-join may scan excluded room IDs; zero JS hydration does not prove constant physical rows or time. No production/release qualification.",
+  "source_clean_after": true,
+  "miniflare": "4.20260730.0",
+  "esbuild": "0.28.2",
+  "workerd": "2026-07-30",
+  "authority_snapshot_tables": [
+    "messages",
+    "current_room_head",
+    "current_room_records",
+    "current_room_record_proofs",
+    "events",
+    "commands",
+    "messages_backfill_cursor"
+  ],
+  "artifacts": {
+    "stderr.log": {
+      "bytes": 1976,
+      "sha256": "9a6f8e759a41135071710f3bf15822e16491d5e607ccedb82a6633d571bf05b6"
+    },
+    "full.log": {
+      "bytes": 5261,
+      "sha256": "052a98f4b99be0ef09033b5044842f3e7fce3ee73ac3e1358c11cdecfa5e8c04"
+    },
+    "native_mixed_maintenance.mjs": {
+      "bytes": 6720,
+      "sha256": "9dd91ab374d84e9bb3752cb03cfe4fcf8b6aed870a0b2827523fec6ebe0448cf"
+    }
+  }
+}

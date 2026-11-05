@@ -1,0 +1,25 @@
+{
+  "runtime_sha": "89e1a58827483f7019085a39205eba62abcd15ba",
+  "command": [
+    "node",
+    "--test",
+    "normalization-compact-scale.check.mjs"
+  ],
+  "cwd": "cloudflare",
+  "exit_code": 0,
+  "outer_timeout": false,
+  "wall_seconds": 5.050324292038567,
+  "reaped_child_cpu_seconds": 6.099914,
+  "existing_test_timeout_ms": 240000,
+  "outer_timeout_seconds": 270,
+  "node": "v24.22.1",
+  "miniflare": "4.20260730.0",
+  "esbuild": "0.28.2",
+  "workerd": "workerd 2026-07-30",
+  "workerd_sha256": "b887d31d8839e80798bf3f92c416343c5db7dd9b22d7fe21bcf877f5d411936f",
+  "workerd_selection": "existing local July binary matching default dependency; no October binary",
+  "source_clean_after": true,
+  "log_sha256": "d1b47b7580adc852790c74f73102a74fa303e859e7d0b8a4a82a6395d8d692be",
+  "log_bytes": 36158,
+  "scope": "Local synthetic default-July Native scale qualification; no 7MB, production, bytes-written or whole-release claim"
+}

@@ -97,8 +97,21 @@ test("a reader scroll before the fill lands cancels the pending reveal", { timeo
   assert.equal(await rowPresent(page, OLD_ID), false, "target still behind the gated fill");
   const list = page.locator("#message-list");
   const box = await list.boundingBox();
+  // Playwright sends wheel input without waiting for the renderer to process
+  // it. Keep the response gated until the real reader event reaches the app;
+  // otherwise this test races “scroll before fill” against “fill before scroll”.
+  await page.evaluate(() => {
+    window.__readerWheelObserved = false;
+    addEventListener("wheel", event => {
+      if (event.isTrusted && document.querySelector("#message-list").contains(event.target)) {
+        window.__readerWheelObserved = true;
+      }
+    }, { capture: true, once: true });
+  });
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, 800);
+  await page.waitForFunction(() => window.__readerWheelObserved === true);
+  assert.equal(await rowPresent(page, OLD_ID), false, "reader input was delivered before the gated response");
   ctx.releaseFill();
   await page.waitForFunction(id => Boolean(document.querySelector(`[data-message-record-id="${id}"]`)), OLD_ID, { timeout: 20000 });
   await page.waitForTimeout(1000);

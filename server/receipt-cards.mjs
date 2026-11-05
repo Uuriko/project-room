@@ -64,6 +64,13 @@ const evidenceOf = item => {
 const UNRECORDED = Object.freeze({ spentCents: null, capCents: null, model: null });
 export const receiptCostOf = workItem => {
   const attempts = workItem && typeof workItem === "object" ? [...attemptReceipts(workItem)].reverse() : [];
+  // A completion receipt is never attributed to a later run. Legacy receipts
+  // without an explicit binding remain unknown. Claim-only run summaries keep
+  // their existing current-attempt display, outside an accepted result record.
+  if (workItem?.receipt) {
+    const bound = workItem.receipt.attemptSnapshot;
+    return bound ? { spentCents: bound.usageCents ?? null, capCents: bound.limits?.maxSpendCents ?? null, model: bound.model ?? null } : { ...UNRECORDED };
+  }
   const last = attempts.find(a => a.outcome === "done") ?? attempts.find(a => a.outcome !== null) ?? null;
   if (!last) return { ...UNRECORDED };
   return { spentCents: last.usageCents ?? null, capCents: last.estimateCents ?? null, model: last.model ?? null };

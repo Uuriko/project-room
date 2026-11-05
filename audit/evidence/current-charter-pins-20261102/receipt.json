@@ -1,0 +1,94 @@
+{
+  "base": "00888c52110d36250d3e07629036701b72926d09",
+  "runtime": [
+    "3e5f8cb6b",
+    "9172ada16"
+  ],
+  "node": {
+    "tests": 47,
+    "pass": 47,
+    "skip": 0
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "historySizes": [
+      1000,
+      5000
+    ],
+    "pinWrite": {
+      "sql": 289,
+      "physicalReads": 1566,
+      "writes": 41
+    },
+    "charterRead": {
+      "sql": 114,
+      "physicalReads": 947,
+      "writes": 0
+    },
+    "pinRead": {
+      "sql": 144,
+      "physicalReads": 980,
+      "writes": 0
+    },
+    "unknown": 0
+  },
+  "limitations": [
+    "Native elapsed is local wall time, not CPU",
+    "Cold constructor excluded from warm counters",
+    "Pin write performs one legitimate 131-byte closed-carrier integrity read",
+    "Existing OpenAPI inventory failure reproduces on unmodified base HTTP",
+    "Older normalized charter revisions deliberately unavailable; retained events unchanged",
+    "Snapshot pins are a partial visible-conversation selection with GET pins pointer"
+  ],
+  "logs": {
+    "current-charter-read-before": {
+      "sha256": "79dcb98958a238de21a9015bfccb6a20f5745a0f09e29592226421e4a65f63f8",
+      "bytes": 2570
+    },
+    "current-charter-read-after": {
+      "sha256": "867d9ee3ddf3f921520d68d487f0fe427f01658969dbb96e6189ffb50c7708ac",
+      "bytes": 12061
+    },
+    "current-pins-http-before": {
+      "sha256": "ee2515e102a6baa44a4428ee94de01eabb482acec6df08872a863f6d5d4bd243",
+      "bytes": 8218
+    },
+    "current-charter-pins-qualified-node": {
+      "sha256": "8b4fd8dba6bacab46cc47155ea6fb28a4dc47693b0fb0d927191595f55f3d668",
+      "bytes": 36782
+    },
+    "current-pins-snapshot-privacy-before": {
+      "sha256": "e3883f1d22763dc5b52ca5877faf8402ba8dabeeb62028d0f703e23f84949779",
+      "bytes": 2180
+    },
+    "current-charter-pins-native-final": {
+      "sha256": "ab68f1081e3e9a36b54f8924ddde1c38d602054080c63c974c8508d08d971ca9",
+      "bytes": 9290
+    },
+    "current-charter-pins-native-instrumentation-red": {
+      "sha256": "092c821cb574e3d09a28f282782a8626dea3e1d0ac646e56b0195ec34c8c1f0a",
+      "bytes": 5399
+    },
+    "current-charter-pins-openapi-original-http": {
+      "sha256": "43d1f93678d7908b2cc9d0842201fc5b945d31b44c94e974837ef12920ecc63a",
+      "bytes": 5714
+    },
+    "current-charter-pins-final-node-2": {
+      "sha256": "3d5817dfb0d226068baa2230358f60be967a5156f5e4d9eb4b71eed4b073eab7",
+      "bytes": 42422
+    },
+    "current-charter-pins-lint-final": {
+      "sha256": "8622d9c2d83a388c01d7063fabf8538295298c587d097f5d60ea91cdf6b96310",
+      "bytes": 7747
+    },
+    "current-charter-pins-source-closure": {
+      "sha256": "2d6d5e8d2d15d7979a73bd654c6ac211f272edf9d31e5771ae164088a4c39ca5",
+      "bytes": 14
+    },
+    "current-charter-pins-secret": {
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "bytes": 24
+    }
+  }
+}

@@ -11,7 +11,7 @@ export function admitHistoricalMember(store, roomId, actorId, data) {
   const stored = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   store.transaction(() => {
     store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, stored), roomId);
   });
   return incoming;
 }

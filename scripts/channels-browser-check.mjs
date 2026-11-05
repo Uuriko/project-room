@@ -35,10 +35,11 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  // A single-thread human room keeps channel controls under Advanced.
-  // Exercise that actual choice, then the existing channel-management journey.
+  // Returning from a DM needs a visible public conversation destination.
+  // Channel management remains under Advanced in a single-channel room.
   await page.waitForFunction(() => document.body.classList.contains("human-experience"));
-  assert.equal(await page.locator('#channel-list [data-channel]').first().isVisible(), false);
+  assert.equal(await page.locator('#channel-list [data-channel]').first().isVisible(), viewport.width >= 940);
+  assert.equal(await page.locator('#create-channel-button').isVisible(), false);
   await openSettings(page);
   await page.locator('#advanced-room-tools > summary').click();
   await page.locator('#human-advanced').check();

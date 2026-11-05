@@ -56,7 +56,7 @@ result.writeSuccesses = times.length;
 gc();
 const state = store.room(room).state;
 result.storedProjectionMs = round(safe(() => typeof store.storedProjection === "function"
-  ? median([0, 1, 2, 3, 4].map(() => ms(() => store.storedProjection(room, state)))) : null));
+  ? median([0, 1, 2, 3, 4].map(() => ms(() => store.transaction(() => store.storedProjection(room, state))))) : null));
 result.coldRoomMs = round(safe(() => typeof store._dropProjectionCache === "function"
   ? median([0, 1, 2, 3, 4].map(() => { store._dropProjectionCache(); return ms(() => store.room(room)); })) : null));
 result.projectionKB = round(safe(() => store.db.prepare("SELECT length(projection) AS b FROM rooms WHERE id=?").get(room).b / 1024), 0);

@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // Regression contract: following returned cursors must enumerate every eligible
 // item across all three caps and timestamp ties, using real persisted state.
 // Existing MCP coverage has one item per kind; it cannot detect these losses.
@@ -13,14 +14,13 @@ import { linkWithProof } from "./helpers/link-with-proof.mjs";
 test('needs-me continuation preserves overflow DMs, mentions, rooms and tied land changes', t => {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
   const expected = new Set();
   for (let r = 0; r < 41; r++) {
     const roomId = `pagination-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
-    rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Pagination', kind: 'personal' });
+    seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Pagination', kind: 'personal' });
     linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
     linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
     setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
@@ -191,8 +191,9 @@ test('needs-me numeric floor does not hide a room joined after the cursor', t =>
   linkWithProof(store, bob.secret, 'late', ada, { displayName: 'Ada', permissions: [] });
   store.command(bob.secret, 'late', { id: 'late-ask', type: 'message.posted', data: { messageId: 'late-ask', body: '@Ada welcome, first ask' } });
   assert.ok(store.roomAuthority('late').sequence < seq, 'the new room head is below the old numeric since');
-  page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
-  assert.deepEqual(page.items.map(item => `${item.roomId}/${item.id}`), ['late/late-ask'], 'the first mention in a room joined later surfaces');
+  const delivered=[];for(let n=0;n<20;n++){page=collectNeedsMe(store,ada.secret,{since:JSON.parse(JSON.stringify(page.cursor))});delivered.push(...page.items);if(!page.hasMore)break;}
+  assert.equal(page.hasMore,false);
+  assert.deepEqual(delivered.map(item => `${item.roomId}/${item.id}`), ['late/late-ask'], 'the first mention in a room joined later surfaces');
   page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
   assert.deepEqual(page.items, [], 'and is not replayed');
 });

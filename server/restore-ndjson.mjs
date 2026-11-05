@@ -1,3 +1,15 @@
+import {validateRestoreResultMetadata,restoreResultFields} from './restore-result-envelope.mjs';
+import {withCompletedRecoveryReminders} from './recovery-reminder-consumption.mjs';
+import {advanceRecoveryReport} from './recovery-report-stage.mjs';
+import {withRecoveryReportFingerprint} from './recovery-report-scope.mjs';
+import {withCompletedRecoveryShareLinks} from './recovery-share-links.mjs';
+import {initialRestoreCleanup,restoreCleanupNext,continueRestoreCleanup} from './restore-cleanup.mjs';
+import {recoveryInvitationSummary} from './recovery-invitation-continuation.mjs';
+import {initialRecoveryCensus,validateRecoveryCensus,advanceRecoveryCensus} from './recovery-census-continuation.mjs';
+import { CURRENT_WRITER_FORMAT } from './current-room-format.mjs';
+import { applicationTables, lazyAdditiveTables, RESTORE_OPERATIONAL_TABLES, installRestoreFreeze, verifyRestoreFreeze } from './writer-fence.mjs';
+import { supportsSealedRestoreSource, RESTORE_AUDIT_VERSION, RESTORE_REPORT_VERSION, withRestoreTransaction, beginRestore, completeRestore, restorePending, verifyRestoreControl, restoreProgress, checkpointRestore } from './restore-admission.mjs';
+import { verifyCurrentRoomSchema, invalidateCurrentRoomSchema, restoredCurrentFormatPresent } from './current-room-repository.mjs';
 // Whole-store NDJSON restore into an already-open store.
 //
 // Sibling of server/room-export.mjs (which owns the export format). The export
@@ -20,12 +32,12 @@
 // - A restore resurrects authority exactly as it was at backup time. Anything
 //   revoked between the backup and the loss must be re-applied by the operator
 //   (docs/BACKUP-DR.md); there is no "current" store left to reconcile against.
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { verifyRestoredTableCounts, restoreSourceSchemaVersion, restoreLegacyWriteProofs, withRestoreTableRows, ensureNativeAgentRestoreSchema, cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
-import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
+import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey, writeKvBackup } from "../cloudflare/room-backup.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 // Parent-first table order, mirroring the exporter's FIRST list in
@@ -73,29 +85,228 @@ function tableColumns(db, table) {
   return db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all().map(column => column.name);
 }
 
-export function parseNdjsonExport(ndjson) {
-  if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
+// Resume compares only indexed keys from the TARGET's code-owned schema.
+// No source DDL, row replacement, immutable deletion or table scan per row.
+function resumeCell(value) {
+  if(value===null)return ['null'];
+  if(value instanceof ArrayBuffer)return ['blob',Buffer.from(value).toString('base64')];
+  if(ArrayBuffer.isView(value))return ['blob',Buffer.from(value.buffer,value.byteOffset,value.byteLength).toString('base64')];
+  if(typeof value==='string')return ['text',value];
+  if(typeof value==='number'&&Number.isFinite(value))return ['number',value];
+  throw Error('Resume row contains an unsupported canonical cell');
+}
+const canonicalResumeRow=(row,columns)=>JSON.stringify(columns.map(name=>[name,resumeCell(row[name])]));
+function rowBag(saved=null){let rows=saved?.rows??0,sum=BigInt('0x'+(saved?.sum??'0')),xor=BigInt('0x'+(saved?.xor??'0'));const addDigest=hex=>{rows++;sum=(sum+BigInt('0x'+hex))&((1n<<256n)-1n);xor^=BigInt('0x'+hex);};return{add(text){addDigest(createHash('sha256').update(text).digest('hex'));},addDigest,value(){return[rows,sum.toString(16),xor.toString(16)].join(':');},snapshot(){return{rows,sum:sum.toString(16).padStart(64,'0'),xor:xor.toString(16).padStart(64,'0')};}};}
+function createKeyedResume(db) {
+  const shapes=new Map(),expected=new Map(),maximumBytes=new Map();
+  function shape(table) {
+    if(shapes.has(table))return shapes.get(table);
+    const info=db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all(),columns=info.map(row=>row.name).sort();
+    const key=info.filter(row=>row.pk>0).sort((a,b)=>a.pk-b.pk).map(row=>row.name);
+    if(!key.length)throw Error('Resume requires a code-owned primary key: '+table);
+    const statement=db.prepare(`SELECT * FROM ${quoteIdent(table)} WHERE ${key.map(name=>quoteIdent(name)+'=?').join(' AND ')}`);
+    const result={columns,key,statement};shapes.set(table,result);return result;
+  }
+  function match(table,cells) {
+    const s=shape(table);
+    if(s.columns.length!==Object.keys(cells).length||s.columns.some(name=>!Object.hasOwn(cells,name)))throw Error('Resume requires complete canonical cells for table '+table);
+    if(s.key.some(name=>cells[name]===null||cells[name]===undefined))throw Error('Resume requires a non-null complete indexed key: '+table);
+    const encoded=canonicalResumeRow(cells,s.columns);let bag=expected.get(table);if(!bag){bag=rowBag();expected.set(table,bag);}bag.add(encoded);
+    maximumBytes.set(table,Math.max(maximumBytes.get(table)??0,canonicalCellBytes(cells)));
+    const saved=s.statement.get(...s.key.map(name=>cells[name]));
+    if(!saved)return false;
+    if(canonicalResumeRow(saved,s.columns)!==encoded)throw Error('Resume row mismatch requires operator reconciliation: '+table);
+    return true;
+  }
+  function verify(counts,tables) {
+    for(const table of tables){
+      if ( table . startsWith ( '_cf_' ) || RESTORE_SKIP_TABLES . has ( table ) || table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES . includes ( table ) ) continue ;
+      const count=db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n,wanted=counts.get(table)??0;
+      if(count!==wanted)throw Error('Resume target count differs from complete source: '+table);
+      if(!count)continue;
+      const s=shape(table),actual=rowBag();let after=null;
+      // Keyset pages of ONE row also bound large BLOB/projection memory.
+      const first=db.prepare(`SELECT * FROM ${quoteIdent(table)} ORDER BY ${s.key.map(quoteIdent).join(',')} LIMIT 1`);
+      const next=db.prepare(`SELECT * FROM ${quoteIdent(table)} WHERE (${s.key.map(quoteIdent).join(',')}) > (${s.key.map(()=>'?').join(',')}) ORDER BY ${s.key.map(quoteIdent).join(',')} LIMIT 1`);
+      for(;;){const row=after?next.get(...after):first.get();if(!row)break;if(s.key.some(name=>row[name]===null))throw Error('Resume target has a nullable indexed key: '+table);actual.add(canonicalResumeRow(row,s.columns));after=s.key.map(name=>row[name]);}
+      if(actual.value()!==expected.get(table)?.value())throw Error('Resume target canonical rows differ from complete source: '+table);
+    }
+  }
+  function observe(table,cells){const info=shape(table);if(info.columns.length!==Object.keys(cells).length||info.columns.some(name=>!Object.hasOwn(cells,name)))throw Error('Staged restore requires complete canonical cells: '+table);let bag=expected.get(table);if(!bag){bag=rowBag();expected.set(table,bag);}bag.add(canonicalResumeRow(cells,info.columns));maximumBytes.set(table,Math.max(maximumBytes.get(table)??0,canonicalCellBytes(cells)));}
+  function manifest(tables){return tables.filter(table => !table.startsWith('_cf_') && !RESTORE_SKIP_TABLES.has(table) && table !== CLAIM_PERMIT_TABLE && !REPLAY_SKIPPED_TABLES.includes(table)).sort().map(table => {const info = shape(table) , ddl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;if(/WITHOUT\s+ROWID/i.test(ddl ?? '') || info.columns.some(name => name.toLowerCase() === 'rowid' || name === '__restore_rid'))throw Error('Staged restore needs the code-owned stable rowid layout: ' + table);return{name : table , columns : info.columns , expected : (expected.get(table) ?? rowBag()).snapshot() , maxRowBytes : maximumBytes.get(table) ?? 0};});}
+  return{match,verify,observe,manifest};
+}
+function requireResumeSource(watermark,trailer,verification) {
+  if ( ! watermark || ! supportsSealedRestoreSource ( watermark . sourceSchemaVersion ) || watermark . sanitizePolicy !== BACKUP_SANITIZE_POLICY || trailer ?. version !== 2 || verification !== 'full' )
+    throw Error('Resume requires the original complete snapshot with source schema and full version2 table trailer');
+}
+
+
+const COVERAGE_ROWS=128,COVERAGE_BYTES=4*1024*1024;
+const restoreTablesKnown=new Set([...applicationTables,...lazyAdditiveTables,...RESTORE_OPERATIONAL_TABLES]);
+function canonicalCellBytes(row){return Object.values(row).reduce((bytes,value)=>bytes+(typeof value==='string'?Buffer.byteLength(value):value instanceof ArrayBuffer?value.byteLength:ArrayBuffer.isView(value)?value.byteLength:value===null?0:16),0);}
+// Same canonical JSON as canonicalResumeRow; chunk encoding avoids a large
+// base64/escaped temporary string for one otherwise legal SQLite row.
+function canonicalResumeDigest(row,columns){
+ const digest=createHash('sha256');digest.update('[');
+ for(let n=0;n<columns.length;n++){
+  const name=columns[n],value=row[name];if(n)digest.update(',');digest.update('['+JSON.stringify(name)+',');
+  if(value===null)digest.update('["null"]');
+  else if(typeof value==='number'&&Number.isFinite(value))digest.update('["number",'+JSON.stringify(value)+']');
+  else if(typeof value==='string'){
+   digest.update('["text","');for(let offset=0;offset<value.length;){let end=Math.min(value.length,offset+8192);if(end<value.length&&value.charCodeAt(end-1)>=0xd800&&value.charCodeAt(end-1)<=0xdbff)end--;digest.update(JSON.stringify(value.slice(offset,end)).slice(1,-1));offset=end;}digest.update('"]');
+  }else if(value instanceof ArrayBuffer||ArrayBuffer.isView(value)){
+   const bytes=value instanceof ArrayBuffer?Buffer.from(value):Buffer.from(value.buffer,value.byteOffset,value.byteLength);digest.update('["blob","');for(let offset=0;offset<bytes.length;offset+=12288)digest.update(bytes.subarray(offset,offset+12288).toString('base64'));digest.update('"]');
+  }else throw Error('Restore coverage has an unsupported canonical cell');
+  digest.update(']');
+ }
+ digest.update(']');return digest.digest('hex');
+}
+const normalizedRestoreSql=sql=>sql?.trim().replace(/;$/,'').replace(/IF NOT EXISTS /g,'').replace(/\s+/g,' ');
+// Like replay-cutover's catalogDefinition: RAM stores a current-definition
+// admission, never durable authority. Every warm use revalidates exact tuples in
+// SQLite; Durable SQLite does not authorize a schema_version cookie.
+const restoreCatalogAdmissions=new WeakMap();
+const restoreRecreatedGuards=new Set(['current_restore_admission_insert','current_restore_admission_update','current_restore_admission_delete','current_restore_audit_scratch_insert','current_restore_audit_scratch_update','current_restore_audit_scratch_delete']);
+function restoreSchemaHash(db,binding=null,{expectedHash=null,tables=null}={}){
+ const scalar=db.prepare("SELECT count(*) AS count,coalesce(sum(length(CAST(sql AS BLOB))),0) AS bytes FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*'").get();
+ if(!Number.isSafeInteger(scalar.count) || scalar.count > restoreTablesKnown.size * 20 + 128 || !Number.isSafeInteger(scalar.bytes) || scalar.bytes > 16 * 1024 * 1024)throw Error('Restore schema inventory scalar bytes require reconciliation');
+ const saved=restoreCatalogAdmissions.get(db);
+ if(binding&&saved?.binding===binding){
+  const refuse=()=>{saved.invalid=true;throw Error('Restore sealed schema changed; exact cold readmission required');};
+  if(saved.invalid||scalar.count!==saved.count||scalar.bytes!==saved.bytes)refuse();
+  // Twelve tuples keep each statement below existing adapter binding limits.
+  // Only exact target-owned control guards are addressed by name: checkpoints
+  // legitimately recreate them. All definitions are compared byte-for-byte;
+  // same-rowid identical recreate proves current definitions, not history.
+  for(const group of saved.groups){
+   const matches=db.prepare(group.sql).all(...group.args);
+   if(matches.length!==group.size||matches.some(row=>row.matches!==1))refuse();
+  }
+  // Check legitimately recreated guards in one bounded catalog pass rather
+  // than rescanning the catalog once per name. Exact type/table/SQL remain
+  // mandatory on every use; no schema cookie or cross-request bypass.
+  if(saved.mutable.length){
+   const actual=db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name IN ('+saved.mutable.map(()=>'?').join(',')+')').all(...saved.mutable.map(row=>row.name));
+   if(actual.length!==saved.mutable.length||saved.mutable.some(expected=>{const row=actual.find(value=>value.name===expected.name);return !row||row.type!==expected.type||row.tbl_name!==expected.tbl_name||row.sql!==expected.sql;}))refuse();
+  }
+  if(saved.hash!==expectedHash)refuse();
+  return saved.hash;
+ }
+ const rows=db.prepare("SELECT rowid,type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY type,name").all();
+ const hash=sha256Hex(JSON.stringify(rows.map(row=>[row.type,row.name,row.tbl_name,normalizedRestoreSql(row.sql)])));
+ if(binding){
+  if(hash!==expectedHash)throw Error('Restore sealed schema changed');
+  verifyRestoreFreeze(db,tables,rows);
+  const groups=[],byRowid=rows.filter(row=>!restoreRecreatedGuards.has(row.name));
+  for(let offset=0;offset<byRowid.length;offset+=12){
+   const selected=byRowid.slice(offset,offset+12),args=selected.flatMap(row=>[row.rowid,row.type,row.name,row.tbl_name,row.sql===null?null:Buffer.byteLength(row.sql),row.sql]);
+   const sql=`WITH expected(catalog_id,kind,name,table_name,sql_bytes,definition) AS (VALUES ${selected.map(()=>'(?,?,?,?,?,?)').join(',')})
+    SELECT CASE WHEN s.type=e.kind AND s.name=e.name AND s.tbl_name=e.table_name AND octet_length(s.sql) IS e.sql_bytes AND s.sql IS e.definition COLLATE BINARY THEN 1 ELSE 0 END AS matches
+    FROM expected e LEFT JOIN sqlite_master s ON s.rowid=e.catalog_id`;
+   groups.push({sql,args,size:selected.length});
+  }
+  const mutable=rows.filter(row=>restoreRecreatedGuards.has(row.name));
+  restoreCatalogAdmissions.set(db,{binding,hash,count:scalar.count,bytes:scalar.bytes,groups,mutable});
+ }
+ return hash;
+}
+const sealId=seal=>sha256Hex(JSON.stringify({...seal,id:undefined}));
+function coverageResponse(state){return{ok:true,verified:false,pending:true,restoreId:state.restore_id,sourceSeal:state.seal.id,revision:state.revision,phase:state.phase,progress:{tableIndex:state.progress.tableIndex,tables:state.seal.tables.length,rows:state.progress.rows,bytes:state.progress.bytes},auditProgress:state.progress.audit?{stage:state.progress.audit.stage,report:state.progress.audit.report?{stage:state.progress.audit.report.stage,tableIndex:state.progress.audit.report.tableIndex,tables:applicationTables.length,sourceRows:state.progress.audit.report.table?.rows??null,sourceColumn:state.progress.audit.report.source?.column??null,sourceOffset:state.progress.audit.report.source?.offset??null,rowPart:state.progress.audit.report.table?.part??null,sort:state.progress.audit.report.table?{stage:state.progress.audit.report.table.stage,width:state.progress.audit.report.table.width,pass:state.progress.audit.report.table.pass,start:state.progress.audit.report.table.start,left:state.progress.audit.report.table.left,right:state.progress.audit.report.table.right,comparePart:state.progress.audit.report.table.comparePart,hashRow:state.progress.audit.report.table.hashRow,hashPart:state.progress.audit.report.table.hashPart}:null}:null,invitations:state.progress.audit.invitations,shareLinks:state.progress.audit.shareLinks,replyRequests:state.progress.audit.replies,workHelp:state.progress.audit.workHelp,charter:state.progress.audit.charter,textResults:state.progress.audit.textResults,reminders:state.progress.audit.reminders,rooms:state.progress.audit.rooms,units:state.progress.audit.units,bytes:state.progress.audit.bytes,engine:state.progress.audit.engine,replay:{rooms:state.progress.audit.replayRooms,deferred:state.progress.audit.replayDeferred,cursor:state.progress.audit.replay}}:null,note:'Coverage is incomplete recovery; the independent full audit still must pass before admission'};}
+function validateCoverageState(db,state){
+ const seal=state.seal,p=state.progress;
+ if(state.state !== 'pending' || !['coverage' , 'audit_pending'].includes(state.phase) || !seal || Object.keys(seal).sort().join(',') !== 'auditVersion,backedUpAt,events,id,inventory,reportVersion,resultMetadata,sanitizePolicy,schemaHash,sourceSchemaVersion,sourceSha256,tables,trailerSha256,version,watermarkSha256,writerFormat' || seal.version !== 2 || seal.auditVersion !== RESTORE_AUDIT_VERSION || seal.reportVersion !== RESTORE_REPORT_VERSION || seal.writerFormat !== CURRENT_WRITER_FORMAT || seal.id !== sealId(seal) || !/^[0-9a-f]{64}$/.test(seal.sourceSha256 ?? '') || !['sourceSha256' , 'watermarkSha256' , 'trailerSha256' , 'schemaHash' , 'id'].every(key => /^[0-9a-f]{64}$/.test(seal[key] ?? '')) || !Number.isSafeInteger(seal.events) || seal.events < 0 || (seal.backedUpAt !== null && (!Number.isSafeInteger(seal.backedUpAt) || seal.backedUpAt < 0)) || !supportsSealedRestoreSource(seal.sourceSchemaVersion) || seal.sanitizePolicy !== BACKUP_SANITIZE_POLICY || !Array.isArray(seal.inventory) || !Array.isArray(seal.tables))throw Error('Restore source seal requires reconciliation');
+ if(seal.inventory.some(name=>typeof name!=='string'||!restoreTablesKnown.has(name))||new Set(seal.inventory).size!==seal.inventory.length||JSON.stringify(tableNames(db).filter(name=>!name.startsWith('_cf_')))!==JSON.stringify(seal.inventory))throw Error('Restore source schema inventory differs');
+ if(!p||Object.keys(p).sort().join(',')!=='after,audit,bag,bytes,rows,tableIndex'||!Number.isSafeInteger(p.tableIndex)||p.tableIndex<0||p.tableIndex>seal.tables.length||!Number.isSafeInteger(p.after)||!Number.isSafeInteger(p.rows)||p.rows<0||!Number.isSafeInteger(p.bytes)||p.bytes<0)throw Error('Restore coverage cursor requires reconciliation');
+ if(state.phase==='coverage'){if(p.audit!==null)throw Error('Audit started before coverage');}else validateRecoveryCensus(p.audit);
+ const bagValid=bag=>bag&&Object.keys(bag).sort().join(',')==='rows,sum,xor'&&Number.isSafeInteger(bag.rows)&&bag.rows>=0&&/^[0-9a-f]{64}$/.test(bag.sum)&&/^[0-9a-f]{64}$/.test(bag.xor);
+ if(!bagValid(p.bag)||seal.tables.some(entry=>Object.keys(entry).sort().join(',')!=='columns,expected,maxRowBytes,name'||!seal.inventory.includes(entry.name)||!IDENT.test(entry.name)||!Array.isArray(entry.columns)||entry.columns.some(name=>!IDENT.test(name))||!bagValid(entry.expected)||!Number.isSafeInteger(entry.maxRowBytes)||entry.maxRowBytes<0))throw Error('Restore coverage shape requires reconciliation');
+ validateRestoreResultMetadata(seal.resultMetadata,seal);
+ const expectedNames = seal.inventory.filter(table => !RESTORE_OPERATIONAL_TABLES.includes(table) && !RESTORE_SKIP_TABLES.has(table) && table !== CLAIM_PERMIT_TABLE && !REPLAY_SKIPPED_TABLES.includes(table)).sort();
+ if(JSON.stringify(seal.tables.map(entry=>entry.name))!==JSON.stringify(expectedNames)||new Set(seal.tables.map(entry=>entry.name)).size!==seal.tables.length||(state.phase==='audit_pending'&&p.tableIndex!==seal.tables.length)||(state.phase==='coverage'&&p.tableIndex===seal.tables.length))throw Error('Restore phase inventory requires reconciliation');
+ restoreSchemaHash(db,state.restore_id+':'+seal.id+':'+state.phase,{expectedHash:seal.schemaHash,tables:seal.inventory});
+}
+function sealRestoreCoverage(store,{restoreId,sourceSha256,watermark,trailer,tables,resultMetadata}){
+ const db=store.db,state=restoreProgress(db);if(state.state!=='pending'||state.phase!=='loading'||state.restore_id!==restoreId)throw Error('Restore source seal is stale');
+ const inventory=tableNames(db);if(inventory.some(name=>!name.startsWith('_cf_')&&!restoreTablesKnown.has(name)))throw Error('Restore source inventory includes unknown table');
+ installRestoreFreeze(db,inventory);
+ const seal = {version : 2 , resultMetadata , auditVersion : RESTORE_AUDIT_VERSION , reportVersion : RESTORE_REPORT_VERSION , writerFormat : CURRENT_WRITER_FORMAT , sourceSha256 , sourceSchemaVersion : watermark.sourceSchemaVersion , sanitizePolicy : BACKUP_SANITIZE_POLICY , watermarkSha256 : sha256Hex(JSON.stringify(watermark)) , trailerSha256 : sha256Hex(JSON.stringify(trailer)) , events : watermark.events , backedUpAt : watermark.backedUpAt ?? null , inventory : inventory.filter(name => !name.startsWith('_cf_')) , tables , schemaHash : restoreSchemaHash(db)};validateRestoreResultMetadata(resultMetadata,seal);seal.id = sealId(seal);
+ const progress={tableIndex:0,after:Number.MIN_SAFE_INTEGER,bag:rowBag().snapshot(),rows:0,bytes:0,audit:null},next={restore_id:restoreId,revision:state.revision+1,phase:'coverage',seal,progress};const result=coverageResponse(next);
+ checkpointRestore(db,{restoreId,expectedRevision:state.revision,phase:'coverage',seal,progress,latest:{requestId:'seal_'+sourceSha256,expectedRevision:state.revision,restoreId,sourceSeal:seal.id,result}});
+ return result;
+}
+function validateContinuation(input){
+ if(!input||Object.keys(input).sort().join(',')!=='expectedRevision,requestId,restoreId,sourceSeal'||typeof input.restoreId!=='string'||input.restoreId.length>128||!/^[0-9a-f]{64}$/.test(input.sourceSeal??'')||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||!/^[-_a-zA-Z0-9]{1,128}$/.test(input.requestId??''))throw Error('Invalid restore continuation');
+}
+export function continueRestoreCoverage(store,input){
+ validateContinuation(input);return withRestoreTransaction(store,()=>{
+  const db=store.db,state=restoreProgress(db),latest=state.latest;
+  if(latest&&latest.requestId===input.requestId&&latest.expectedRevision===input.expectedRevision&&latest.restoreId===input.restoreId&&latest.sourceSeal===input.sourceSeal){if(state.state==='pending')validateCoverageState(db,state);return latest.result;}
+  if(latest?.requestId===input.requestId)throw Error('Restore request ID binding differs');
+  if(state.state!=='pending'||state.restore_id!==input.restoreId||state.seal?.id!==input.sourceSeal||state.revision!==input.expectedRevision)throw Error('Restore continuation is stale or source differs');
+  validateCoverageState(db,state);
+  if(state.phase==='audit_pending'&&state.progress.audit.stage!=='full_audit_pending'){
+   const progress={...state.progress,audit:advanceRecoveryCensus(store,state.restore_id,state.progress.audit,state.seal)},next={...state,progress,revision:state.revision+1},result=coverageResponse(next);
+   checkpointRestore(db,{restoreId:input.restoreId,expectedRevision:input.expectedRevision,phase:'audit_pending',seal:state.seal,progress,latest:{...input,result}});invalidateCurrentRoomSchema(db);return result;
+  }
+  if(state.phase==='audit_pending'&&state.progress.audit.report?.stage!=='complete'){
+   const report=advanceRecoveryReport(store,state.restore_id,state.progress.audit.report,{assertSealedSource:current=>validateCoverageState(db,current)}),progress={...state.progress,audit:{...state.progress.audit,report}},next={...state,progress,revision:state.revision+1},result=coverageResponse(next);
+   checkpointRestore(db,{restoreId:input.restoreId,expectedRevision:input.expectedRevision,phase:'audit_pending',seal:state.seal,progress,latest:{...input,result}});invalidateCurrentRoomSchema(db);return result;
+  }
+  if(state.phase==='audit_pending'){
+   // Intentionally still the existing full census. Do not describe this phase
+   // as bounded until its replay/SQLite/subsystem/report scans are resumable.
+   const recovery=withCompletedRecoveryShareLinks(store,input.restoreId,input.sourceSeal,()=>withCompletedRecoveryReminders(store,input.restoreId,input.sourceSeal,()=>withRecoveryReportFingerprint(store,state.restore_id,{assertSealedSource:current=>validateCoverageState(db,current)},()=>auditRecovery(store)))),invitations=store.verifyInvitationAudit();if(JSON.stringify(invitations)!==JSON.stringify(recoveryInvitationSummary(state.progress.audit.invitations)))throw Error('Independent invitation audit differs from full oracle');validateCoverageState(db,state);verifyCurrentRoomSchema(db);
+   const result={ok:true,verified:true,pending:false,reportVersion:recovery.contractVersion,engineChecks:state.progress.audit.engine,subsystemContinuation:{shareLinks:{...state.progress.audit.shareLinks,consumed:state.progress.audit.shareLinks.stage==='complete'},invitations:recoveryInvitationSummary(state.progress.audit.invitations),replyRequests:{rooms:state.progress.audit.replyRooms,deferred:state.progress.audit.replyDeferred,requestsScanned:state.progress.audit.replyRequests,messagesCompared:state.progress.audit.replyMessages},workHelp:{rooms:state.progress.audit.helpRooms,deferred:state.progress.audit.helpDeferred,offersScanned:state.progress.audit.helpOffers,offerChecks:state.progress.audit.helpOfferChecks,helpsScanned:state.progress.audit.helpValues},charters:{rooms:state.progress.audit.charterRooms},textResults:{rooms:state.progress.audit.textRooms,projected:state.progress.audit.textProjected,audited:state.progress.audit.textAudited},privateReminders:{complete:state.progress.audit.reminders?.stage==='complete',receipts:state.progress.audit.reminders?.receipts??0,rows:state.progress.audit.reminders?.rows??0,groups:state.progress.audit.reminders?.groups??0}},replayContinuation:{rooms:state.progress.audit.replayRooms,deferred:state.progress.audit.replayDeferred,originalFullOracleRequired:true},...restoreResultFields(state.seal),events:state.seal.events,backedUpAt:state.seal.backedUpAt===null?null:new Date(state.seal.backedUpAt).toISOString(),note:RESTORE_NOTE,recovery,audit:{ok:true},...invitations};
+   const cleanup=initialRestoreCleanup(db,input.restoreId,input.sourceSeal,state.seal.inventory,{reportScratchRows:state.progress.audit.report.scratchRows});result.cleanupComplete=cleanup.complete;result.nextCleanup=restoreCleanupNext(cleanup);
+   completeRestore(db,{...input,result,cleanup});invalidateCurrentRoomSchema(db);return result;
+  }
+  const p={...state.progress,bag:{...state.progress.bag}};let rows=0,bytes=0;
+  while(p.tableIndex < state.seal.tables.length && rows < COVERAGE_ROWS){
+   const entry=state.seal.tables[p.tableIndex],name=quoteIdent(entry.name),scalarSql=entry.columns.map((column,n)=>`length(CAST(${quoteIdent(column)} AS BLOB)) AS c${n}`).join(',');
+   const scalar=db.prepare(`SELECT rowid AS __restore_rid,${scalarSql} FROM ${name} WHERE rowid>? ORDER BY rowid LIMIT 1`).get(p.after);
+   if(!scalar){if(rowBag(p.bag).value()!==rowBag(entry.expected).value())throw Error('Resume target canonical rows differ from complete sealed source: '+entry.name);p.tableIndex++;p.after=Number.MIN_SAFE_INTEGER;p.bag=rowBag().snapshot();continue;}
+   if(!Number.isSafeInteger(scalar.__restore_rid))throw Error('Restore coverage rowid requires exact integer reconciliation');
+   const scalarBytes=entry.columns.reduce((sum,_,n)=>sum+(scalar['c'+n]??0),0);
+   // Numeric SQLite CAST bytes differ from JS accounting; a fixed allowance
+   // per code-owned column bounds this without excluding legal numeric cells.
+   if(!Number.isSafeInteger(scalarBytes)||scalarBytes<0||scalarBytes>entry.maxRowBytes+entry.columns.length*32)throw Error('Resume target scalar bytes differ from sealed source: '+entry.name);
+   // A first legal row can exceed the remaining work quantum; its size is
+   // still bounded by the sealed original row and SQLite's existing limit.
+   if(rows && bytes + scalarBytes > COVERAGE_BYTES)break;
+   const row=db.prepare(`SELECT ${entry.columns.map(quoteIdent).join(',')} FROM ${name} WHERE rowid=?`).get(scalar.__restore_rid);if(!row)throw Error('Restore sealed row disappeared');
+   const bag=rowBag(p.bag);bag.addDigest(canonicalResumeDigest(row,entry.columns));p.bag=bag.snapshot();p.after=scalar.__restore_rid;p.rows++;p.bytes+=scalarBytes;rows++;bytes+=scalarBytes;
+  }
+  const phase=p.tableIndex===state.seal.tables.length?'audit_pending':'coverage';if(phase==='audit_pending')p.audit=initialRecoveryCensus();const next={...state,progress:p,phase,revision:state.revision+1},result=coverageResponse(next);
+  checkpointRestore(db,{restoreId:input.restoreId,expectedRevision:input.expectedRevision,phase,seal:state.seal,progress:p,latest:{...input,result}});return result;
+ });
+}
+
+// Buffered compatibility and source preflight share ONE parser.
+// Tuple-only mode retains only what existing verifyTrailer needs; the
+// content digests still see every original complete row before any skip.
+function createNdjsonPreparse({retainRows=true}={}) {
   const byTable = new Map();
   const skippedTables = {};
   const digests = createTableDigests();
   let watermark = null;
   let trailer = null;
-  for (const line of ndjson.split("\n")) {
-    if (!line.trim()) continue;
+  const writeLine = line => {
+    if (!line.trim()) return;
     let record;
     try { record = JSON.parse(line); }
     catch { throw new Error("Export line is not JSON"); }
     if (record?.kind === "watermark") {
       if (watermark) throw new Error("Export has more than one watermark");
       watermark = record;
-      continue;
+      return;
     }
     // End-of-stream integrity trailer (server/room-export.mjs exportTrailer).
     if (record?.kind === "trailer") {
       if (trailer) throw new Error("Export has more than one trailer");
       assertTrailerShape(record);
       trailer = record;
-      continue;
+      return;
     }
     if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row))
       throw new Error("Export line is not a table row");
@@ -109,15 +320,26 @@ export function parseNdjsonExport(ndjson) {
     if (record.table.startsWith("_cf_") || RESTORE_SKIP_TABLES.has(record.table)
       || record.table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES.includes(record.table)) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
-      continue;
+      return;
     }
+    if (!retainRows && record.table !== "events") return;
     const rows = byTable.get(record.table) ?? [];
-    rows.push(record.row);
+    if (retainRows) rows.push(record.row);
+    else if (record.table === "events") rows.push({room_id:record.row.room_id,sequence:record.row.sequence,id:record.row.id});
     byTable.set(record.table, rows);
-  }
+  };
+  const finish = () => {
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
     throw new Error("Export is missing its watermark");
   return { watermark, byTable, trailer, skippedTables, tableDigests: digests.finish() };
+  };
+  return {writeLine,finish};
+}
+export function parseNdjsonExport(ndjson) {
+  if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
+  const parser=createNdjsonPreparse();
+  for(const line of ndjson.split("\n"))parser.writeLine(line);
+  return parser.finish();
 }
 
 function insertOrder(names) {
@@ -171,14 +393,18 @@ function topologicalTableOrder(names, deps) {
 // qualification on the result instead — the semantics of the file replay's
 // report mode (server/room-export.mjs replayNdjson), for backups whose
 // stored projections were written by older code.
-export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
+export function replayNdjsonInto(ndjson, store, { audit = "strict", sourceSchemaVersion = null, resume = false, staged = false } = {}) {
+  if(typeof resume!=="boolean")throw Error("resume must be boolean");
+  if(resume||staged){const parsed=parseNdjsonExport(ndjson);if(staged&&!resume&&!supportsSealedRestoreSource(parsed.watermark?.sourceSchemaVersion))return replayNdjsonInto(ndjson,store,{audit,sourceSchemaVersion,resume,staged:false});requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests));verifyTrailer(parsed.trailer,parsed.byTable);const session=createBackupReplaySession(store,{audit,sourceSchemaVersion,resume,staged});try{session.writeText(ndjson);return session.finish({sourceSha256:sha256Hex(ndjson)});}catch(error){session.abort();throw error;}}
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
   const { watermark, byTable, trailer, skippedTables, tableDigests } = parseNdjsonExport(ndjson);
+  restoreSourceSchemaVersion(watermark, sourceSchemaVersion);
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  ensureNativeAgentRestoreSchema(db, new Set(byTable.keys()));
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
@@ -195,7 +421,8 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   // of half-restored.
   db.exec("PRAGMA foreign_keys=OFF");
   try {
-    return store.transaction(() => {
+    return withRestoreTransaction(store, () => {
+      beginRestore(store);
       // Workers enforce foreign keys even with the PRAGMA above (the DO
       // SQLite engine ignores foreign_keys=OFF). Deferring the checks to the
       // COMMIT makes the whole-row replay order-safe there: row order inside
@@ -203,7 +430,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
       // parent-first sort) no longer matters, because every referenced row is
       // present before the single COMMIT.
       db.exec("PRAGMA defer_foreign_keys=ON");
-      for (const table of order) db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+      for (const table of order) withRestoreTableRows(db,table,()=>db.prepare(`DELETE FROM ${quoteIdent(table)}`).run());
       // #3324: the claim fence aborts any write to a public namespace's
       // claims unless the permit is open. Mirror the file replay: open the
       // TARGET's own seeded permit for the bulk load (the exported permit
@@ -216,16 +443,18 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
         // Parents before children, matching the exporter's credentials order.
         if (table === "credentials") rows.sort((a, b) => Number(a.parent_hash != null) - Number(b.parent_hash != null));
         const known = new Set(tableColumns(db, table));
-        for (const row of rows) {
-          const keys = Object.keys(row);
-          if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
-          if (!keys.length) continue;
-          // Binary cells leave the exporter as {$base64}; decode and prove them.
-          const cells = Object.fromEntries(keys.map(key => [key, tracker.resolve(table, key, cellOf(row[key]))]));
-          checkStoredBytes(table, cells);
-          db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
-            .run(...keys.map(key => cells[key]));
-        }
+        withRestoreTableRows(db, table, () => {
+          for (const row of rows) {
+            const keys = Object.keys(row);
+            if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
+            if (!keys.length) continue;
+            // Binary cells leave the exporter as {$base64}; decode and prove them.
+            const cells = Object.fromEntries(keys.map(key => [key, tracker.resolve(table, key, cellOf(row[key]))]));
+            checkStoredBytes(table, cells);
+            db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
+              .run(...keys.map(key => cells[key]));
+          }
+        });
       }
       if (claimPermit) {
         db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
@@ -250,15 +479,20 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
       // Report mode: the recovery audit's refusal becomes the result's
       // audit qualification instead of a failed restore — the data lands,
       // the drift is enumerated, and `verified` never stands unqualified.
+      verifyRestoredTableCounts(db, byTable);
+      const writeProofs = restoreLegacyWriteProofs(store, watermark, sourceSchemaVersion);
       let recovery = null, invitations = {}, auditResult = { ok: true };
       try {
         recovery = auditRecovery(store);
         invitations = store.verifyInvitationAudit();
       } catch (error) {
-        if (audit !== "report") throw error;
+        if (resume || audit !== "report" || restoredCurrentFormatPresent(db)) throw error;
         auditResult = auditFailure(error);
       }
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
+      verifyCurrentRoomSchema(db);
+      completeRestore(db);
+      invalidateCurrentRoomSchema(db);
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, writeProofs, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -276,18 +510,26 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
 // needs — the total size is unbounded. Room transactions must stay
 // synchronous, so inserts commit in bounded batches; any failure runs
 // abort(), which deletes every table the replay touched (the target was
-// verified empty first), leaving the store empty and retryable.
+// verified empty first), leaving the store empty and retryable. Explicit resume
+// never deletes existing rows: failure retains the pending target for reconciliation.
 const REPLAY_BATCH_ROWS = 500;
 const REPLAY_BATCH_BYTES = 4 * 1024 * 1024;
 
-export function createBackupReplaySession(store, { audit = "strict" } = {}) {
+export function createBackupReplaySession(store, { audit = "strict", sourceSchemaVersion = null, resume = false, staged = false } = {}) {
+  if(typeof resume!=="boolean")throw Error("resume must be boolean");
+  restoreSourceSchemaVersion(null, sourceSchemaVersion);
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!store?.db) throw new Error("Restore needs an open store");
   const db = store.db;
-  if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  let resumeId=null;
+  if(resume){verifyRestoreControl(db);if(!restorePending(db))throw Error("Resume requires an explicitly pending restore target");resumeId=db.prepare("SELECT restore_id FROM current_restore_admission WHERE singleton=1").get().restore_id;}
+  else if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
+  const keyed=resume||staged?createKeyedResume(db):null;
+  const assertSameResume=()=>{verifyRestoreControl(db);const row=db.prepare("SELECT state,restore_id,phase FROM current_restore_admission WHERE singleton=1").get();if(row?.state!=="pending"||row.restore_id!==resumeId||row.phase!=='loading')throw Error("Resume target admission changed; no further writes are allowed");};
   const existing = new Set(tableNames(db));
   const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
   const skippedTables = {};
+  let receivedBytes=0,byteCarry='';
   const eventTuples = [];
   const digests = createTableDigests();
   const counts = new Map();
@@ -319,16 +561,34 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   let trailer = null;
   let carry = "";
   let settled = false;
+  let abortResult = null;
   // #3599: created when the watermark line lands (it names the sanitize
   // policy); a row arriving before it resolves under the legacy policy —
   // finish() refuses a watermark-less stream and aborts the replay anyway.
   let tracker = null;
   const cellTracker = () => tracker ??= createSanitizedCellTracker(db, { legacySanitize: true });
 
+  if(!resume)resumeId=beginRestore(store);
   db.exec("PRAGMA foreign_keys=OFF");
   // #3324, as in replayNdjsonInto: open the target's own permit for the
   // load; the exported permit row is skipped in writeLine and never lands.
-  if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=1 WHERE singleton=1`).run();
+  withRestoreTransaction(store,()=>{
+    assertSameResume();
+    if(claimPermit)db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=1 WHERE singleton=1`).run();
+    if(!resume){
+      // Remove target migration seeds before any source batch can persist.
+      // A cold resume must only encounter imported cells, never a conflicting
+      // target default for a source table that had not flushed at interruption.
+      db.exec("PRAGMA defer_foreign_keys=ON");
+      for(const table of [...topo].reverse()){
+        if ( table . startsWith ( '_cf_' ) || RESTORE_SKIP_TABLES . has ( table ) || table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES . includes ( table ) ) continue ;
+        if(db.prepare(`SELECT 1 FROM ${quoteIdent(table)} LIMIT 1`).get()){
+          withRestoreTableRows(db,table,()=>db.prepare(`DELETE FROM ${quoteIdent(table)}`).run());
+          cleared.add(table);
+        }
+      }
+    }
+  });
 
   const columnsOf = table => {
     if (!knownColumns.has(table)) knownColumns.set(table, new Set(tableColumns(db, table)));
@@ -375,26 +635,32 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     }
     if (!insertable.length) return 0;
     let inserted = 0;
-    store.transaction(() => {
+    withRestoreTransaction(store, () => {
+      assertSameResume();
       db.exec("PRAGMA defer_foreign_keys=ON");
-      if (!cleared.has(table)) {
-        db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+      if (!resume && !cleared.has(table)) {
+        withRestoreTableRows(db,table,()=>db.prepare(`DELETE FROM ${quoteIdent(table)}`).run());
         cleared.add(table);
       }
       const known = columnsOf(table);
-      for (const row of insertable) {
-        const keys = Object.keys(row);
-        if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
-        // An empty row object carries no cells and never lands (the
-        // buffered replay skips it the same way); count it so finish()'s
-        // landed-count reconciliation stays exact.
-        if (!keys.length) { unlandedEmpty.set(table, (unlandedEmpty.get(table) ?? 0) + 1); continue; }
-        const cells = Object.fromEntries(keys.map(key => [key, cellTracker().resolve(table, key, cellOf(row[key]))]));
-        checkStoredBytes(table, cells);
-        db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
-          .run(...keys.map(key => cells[key]));
-        inserted += 1;
-      }
+      withRestoreTableRows(db, table, () => {
+        for (const row of insertable) {
+          const keys = Object.keys(row);
+          if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
+          // An empty row object carries no cells and never lands (the
+          // buffered replay skips it the same way); count it so finish()'s
+          // landed-count reconciliation stays exact.
+          if(resume&&!keys.length)throw Error("Resume source has an empty row");
+          if (!keys.length) { unlandedEmpty.set(table, (unlandedEmpty.get(table) ?? 0) + 1); continue; }
+          const cells = Object.fromEntries(keys.map(key => [key, cellTracker().resolve(table, key, cellOf(row[key]))]));
+          checkStoredBytes(table, cells);
+          if(resume&&keyed.match(table,cells))continue;
+          if(!resume&&staged&&supportsSealedRestoreSource(watermark?.sourceSchemaVersion))keyed.observe(table,cells);
+          db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
+            .run(...keys.map(key => cells[key]));
+          inserted += 1;
+        }
+      });
     });
     buffers.set(table, held.length ? held : []);
     return inserted;
@@ -418,8 +684,10 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     let record;
     try { record = JSON.parse(line); }
     catch { throw new Error("Export line is not JSON"); }
+    if(resume&&trailer)throw Error("Resume complete snapshot has content after its trailer");
     if (record?.kind === "watermark") {
       if (watermark) throw new Error("Export has more than one watermark");
+      restoreSourceSchemaVersion(record, sourceSchemaVersion);
       watermark = record;
       tracker = createSanitizedCellTracker(db, { legacySanitize: record.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
       return;
@@ -432,6 +700,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     }
     if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row))
       throw new Error("Export line is not a table row");
+    if(resume&&!watermark)throw Error("Resume requires watermark before source rows");
     // #3325: digest each loadable row as it streams past, before the skip
     // branch — finish() pins the whole stream against the trailer.
     digests.add(record.table, record.row);
@@ -439,6 +708,26 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       || record.table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES.includes(record.table)) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
       return;
+    }
+    if (!existing.has(record.table)) {
+      ensureNativeAgentRestoreSchema(db, new Set([record.table]));
+      // These lazy native tables have no foreign keys. Extend the streaming
+      // order only after inspecting real schema; unknown backup names still fail.
+      for (const table of tableNames(db)) {
+        if (existing.has(table)) continue;
+        const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${quoteIdent(table)})`).all();
+        // The replay sidecar has one code-owned rooms FK. Its schema has just
+        // been verified; feed that parent into the existing buffered cascade.
+        const replayChild = table === "message_replay_units" && foreignKeys.length === 1
+          && foreignKeys[0].table === "rooms" && foreignKeys[0].from === "room_id"
+          && foreignKeys[0].to === "id" && existing.has("rooms");
+        if (foreignKeys.length && !replayChild) throw new Error("Lazy restore table requires dependency ordering");
+        existing.add(table);
+        topoIndex.set(table, topo.length);
+        topo.push(table);
+        deps.set(table, new Set(replayChild ? ["rooms"] : []));
+        ancestors.set(table, new Set(replayChild ? ["rooms", ...(ancestors.get("rooms") ?? [])] : []));
+      }
     }
     if (!existing.has(record.table)) throw new Error("Export names a table this store does not have");
     const keys = Object.keys(record.row);
@@ -457,6 +746,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   }
 
   function writeText(text) {
+    const input=byteCarry+text,last=input.charCodeAt(input.length-1);byteCarry=last>=0xd800&&last<=0xdbff?input.slice(-1):'';receivedBytes+=Buffer.byteLength(byteCarry?input.slice(0,-1):input);
     carry += text;
     const lines = carry.split("\n");
     carry = lines.pop();
@@ -464,29 +754,41 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
   }
 
   function abort() {
+    // finish() may already have attempted cleanup before the route handles
+    // its error. Preserve that result instead of reporting a false clean skip.
+    if (abortResult) return abortResult;
     if (settled) return { cleaned: true, skipped: true };
     settled = true;
-    let cleanupError = null;
+    if(resume){try{withRestoreTransaction(store,()=>{assertSameResume();if(claimPermit)db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();});db.exec("PRAGMA foreign_keys=ON");}catch(error){abortResult={cleaned:false,skipped:true,retained:true,error};return abortResult;}abortResult={cleaned:false,skipped:true,retained:true};return abortResult;}
+    let cleanupError = null,cleanupSucceeded=false;
     try {
-      store.transaction(() => {
+      withRestoreTransaction(store, () => {
+        assertSameResume();
         // Children before parents (reverse topological order): the Worker
         // enforces foreign keys, so deleting a parent row while its child
         // rows remain fails the cleanup and leaves half-restored data.
         for (const table of [...cleared].sort((a, b) => topoIndex.get(b) - topoIndex.get(a)))
-          db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
-      });
+          withRestoreTableRows(db,table,()=>db.prepare(`DELETE FROM ${quoteIdent(table)}`).run());
+        for(const table of cleared) if(db.prepare(`SELECT 1 FROM ${quoteIdent(table)} LIMIT 1`).get())throw Error("Restore cleanup left rows: "+table);
+        if(db.prepare("SELECT 1 FROM rooms LIMIT 1").get())throw Error("Restore cleanup left rooms");
+        if(claimPermit)db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
+        verifyCurrentRoomSchema(db);
+        completeRestore(db);
+      invalidateCurrentRoomSchema(db);
+      });cleanupSucceeded=true;
     } catch (error) { cleanupError = error; }
     try {
-      if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
-    } catch { /* closing the permit must not mask the original failure */ }
-    db.exec("PRAGMA foreign_keys=ON");
+      if(!cleanupSucceeded&&claimPermit)withRestoreTransaction(store,()=>{assertSameResume();db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();});
+    } catch (error) { cleanupError ??= error; }
+    try { db.exec("PRAGMA foreign_keys=ON"); } catch (error) { cleanupError ??= error; }
     // The caller reports a failed cleanup: the store was verified empty
     // before the replay, but if these deletes failed it may now hold
     // partial data, and the operator must not treat it as retryable-empty.
-    return { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    abortResult = { cleaned: !cleanupError, error: cleanupError, skipped: false };
+    return abortResult;
   }
 
-  function finish() {
+  function finish({sourceSha256=null,transport=null}={}) {
     try {
       if (carry) { writeLine(carry); carry = ""; }
       if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
@@ -506,10 +808,21 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       // Torn export (a write landed mid-stream): refuse, as the buffered
       // replay does — the tuples collected line by line are exactly the
       // rows verifyTrailer hashes.
+      return withRestoreTransaction(store,()=>{
+      assertSameResume();
       if (trailer) verifyTrailer(trailer, new Map([["events", eventTuples]]));
       // #3325: the trailer's table digests pin the non-event rows the same
       // way; a mismatch aborts and wipes the replay like any other failure.
       const contentVerification = contentVerificationLevel(trailer, digests.finish());
+      if(staged&&supportsSealedRestoreSource(watermark.sourceSchemaVersion)){
+        requireResumeSource(watermark,trailer,contentVerification);
+        if(!/^[0-9a-f]{64}$/.test(sourceSha256??''))throw Error('Staged restore requires its complete original source SHA');
+        if((counts.get('events')??0)!==watermark.events)throw Error('Export watermark does not match source event count');
+        if(claimPermit){db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();verifyPublicWorkClaimFence(db);}
+        verifyCurrentRoomSchema(db);
+        const result=sealRestoreCoverage(store,{restoreId:resumeId,sourceSha256,watermark,trailer,tables:keyed.manifest([...existing]),resultMetadata:{version:1,contentVerification,writeProofs:restoreLegacyWriteProofs(store,watermark,sourceSchemaVersion),tables:counts.size,skippedTables,sanitizedCells:cellTracker().report(),resumed:resume,transport:transport??{kind:'request-body',key:null,bytes:receivedBytes+Buffer.byteLength(byteCarry)}}});settled=true;return result;
+      }
+      if(resume){requireResumeSource(watermark,trailer,contentVerification);keyed.verify(counts,existing);}
       if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
       const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
       if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
@@ -538,6 +851,9 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
         verifyPublicWorkClaimFence(db);
       }
+      const legacyVersion = restoreSourceSchemaVersion(watermark, sourceSchemaVersion);
+      if (legacyVersion === 42 || legacyVersion === 43) cleared.add('integrity_room_state');
+      const writeProofs = restoreLegacyWriteProofs(store, watermark, sourceSchemaVersion);
       // Report mode: as in replayNdjsonInto, the recovery audit's refusal
       // becomes the result's audit qualification; the data lands.
       let recovery = null, invitations = {}, auditResult = { ok: true };
@@ -545,12 +861,16 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         recovery = auditRecovery(store);
         invitations = store.verifyInvitationAudit();
       } catch (error) {
-        if (audit !== "report") throw error;
+        if (resume || audit !== "report" || restoredCurrentFormatPresent(db)) throw error;
         auditResult = auditFailure(error);
       }
-      settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
+      verifyCurrentRoomSchema(db);
+      completeRestore(db);
+      invalidateCurrentRoomSchema(db);
+      settled = true;
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, writeProofs, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...(resume?{resumed:true}:{}), ...invitations, recovery, audit: auditResult };
+      });
     } catch (error) {
       abort();
       throw error;
@@ -596,7 +916,7 @@ function utf8ByteLengthExceeds(text, limit) {
 // Content-Length for the pre-read guard) is never buffered in full.
 // Bodies without a stream (e.g. test doubles exposing only text()) fall back
 // to a byte-accurate check on the decoded string.
-async function readRestoreBody(request) {
+async function readRestoreBody(request, limit = RESTORE_MAX_BYTES) {
   if (request.body && typeof request.body.getReader === "function") {
     const reader = request.body.getReader();
     const chunks = [];
@@ -605,7 +925,7 @@ async function readRestoreBody(request) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > RESTORE_MAX_BYTES) {
+      if (total > limit) {
         try { await reader.cancel(); } catch { /* already errored/closed */ }
         return { tooLarge: true, text: "" };
       }
@@ -617,7 +937,61 @@ async function readRestoreBody(request) {
     return { tooLarge: false, text: new TextDecoder().decode(bytes) };
   }
   const text = await request.text();
-  return { tooLarge: utf8ByteLengthExceeds(text, RESTORE_MAX_BYTES), text };
+  return { tooLarge: utf8ByteLengthExceeds(text, limit), text };
+}
+
+// Stage explicitly qualified native45/46 sources ONLY in the existing private KV multipart format.
+// Original preparse/content/trailer checks finish BEFORE any canonical import.
+// Missing KV retains the exact historical buffered64MiB-limited source door.
+const RESTORE_SOURCE_PART_BYTES=1024*1024,RESTORE_SOURCE_TTL_SECONDS=3600;
+async function* decodedRestoreChunks(request,limit,transport){
+  const reader=request.body.getReader(),decoder=new TextDecoder();transport.cancel=()=>reader.cancel();let total=0;
+  try{
+    for(;;){let chunk;try{chunk=await reader.read();}catch(cause){throw Object.assign(new Error("Could not read the restore body",{cause}),{restoreBodyUnreadable:true});}
+      if(chunk.done)break;total+=chunk.value.byteLength;if(total>limit)throw Object.assign(new Error("Restore is too large for a single request"),{restoreBodyTooLarge:true});
+      for(let offset=0;offset<chunk.value.byteLength;offset+=65536)yield decoder.decode(chunk.value.subarray(offset,offset+65536),{stream:true});
+    }
+    yield decoder.decode();
+  }finally{try{await reader.cancel();}catch{/* primary refusal stays */}reader.releaseLock();}
+}
+async function readRestoreIngress(request,{kv,hashOnly=false,sourceSchemaVersion=null,limit=RESTORE_MAX_BYTES}){
+  if(!request.body||typeof request.body.getReader!=="function"||!hashOnly&&(!kv||typeof kv.get!=="function"||typeof kv.put!=="function")){
+    let body;try{body=await readRestoreBody(request,limit);}catch(cause){throw Object.assign(new Error("Could not read the restore body",{cause}),{restoreBodyUnreadable:true});}
+    return{...body,sourceSha256:body.tooLarge?null:sha256Hex(body.text)};
+  }
+  const transport={},chunks=decodedRestoreChunks(request,limit,transport)[Symbol.asyncIterator]();
+  if(hashOnly){const hash=createHash("sha256");for(;;){const part=await chunks.next();if(part.done)break;hash.update(part.value);}return{sourceSha256:hash.digest("hex")};}
+  let prefix="",first;
+  for(;;){const part=await chunks.next();if(part.done)break;prefix+=part.value;
+    const lines=prefix.split("\n");lines.pop();const line=lines.find(value=>value.trim());if(line!==undefined){try{first=JSON.parse(line);}catch{/* compatibility parser owns error */}break;}
+  }
+  if(first?.kind!=="watermark"||!supportsSealedRestoreSource(first.sourceSchemaVersion)){const parts=[prefix];for(;;){const next=await chunks.next();if(next.done)break;parts.push(next.value);}return{text:parts.join("")};}
+  const parser=createNdjsonPreparse({retainRows:false}),encoder=new TextEncoder();let carry="",validationError=null;
+  const accept=text=>{carry+=text;let offset=0,end;while((end=carry.indexOf("\n",offset))!==-1){parser.writeLine(carry.slice(offset,end));offset=end+1;}carry=carry.slice(offset);};
+  async function* validated(){try{
+    accept(prefix);yield encoder.encode(prefix);prefix="";
+    for(;;){const part=await chunks.next();if(part.done)break;accept(part.value);yield encoder.encode(part.value);}
+    if(carry)parser.writeLine(carry);const parsed=parser.finish();restoreSourceSchemaVersion(parsed.watermark,sourceSchemaVersion);
+    requireResumeSource(parsed.watermark,parsed.trailer,contentVerificationLevel(parsed.trailer,parsed.tableDigests));verifyTrailer(parsed.trailer,parsed.byTable);
+  }catch(error){validationError=error;throw error;}finally{await chunks.return?.();}}
+  const key="room-restore-sources/"+randomUUID()+".ndjson",written=[];
+  const cleanup=async()=>{if(typeof kv.delete!=="function")return;await Promise.allSettled(written.map(part=>kv.delete(part)));};
+  const stage={put:async(part,value,options)=>{written.push(part);return kv.put(part,value,options);}};
+  const iterator=validated(),body=new ReadableStream({async pull(controller){try{const next=await iterator.next();if(next.done)controller.close();else controller.enqueue(next.value);}catch(error){controller.error(error);}},cancel(){return iterator.return?.();}});
+  try{const manifest=await writeKvBackup(stage,key,body,{partBytes:RESTORE_SOURCE_PART_BYTES,ttlSeconds:RESTORE_SOURCE_TTL_SECONDS});return{nativeSource:{manifest,cleanup}};}
+  catch(error){try{await transport.cancel?.();await iterator.return?.();}catch{/* preserve source/storage refusal */}await cleanup();throw validationError??error;}
+}
+// Existing KV feeding and source validation, shared with the original door.
+// The manifest is not target admission: full target recovery stays mandatory.
+async function replayBackupManifestSource(session,kv,manifest,sourceKey=null){
+  const whole=createHash("sha256"),decoder=new TextDecoder();let total=0;
+  for(const part of manifest.parts){const bytes=kvBytes(await kv.get(part.key,"arrayBuffer"))??kvBytes(await kv.get(part.key));
+    if(!bytes)throw Error("Backup part "+part.key+" is missing");
+    if(bytes.byteLength!==part.bytes||createHash("sha256").update(bytes).digest("hex")!==part.sha256)throw Error("Backup part "+part.key+" does not match its manifest entry");
+    whole.update(bytes);total+=bytes.byteLength;session.writeText(decoder.decode(bytes,{stream:true}));
+  }
+  session.writeText(decoder.decode());if(total!==manifest.bytes||whole.digest("hex")!==manifest.sha256)throw Error("Backup does not match its manifest sha256");
+  return{result:session.finish({sourceSha256:manifest.sha256,transport:{kind:sourceKey===null?'request-body':'kv-backup',key:sourceKey,bytes:total}}),total};
 }
 
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -634,7 +1008,7 @@ function jsonResponse(status, body) {
 // backup whose stored projections have drifted from current-reducer replay:
 // the restore then succeeds with the drift named in the result's audit
 // field instead of refusing (default: strict).
-export async function operatorRestoreResponse(request, token, store) {
+export async function operatorRestoreResponse(request, token, store, kv = null) {
   const url = new URL(request.url);
   if (url.pathname !== "/api/operator/restore") return null;
   const auth = authorizeOperatorRestore(request.headers.get("authorization"), token);
@@ -642,40 +1016,63 @@ export async function operatorRestoreResponse(request, token, store) {
   if (request.method !== "POST") return jsonResponse(405, { error: { code: "method_not_allowed", message: "Use POST" } });
   if (auth === "denied") return jsonResponse(401, { error: { code: "unauthorized", message: "Operator token required" } });
   if (!store) return jsonResponse(503, { error: { code: "unavailable", message: "Restore unavailable" } });
+  if(/^application\/json(?:;|$)/i.test(request.headers.get('content-type')??'')){
+    try{const body=await readRestoreBody(request,8192);if(body.tooLarge)return jsonResponse(413,{error:{code:'too_large',message:'Restore continuation metadata is too large'}});const input=JSON.parse(body.text),result=input?.cleanup===true?continueRestoreCleanup(store,input):continueRestoreCoverage(store,input);return jsonResponse(result.cleanupComplete===false&&input?.cleanup===true?202:result.verified?200:202,result);}
+    catch(error){const message=error?.message??String(error);return jsonResponse(/stale|binding differs|source differs/.test(message)?409:422,{error:{code:'restore_continuation_refused',message}});}
+  }
   // Explicit operator opt-in: ?audit=report lands a drifted backup with
   // the drift named on the result; anything else stays strict.
+  const resumeParam=url.searchParams.get("resume");if(url.searchParams.getAll("resume").length>1||(resumeParam!==null&&resumeParam!=="1"))return jsonResponse(422,{error:{code:"invalid_restore",message:"resume must be 1"}});const resume=resumeParam==="1";
   const auditParam = url.searchParams.get("audit");
   if (auditParam !== null && auditParam !== "strict" && auditParam !== "report")
     return jsonResponse(422, { error: { code: "invalid_restore", message: "audit must be strict or report" } });
+  const sourceParam = url.searchParams.get("sourceSchemaVersion");
+  const sourceSchemaVersion = sourceParam === null ? null : sourceParam === "42" ? 42 : sourceParam === "43" ? 43 : NaN;
+  try { restoreSourceSchemaVersion(null, sourceSchemaVersion); }
+  catch (error) { return jsonResponse(422, { error: { code: "invalid_restore", message: error.message } }); }
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > RESTORE_MAX_BYTES)
     return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
-  let ndjson;
+  let result, session = null, nativeSource = null;
   try {
-    const body = await readRestoreBody(request);
-    if (body.tooLarge)
+    const active = restoreProgress(store.db), sealed = active.state === "pending" && active.phase !== "loading";
+    const input = await readRestoreIngress(request, {kv:auditParam==="report"&&!resume?null:kv,hashOnly:sealed,sourceSchemaVersion});
+    nativeSource=input.nativeSource??null;
+    if (input.tooLarge) {
+      session?.abort();
       return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
-    ndjson = body.text;
-  } catch {
-    return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
-  }
-  let result;
-  try {
-    result = replayNdjsonInto(ndjson, store, { audit: auditParam ?? "strict" });
+    }
+    if (sealed) {
+      if (active.seal?.sourceSha256 !== input.sourceSha256) throw Error("Resume source differs from sealed original snapshot");
+      result = withRestoreTransaction(store, () => { validateCoverageState(store.db, active); return coverageResponse(active); });
+    } else if(nativeSource){
+      session=createBackupReplaySession(store,{audit:auditParam??"strict",sourceSchemaVersion,resume,staged:auditParam!=="report"});
+      ({result}=await replayBackupManifestSource(session,kv,nativeSource.manifest));
+    }
+    else result = replayNdjsonInto(input.text, store, { audit: auditParam ?? "strict", sourceSchemaVersion, resume, staged: auditParam !== "report" });
   } catch (error) {
+    // Same existing cleanup authority: a new failed load verifies empty before
+    // clearing admission; an explicit resume retains its protected target.
+    try { session?.abort(); } catch { /* admission remains pending if cleanup cannot complete */ }
+    if(error?.restoreBodyTooLarge)return jsonResponse(413,{error:{code:"too_large",message:"Restore is too large for a single request"}});
+    if (error?.restoreBodyUnreadable)
+      return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
     const message = error?.message ?? String(error);
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|sourceSchemaVersion|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|requires operator reconciliation/.test(message))
+    if (/Resume |watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|projection_corrupt|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
-  }
+  } finally { await nativeSource?.cleanup(); }
+  if(result.pending)return jsonResponse(202,result);
   return jsonResponse(200, {
     ok: true,
+    ...(result.resumed?{resumed:true}:{}),
     verified: result.verified,
     audit: result.audit,
     contentVerification: result.contentVerification,
+    writeProofs: result.writeProofs,
     events: result.events,
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -720,18 +1117,25 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     return jsonResponse(503, { error: { code: "backup_unavailable", message: "No backup namespace is configured on this deployment" } });
   let key = url.searchParams.get("key");
   let auditMode = url.searchParams.get("audit");
+  const resumeParam=url.searchParams.get("resume");if(url.searchParams.getAll("resume").length>1||(resumeParam!==null&&resumeParam!=="1"))return jsonResponse(422,{error:{code:"invalid_restore",message:"resume must be 1"}});let resume=resumeParam==="1";
+  const sourceParam = url.searchParams.get("sourceSchemaVersion");
+  let sourceSchemaVersion = sourceParam === null ? null : sourceParam === "42" ? 42 : sourceParam === "43" ? 43 : NaN;
   try {
     const text = await request.text();
     if (text.trim()) {
       const parsed = JSON.parse(text);
       if (parsed && typeof parsed.key === "string") key = parsed.key;
+      if (parsed && Object.hasOwn(parsed, "sourceSchemaVersion") && sourceParam === null) sourceSchemaVersion = parsed.sourceSchemaVersion;
       if (parsed && typeof parsed.audit === "string" && auditMode === null) auditMode = parsed.audit;
+      if(parsed&&Object.hasOwn(parsed,"resume")&&resumeParam===null){if(typeof parsed.resume!=="boolean")return jsonResponse(422,{error:{code:"invalid_restore",message:"resume must be boolean"}});resume=parsed.resume;}
     }
   } catch {
     return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
   }
   if (auditMode !== null && auditMode !== "strict" && auditMode !== "report")
     return jsonResponse(422, { error: { code: "invalid_restore", message: "audit must be strict or report" } });
+  try { restoreSourceSchemaVersion(null, sourceSchemaVersion); }
+  catch (error) { return jsonResponse(422, { error: { code: "invalid_restore", message: error.message } }); }
   if (key == null) key = backupObjectKey(new Date());
   if (!BACKUP_KEY_PATTERN.test(key))
     return jsonResponse(422, { error: { code: "invalid_restore", message: "Backup key is not a daily backup key" } });
@@ -751,36 +1155,29 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     && typeof manifest?.sha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.sha256);
   if (!partsValid) return jsonResponse(422, { error: { code: "invalid_restore", message: "Backup manifest is malformed" } });
 
+  const active=restoreProgress(store.db);
+  if(active.state==='pending'&&active.phase!=='loading'){
+    try{if(active.seal?.sourceSha256!==manifest.sha256)throw Error('Resume source differs from sealed original snapshot');const result=withRestoreTransaction(store,()=>{validateCoverageState(store.db,active);return coverageResponse(active);});return jsonResponse(202,result);}catch(error){return jsonResponse(409,{error:{code:'restore_continuation_refused',message:error.message}});}
+  }
   let session;
   try {
-    session = createBackupReplaySession(store, { audit: auditMode ?? "strict" });
+    session = createBackupReplaySession(store, { audit: auditMode ?? "strict", sourceSchemaVersion, resume, staged:auditMode!=="report" });
   } catch (error) {
     const message = error?.message ?? String(error);
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
+    if (/^Resume /.test(message)) return jsonResponse(422,{error:{code:"resume_refused",message}});
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed before replay" } });
   }
-  const whole = createHash("sha256");
-  const decoder = new TextDecoder();
-  let total = 0;
-  try {
-    for (const part of manifest.parts) {
-      const bytes = kvBytes(await kv.get(part.key, "arrayBuffer")) ?? kvBytes(await kv.get(part.key));
-      if (!bytes) throw new Error(`Backup part ${part.key} is missing`);
-      if (bytes.byteLength !== part.bytes || createHash("sha256").update(bytes).digest("hex") !== part.sha256)
-        throw new Error(`Backup part ${part.key} does not match its manifest entry`);
-      whole.update(bytes);
-      total += bytes.byteLength;
-      session.writeText(decoder.decode(bytes, { stream: true }));
-    }
-    session.writeText(decoder.decode());
-    if (total !== manifest.bytes || whole.digest("hex") !== manifest.sha256)
-      throw new Error("Backup does not match its manifest sha256");
-    const result = session.finish();
+  try{
+    const {result,total}=await replayBackupManifestSource(session,kv,manifest,key);
+    if(result.pending)return jsonResponse(202,result);
     return jsonResponse(200, {
       ok: true,
+      ...(result.resumed?{resumed:true}:{}),
       verified: result.verified,
       audit: result.audit,
       contentVerification: result.contentVerification,
+      writeProofs: result.writeProofs,
       events: result.events,
       tables: result.tables,
       backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -796,9 +1193,9 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     try { cleanup = session.abort() ?? cleanup; } catch (cleanupError) { cleanup = { cleaned: false, error: cleanupError, skipped: false }; }
     const cleanupNote = !cleanup.cleaned && !cleanup.skipped ? { cleanupFailed: true } : {};
     const message = error?.message ?? String(error);
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|sourceSchemaVersion|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
-    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|requires operator reconciliation/.test(message))
+    if (/Resume |watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)|projection_corrupt|requires operator reconciliation/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }

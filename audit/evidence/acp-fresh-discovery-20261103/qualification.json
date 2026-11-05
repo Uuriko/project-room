@@ -1,0 +1,44 @@
+{
+  "source": "f6ecc372dcb31886caed50190a9211f35911dc50",
+  "base": "dd9f34d324ad32eb359bd48d7eb6eafa98dfc14b",
+  "serverDependency": "3041b4188976b3d7ccf2a38056edd933bca3dfce",
+  "localServerDependency": "469a01ce6",
+  "node": "v24.22.1",
+  "focused": {
+    "tests": 109,
+    "pass": 109,
+    "skip": 0
+  },
+  "before": {
+    "tests": 2,
+    "pass": 1,
+    "fail": 1
+  },
+  "actualHttpFixture": {
+    "historicalWakes": 500,
+    "heldHistoricalPrompts": 3,
+    "arrivalToDiscoveryMs": 17.356166999999914,
+    "discoveryToDeliveryObservationMs": 51.37025000000017,
+    "requestsFromDiscovery": 22,
+    "model": "synthetic",
+    "notASLA": true
+  },
+  "logs": {
+    "before": {
+      "sha256": "9f5e23eaf2085681fd065d614ce7706177a28a7dbb6d6da946480ad2d8854e6f",
+      "rawBytes": 1020
+    },
+    "final": {
+      "sha256": "91df42072ed8be42e5d25572ccc61b9f8cbc6d0c3302d683f1cacd435ebd7d22",
+      "rawBytes": 47017
+    },
+    "lint": {
+      "sha256": "6695095fb673f11b06c370e608fd2f88f5228442878d622d0ba5de4187b33d0a",
+      "rawBytes": 205
+    },
+    "secret": {
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "rawBytes": 24
+    }
+  }
+}

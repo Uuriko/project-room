@@ -1,0 +1,96 @@
+{
+  "runtimeToolHead": "72dff46ff306204a2f31ff71d00aa39822ddc180",
+  "base": "a2fb0c7cb9f8d77d5b594cf9880319ef5a3ffe14",
+  "serverContractReviewed": "e4fb4700f (server/restore-cleanup.mjs cleanupResult/restoreCleanupNext andpublication result)",
+  "focusedActualCLIHTTP": {
+    "exitCode": 0,
+    "pass": 11,
+    "fail": 0,
+    "skip": 0,
+    "includes": [
+      "lostcoverageACK",
+      "firstandlastcleanupACKloss",
+      "SIGKILL+twoexistinglockrestartrefusals+explicitoperatorreconciliation",
+      "redirectauthorizationnonforwarding",
+      "fixedendpoint/binding/CAS/type/progress/zeroproof",
+      "morethan500progressrequests"
+    ]
+  },
+  "finalTestOnlyConstChange": {
+    "exitCode": 0,
+    "pass": 1,
+    "description": "Fresh SIGKILL+two-restart+exactresume test; productionhelper unchangedfrom72d."
+  },
+  "lint": {
+    "exitCode": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  "secretScan": {
+    "exitCode": 0,
+    "files": 1848,
+    "findings": 0
+  },
+  "localCompatibility": {
+    "legacyMainBodyBytesIdentical": true,
+    "combinedNeighborRun": {
+      "tests": 69,
+      "pass": 67,
+      "fail": 2
+    },
+    "originalBaseScriptRedReproduction": {
+      "tests": 2,
+      "pass": 0,
+      "fail": 2,
+      "cases": [
+        "current schema marker prevents legacy attestation from blessing missing proofs",
+        "replay skips Durable Object runtime and retired tables and reports them"
+      ]
+    },
+    "description": "Both inherited current-schema45/operational-table fixture failures reproducedwithoriginala2fbCLI; no broadlocalrestorepassclaimed."
+  },
+  "independentReview": {
+    "reviewer": "pairing_resume",
+    "source": "72dff46ff306204a2f31ff71d00aa39822ddc180",
+    "result": "No remaining material blocker; no independent test run. Automaticstaleunlink race foundandremoved."
+  },
+  "limitations": [
+    "Synthetic realHTTPAPI serverimplementsfrozenbackendJSONcontract; noactualNativecomposedcleanupdriverjourneyclaim.",
+    "Existinglockalwaysrefusesaftercrash; operatorstopsotherdrivers/verifiesdeadownerbeforeremovingonlylock, durablecheckpointretained.",
+    "LosingcheckpointaftermultiplecleanupACKscannotberecoveredfromimmutablepublicationrev0receipt; freshcheckpointfails409safely.",
+    "No backupupload/newrestore/deploy/productioncalls.",
+    "Invocationsbounded15minutes(default), shorter--run-ms allowed; pendingexit2, complete0, stopped1."
+  ],
+  "sources": {
+    "scripts/restore-remote-continuation.mjs": "a3cf9cdaaaa00a65b609b4d3200107fea67aa25a695229bfb68fdb5c620d07a4",
+    "scripts/restore-room-backup.mjs": "c6bcaa2521502b5cf3f6881cb335edb99b608ccaf777f53dd85e412f9b738bae",
+    "tests/remote-restore-driver.test.mjs": "a91592bcd90d5c306f86436329af6862a3ab47d1e1465ef510f26ed728573624",
+    "docs/BACKUP-DR.md": "8974f4dbf57e3177e634f7aca46d7e25c2c255362b1ac7a86c5f0a9657f7ec24"
+  },
+  "artifacts": {
+    "remote-restore-driver-lock-cure-1102.log": {
+      "bytes": 1090,
+      "sha256": "5827d61542763f65495916ffd123c137820dbab198f70edb8d071884b9d0a263"
+    },
+    "remote-driver-final-lock-test-1102.log": {
+      "bytes": 212,
+      "sha256": "bb3708153d0274868f4383c682c342b9365a812197c06e48a0552523b149256c"
+    },
+    "remote-driver-final-lint-1102.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "remote-restore-driver-secret-1102.log": {
+      "bytes": 53,
+      "sha256": "649a7d9a55ed9e5930984fa6288197522c52c2f30db53686132d7f3d96734b99"
+    },
+    "remote-restore-driver-tests-1102.log": {
+      "bytes": 51633,
+      "sha256": "b8357faa4d2a0dea42e8b3126d82609934f08cc163a80ecda88ce3d677c49330"
+    },
+    "remote-driver-inherited-base-red-1102.log": {
+      "bytes": 3823,
+      "sha256": "505fa6009a4be8bb6b9d5c2d5aa11d269667cf4cc664e9df85f642bf4029723a"
+    }
+  }
+}

@@ -26,11 +26,10 @@
         invite_member stay refused on this array), a `profile` (chat, contribute,
         review, collaborate), or `ownerEquivalent: true`, plus optional
         `expiresInMinutes` and `displayName`. `ownerEquivalent: true` is the room's
-        owner member only: a human session, a human room key, or that owner's own
+        owner member, or a co-owner in opted-in Muse Room: a human session, a human room key, or that owner's own
         identity secret or room connection, including when the owner is an agent.
         It grants every permission the owner can delegate. The invitee is a
-        co-owner-level member, not the owner. Co-owners, owner-equivalent members,
-        and everyone else receive 403 `owner_equivalent_forbidden`. Each such mint
+        co-owner-level member, not the owner. Outside opted-in Muse Room, other members receive 403 `owner_equivalent_forbidden`. Each such mint
         is logged in the room as `agent_invite.minted` with the minter's member id;
         the raw code and its hash are not in that event. Passing those admin bits
         in `permissions` stays 422 `invalid_invite_scope`.
@@ -49,13 +48,13 @@
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
-                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room's owner member only, including an agent owner on their own connection. Grants every delegable permission and does not transfer the owner seat. Co-owners cannot." }
+                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room owner, or a co-owner in opted-in Muse Room, including agents on their own connections. Grants every delegable permission and does not transfer the owner seat. Other rooms keep owner-only issuance." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, ownerEquivalent, displayName, createdAt, expiresAt }. profile is owner when ownerEquivalent is true. The raw code is returned once." }
-        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (only the room's owner member can mint an owner-level invite)" }
+        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (room owner or opted-in Muse co-owner required)" }
         '409': { description: pilot_limit }
         '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:

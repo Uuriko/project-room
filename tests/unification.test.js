@@ -72,6 +72,23 @@ test("draft recovery isolates account, epoch, room, member and session without s
   assert.equal(recovery.write(null, drafts, null), false);
 });
 
+test("account reconciliation removes unscoped legacy drafts without losing a matching current draft", () => {
+  const memory = new Map();
+  const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) };
+  const recovery = new DraftRecovery(storage);
+  const identity = { authenticated: true, account: { id: "account", authEpoch: 0 }, roomId: "room", member: { id: "person" }, sessionBinding: "binding" };
+  const drafts = new ConversationDrafts(); drafts.save(null, { body: "Current draft" });
+  recovery.write(draftRecoveryScope(identity), drafts, null);
+  memory.set("project-room:drafts:v1", "old unscoped private text");
+  recovery.reconcileAccount(identity);
+  assert.equal(memory.has("project-room:drafts:v1"), false);
+  assert.equal(recovery.read(draftRecoveryScope(identity), { messages: [], members: { person: { active: true } } }).drafts.get(null).body, "Current draft");
+  recovery.clear();
+  memory.set("project-room:drafts:v1", "old unscoped private text");
+  recovery.reconcileAccount(identity);
+  assert.equal(memory.size, 0);
+});
+
 test("an unchanged member cannot own catch-up work from another account epoch or browser session", () => {
   for (const change of [
     s => { s.account.id = "other"; }, s => { s.account.authEpoch++; },

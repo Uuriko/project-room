@@ -162,7 +162,12 @@ test("a contested write cannot start without a current exact-scope claim", () =>
 
 test("a claim records scope without granting write permission", () => {
   let state = baseState();
-  state = applyEvent(state, proposal("noauth-proposed", "work-noauth", "instinct", "codex", "write"));
+  // FUNNEL-FIXES pack 01 (Option D) §7.6 amendment, per PACK-REVISION §5.5:
+  // the proposal actor is re-pointed via the helper's actor parameter to
+  // "maya", a non-owner steer holder without write_external, so no item
+  // stamp is granted and the test's true claim (a claim by itself grants
+  // nothing) is preserved. The owner-proposed companion case is the next test.
+  state = applyEvent(state, proposal("noauth-proposed", "work-noauth", "instinct", "codex", "write", "maya"));
   state = applyEvent(state, workEvent("noauth-accepted", EVENT_TYPES.WORK_ACCEPTED, "instinct", "work-noauth", 0));
   state = applyEvent(state, workEvent("noauth-claim", EVENT_TYPES.CLAIM_ACQUIRED, "instinct", "work-noauth", 1, {
     repository: "Uuriko/project-room",
@@ -178,6 +183,30 @@ test("a claim records scope without granting write permission", () => {
     evidenceVersion: "abc",
     nextAction: "Review"
   })), /lacks write_external/);
+});
+
+test("an owner-proposed write item carries a one-item grant for its accountable member", () => {
+  let state = baseState();
+  state = applyEvent(state, proposal("granted-proposed", "work-granted", "instinct", "codex", "write"));
+  assert.equal(state.workItems["work-granted"].externalWriteGrantBy, "potter");
+  assert.equal(state.workItems["work-granted"].externalWriteGrantFor, "instinct");
+  state = applyEvent(state, workEvent("granted-accepted", EVENT_TYPES.WORK_ACCEPTED, "instinct", "work-granted", 0));
+  state = applyEvent(state, workEvent("granted-claim", EVENT_TYPES.CLAIM_ACQUIRED, "instinct", "work-granted", 1, {
+    repository: "Uuriko/project-room",
+    ref: "instinct/test",
+    paths: ["src/**"],
+    expiresAt: "2026-09-06T10:00:00.000Z"
+  }));
+  state = applyEvent(state, workEvent("granted-started", EVENT_TYPES.WORK_STARTED, "instinct", "work-granted", state.workItems["work-granted"].revision));
+  state = applyEvent(state, workEvent("granted-complete", EVENT_TYPES.WORK_COMPLETED, "instinct", "work-granted", state.workItems["work-granted"].revision, {
+    summary: "Done",
+    evidenceUrl: "https://github.com/Uuriko/project-room",
+    evidenceVersion: "abc",
+    nextAction: "Review"
+  }));
+  assert.equal(state.workItems["work-granted"].state, "completed");
+  // The grant is item-scoped: the member record gains no room-wide bit.
+  assert.equal(state.members.instinct.permissions.includes("write_external"), false);
 });
 
 test("read-only work rejects a write claim", () => {
@@ -517,8 +546,10 @@ test("event helper creates the required Room-scoped envelope", () => {
   assert.equal(created.roomId, ROOM_ID);
 });
 
-function proposal(id, workItemId, accountableMemberId, verifierMemberId, mode) {
-  return fixedEvent(id, EVENT_TYPES.WORK_PROPOSED, "potter", {
+function proposal(id, workItemId, accountableMemberId, verifierMemberId, mode, actorId = "potter") {
+  return fixedEvent(id, EVENT_TYPES.WORK_PROPOSED, actorId, {
+    // Live admission stamps the write grant policy on every new proposal.
+    writeGrantPolicyVersion: 1,
     workItemId,
     title: `Work ${workItemId}`,
     definitionOfDone: "Exact evidence is returned",

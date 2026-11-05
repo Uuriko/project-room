@@ -1,0 +1,40 @@
+{
+  "sourceHead": "c6a9a77d42c4b2e4438195423b2753d08ecc982d",
+  "node": {
+    "pass": 85,
+    "fail": 0,
+    "skip": 0
+  },
+  "native": {
+    "pass": 3,
+    "fail": 0,
+    "skip": 0
+  },
+  "bootGraph": {
+    "production": 537,
+    "fixtureUnion": 554,
+    "fixtureOnlyAllowlisted": 17,
+    "residual": 0
+  },
+  "preflight": "pass",
+  "review": "Independent helper reviewed exactf944 composed delivery core; Root adopted final public source and re-ran public Native. No blocking issue reported.",
+  "scope": "Local qualification only; deployment and real cloud/runner proof separate.",
+  "logs": [
+    {
+      "file": "root-bounded-delivery-final-node-1103.log.gz",
+      "uncompressedSha256": "097e92b48c167fece087954e9f6362a993c0118cfb5d105abc7cc6bb17aff0b0"
+    },
+    {
+      "file": "root-bounded-final-native-1103.log.gz",
+      "uncompressedSha256": "9d14bcf2e402d43545bdd8d46cb634f969d6482c4ebd4cf0d03434d0feac0b79"
+    },
+    {
+      "file": "root-bounded-delivery-boot-1103.log.gz",
+      "uncompressedSha256": "31ac9b8c5068afa28ea56b490b21c2b30a4380809a027cf86d57a82de98db519"
+    },
+    {
+      "file": "root-bounded-preflight-1103.log.gz",
+      "uncompressedSha256": "06b2ecf906c96d458e90903fa813331252db81b8be4252d762fb53feb0c8ae52"
+    }
+  ]
+}

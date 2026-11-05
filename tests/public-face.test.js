@@ -161,3 +161,133 @@ test("faceHtml escapes content and carries noindex", () => {
   assert.ok(html.includes("&lt;script&gt;"));
   assert.ok(html.includes("noindex"));
 });
+
+test("long public messages have an expandable, escaped preview without scripts", () => {
+  const state = baseState();
+  state.messages.push({ id: "long", authorId: "alice", body: "A".repeat(450) + "<script>bad()</script>" + "Z".repeat(2100), createdAt: 20 });
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  const html = face.faceHtml(publicCode);
+  assert.match(html, /<details><summary>/);
+  assert.match(html, /Show more/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
+  assert.doesNotMatch(html, /Z{2000}/);
+});
+
+test("public activity previews stay compact and retain the complete message", () => {
+  const state = baseState();
+  const body = 'Update\n\n' + '😀'.repeat(170) + '\nFinal detail';
+  state.messages.push({ id: 'compact', authorId: 'alice', body, createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable('r1', 'owner');
+  const html = face.faceHtml(publicCode);
+  const preview = html.match(/<span class="preview">(.*?)<\/span>/s)?.[1];
+  assert.ok(preview);
+  assert.doesNotMatch(preview, /\n/);
+  assert.ok(Array.from(preview).length <= 162);
+  assert.ok(html.includes(body));
+  assert.match(html, /Show more/);
+});
+
+test("a whitespace-heavy public message is collapsed without dropping its content", () => {
+  const state = baseState();
+  const body = 'Start' + ' '.repeat(1000) + 'End';
+  state.messages.push({ id: 'spaces', authorId: 'alice', body, createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable('r1', 'owner');
+  const html = face.faceHtml(publicCode);
+  assert.match(html, /<span class="preview">Start End <\/span>/);
+  assert.ok(html.includes(body));
+});
+
+test("public message emphasis is readable without interpreting code or HTML", () => {
+  const state = baseState();
+  state.messages.push({ id: "format", authorId: "alice", body: '**Status:** ready `<b>**literal**</b>` **<img src=x onerror=alert(1)>**', createdAt: 20 });
+  const face = new PublicFace(makeStore({ r1: state }));
+  const { publicCode } = face.enable("r1", "owner");
+  const html = face.faceHtml(publicCode);
+  assert.match(html, /<strong>Status:<\/strong> ready/);
+  assert.match(html, /`&lt;b&gt;\*\*literal\*\*&lt;\/b&gt;`/);
+  assert.match(html, /<strong>&lt;img src=x onerror=alert\(1\)&gt;<\/strong>/);
+  assert.doesNotMatch(html, /<img src=x/);
+});
+
+test("mention tokens show public handles, never member ids", () => {
+  const state = baseState();
+  state.members.gone = member("gone", "Gone", false);
+  state.messages.push(
+    { id: "m5", authorId: "owner", body: "<@alice> and <@bob>, see <@gone> and <@ai_unknownX9>", createdAt: 14 },
+    { id: "m6", authorId: "owner", body: "<@alice>" + "x".repeat(2100), createdAt: 15 });
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  const shown = face.faceByCode(publicCode).messages.find(m => m.body.startsWith("@Alice and"));
+  assert.equal(shown.body, "@Alice and @Bob, see @member and @member");
+  const feed = face.feedByCode(publicCode).messages;
+  assert.ok(feed.every(m => !/<@|ai_unknownX9|\bgone\b/.test(m.body)));
+  assert.ok(feed.find(m => m.id === "m6").body.startsWith("@Alice"));
+  const html = face.faceHtml(publicCode);
+  assert.ok(html.includes("@Alice and @Bob"));
+  assert.ok(!html.includes("&lt;@") && !html.includes("ai_unknownX9"));
+});
+
+test("mention handles stay escaped and unavailable members stay anonymous", () => {
+  const state = baseState();
+  state.members.eve = member("eve", "<b>Eve</b>");
+  state.members.left = member("left", "Former Member", false);
+  // Eve's name is already published as the author of this public page.
+  state.messages.push({ id: "eve-public", authorId: "eve", body: "Public update", createdAt: 15 });
+  state.messages.push({ id: "m7", authorId: "owner", body: "<@eve> and <@left>", createdAt: 16 });
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  assert.equal(face.feedByCode(publicCode).messages.find(m => m.id === "m7").body, "@<b>Eve</b> and @member");
+  const html = face.faceHtml(publicCode);
+  assert.ok(html.includes("@&lt;b&gt;Eve&lt;/b&gt; and @member"));
+  assert.ok(!html.includes("<b>Eve</b>") && !html.includes("Former Member") && !html.includes("&lt;@left&gt;"));
+});
+
+test("mention resolution never associates an active private member's raw ID with its name", () => {
+  const state = baseState();
+  state.members.privateOnly = member("privateOnly", "Private Participant");
+  state.messages.push(
+    { id: "private-post", authorId: "privateOnly", toMemberId: "owner", body: "Private history", createdAt: 14 },
+    { id: "public-mention", authorId: "owner", body: "<@alice> / <@privateOnly> / <@not-known>", createdAt: 15 });
+  const store = makeStore({ r1: state }), face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  assert.equal(face.faceByCode(publicCode).messages.at(-1).body, "@Alice / @member / @member");
+  const feed = face.feedByCode(publicCode);
+  assert.equal(feed.messages.at(-1).body, "@Alice / @member / @member");
+  assert.doesNotMatch(JSON.stringify(feed), /privateOnly|Private Participant|Private history/);
+  // A cursor may not turn authors from another page into a member-name lookup.
+  assert.equal(face.feedByCode(publicCode, { after: "m4", limit: 1 }).messages[0].body, "@member / @member / @member");
+});
+
+
+test("normalized JSON and watch resolve only admitted public authors without hydrating private members", async t => {
+  const { RoomStore } = await import("../server/store.mjs");
+  const { createRoomServer } = await import("../server/http.mjs");
+  const { seedPublicLobby } = await import("./helpers/public-lobby-source.mjs");
+  const store = new RoomStore(":memory:");
+  const saved = seedPublicLobby(store, { privateCount: 3 });
+  store.command(saved.owner, saved.roomId, { id: "mention-publication", type: "message.posted", data: {
+    messageId: "mention-publication", body: "<@alice> / <@bob> / <@unknown>", channelId: "general"
+  } });
+  const { publicCode } = store.publicFace.enable(saved.roomId, "owner");
+  store.command(saved.owner, saved.roomId, { id: "publish-mentions-lobby", type: "room.public_page_set", data: { enabled: true } });
+  store.room = () => { throw new Error("Whole-room member hydration forbidden"); };
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const page = await (await fetch(origin + "/api/public/rooms/" + publicCode)).json();
+  assert.equal(page.messages.at(-1).body, "@alice / @member / @member");
+  const feed = await (await fetch(origin + "/api/public/rooms/" + publicCode + "/feed?after=public-16")).json();
+  assert.equal(feed.messages.at(-1).body, "@alice / @member / @member");
+  const watch = await (await fetch(origin + "/watch")).text();
+  assert.match(watch, /@alice \/ @member \/ @member/);
+  assert.doesNotMatch(watch, /&lt;@|@bob|OTHER CHANNEL|PRIVATE HISTORY/);
+  assert.match(watch, /Only the General channel/);
+});

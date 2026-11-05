@@ -29,14 +29,32 @@ test("composer Send control has a 44px touch target", () => {
   assert.match(joined, /min-width:\s*44px/, "submit button declares min-width: 44px");
 });
 
+function submitTrackMinimum(columns) {
+  // Whitespace inside a CSS math function does not separate grid tracks.
+  const track = columns.trim().match(/(?:max\([^()]+\)|[^\s()]+)\s*$/)?.[0].trim();
+  if (/^\d+(?:\.\d+)?px$/.test(track ?? "")) return Number.parseFloat(track);
+  if (/^max\([^()]+\)$/.test(track ?? "")) {
+    const pixels = track.slice(4, -1).split(",").map(value => value.trim())
+      .filter(value => /^\d+(?:\.\d+)?px$/.test(value)).map(Number.parseFloat);
+    if (pixels.length) return Math.max(...pixels);
+  }
+  return NaN; // An unfamiliar expression needs review, not an implicit pass.
+}
+
+test("composer track guard recognizes CSS math without confusing rem with px", () => {
+  assert.equal(submitTrackMinimum("minmax(0, 1fr) max(44px, 2.75rem)"), 44);
+  assert.equal(submitTrackMinimum("minmax(0, 1fr) 40px"), 40);
+  assert.equal(submitTrackMinimum("1fr max(40px, 2rem)"), 40);
+  assert.ok(Number.isNaN(submitTrackMinimum("1fr var(--send-width)")));
+});
+
 test("composer grid gives the submit column room for the 44px button", () => {
   const rows = ruleBody(".composer-row")
     .filter((b) => /grid-template-columns/.test(b))
     .map((b) => b.match(/grid-template-columns:\s*([^;]+);/)[1]);
   assert.ok(rows.length >= 1, "at least one .composer-row grid rule exists");
   for (const cols of rows) {
-    const last = cols.trim().split(/\s+/).pop();
-    const px = parseInt(last, 10);
-    assert.ok(!(Number.isFinite(px) && px < 44), `submit track "${last}" leaves room for a 44px control`);
+    const px = submitTrackMinimum(cols);
+    assert.ok(Number.isFinite(px) && px >= 44, `submit track in "${cols}" guarantees room for a 44px control`);
   }
 });

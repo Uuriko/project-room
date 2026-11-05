@@ -50,7 +50,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   const visitor = await f.browser.newPage({ viewport: { width, height: 900 }, isMobile: width === 320, hasTouch: width === 320 }); visitor.setDefaultTimeout(10000);
   await visitor.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }); });
   const requests = []; visitor.on('request', request => requests.push(request));
-  await visitor.goto(`${f.origin}/offers`); await visitor.locator('#find-work-form [name=skills]').fill('JavaScript'); await visitor.locator('#find-work-form [name=interests]').fill('Accessibility');
+  await visitor.goto(`${f.origin}/offers`); await visitor.locator('.match-filters summary').click(); await visitor.locator('#find-work-form [name=skills]').fill('JavaScript'); await visitor.locator('#find-work-form [name=interests]').fill('Accessibility');
   let failedSuggestion = false;
   await visitor.route('**/api/public-work/match', async route => { if (failedSuggestion) { await route.continue(); return; } failedSuggestion = true; await route.fetch(); await route.abort('failed'); });
   await visitor.locator('#find-work-form [type=submit]').click(); await visitor.locator('#find-work-status').filter({ hasText: 'Couldn’t find work' }).waitFor();
@@ -63,8 +63,17 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   assert.match(await packet.inputValue(), new RegExp(`/tasks/${offerId}/claim`)); assert.match(await packet.inputValue(), /"expectedTermsVersion": 1/);
   assert.equal(await visitor.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-work-matching-${width}.png`, fullPage: true });
-  await visitor.locator('[data-match-offer]').click(); await visitor.locator('#copy-offer:not(:disabled)').waitFor(); await visitor.goBack();
+  await visitor.locator('[data-match-offer]').click(); await visitor.locator('#copy-offer:not(:disabled)').waitFor();
+  assert.equal(await visitor.locator('.find-work').isVisible(), false, 'task detail should not be preceded by the matcher');
+  await visitor.goBack(); assert.equal(await visitor.locator('.find-work').isVisible(), true);
+  assert.equal(await visitor.locator('[data-match-offer]').evaluate(node => node === document.activeElement), true, 'back returns focus to the selected suggestion');
+  await visitor.keyboard.press('Tab');
+  assert.equal(await visitor.locator('[data-copy-claim]').evaluate(node => node === document.activeElement), true, 'the next tab reaches the suggestion handoff');
+  await visitor.locator('[data-match-offer]').click(); await visitor.locator('#copy-offer:not(:disabled)').waitFor();
+  await visitor.locator('[data-close]').click();
+  assert.equal(await visitor.locator('[data-match-offer]').evaluate(node => node === document.activeElement), true, 'All offers returns focus to the selected suggestion');
   assert.equal(new URL(visitor.url()).searchParams.has('offer'), false);
+  await visitor.locator('#find-work-form [name=reward]').selectOption('work_trade'); await visitor.locator('#find-work-form [type=submit]').click(); await visitor.locator('#find-work-status').filter({ hasText: 'Work-trade search is not available yet.' }).waitFor(); assert.equal(await visitor.locator('[data-copy-claim]').count(), 0);
   await visitor.locator('#find-work-form [name=reward]').selectOption('cash'); await visitor.locator('#find-work-form [type=submit]').click(); await visitor.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); assert.equal(await visitor.locator('[data-copy-claim]').count(), 0);
   const identity = await createAgentIdentity(f.origin, 'Synthetic explicit contributor');
   const client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: identity.secret });
@@ -92,6 +101,13 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   assert.equal((await (await visitor.request.get(f.origin + jsonPath)).json()).receiptId, submitted.receipt.receiptId);
   const [download] = await Promise.all([visitor.waitForEvent('download'), visitor.locator('#contribution-artifact').click()]);
   assert.deepEqual(readFileSync(await download.path()), Buffer.from(artifactText, 'utf8'));
+  await visitor.route('**/api/project-offers?*', route => route.fulfill({ status: 200, json: { offers: [], nextCursor: null } }));
+  await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-artifact').waitFor();
+  await visitor.locator('#list-status').filter({ hasText: 'No open tasks' }).waitFor({ state: 'attached' });
+  await visitor.locator('[data-close]').click();
+  assert.equal(await visitor.locator('#find-work-title').evaluate(node => node === document.activeElement), true, 'an empty list returns focus to the work search');
+  await visitor.unroute('**/api/project-offers?*');
+  await visitor.goto(`${f.origin}/offers?offer=${offerId}`); await visitor.locator('#contribution-artifact').waitFor();
   f.store.projectOffers.transition('commons', 'owner', offerId, 'withdraw', { requestId: 'after-submission-withdraw', expectedRevision: 2 });
   if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
   await visitor.locator('#detail-title').filter({ hasText: 'Offer unavailable' }).waitFor();
@@ -117,6 +133,7 @@ test('an empty bounded recommendation page recovers failed fresh and continuatio
   }
   await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click();
   await f.page.locator('#more-matches').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);
+  assert.match(await f.page.locator('#find-work-status').textContent(), /No matches in this set.*Try next tasks/i);
   let interruptNext = true;
   const inputs = [];
   await f.page.route('**/api/public-work/match', async route => {
@@ -207,7 +224,7 @@ test('editing preferences fences an older real match response and starts a fresh
     inputs.push(JSON.parse(route.request().postData())); if (!first) return route.continue(); first = false; const response = await route.fetch(); observed(); await held;
     try { await route.fulfill({ response }); } catch { /* The obsolete browser read is allowed to abort. */ } finally { delivered(); }
   });
-  await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [name=skills]').fill('JavaScript'); await f.page.locator('#find-work-form [type=submit]').click(); await captured;
+  await f.page.goto(`${f.origin}/offers`); await f.page.locator('.match-filters summary').click(); await f.page.locator('#find-work-form [name=skills]').fill('JavaScript'); await f.page.locator('#find-work-form [type=submit]').click(); await captured;
   await f.page.locator('#find-work-form [name=skills]').fill('Python'); await f.page.locator('#find-work-form [name=reward]').selectOption('cash'); assert.equal(await f.page.locator('#find-work-form [type=submit]').isEnabled(), true);
   await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); release(); await finished; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.match(await f.page.locator('#find-work-status').textContent(), /No claimable cash matches/); assert.deepEqual(inputs[1], { skills: ['Python'], interests: [], reward: 'cash', limit: 3 });
@@ -218,6 +235,21 @@ test('a completed native clipboard write cannot restore old match feedback after
   await f.page.evaluate(() => { const write = navigator.clipboard.writeText.bind(navigator.clipboard); navigator.clipboard.writeText = async text => { await write(text); window.nativeClipboardWritten = true; await new Promise(resolve => { window.finishClipboardResponse = resolve; }); }; });
   await f.page.locator('[data-copy-claim]').click(); await f.page.waitForFunction(() => window.nativeClipboardWritten);
   assert.match(await f.page.evaluate(() => navigator.clipboard.readText()), /preference-task/);
-  await f.page.locator('#find-work-form [name=interests]').fill('Games'); await f.page.evaluate(() => window.finishClipboardResponse()); await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await f.page.locator('.match-filters summary').click(); await f.page.locator('#find-work-form [name=interests]').fill('Games'); await f.page.evaluate(() => window.finishClipboardResponse()); await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.equal(await f.page.locator('#find-work-status').textContent(), '');
+});
+test('late rejected match copy leaves subsequent focus alone', { timeout: 45000 }, async t => {
+  const f = await setup(t, 1280); preferenceTask(f);
+  await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('[data-copy-claim]').waitFor();
+  await f.page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:()=>new Promise((_,reject)=>{window.rejectCopy=reject;})}}));
+  await f.page.locator('[data-copy-claim]').click(); const terms=f.page.getByRole('link',{name:'Terms',exact:true}); await terms.focus();
+  await f.page.evaluate(()=>window.rejectCopy(new Error('denied'))); await f.page.locator('#find-work-status').filter({hasText:'Copy the instructions under Read claim instructions'}).waitFor();
+  assert.equal(await terms.evaluate(el=>el===document.activeElement),true,'late rejection must not steal focus');
+});
+test('immediate rejected match copy selects instructions for manual copy', { timeout: 45000 }, async t => {
+  const f=await setup(t,320); preferenceTask(f); await f.page.goto(`${f.origin}/offers`);
+  await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('[data-copy-claim]').waitFor();
+  await f.page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}}));
+  await f.page.locator('[data-copy-claim]').click(); await f.page.locator('#find-work-status').filter({hasText:'Copy the selected instructions'}).waitFor();
+  assert.equal(await f.page.locator('#find-work-results textarea').evaluate(el=>el===document.activeElement && el.selectionEnd>el.selectionStart),true);
 });

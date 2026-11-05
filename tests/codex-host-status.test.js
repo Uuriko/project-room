@@ -135,3 +135,39 @@ for (const mismatch of ["origin", "roomId", "memberId", "malformed", "incomplete
     assert.equal((result.stdout + result.stderr).includes(connection.token), false);
   });
 }
+
+test("capability discovery is offline and does not claim runtime readiness", () => {
+  const child = spawnSync(process.execPath, [cli, "--capabilities"], { encoding: "utf8", env: { PATH: "/unavailable" } });
+  assert.equal(child.status, 0, child.stderr);
+  const capabilities = JSON.parse(child.stdout);
+  assert.ok(capabilities.modes.includes("run-request"));
+  assert.equal(capabilities.runtimeReadiness, "unverified");
+  assert.equal(capabilities.preflight, "--preflight");
+  assert.equal(capabilities.workLifecycle, "unchanged");
+});
+
+test("single-request CLI refuses absent or plural selection before reading runtime configuration", () => {
+  for (const selection of [["owner"], ["owner,reviewer", "request"], ["owner", "one,two"]]) {
+    const child = spawnSync(process.execPath, [cli, "--run-request", "/missing/journal", "/missing/runtime.json", ...selection],
+      { encoding: "utf8", env: { PATH: "/unavailable" } });
+    assert.equal(child.status, 1);
+    assert.match(child.stderr, /exactly one requester and request ID/);
+    assert.doesNotMatch(child.stderr, /ENOENT/);
+  }
+});
+
+// A run whose result is saved but whose report the room has not settled is a
+// durable host phase: the writer must record it, and a reader (the next
+// process, or `status`) must read it back instead of rejecting the record.
+test("report_reconciliation_pending is written, persisted and read back with its run id", t => {
+  const f = setup(t), directory = `${f.journal}.watch`, owner = new WatchJournal(directory);
+  const writer = createCodexStatusWriter(directory, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  t.after(() => { writer.close(); owner.close(); });
+  writer.event({ type: "host_status", status: "report_reconciliation_pending", runId: "run-1" });
+  const stored = JSON.parse(readFileSync(join(directory, "status.json"), "utf8"));
+  assert.equal(stored.phase, "report_reconciliation_pending");
+  const status = readCodexHostStatus(f.journal);
+  assert.equal(status.fresh, true);
+  assert.equal(status.phase, "report_reconciliation_pending");
+  assert.equal(status.runId, "run-1");
+});

@@ -8,6 +8,8 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { randomBytes, randomUUID } from "node:crypto";
 
 test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -46,12 +48,26 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   const copied = await page.evaluate(() => window.growthCopied);
   assert.match(copied, /People and agents work in the same room/);
   assert.match(copied, new RegExp(inviteUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  await page.locator("#growth-copy-agent").click();
+  assert.match(await page.locator('#growth-copy-link').getAttribute('class'), /secondary/);
+  await page.getByRole('button', { name: 'Copy link', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.growthCopied), inviteUrl);
+  const agentCreate = page.getByRole('button', { name: 'Create invitation for an agent', exact: true });
+  assert.match(await agentCreate.getAttribute('class'), /primary/);
+  await page.locator('#share-link-access').selectOption('guest');
+  await agentCreate.click();
+  assert.equal(await page.locator('#agent-invite-profile').inputValue(), 'guest', 'Guest selection does not turn into Member access');
+  await page.locator('#agent-invite-mint').click();
+  await page.getByRole('button', { name: 'Copy invitation for an agent', exact: true }).click();
   const agentInstructions = await page.evaluate(() => window.growthCopied);
-  assert.ok(agentInstructions.includes(inviteUrl));
-  assert.match(agentInstructions, /Reuse your saved identity/);
-  assert.match(agentInstructions, /Do not claim to be listening/);
-  assert.equal(await page.locator("#growth-kit-status").isVisible(), true);
+  const nativeUrl = await page.locator('#agent-invite-link').getAttribute('href');
+  assert.match(nativeUrl, /\/join\/RM-[A-Z0-9]{16}$/);
+  assert.deepEqual(fixture.store.invites.preview(new URL(nativeUrl).pathname.split('/').at(-1)).permissions, []);
+  assert.equal(agentInstructions.split(nativeUrl).length - 1, 1);
+  assert.ok(!agentInstructions.includes(inviteUrl), 'native invitation is distinct from reusable people link');
+  assert.match(agentInstructions, /room_check_access/);
+  assert.match(agentInstructions, /read the shared brief/);
+  assert.match(agentInstructions, /keep the invitation unused until/);
+  assert.equal(fixture.store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get().redeemed_at, null);
   mkdirSync("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/growth-invite-kit.png" });
 
@@ -63,6 +79,13 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   await landing.locator("#join-link-dialog").waitFor({ state: "visible" });
   await landing.locator("#join-inviter-line").waitFor({ state: "visible" });
   assert.match(await landing.locator("#join-inviter-line").innerText(), /invited you\./);
+  await landing.locator('#shared-agent-details > summary').click();
+  const recipientInstructions = await landing.locator('#shared-agent-instructions').inputValue();
+  assert.match(recipientInstructions, /supports shared invitation links/);
+  assert.match(recipientInstructions, /Native OAuth needs a fresh RM invitation/);
+  assert.match(recipientInstructions, /explain the exact next step and wait/);
+  assert.match(recipientInstructions, /read the shared brief/);
+  assert.doesNotMatch(recipientInstructions, /npx|agent-inbox/);
   await landing.screenshot({ path: "test-results/growth-invite-landing.png" });
   await guest.close();
 
@@ -70,13 +93,81 @@ test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, 
   const dead = await deadContext.newPage();
   dead.setDefaultTimeout(10000);
   dead.on("pageerror", error => errors.push(error.message));
-  await dead.goto(`${origin}/#join/${"a".repeat(43)}`);
+  // A real link that was issued and then cancelled shows the ended copy (#5954
+  // names it link_cancelled); a token that was never issued is not-found.
+  const deadToken = randomBytes(32).toString("base64url");
+  const issued = fixture.store.shareLinks.create(fixture.keys.owner, "commons", { requestId: randomUUID(), linkToken: deadToken,
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: fixture.store.roomAuthority("commons").members.owner?.revision ?? 0 },
+    null, { emailVerificationUnachievable: true });
+  fixture.store.shareLinks.cancel(fixture.keys.owner, "commons", issued.link.id, null);
+  await dead.goto(`${origin}/#join/${deadToken}`);
   await dead.locator("#join-link-dialog").waitFor({ state: "visible" });
   await dead.waitForFunction(() => document.querySelector("#join-link-title").textContent === "This invite has ended");
   assert.match(await dead.locator("#join-link-scope").innerText(), /fresh link/);
   assert.match(await dead.locator("#join-link-status").innerText(), /Sign in and request access/);
   assert.equal(await dead.locator("#join-account-choices").isVisible(), true);
   await dead.screenshot({ path: "test-results/growth-invite-dead.png" });
+  await dead.goto(`${origin}/#join/${"a".repeat(43)}`);
+  await dead.reload();
+  await dead.locator("#join-link-dialog").waitFor({ state: "visible" });
+  await dead.waitForFunction(() => /No invite link was issued/.test(document.querySelector("#join-link-status").textContent));
+  assert.notEqual(await dead.locator("#join-link-title").innerText(), "This invite has ended");
   await deadContext.close();
   assert.deepEqual(errors, []);
+});
+
+for (const width of [1280, 390]) test(`normalized invitation kit opens and creates an agent invitation at ${width}`, { timeout: 60000 }, async t => {
+  const store = new RoomStore(':memory:');
+  store.createAccount('invite-owner');
+  const slot = store.createAccountSessionSlot(), session = store.loginAccountSession(slot.token, store.issueAccountAccessKey('invite-owner'), 0);
+  const made = store.createAccountRoom(slot.token, session.sessionBinding, { roomId: 'invite-native', title: 'A clean project', purpose: 'Useful work', kind: 'personal', displayName: 'Owner' });
+  const owner = store.issueAccessKey('invite-native', made.room.memberId), server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const page = await browser.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' }), errors = [], reads = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => { if (request.url().includes('/referrals')) reads.push(new URL(request.url()).search); });
+  page.setDefaultTimeout(10000);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?room=invite-native`);
+  await signInFixture(page, owner); await clickChrome(page, '#invite-people-button');
+  await page.waitForFunction(() => document.querySelector('#growth-invite-url')?.value.includes('#join/'));
+  assert.deepEqual(reads, ['?view=invitation']);
+  assert.equal(await page.locator('#growth-kit-retry').isVisible(), false);
+  assert.equal(await page.locator('#growth-copy-link').isEnabled(), true);
+  assert.equal(await page.locator('#growth-copy-agent').isEnabled(), true);
+  assert.equal(await page.locator('#share-link-dialog').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+  await page.locator('#share-link-access').selectOption('guest');
+  await page.locator('#growth-copy-agent').focus(); await page.keyboard.press('Enter');
+  await page.locator('#agent-invite-dialog[open]').waitFor();
+  assert.equal(await page.locator('#agent-invite-profile').inputValue(), 'guest');
+  await page.locator('#agent-invite-mint').click();
+  await page.locator('#agent-invite-link[href*="/join/RM-"]').waitFor();
+  const row = store.db.prepare('SELECT redeemed_at FROM agent_invite_codes').get();
+  assert.equal(row.redeemed_at, null, 'Creating an invitation must not redeem it or create another agent');
+  mkdirSync('test-results', { recursive: true });
+  await page.screenshot({ path: `test-results/normalized-invitation-kit-${width}.png` });
+  assert.deepEqual(errors, []);
+});
+
+test('agent invitation remains available when the reusable invitation read fails', { timeout: 60000 }, async t => {
+  const store = new RoomStore(':memory:');
+  store.createAccount('invite-recovery-owner');
+  const slot = store.createAccountSessionSlot(), session = store.loginAccountSession(slot.token, store.issueAccountAccessKey('invite-recovery-owner'), 0);
+  const made = store.createAccountRoom(slot.token, session.sessionBinding, { roomId: 'invite-recovery', title: 'Recovery', purpose: 'Useful work', kind: 'personal', displayName: 'Owner' });
+  const owner = store.issueAccessKey('invite-recovery', made.room.memberId), server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(10000);
+  await page.route('**/referrals?view=invitation', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }));
+  await page.goto(`http://127.0.0.1:${server.address().port}/?room=invite-recovery`);
+  await signInFixture(page, owner); await clickChrome(page, '#invite-people-button');
+  await page.locator('#growth-kit-retry').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#growth-copy-link').isEnabled(), false);
+  assert.equal(await page.locator('#growth-copy-agent').isEnabled(), true);
+  await page.locator('#growth-copy-agent').click();
+  await page.locator('#agent-invite-dialog[open]').waitFor();
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM agent_invite_codes').get().n, 0, 'opening the dialog must not create an invitation');
 });

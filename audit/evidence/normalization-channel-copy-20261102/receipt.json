@@ -1,0 +1,116 @@
+{
+  "source": "c6fe84ca1ba1557cdaf2fb3b4540c646d75b78f0",
+  "base": "00888c52110d36250d3e07629036701b72926d09",
+  "status": "local synthetic qualification only; actual live cause unconfirmed until root retries same request",
+  "runtime": {
+    "node": "24.22.1",
+    "miniflare": "4.20260730.0",
+    "workerd": "1.20260730.1",
+    "compatibilityDate": "2026-07-30"
+  },
+  "checks": [
+    {
+      "command": "node --test tests/operator-normalization-channel-copy.test.mjs before runtime fix",
+      "exit": 1,
+      "tests": 12,
+      "pass": 8,
+      "fail": 4
+    },
+    {
+      "command": "node --test tests/operator-normalization-channel-copy.test.mjs tests/operator-normalization-adopt.test.mjs first after runtime fix",
+      "exit": 1,
+      "tests": 17,
+      "pass": 15,
+      "fail": 2,
+      "scope": "two preexisting independent reply-audit failures for edited derived copy; original adoption missing-origin failure fixed"
+    },
+    {
+      "command": "node --test tests/operator-normalization-channel-copy.test.mjs tests/operator-normalization-adopt.test.mjs tests/messages-table.test.js",
+      "exit": 0,
+      "tests": 59,
+      "pass": 59,
+      "fail": 0,
+      "skip": 0,
+      "scope": "edited-copy original oracle refusal asserted explicitly before and after, not claimed fixed; unedited oracle succeeds"
+    },
+    {
+      "command": "node --test cloudflare/normalization-channel-copy.check.mjs",
+      "exit": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skip": 0
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js server/messages-store.mjs tests/operator-normalization-channel-copy.test.mjs cloudflare/normalization-channel-copy.test-fixture.mjs cloudflare/normalization-channel-copy.check.mjs",
+      "exit": 0
+    },
+    {
+      "command": "node scripts/secret-scan-check.mjs",
+      "exit": 0,
+      "files": 1922
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "cloudflare/normalization-channel-copy.check.mjs",
+      "sha256": "e10beb1e91e9373914fb5d893fb879ccbe72e117930cbffef65ec61636804c65"
+    },
+    {
+      "path": "cloudflare/normalization-channel-copy.test-fixture.mjs",
+      "sha256": "b4ee731d84426228eb5dbe9785cbc3b283fec89fa91f81286d784fe810cfefea"
+    },
+    {
+      "path": "server/messages-store.mjs",
+      "sha256": "33e8b850919d74f2eb41ffbfd292b278339602c7774514cf8c634723ec9fb0dd"
+    },
+    {
+      "path": "tests/operator-normalization-channel-copy.test.mjs",
+      "sha256": "6848571ab558c512aa9c3a473f7630b60b8039759d8b87755fc7ed2b1be165de"
+    }
+  ],
+  "logs": [
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-channel-copy-repro.log.gz",
+      "bytes": 2702,
+      "sha256": "1f92ee21243cf25fd6100f68f8ebdd775f3a79219b5821436e3fa181624939e0",
+      "gzipSha256": "b37c0e78a2164f27af18ee04b0b640590b3f8111dc4225a119967544697f5425"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-before.log.gz",
+      "bytes": 14976,
+      "sha256": "b273d5f4dede3358f20b471bfa0b6f09ff87f0894b6aee18eec0f6c590bf4c78",
+      "gzipSha256": "eb36040bde256d5a63748ee0e9d341b9e9eb565da0c369a919f49454c02b2f8a"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-after.log.gz",
+      "bytes": 16449,
+      "sha256": "5c4d38c5c4d2c53b112d3f2b3aa6731997aeb1780c9adb6ed5a1639ee65a4e25",
+      "gzipSha256": "4de4ddb826cd9d96d2052bc987b5f421e3e514bc7da1dd84f9d7dfecd5056d37"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-node-final.log.gz",
+      "bytes": 39929,
+      "sha256": "4fd12839371594316f60c3c6f19c4e72703e995ead477cec93171d61f1a463d8",
+      "gzipSha256": "97235d42662c3c88a3cac06e32c58942ce446088886229a9acbd70c51d0270ea"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-native.log.gz",
+      "bytes": 1905,
+      "sha256": "e54e18bb0b15e09de32effcee75fd5b70a2df6012718de534975054034f984b4",
+      "gzipSha256": "1dfa42d816a58a0b48286bd9ad57f51d78fbdbb9b175df67f6e110b8ada8066d"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-lint.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    },
+    {
+      "path": "audit/evidence/normalization-channel-copy-20261102/normalization-copy-secrets.log.gz",
+      "bytes": 53,
+      "sha256": "631734a5ae4cdabce8ffd35662a3bfe60282948c0d4552bf125a2d0e00db3164",
+      "gzipSha256": "da992a27827dee9dbf911dbda24b26a2f7261acc60b48e5c8fcf900308bdd962"
+    }
+  ]
+}

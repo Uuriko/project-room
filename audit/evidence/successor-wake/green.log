@@ -1,0 +1,16 @@
+✔ flag is off by default and on only for explicit values (0.338541ms)
+✔ adapter kind is inferred from the target url (0.456167ms)
+✔ bodies are content-free: ids only, unsafe values dropped (0.466458ms)
+✔ bursts coalesce per agent and room, and the next wake carries the count (0.100417ms)
+✔ unread wakes are re-sent up to maxRewakes; an ack stops them (0.09375ms)
+✔ evicts oldest keys past maxKeys (0.053334ms)
+✔ context pointer names where to read, and liveness moves pending -> unresponsive -> stale (0.061209ms)
+✔ a fresh coalesced generation has its own bounded retry budget and ack (0.06575ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.312958

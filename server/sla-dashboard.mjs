@@ -158,6 +158,7 @@ export function buildSlaDashboard({ threads, now, targets, owners = null, breach
   return Object.freeze({
     generatedAt: new Date(at).toISOString(),
     threadCount: batch.assessed.length,
+    errors: batch.errors,
     openCount: batch.openCount,
     openByChannel: batch.openByChannel,
     percentiles: Object.freeze(percentiles),

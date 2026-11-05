@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { workerLivenessResponse, readyProbeResponse } from "../cloudflare/health-probe.mjs";
 
-// #3272: the Worker answers /api/health itself and never enters the handler,
+// #3272: the Worker shapes /api/health after its bounded job-health probe,
 // so its liveness body must carry the documented emailVerification field the
 // Node handler reports (docs/openapi.yaml). The caller (cloudflare/room.mjs)
 // derives the value from the same env rule the Durable Object constructor
@@ -12,7 +12,7 @@ test("worker liveness carries emailVerification alongside status/mode/deployment
     mode: "cloudflare-production", deployment: "production", emailVerification: "relaxed-no-mailer"
   }).json();
   assert.deepEqual(relaxed, {
-    status: "ok", mode: "cloudflare-production", deployment: "production", emailVerification: "relaxed-no-mailer", emailVerificationScope: "worker"
+    status: "degraded", liveness: "ok", jobs: { status: "unknown" }, mode: "cloudflare-production", deployment: "production", emailVerification: "relaxed-no-mailer", emailVerificationScope: "worker"
   });
   const enforced = await workerLivenessResponse(new Request("https://room.example/api/health"), {
     mode: "cloudflare-production", deployment: "production", emailVerification: "enforced"

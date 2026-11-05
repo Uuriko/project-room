@@ -1,3 +1,5 @@
+import {isCurrentRoom,readCurrentRoomForAudit} from '../server/current-room-repository.mjs';
+const forensicRoom=(store,roomId)=>isCurrentRoom(store.db,roomId)?store.readTransaction(()=>readCurrentRoomForAudit(store,roomId)):store.room(roomId);
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -95,7 +97,7 @@ test("the single-pass redaction still erases every body in the log, the rows and
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
   const max = db.prepare("SELECT MAX(sequence) AS n FROM events WHERE room_id=?").get(roomId).n;
   assert.equal(head, max, "the room head matches the log");
-  const state = ctx.f.store.room(roomId).state;
+  const state = forensicRoom(ctx.f.store,roomId).state;
   assert.ok((state.messages ?? []).every(message => message.body == null), "the projection holds no body");
-  assert.equal(JSON.stringify(ctx.f.store.rebuildProjection(roomId).state.messages), JSON.stringify(state.messages), "projection equals a replay of the redacted log");
+  assert.deepEqual(ctx.f.store.rebuildProjection(roomId).state.messages, state.messages, "projection equals a replay of the redacted log");
 });

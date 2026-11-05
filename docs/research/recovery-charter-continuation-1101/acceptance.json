@@ -1,0 +1,24 @@
+{
+  "source": "e72cd46d9",
+  "protocol": 14,
+  "reportVersion": 1,
+  "fullOracleRequired": true,
+  "node": 5,
+  "sourceExtraction": 7,
+  "native": {
+    "pass": 1,
+    "calls": 62,
+    "exactCharter": true,
+    "textProjected": 1,
+    "coldResume": true,
+    "warmSteps": true
+  },
+  "prior13Fence": 2,
+  "limits": [
+    "Small source text phase finishes in one step: does not clear separately reproduced warm multistep current schema-cache bug.",
+    "Text legal-large-atom and validation-order cure still pending from owner.",
+    "One legal sealed source/context atom can exceed nominal4MiB; not strictCPUbounded.",
+    "Current normalized charter edits still refuse409 current_room_context_unavailable; fixture uses supported pre-H command and proves recovery preservation only.",
+    "No integration/deployment/live proof; original fulloracle and report1 retained."
+  ]
+}

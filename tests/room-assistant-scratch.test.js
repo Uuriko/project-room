@@ -22,13 +22,14 @@ async function setup(t) {
 
 async function ask(owner, friend) {
   await owner.post("ask", "@Room plan dinner for four on Friday");
-  let run = (await owner.act({ action: "invoke", requestId: "invoke", runId: "run", sourceMessageId: "ask" })).result;
+  let run = await runOf(owner);
+  assert.ok(run, "posting the addressed ask creates its shared run atomically");
   await friend.post("add", "Make it 8pm, outdoor seating", { replyToId: "ask" });
-  run = (await friend.act({ action: "contribute", requestId: "contribute", runId: "run", sourceMessageId: "add", expectedRevision: run.revision })).result;
+  run = (await friend.act({ action: "contribute", requestId: "contribute", runId: "run-ask", sourceMessageId: "add", expectedRevision: run.revision })).result;
   return run;
 }
 
-const runOf = async (client, id = "run") => (await client.assistant()).runs.find(r => r.id === id);
+const runOf = async (client, id = "run-ask") => (await client.assistant()).runs.find(r => r.id === id);
 
 test("two people share one request; the host answers once in its thread with both inputs applied", async t => {
   const { owner, friend, producer } = await setup(t);
@@ -86,7 +87,7 @@ test("an addition that lands after the answer is drafted is answered, never drop
       // The friend adds while the host is composing (the done/attach race).
       const current = await runOf(friend);
       await friend.post("late", "Vegetarian options too", { replyToId: "ask" });
-      await friend.act({ action: "contribute", requestId: "late-contribute", runId: "run", sourceMessageId: "late", expectedRevision: current.revision });
+      await friend.act({ action: "contribute", requestId: "late-contribute", runId: "run-ask", sourceMessageId: "late", expectedRevision: current.revision });
     }
     return scriptedExecute(brief);
   };
@@ -112,7 +113,7 @@ test("an addition at the publication boundary is refused for done and answered a
     if (once) return; once = true;
     const current = await runOf(friend);
     await friend.post("edge", "Somewhere quiet", { replyToId: "ask" });
-    await friend.act({ action: "contribute", requestId: "edge-contribute", runId: "run", sourceMessageId: "edge", expectedRevision: current.revision });
+    await friend.act({ action: "contribute", requestId: "edge-contribute", runId: "run-ask", sourceMessageId: "edge", expectedRevision: current.revision });
   });
   const { outcomes } = await runHostOnce(host, { memberId: "producer" });
   assert.equal(outcomes[0].state, "done");
@@ -134,11 +135,11 @@ test("Stop or Pause while the executor is still running publishes nothing", asyn
     await running;
     const current = await runOf(owner);
     assert.equal(current.status, "working");
-    await owner.act({ action: stop, requestId: `${stop}-during`, runId: "run", expectedRevision: current.revision });
+    await owner.act({ action: stop, requestId: `${stop}-during`, runId: "run-ask", expectedRevision: current.revision });
     release();
     const { outcomes } = await pass;
     const expected = stop === "cancel" ? "cancelled" : "paused";
-    assert.deepEqual(outcomes, [{ runId: "run", state: expected, published: false }]);
+    assert.deepEqual(outcomes, [{ runId: "run-ask", state: expected, published: false }]);
     const final = await runOf(friend);
     assert.equal(final.status, expected);
     assert.equal(final.resultMessageId, undefined);
@@ -152,7 +153,7 @@ test("a Stop at the publication boundary is acknowledged and the posted answer i
   await ask(owner, friend);
   const host = beforePost(producer, async () => {
     const current = await runOf(owner);
-    await owner.act({ action: "cancel", requestId: "edge-cancel", runId: "run", expectedRevision: current.revision });
+    await owner.act({ action: "cancel", requestId: "edge-cancel", runId: "run-ask", expectedRevision: current.revision });
   });
   const { outcomes } = await runHostOnce(host, { memberId: "producer" });
   assert.equal(outcomes[0].state, "cancelled");
@@ -167,26 +168,27 @@ test("the host reports executor failure and acknowledges pause, resume and cance
   await ask(owner, friend);
   // An executor failure is reported as failed, never as done.
   const broken = async () => { throw new Error("model unavailable"); };
-  assert.deepEqual((await runHostOnce(producer, { memberId: "producer", execute: broken })).outcomes, [{ runId: "run", state: "failed" }]);
+  assert.deepEqual((await runHostOnce(producer, { memberId: "producer", execute: broken })).outcomes, [{ runId: "run-ask", state: "failed" }]);
   let run = await runOf(owner);
   assert.equal(run.status, "failed");
   assert.match(run.activity.at(-1).summary, /model unavailable/);
   // Fresh request for the stop controls.
   await owner.post("ask-2", "@Room second request");
-  run = (await owner.act({ action: "invoke", requestId: "invoke-2", runId: "run-2", sourceMessageId: "ask-2" })).result;
-  await producer.act({ action: "claim", requestId: "claim-2", runId: "run-2", attemptId: "producer-run-2", expectedRevision: run.revision });
-  run = await runOf(owner, "run-2");
-  await owner.act({ action: "pause", requestId: "pause-2", runId: "run-2", expectedRevision: run.revision });
+  run = await runOf(owner, "run-ask-2");
+  assert.ok(run, "the second addressed ask also creates its run");
+  await producer.act({ action: "claim", requestId: "claim-2", runId: "run-ask-2", attemptId: "producer-run-ask-2", expectedRevision: run.revision });
+  run = await runOf(owner, "run-ask-2");
+  await owner.act({ action: "pause", requestId: "pause-2", runId: "run-ask-2", expectedRevision: run.revision });
   await runHostOnce(producer, { memberId: "producer" });
-  run = await runOf(friend, "run-2");
+  run = await runOf(friend, "run-ask-2");
   assert.equal(run.status, "paused");
-  await owner.act({ action: "resume", requestId: "resume-2", runId: "run-2", expectedRevision: run.revision });
-  run = await runOf(owner, "run-2");
+  await owner.act({ action: "resume", requestId: "resume-2", runId: "run-ask-2", expectedRevision: run.revision });
+  run = await runOf(owner, "run-ask-2");
   assert.equal(run.status, "resume_requested");
-  await owner.act({ action: "cancel", requestId: "cancel-2", runId: "run-2", expectedRevision: run.revision });
+  await owner.act({ action: "cancel", requestId: "cancel-2", runId: "run-ask-2", expectedRevision: run.revision });
   const { outcomes } = await runHostOnce(producer, { memberId: "producer" });
-  assert.deepEqual(outcomes, [{ runId: "run-2", state: "cancelled" }]);
-  run = await runOf(friend, "run-2");
+  assert.deepEqual(outcomes, [{ runId: "run-ask-2", state: "cancelled" }]);
+  run = await runOf(friend, "run-ask-2");
   assert.equal(run.status, "cancelled");
   assert.equal(run.resultMessageId, undefined, "a cancelled run publishes no result");
 });
@@ -230,7 +232,7 @@ test("a host restarted after a crash picks its own stalled run back up and answe
   await owner.act({ action: "configure", requestId: "configure", expectedRevision: 0, name: "Room", coordinatorMemberId: "producer" });
   const asked = await ask(owner, friend);
   // The first host process claimed with its stable attempt id, then died.
-  await producer.act({ action: "claim", requestId: "claim-before-crash", runId: "run", attemptId: "producer-run", expectedRevision: asked.revision });
+  await producer.act({ action: "claim", requestId: "claim-before-crash", runId: "run-ask", attemptId: "producer-run-ask", expectedRevision: asked.revision });
   const realNow = f.store.now;
   f.store.now = () => realNow.call(f.store) + 130000;
   assert.equal((await runOf(owner)).status, "unknown", "a silent host reads as unknown after two minutes");

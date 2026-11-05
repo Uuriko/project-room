@@ -62,3 +62,25 @@ test("latest:true with a non-message event mix still tiles seams exactly once", 
   });
   assert.deepEqual(messages.map(m => m.sequence), want);
 });
+
+test('latest snapshot fails explicitly when bounded sparse backward scan cannot fill it', async () => {
+  let calls = 0;
+  const read = async (cursor, pageLimit) => {
+    calls += 1;
+    const next = Math.min(10000, cursor + Math.min(pageLimit, 10));
+    return { events: Array.from({ length: next - cursor }, (_, i) => {
+      const sequence = cursor + i + 1;
+      return { sequence, event: { type: sequence % 500 === 0 ? 'message.posted' : 'work.updated' } };
+    }), next, hasMore: next < 10000 };
+  };
+  await assert.rejects(paginateRoomMessages(read, { after: 0, end: 10001, limit: 5, latest: true }), e => e.code === 'message_window_unavailable');
+  assert.equal(calls, 100);
+});
+
+test('latest without a head fails explicitly when forward scan does not reach the end', async () => {
+  const read = async (cursor, pageLimit) => {
+    const next = Math.min(10100, cursor + pageLimit);
+    return { events: [{ sequence: next, event: { type: 'message.posted' } }], next, hasMore: next < 10100 };
+  };
+  await assert.rejects(paginateRoomMessages(read, { after: 0, limit: 5, latest: true }), e => e.code === 'message_window_unavailable');
+});

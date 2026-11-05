@@ -24,12 +24,40 @@ import {
   isGuestAgentMemberId,
 } from "./guest-agent-links.mjs";
 import { guestHistoryAccessLead } from "./history-visibility.mjs";
+import { currentInviteContext, prepareCurrentWrite, withCurrentServingWriter } from "./current-room-repository.mjs";
 
 class GuestInviteError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 const fail = (status, code, message) => { throw new GuestInviteError(status, code, message); };
 const hash = value => createHash("sha256").update(value).digest("hex");
+
+// Addressed current read (the agent-invites / share-links / access-requests
+// pattern): current-format rooms refuse the legacy whole-room read
+// (store.mjs _readProjection), so guest state is read through the invite
+// context and falls back to store.room() only for legacy rooms. A room that
+// came from the context carries `current`, which saveGuestEvent uses to
+// persist through the current writer.
+const guestRoom = (store, roomId, { memberIds = [], census = false } = {}) => {
+  const context = currentInviteContext(store, roomId, { memberIds, census });
+  return context ? { ...context.room, current: context.current } : store.room(roomId);
+};
+// Persist one guest event (the access-requests save pattern): through the
+// current writer when the room came from an invite context, else the legacy
+// projection. Returns a freshly read room so a chained write never builds
+// on a consumed context.
+const saveGuestEvent = (store, roomId, room, state, incoming) => {
+  const sequence = room.sequence + 1;
+  const write = room.current ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming, sequence, current: room.current }) : null;
+  const projection = write?.projection ?? store.storedProjection(roomId, state);
+  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  withCurrentServingWriter(store.db, roomId, () => {
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    write?.persistEntities();
+  });
+  return guestRoom(store, roomId, { census: true });
+};
 
 // Invite codes are public-safe: single-use, stored as a hash, and they
 // grant nothing by themselves. The credential (ga1.) is issued at redeem.
@@ -299,7 +327,7 @@ export class GuestInvites {
       // The minter's authority was a delegation grant. It stands only
       // while the grant stands — unless the minter has since become the
       // room owner, in which case the authority is their own.
-      const ownerId = this.store.room(row.room_id).state.room?.ownerId;
+      const ownerId = this.store.roomOwnerId(row.room_id);
       if (row.minted_by_member_id !== ownerId) {
         const identityId = this.store.identities.identityIdForMember(row.room_id, row.minted_by_member_id);
         if (!identityId || !this.store.ownerDelegates.hasGrant(row.room_id, identityId)) {
@@ -341,9 +369,10 @@ export class GuestInvites {
   }
 
   activeGuestCount(roomId) {
-    const members = this.store.room(roomId).state.members;
+    const rows = this.db.prepare("SELECT member_id FROM guest_members WHERE room_id=?").all(roomId);
+    const members = guestRoom(this.store, roomId, { memberIds: rows.map(row => row.member_id) }).state.members;
     let n = 0;
-    for (const row of this.db.prepare("SELECT member_id FROM guest_members WHERE room_id=?").all(roomId)) {
+    for (const row of rows) {
       const member = members[row.member_id];
       if (member && member.kind === "agent" && member.active !== false && isGuestAgentMemberId(member.id)) n++;
     }
@@ -358,7 +387,7 @@ export class GuestInvites {
     // the predicate honest for audits.
     const row = this.db.prepare("SELECT room_id,tier FROM guest_members WHERE member_id=?").get(memberId);
     if (!row) return null;
-    const member = this.store.room(row.room_id).state.members[memberId];
+    const member = guestRoom(this.store, row.room_id, { memberIds: [memberId] }).state.members[memberId];
     if (!member || member.active === false) return null;
     return row.tier;
   }
@@ -398,15 +427,11 @@ export class GuestInvites {
     try {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
-    const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+    const saved = saveGuestEvent(this.store, roomId, room, state, incoming);
     this.store.agentConnections.revokeMember(roomId, member.id);
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
     this.store.reminders.retireMember(roomId, member.id);
-    const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
-    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
-    return { sequence, state };
+    return saved;
   }
 
   // Self-serve expiry sweep for the redemption path, where no owner token
@@ -458,14 +483,11 @@ export class GuestInvites {
     try {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
-    const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
-    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    const saved = saveGuestEvent(this.store, roomId, room, state, incoming);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
     // never escalated by redemption.
     this.db.prepare("UPDATE guest_members SET invite_id=?, created_at=? WHERE member_id=?").run(inviteId, now, member.id);
-    return { sequence, state };
+    return saved;
   }
 
   mint(token, roomId, details, binding) {
@@ -505,7 +527,8 @@ export class GuestInvites {
       // asserts they saw the current owner state. A delegate's own member
       // revision is irrelevant to their delegated authority, so the check
       // always reads the owner's record.
-      const authority = this.store.roomAuthority(roomId);
+      const ownerId = this.store.roomOwnerId(roomId);
+      const authority = this.store.roomAuthority(roomId, { memberId: ownerId });
       if (expectedOwnerRevision !== authority.members[authority.ownerId]?.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       // Expiry rides the existing sweep: any expired guest-agent-* member
       // (ga1. or GX-redeemed) is deactivated here, during owner mint activity.
@@ -565,7 +588,7 @@ export class GuestInvites {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
       this.assertIssuingAuthorityLive(row);
-      const room = this.store.room(row.room_id).state.room;
+      const room = guestRoom(this.store, row.room_id).state.room;
       return {
         room: { id: room.id, title: room.title },
         kind: "guest-invite",
@@ -598,7 +621,7 @@ export class GuestInvites {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
       const roomId = row.room_id;
-      let room = this.store.room(roomId);
+      let room = guestRoom(this.store, roomId, { census: true });
       refuseArchivedWrite(room.state);
       this.assertIssuingAuthorityLive(row);
       // Sweep expired guest seats before any capacity decision: an expired
@@ -670,10 +693,7 @@ export class GuestInvites {
         try {
           state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
-        const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
-        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
-        this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+        room = saveGuestEvent(this.store, roomId, room, state, incoming);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
           .run(memberId, roomId, identity.identityId, row.tier, row.id, now);
       }
@@ -684,7 +704,7 @@ export class GuestInvites {
       const expiresAt = this.store.now() + row.credential_ttl_ms;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, memberId, expiresAt);
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = room.state.members[memberId];
       return {
         token,
         member: { id: member.id, kind: member.kind, permissions: [...member.permissions], displayName: member.displayName, expiresAt },
@@ -772,7 +792,7 @@ export class GuestInvites {
     if (!isGuestAgentMemberId(memberId)) fail(422, "invalid_guest_invite", "That member is not a guest");
     return this.store.transaction(() => {
       this.ownerGate(token, roomId, binding);
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = guestRoom(this.store, roomId, { memberIds: [memberId] }).state.members[memberId];
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
       const isKnownGuest = !!this.db.prepare("SELECT 1 FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
       const hasLiveCredential = !!this.db.prepare(
@@ -793,7 +813,7 @@ export class GuestInvites {
   revokeAll(token, roomId, binding) {
     return this.store.transaction(() => {
       this.ownerGate(token, roomId, binding);
-      const members = this.store.room(roomId).state.members;
+      const members = guestRoom(this.store, roomId, { census: true }).state.members;
       let n = 0;
       for (const row of this.db.prepare("SELECT member_id FROM guest_members WHERE room_id=?").all(roomId)) {
         const member = members[row.member_id];
@@ -844,7 +864,7 @@ export class GuestInvites {
       this.ownerGate(token, roomId, binding);
       const seat = this.db.prepare("SELECT tier FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
       if (!seat) fail(404, "guest_not_found", "No guest seat with that member id");
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = guestRoom(this.store, roomId, { memberIds: [memberId] }).state.members[memberId];
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
       if (seat.tier === tier) return { memberId, tier, unchanged: true };
       // The tier change is journaled as a MEMBER_ACCESS_CHANGED carrying

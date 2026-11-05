@@ -50,6 +50,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     await signInFixture(owner, ownerKey);
     await owner.locator('#main').waitFor({ state: 'visible' });
     await clickChrome(owner, '#invite-people-button');
+    await owner.locator('#share-link-access').selectOption('guest');
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();
@@ -75,7 +76,9 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     for (let visit = 0; visit < 6; visit++) {
       await guest.close();
       guest = await guestContext.newPage(); guest.setDefaultTimeout(12000);
-      const streamStatuses = [];
+      const streamStatuses = [], requestFailures = [], pageErrors = [];
+      guest.on('requestfailed', request => requestFailures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText }));
+      guest.on('pageerror', error => pageErrors.push(error.message));
       guest.on('response', response => {
         if (new URL(response.url()).pathname.endsWith('/stream')) streamStatuses.push(response.status());
       });
@@ -83,8 +86,9 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
         status: 429, contentType: 'application/json', body: '{"error":{"code":"stream_limit","message":"Try again shortly"}}'
       }), { times: 1 });
       await guest.goto(returnUrl);
-      await guest.locator('#connection-status[data-state="connected"]').waitFor({ state: 'visible' }).catch(error => {
-        throw new Error(`Guest return ${visit + 1}: stream statuses ${streamStatuses.join(', ')}`, { cause: error });
+      await guest.locator('#connection-status[data-state="connected"]').waitFor({ state: 'visible' }).catch(async error => {
+        const state = await guest.evaluate(() => ({ mainHidden: globalThis.document.querySelector('#main')?.hidden, connection: globalThis.document.querySelector('#connection-status')?.textContent, state: globalThis.document.querySelector('#connection-status')?.dataset.state, status: globalThis.document.querySelector('#status')?.textContent }));
+        throw new Error(`Guest return ${visit + 1}: ${JSON.stringify({ streamStatuses, requestFailures, pageErrors, state })}`, { cause: error });
       });
       if (visit === 0) assert.deepEqual(streamStatuses, [429, 200], 'a closed stream recovers automatically after a temporary refusal');
       assert.equal(await owner.locator('#connection-status').textContent(), 'Connected');

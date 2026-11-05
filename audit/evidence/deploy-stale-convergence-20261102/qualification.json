@@ -1,0 +1,63 @@
+{
+  "sourceHead": "ca67862fabe5afec263183ef25ea779a1df77960",
+  "base": "2b37bbdc3ea2dc2100b7691a0f7f061f77e04791",
+  "before": {
+    "command": "node --test --test-name-pattern \"stale jobs converge inside\" tests/prod-deploy-smoke.test.js",
+    "source": "Original base scripts/prod-deploy-smoke.mjs with new actualHTTP regression fixture",
+    "exitCode": 1,
+    "result": "All serving checks pass; both health checks fail job_stale after one read despite next snapshot becoming healthy."
+  },
+  "after": {
+    "command": "node --test tests/deploy-stale-convergence.test.mjs tests/deploy-health-contract.test.js tests/prod-deploy-smoke.test.js",
+    "exitCode": 0,
+    "tests": 110,
+    "pass": 110,
+    "fail": 0,
+    "skip": 0,
+    "actualHTTPRegressionMs": 10060.800709
+  },
+  "lint": {
+    "exitCode": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  "secretScan": {
+    "exitCode": 0,
+    "files": 1717,
+    "findings": 0
+  },
+  "scope": [
+    "Existing source-convergence deadline reused for valid optional stale-job waiting on both doors.",
+    "Both complete health/job snapshots and enforced durable readiness re-read each round.",
+    "Required backup must already be healthy. Failing, unsupported, malformed, missing, inconsistent views do not wait.",
+    "Persistent stale views fail within remaining shared wait; responses finishing after retry deadline cannot pass.",
+    "Final deploymentHealth passing semantics, GitHub rate-limit evidence, signed cards, source versions, legal pages unchanged.",
+    "No serverprobe timeout/workflow/runtime/manifest changes, no production calls or deployment."
+  ],
+  "artifacts": {
+    "deploy-stale-cli-before-1102.log": {
+      "bytes": 4589,
+      "sha256": "8ea845eaa366a687ad52fc27052168bf93f174c39106c21a9937fbce2adbef79"
+    },
+    "deploy-stale-final-1102.log": {
+      "bytes": 8498,
+      "sha256": "4d9455131aa40154b90d7fe00843466ace94d8e5166406ed8fe6c1485e35cba5"
+    },
+    "deploy-stale-final-lint-1102.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "deploy-stale-secret-1102.log": {
+      "bytes": 53,
+      "sha256": "af3a2f05a90a29c0c536492a68dcce733459cb4d1fd7a1a53a55ee09f7474f80"
+    }
+  },
+  "rootComposition": {
+    "main": "7cd50911398ea67b18ad580e4a31bfcab5054ac8",
+    "sourceHeadBeforeDocs": "35d20747a",
+    "affectedPlusManifestTestsPassed": 27,
+    "independentReview": "No actionable acceptance or wait-budget regression found; final health predicate unchanged.",
+    "runtimeSchemaWorkflowChanges": false,
+    "candidateManifest": "regenerated; no drift or byte change"
+  }
+}

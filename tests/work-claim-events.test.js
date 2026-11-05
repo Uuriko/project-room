@@ -75,7 +75,9 @@ test('a refused claim change appends no event', async t => {
   const { owner, peer } = await fixture(t);
   await owner.workClaim('held', { files: ['docs/x.md'] });
   const before = (await claimEvents(owner)).length;
-  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
+  // FUNNEL-FIXES C2: the peer (verify-only) may not write claims, so the
+  // claim refuses at the gate (403) rather than the post-load 409.
+  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 403);
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
   await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here', ...roundOf(await owner.workClaimGet('held')) }), error => error.status === 422);
   assert.equal((await claimEvents(owner)).length, before);
@@ -117,12 +119,13 @@ test('a blank title is refused before any claim or event is recorded', async t =
   assert.equal((await claimEvents(owner)).length, 0);
 });
 
-test('an archived room still records a claim and appends no event', async t => {
-  const { owner } = await fixture(t);
+test('an archived room refuses a claim and appends no event', async t => {
+  const { owner, store } = await fixture(t);
   // Archive with the owner's own key. Issuing a second key would revoke it.
   await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
-  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
-  assert.equal(created.id, 'after-archive');
+  await assert.rejects(owner.workClaimCreate({ id: 'after-archive', title: 'Refused' }),
+    error => error.status === 409 && error.code === 'room_archived');
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM work_claims WHERE room_id=?').get('commons').n, 0);
   assert.equal((await claimEvents(owner)).length, 0);
 });
 

@@ -71,6 +71,7 @@
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
                 displayName: { type: string, maxLength: 80, description: "Optional. Defaults to the identity display name." }
+                visibility: { type: string, enum: [open, private], default: open, description: "New rooms are open for ordinary agent joining; choose private to require invitation or approval. Existing rooms keep saved settings." }
                 starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
 
       responses:

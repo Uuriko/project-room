@@ -1,0 +1,156 @@
+{
+  "base": "aa4a88c211cf65c956e0ae926966842de6b8a157",
+  "runtimeCommits": [
+    "d7cbb92ac",
+    "ffc8bc802",
+    "40550daac",
+    "68553fe7e"
+  ],
+  "protocol": 16,
+  "schema": 45,
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "testedLocally": true,
+  "deployed": false,
+  "liveVerified": false,
+  "fullOriginalOracleRequired": true,
+  "sourceSha256": {
+    "server/invitation-evidence.mjs": "0d58abb7566cb9fd1f7003ab94dd25fb1a0bb65f42807f9560222e133d442ce6",
+    "server/recovery-invitation-continuation.mjs": "28e861cf184fc715ce8a657ef3b1d19664f29154cd52e45612165b6cf11078bf",
+    "server/store.mjs": "e234e4aeb29a078a9c7c3d20292f0ba5074bb8087b10aeb4cfa8c4a61dc2ab1a",
+    "server/recovery-census-continuation.mjs": "b5ad64d077f0556685848ed0ce0d6f4b7b02b676181b9daee318a3ecc9e7cfa4",
+    "server/restore-admission.mjs": "587daa6e94477f03053ba611a2253a1500721c1c63b2562256f95e1fede4fffe",
+    "server/restore-ndjson.mjs": "2a28fea4e1c802836454bc66a60b739bfabae3995cec981a9fa0b2624bde3b73",
+    "scripts/runtime-package.mjs": "5a869e6b2cf7adc5a200b0683308e01c0282a70d774ac1c7ed5b385935a50906"
+  },
+  "logs": [
+    {
+      "path": "/tmp/recovery-invitations-protocol15-causal-red.log",
+      "sha256": "0d09158791401a9a4b89cd8283b931b1a764bf90e973f1f547f14c00ea9f1467",
+      "outcome": "intended-red",
+      "count": 1
+    },
+    {
+      "path": "/tmp/recovery-invitations-duplicate-eligibility-red.log",
+      "sha256": "fe4dd4be61049d926af43d7c0df2a58180d2775d3235f9af90d5136aced15a54",
+      "outcome": "intended-red",
+      "count": 4
+    },
+    {
+      "path": "/tmp/recovery-invitations-405-node-final.log",
+      "sha256": "06c80c7af9ddc14f4a1f440c7a8551adc2f43f9828e3c8f9b2c3eaf5b11543bb",
+      "outcome": "prior405-green",
+      "count": 125
+    },
+    {
+      "path": "/tmp/recovery-invitations-eligibility-green.log",
+      "sha256": "1e5abd1b2eb6532d072219422443ebc6ad87bd9abd869df205d381c646550463",
+      "outcome": "final-green",
+      "count": 20
+    },
+    {
+      "path": "/tmp/recovery-invitations-eligibility-native-final.log",
+      "sha256": "b6b0f0d3d138d92d8070a2219ea6886ff61e54f9d44af8650e28b1ee2afc2f9b",
+      "outcome": "final-green",
+      "count": 1
+    },
+    {
+      "path": "/tmp/recovery-invitations-eligibility-package.log",
+      "sha256": "97831e3afb4015dced90eac8e5268c1c19425506c44b4aec873fb856d2caebf8",
+      "outcome": "final-green",
+      "count": 3
+    },
+    {
+      "path": "/tmp/recovery-invitations-final-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "outcome": "final-clean",
+      "count": 0
+    },
+    {
+      "path": "/tmp/recovery-invitations-eligibility-secret.log",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "outcome": "final-committed-runtime-clean",
+      "count": 0
+    }
+  ],
+  "native": {
+    "expected": {
+      "consistent": true,
+      "invitations": 20,
+      "legacyBaselines": 0,
+      "journalEntries": 23
+    },
+    "sampled": [
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 127,
+          "rowsRead": 21958,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "units": 32,
+        "bytes": 226316,
+        "stage": "records",
+        "checked": 9
+      },
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 247,
+          "rowsRead": 31245,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "units": 32,
+        "bytes": 199865,
+        "stage": "self_left",
+        "checked": 10
+      },
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 187,
+          "rowsRead": 23692,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "units": 21,
+        "bytes": 287512,
+        "stage": "complete",
+        "checked": 20
+      },
+      {
+        "surface": "damaged",
+        "cost": {
+          "statements": 127,
+          "rowsRead": 21958,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "units": 32,
+        "bytes": 226316,
+        "stage": "records",
+        "checked": 9
+      }
+    ],
+    "originalFullOracleRequired": true,
+    "coldResume": true,
+    "saveFaultRollback": true,
+    "corruptionRefused": true,
+    "sourceBytes": 661093
+  },
+  "commands": {
+    "node": "/Users/johnpotter/.local/bin/node --test tests/recovery-invitation-continuation.test.mjs tests/recovery-invitation-operator.test.mjs tests/recovery-invitation-protocol.test.mjs",
+    "native": "MINIFLARE_WORKERD_PATH=/Users/johnpotter/.npm/_npx/c943b712072b77c4/node_modules/workerd/bin/workerd /Users/johnpotter/.local/bin/node --test cloudflare/recovery-invitation-native.check.mjs",
+    "package": "/Users/johnpotter/.local/bin/node --test --test-name-pattern='every module in the server import closure|runtime preflight checks the working source|every currently served asset' tests/runtime-package.test.js"
+  },
+  "limits": [
+    "At most32logicalatoms and normal4MiB admittedsourcebytes; a source-sealed legal fixed atom/group abovequantum executesalone and isreported.",
+    "No strictCPU/heapbound forSQLite atoms or legacyprojection tokenization.",
+    "Originalfulloracle and originalprivate invitationaudit remain synchronous andmandatory.",
+    "Native adapter samples successful invitationsteps only, excludescoldconstructor/rawnativepermit/restofrecovery/faults/retries.",
+    "125affectedNode tests passed405 beforeduplicatepredicate cure; final20focused tests passed685.",
+    "Controlledduplicate-key mutations establish selected privateaudit grammar parity, not valid global sourceadmission.",
+    "No productiondata, APIcalls, push, deploy or migration."
+  ]
+}

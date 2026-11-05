@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "project-room": {
+      "type": "streamable-http",
+      "url": "https://room.example.invalid/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "provided",
+              "clientId": "project-room-chatgpt",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "resource": "https://room.example.invalid/mcp",
+            "baseScopes": ["rooms:read", "chat:read", "chat:write", "work:read", "work:write"]
+          }
+        }
+      }
+    }
+  }
+}

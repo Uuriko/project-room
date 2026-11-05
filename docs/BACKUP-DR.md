@@ -60,6 +60,34 @@ honestly cannot survive yet.
     needs a wrangler login); the runbook below replays the real artifact
     by file with `scripts/restore-room-backup.mjs --kv`.
 
+## Bounded follow-up evidence (2026-10-29)
+
+A peer reported a synthetic SQLite/fake-KV restore of 341,091,645 bytes in
+21 parts: 45 rooms, 45,000 posts and 45,225 events. The reported check compared
+216 tables, found zero **unexpected** digest mismatches, completed full content
+verification and reopened the restored store successfully. Existing account and
+target-permit digest exceptions remained explicit. Restore time was 7,083 ms;
+fixture seeding took 160,585 ms and total runtime was 179,994 ms. An initial
+rate-limit failure was retained before correcting the fixture's simulated clock.
+The peer retained the source/configuration, manifest and result log for its local
+`f34dd18a`-derived test; this is reported evidence, not a locally repeated run.
+
+This demonstrates synthetic byte/event-scale coverage only. It does **not**
+verify an actual backup artifact, independent off-account custody, a Cloudflare
+Durable Object restore, or DO CPU/memory limits. It does not refresh the dated
+production observations above or establish a new operational RTO.
+
+A separate peer review of [#4930](https://github.com/Uuriko/project-room/pull/4930)
+at `87188ace` reported a false-healthy case: a `messages_backfill` failure could
+be classified as parked without a matching durable event block. Its focused
+fixture reported zero verified rooms, one blocked failure, zero blocked rooms
+and no errors, where the baseline reported an error. Before adopting that
+behavior, require a positive, non-null block for the same room, compare room
+identities rather than counts, and retain failure when the block map cannot be
+read. This scoped finding is not a full-PR qualification; the reproducer was
+sent to its owner. It does not establish a repair for the distinct
+`messages_parity_failed` condition. No production repair was performed here.
+
 ## Disaster-recovery defects — status (2026-10-15)
 
 The four defects that made recovery of the real production backup
@@ -85,12 +113,63 @@ recovered in place — a fresh DO starts empty, and
 as well as by file replay into a new Node sqlite store (above), which
 remains the route that needs no Cloudflare runtime.
 
+## Resume an already sealed remote restore
+
+The existing script has an explicit continuation-only mode:
+
+```sh
+node scripts/restore-room-backup.mjs \
+  --continue-receipt /private/restore/initial-receipt.json \
+  --origin https://room.example \
+  --checkpoint /private/restore/continuation.json
+```
+
+`ROOM_RESTORE_TOKEN` must already be in the environment. This mode never
+uploads a backup or starts a restore. Use the current coverage receipt or a
+verified publication/cleanup receipt from the existing operator API. It sends
+only POST `/api/operator/restore` under the explicit origin. HTTPS is required
+except loopback HTTP; userinfo, paths, query, fragments and redirects are refused.
+Response-provided destinations never select where authorization is sent.
+
+The checkpoint directory must be owned by the operator and not writable by
+others. The script atomically writes and fsyncs a mode0600 checkpoint containing
+the exact request before sending it. After an interrupted response or process
+restart, rerun the **same command with the same initial receipt and checkpoint**;
+the saved requestId and body are reused. A live lock refuses concurrent drivers;
+all existing locks (including stale ones) fail closed. After a process crash,
+stop other continuation drivers and inspect the private `.lock` file's host/PID.
+Only after verifying the owner is no longer running and no driver is acquiring
+the checkpoint may the operator remove that **lock file alone** and rerun the
+same command. Never delete the durable checkpoint to bypass a lock. The script
+does not automatically steal locks, because simultaneous recovery attempts
+could otherwise erase a live owner's lock. Preserve checkpoint files until the
+operation is reconciled.
+
+After multiple cleanup acknowledgements, the original immutable publication
+receipt still names cleanup revision0; it cannot recover the current cleanup
+cursor by itself. The original receipt **and its durable checkpoint** are needed.
+If that checkpoint is lost, starting a fresh one from the old publication receipt
+fails409 safely; stop and reconcile operator progress rather than restarting the
+restore or manufacturing a new revision.
+
+Verified data publication is separate from guard cleanup. The driver follows
+only the exact `nextCleanup.body` template, including HTTP202 maintenance
+receipts where data is already verified. It reports complete only after an
+HTTP200 receipt proves both remaining guards and verified guard count are zero.
+It stops on malformed bindings, non-progress or rejected requests. Each invocation
+has a 15-minute budget (optionally shorten with `--run-ms`); budget exhaustion
+prints status `pending` and exits2, preserving the next exact request. Completed
+cleanup exits0; refusal/interruption exits1. Output contains status and counts,
+never raw receipts, request bodies or credentials. Existing local file/KV restore
+options are unchanged and cannot be mixed with continuation mode.
+
 ## Honest RPO / RTO
 
 - **RPO: ~24 hours.** Nightly backups bound the loss window to the last
-  successful daily export. Cloudflare also replicates Durable Object storage
-  internally, but there is no user-facing snapshot or point-in-time recovery
-  for DO SQLite — the nightly export is the recovery point.
+  successful daily export for this portable-backup path. Separately,
+  [Cloudflare SQLite-backed Durable Objects support point-in-time recovery of SQL and KV data over the preceding 30 days](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
+  That platform recovery path is distinct from this export/restore protocol;
+  neither automatically reconciles authority changes after the chosen recovery point.
 - **RTO: hours, not minutes.** File replay is rehearsed, but re-issuing
   credentials and re-applying post-backup revocations (below) are manual.
   There is no runbook rehearsal against production — and there must never be
@@ -188,3 +267,26 @@ the same way: rebuilds fall back to a full event-history replay.
   the production-scale KV restore test in
   `tests/restore-from-backup.test.js` (2026-10-16, above) are the
   standing proofs instead.
+
+
+### Legacy backups and write proofs
+
+New NDJSON exports record the actual database `sourceSchemaVersion` in their
+watermark. Old unmarked exports from schema42/43 require an explicit operator
+attestation to establish prospective metadata write proofs on a fresh schema44
+restore target. Confirm the source version from the backup's deployment history;
+do not infer it from missing proof rows.
+
+For a local rehearsal, add `--source-schema-version 42` (or `43`) to
+`scripts/restore-room-backup.mjs`. For the authenticated NDJSON restore door,
+use `?sourceSchemaVersion=42`; the authenticated KV restore also accepts
+`"sourceSchemaVersion": 42` in its JSON body. A conflicting marked source is
+refused, and current-schema missing proofs receive no automatic bootstrap.
+
+Bootstrap runs after backup content, foreign-key, and landed-count checks. It
+validates existing strong content baselines, adds only prospective metadata
+protection, and leaves a NULL historical content hash NULL. The result's
+`writeProofs` reports the source version and added metadata-proof count;
+`historicalVerification` remains `unchanged`. This does not clear a recovery
+audit failure or a quarantine. `audit=report` retains its existing qualifications.
+Default restore behavior and authentication remain unchanged.

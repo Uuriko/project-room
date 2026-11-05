@@ -1,3 +1,5 @@
+import {isCurrentRoom,readCurrentRoomForAudit} from '../server/current-room-repository.mjs';
+const forensicRoom=(store,roomId)=>isCurrentRoom(store.db,roomId)?store.readTransaction(()=>readCurrentRoomForAudit(store,roomId)):store.room(roomId);
 // R365-1: deleting the owner's account must not hand a personal room to an
 // 8-hour share-link guest. Before the fix the guest's throwaway account counts
 // as an "other human owner", so the room is transferred (guest gets owner
@@ -34,13 +36,13 @@ test("owner deletion with a link guest present: the guest does not become owner 
   // guest joins through a share link
   const linkToken = randomBytes(32).toString("base64url");
   f.store.shareLinks.create(key, roomId, { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 5,
-    expectedMemberRevision: f.store.room(roomId).state.members.owner.revision ?? 0 }, null);
+    expectedMemberRevision: forensicRoom(f.store,roomId).state.members.owner.revision ?? 0 }, null);
   const gslot = f.store.createAccountSessionSlot();
   const gview = f.store.accountSessionSlot(gslot.token);
   const gh = { Cookie: `account_session=${gslot.token}`, "x-csrf-token": gview.csrf, "x-session-binding": gview.sessionBinding };
   const joined = await post("/api/share-links/join", { linkToken, displayName: "Riley", redemptionId: randomUUID(), expectedSessionRevision: gview.sessionRevision }, gh);
   assert.equal(joined.status, 201, await joined.clone().text());
-  const guestId = Object.values(f.store.room(roomId).state.members).find(m => m.displayName === "Riley")?.id;
+  const guestId = Object.values(forensicRoom(f.store,roomId).state.members).find(m => m.displayName === "Riley")?.id;
   assert.ok(guestId?.startsWith("guest-"), "the link guest joined");
   assert.notEqual(f.store.historyFloor(roomId, guestId), null, "since_join hides the pre-join message from the guest before deletion");
   // owner deletes the account
@@ -49,7 +51,7 @@ test("owner deletion with a link guest present: the guest does not become owner 
   const after = f.store.authenticateAccountSession(token);
   const done = await post("/api/account/delete", { confirmationToken: planned.confirmationToken }, { ...oc, "X-CSRF-Token": after.csrf });
   assert.equal(done.status, 200, await done.clone().text());
-  const state = f.store.room(roomId).state;
+  const state = forensicRoom(f.store,roomId).state;
   assert.notEqual(state.room.ownerId, guestId, "an 8-hour link guest is not made the room owner");
   assert.notEqual(f.store.historyFloor(roomId, guestId), null, "the guest still cannot read the owner's pre-join message");
 });
@@ -78,13 +80,13 @@ test("owner deletion with an upgraded link guest (has a login method): the kept 
   // email but does not rewrite the account origin, so it stays share-link-guest.
   const linkToken = randomBytes(32).toString("base64url");
   f.store.shareLinks.create(key, roomId, { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 5,
-    expectedMemberRevision: f.store.room(roomId).state.members.owner.revision ?? 0 }, null);
+    expectedMemberRevision: forensicRoom(f.store,roomId).state.members.owner.revision ?? 0 }, null);
   const gslot = f.store.createAccountSessionSlot();
   const gview = f.store.accountSessionSlot(gslot.token);
   const gh = { Cookie: `account_session=${gslot.token}`, "x-csrf-token": gview.csrf, "x-session-binding": gview.sessionBinding };
   const joined = await post("/api/share-links/join", { linkToken, displayName: "Riley", redemptionId: randomUUID(), expectedSessionRevision: gview.sessionRevision }, gh);
   assert.equal(joined.status, 201, await joined.clone().text());
-  const guestId = Object.values(f.store.room(roomId).state.members).find(m => m.displayName === "Riley")?.id;
+  const guestId = Object.values(forensicRoom(f.store,roomId).state.members).find(m => m.displayName === "Riley")?.id;
   assert.ok(guestId?.startsWith("guest-"), "the link guest joined");
   const guestAccountId = f.store.db.prepare(
     "SELECT account_id AS accountId FROM member_accounts WHERE room_id=? AND member_id=?"
@@ -101,6 +103,6 @@ test("owner deletion with an upgraded link guest (has a login method): the kept 
   const done = await post("/api/account/delete", { confirmationToken: planned.confirmationToken }, { ...oc, "X-CSRF-Token": after.csrf });
   assert.equal(done.status, 200, await done.clone().text());
   // A kept guest with a login method is a real human: the room transfers to it.
-  const state = f.store.room(roomId).state;
+  const state = forensicRoom(f.store,roomId).state;
   assert.equal(state.room.ownerId, guestId, "a kept (upgraded) link guest is a valid heir");
 });

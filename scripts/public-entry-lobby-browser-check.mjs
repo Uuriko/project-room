@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdirSync} from 'node:fs';
+import {chromium} from 'playwright';
+import AxeBuilder from '@axe-core/playwright';
+import {RoomStore} from '../server/store.mjs';
+import {createRoomServer} from '../server/http.mjs';
+import {seedPublicLobby} from '../tests/helpers/public-lobby-source.mjs';
+for(const width of [390,1280])for(const theme of ['dark','light'])test('public entry and lobby '+width+' '+theme,{timeout:60000},async t=>{
+ const store=new RoomStore(':memory:'),saved=seedPublicLobby(store,{privateCount:10});
+ store.publicFace.enable(saved.roomId,'owner');store.command(saved.owner,saved.roomId,{id:'publish',type:'room.public_page_set',data:{enabled:true}});
+ const server=createRoomServer({store});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await chromium.launch({headless:true});t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));store.close();});
+ const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage(),origin='http://127.0.0.1:'+server.address().port;const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin);await page.locator('#auth-panel').waitFor({state:'visible'});await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+ const connect=page.locator('.entry-public-actions').getByRole('link',{name:'Connect an agent',exact:true});assert.equal(await connect.isVisible(),true);
+ await connect.focus();await page.keyboard.press('Enter');await page.waitForURL('**/docs/agents/paste');assert.match(await page.locator('h1').innerText(),/Connect your agent/);
+ const copy=page.locator('[data-copy-prompt="agent-paste-prompt-1"]');await copy.waitFor({state:'visible'});
+ await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{globalThis.copiedPrompt=text;}}}));
+ await copy.focus();await page.keyboard.press('Enter');await page.locator('#agent-paste-prompt-1-status').filter({hasText:'Copied.'}).waitFor();
+ assert.equal(await page.evaluate(()=>globalThis.copiedPrompt),await page.locator('#agent-paste-prompt-1').inputValue());
+ await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}}));
+ await copy.click();await page.locator('#agent-paste-prompt-1-status').filter({hasText:'Copy the selected prompt'}).waitFor();assert.equal(await page.locator('#agent-paste-prompt-1').evaluate(n=>n===document.activeElement&&n.selectionEnd===n.value.length),true);
+ await page.evaluate(()=>{document.querySelector('#agent-paste-prompt-1-status').textContent='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>new Promise(resolve=>{globalThis.finishLateCopy=resolve;})}});});
+ await copy.click();await page.locator('#agent-paste-prompt-1-status').filter({hasText:'Copy the selected prompt'}).waitFor();await page.evaluate(()=>globalThis.finishLateCopy());assert.match(await page.locator('#agent-paste-prompt-1-status').innerText(),/Copy the selected prompt/);assert.equal(await copy.isEnabled(),true);
+
+ await page.goto(origin);await page.locator('.entry-public-actions').getByRole('link',{name:'Watch agents work'}).click();await page.waitForURL('**/watch');await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+ assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),theme==='dark'?'rgb(32, 33, 39)':'rgb(244, 243, 248)');
+ assert.match(await page.locator('main').innerText(),/Useful <public> result/);assert.doesNotMatch(await page.locator('main').innerText(),/PRIVATE HISTORY|OTHER CHANNEL|DELETED MUST/);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ const a11y=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();assert.deepEqual(a11y.violations.map(v=>v.id),[]);
+ mkdirSync('/tmp/pr-public-entry-1102',{recursive:true});await page.screenshot({path:'/tmp/pr-public-entry-1102/watch-'+width+'-'+theme+'.png',fullPage:true});
+ await page.getByRole('link',{name:'Connect an agent',exact:true}).focus();await page.keyboard.press('Enter');await page.waitForURL('**/docs/agents/paste?room=project-room-lobby');await page.getByRole('heading',{name:'Connect to the public lobby'}).waitFor();
+ assert.match(await page.locator('#agent-paste-prompt-1').inputValue(),/join project-room-lobby rather than switching to another saved project/);
+ const nojs=await browser.newContext({javaScriptEnabled:false,viewport:{width,height:900}}),nojsPage=await nojs.newPage();await nojsPage.goto(origin+'/docs/agents/paste?room=project-room-lobby');assert.match(await nojsPage.locator('#agent-paste-prompt-1').inputValue(),/join project-room-lobby rather than switching to another saved project/);await nojs.close();await page.locator('[data-copy-prompt="agent-paste-prompt-1"]').waitFor({state:'visible'});assert.equal(errors.length,0,errors.join(' | '));
+});

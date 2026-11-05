@@ -1,7 +1,10 @@
 # An adaptive Project Room: cohesive vision and completion plan
 
-2026-10-18. This is the navigation and sequencing layer for the existing overhaul,
-not a replacement scope. Track status in the [delivery ledger](DELIVERY-LEDGER.md).
+Historical vision and sequencing proposal, captured 2026-10-18. Current scope and
+execution pointers live in the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md).
+Retain the acceptance requirements below where that plan retains their scope;
+package order and dated status are not a parallel execution queue. The
+[delivery ledger](DELIVERY-LEDGER.md) preserves original requirement identities.
 Architecture requirements remain in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md).
 Supporting evidence: [infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md),
 [startup research](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md),
@@ -196,8 +199,9 @@ commitment to an implemented item, explicit remaining requirement or a documente
 supersession; an unreviewed absence is not completion. Run supported-platform unit,
 Workers, browser, privacy, migration/reversal and failure qualification. Remove
 retired compatibility paths with evidence. Record comparative product outcomes,
-known limits, rollout and rollback procedures. Production release requires the
-current session's authorization and the serialized deployment lane.
+known limits, rollout and rollback procedures. Production release follows existing authorization and the
+[serialized deployment lane](DEPLOY-LANE.md). Standing authorization is not reset
+by a new session; current [repository instructions](../AGENTS.md) govern.
 
 Exit: all seven original architecture exit criteria and accepted added scope have
 evidence. Experiments have explicit results and adoption/rejection decisions;

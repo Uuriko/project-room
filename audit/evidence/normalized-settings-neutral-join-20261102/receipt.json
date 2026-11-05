@@ -1,0 +1,56 @@
+{
+  "base": "5d802e6051b7dd085bd3a67b36e599afc1091269",
+  "adoptedFromPR": 5718,
+  "adoptedHead": "9966c14585d265e7de2c7766362c50653d99a618",
+  "before": {
+    "normalizedSettings": {
+      "pass": 0,
+      "fail": 3,
+      "reason": "current_room_context_unavailable"
+    },
+    "neutralJoin": {
+      "pass": 41,
+      "fail": 2
+    }
+  },
+  "after": {
+    "focusedNode": 62,
+    "neighbors": 12,
+    "workersSQLite": 1,
+    "realChromium": 3,
+    "fail": 0,
+    "skip": 0
+  },
+  "scope": "Existing owner-only policy/trust commands use bounded normalized context; general join has no default room; room-address and query handoffs retained. No new payment, marketplace, scope, settings or schema.",
+  "logs": [
+    {
+      "file": "pr-normalized-settings-before-1102.log.gz",
+      "uncompressedSha256": "4d6a024151a2cd368d2301a20eac7429da6a63d5da5e75328af03f8ac3d15558"
+    },
+    {
+      "file": "pr-neutral-join-before-1102.log.gz",
+      "uncompressedSha256": "c39d70af8d9cb469158309843cea1bc3811e8aab813ead19c2f72ac74f8bee41"
+    },
+    {
+      "file": "pr-settings-join-after-1102.log.gz",
+      "uncompressedSha256": "2d8b86aacb634a012db443ac861d67375590ea1d9be8b71b82e09b3a6849ba63"
+    },
+    {
+      "file": "pr-settings-native-after-1102.log.gz",
+      "uncompressedSha256": "b1601cb5f14450d81bb24f11fa2533011f7a2c493a8d2f72cb04b4078126cd8f"
+    },
+    {
+      "file": "pr-settings-neighbors-1102.log.gz",
+      "uncompressedSha256": "62c096da739bc8b07ec5af8d0d799690fdfd5aeda3627eed8d389c8192edf0ee"
+    },
+    {
+      "file": "pr-neutral-join-browser-1102.log.gz",
+      "uncompressedSha256": "a5d669b5ac6064678bac1198d21a4163af4da3c5d448022aca0e51465c165081"
+    },
+    {
+      "file": "pr-settings-join-final-1102.log.gz",
+      "uncompressedSha256": "43ca99c5d0e22aa25acbe3f6e5d8fb800ad8fa2f37a3dd870cfbb207197152a2"
+    }
+  ],
+  "ciFollowup": "First safety-net caught one new hardcoded placeholder. Removed redundant placeholder; i18n ratchet against origin/main passes, no growth exception or baseline change. Repeated affected Node + actual Chromium checks pass."
+}

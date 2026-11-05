@@ -1,3 +1,5 @@
+// Existing legacy-board semantics are retained below using an explicit historical journal fixture.
+// New-product canonical behavior is qualified separately in this file.
 // Open work in room_needs_me. Measured in muse-room on 2026-10-05 (GET
 // /work-claims history, 203 claims): 21 of 21 items posted for another agent to
 // pick up were never claimed, the oldest 88h, because room_needs_me (the read
@@ -6,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseInvalid, clearPremiseFlag } from '../server/work-claims.mjs';
@@ -22,11 +24,10 @@ function setup(t) {
   // expired.
   const store = new RoomStore(':memory:', { now: () => Date.parse('2026-10-01T00:00:00Z') });
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
   const ada = store.identities.create('Ada');
   const rex = store.identities.create('Rex');
-  rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Open work', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: 'board', title: 'board', purpose: 'Open work', kind: 'personal' });
   linkWithProof(store, owner.secret, 'board', ada, { displayName: 'Ada', permissions: WRITER });
   linkWithProof(store, owner.secret, 'board', rex, { displayName: 'Rex', permissions: [] });
   const t0 = Date.parse('2026-10-01T00:00:00Z');
@@ -38,7 +39,7 @@ function setup(t) {
   return { store, owner, ada, rex, put, t0 };
 }
 
-test('an idle writer sees ready unclaimed work in Board order, without new events', t => {
+test('[legacy compatibility] an idle writer sees ready unclaimed work in Board order, without new events', t => {
   const { store, ada, put, owner } = setup(t);
   const first = collectNeedsMe(store, ada.secret, {});
   assert.equal(first.openWork, undefined, 'empty board adds nothing');
@@ -62,7 +63,7 @@ test('an idle writer sees ready unclaimed work in Board order, without new event
   assert.deepEqual(page.cursor, collectNeedsMe(store, ada.secret, { since: first.cursor }).cursor, 'openWork never moves the cursor');
 });
 
-test('a dependency that is done makes its dependent ready', t => {
+test('[legacy compatibility] a dependency that is done makes its dependent ready', t => {
   const { store, ada, put } = setup(t);
   const dep = put('dep', 0);
   put('after', 5, { dependsOn: ['dep'] });
@@ -74,7 +75,7 @@ test('a dependency that is done makes its dependent ready', t => {
 // Regression owner: the real needs-me response must not dispatch invalid work.
 // Existing readiness cases only cover state and dependencies; these records
 // stay unclaimed/done when invalidated. No production test seam is required.
-test('pickup recommendations omit invalid or superseded work and dependencies, and recover after re-review', t => {
+test('[legacy compatibility] pickup recommendations omit invalid or superseded work and dependencies, and recover after re-review', t => {
   const { store, ada, owner, put, t0 } = setup(t);
   const first = collectNeedsMe(store, ada.secret, {});
   const flag = item => flagPremiseInvalid(item, {
@@ -105,7 +106,7 @@ test('pickup recommendations omit invalid or superseded work and dependencies, a
   assert.deepEqual(page.cursor, first.cursor, 'recommendations do not consume the attention cursor');
 });
 
-test('work posted for pickup ranks above released work', t => {
+test('[legacy compatibility] work posted for pickup ranks above released work', t => {
   const { store, ada, owner, put } = setup(t);
   put('posted', 0);
   const claimed = claimWork(put('handed-back', 5), owner.identityId, { now: Date.now() });
@@ -117,7 +118,7 @@ test('work posted for pickup ranks above released work', t => {
   assert.deepEqual(open.top.map(row => [row.id, row.released ?? false]), [['posted', false], ['handed-back', true]]);
 });
 
-test('Board order uses the exact timestamp, not the rounded minute', t => {
+test('[legacy compatibility] Board order uses the exact timestamp, not the rounded minute', t => {
   const { store, ada, owner } = setup(t);
   const base = Date.parse('2026-10-01T00:00:00Z');
   // Same minute, 10 s apart: the later one is first in Board order even though
@@ -129,15 +130,14 @@ test('Board order uses the exact timestamp, not the rounded minute', t => {
   assert.ok(open.top[1].idleMinutes - open.top[0].idleMinutes <= 1, 'display minutes differ by at most rounding; order is still exact');
 });
 
-test('every room with open work is summarised, none dropped', t => {
+test('[legacy compatibility] every room with open work is summarised, none dropped', t => {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const ada = store.identities.create('Ada');
   for (let r = 0; r < 14; r++) {
     const roomId = `room-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
-    rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Open work', kind: 'personal' });
+    seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Open work', kind: 'personal' });
     linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: WRITER });
     store.workClaims.set(roomId, createWork({ id: `task-${r}`, title: 'T' }, { now: Date.now(), agentId: owner.identityId }));
   }
@@ -145,13 +145,13 @@ test('every room with open work is summarised, none dropped', t => {
   assert.equal(page.openWork.length, 14);
 });
 
-test('members who cannot claim see no openWork', t => {
+test('[legacy compatibility] members who cannot claim see no openWork', t => {
   const { store, rex, put } = setup(t);
   put('a', 0);
   assert.equal(collectNeedsMe(store, rex.secret, {}).openWork, undefined);
 });
 
-test('openWork stays small on a crowded board', t => {
+test('[legacy compatibility] openWork stays small on a crowded board', t => {
   const { store, ada, put } = setup(t);
   for (let i = 0; i < 40; i++) put(`task-${String(i).padStart(2, '0')}`, i, { title: 'x'.repeat(400) });
   const open = collectNeedsMe(store, ada.secret, {}).openWork[0];
@@ -164,7 +164,7 @@ test('openWork stays small on a crowded board', t => {
   assert.ok(JSON.stringify(open).length < 654, `openWork was ${JSON.stringify(open).length} bytes`);
 });
 
-test('hard work (tag hard / hard-problem) ranks first and says how to close it', t => {
+test('[legacy compatibility] hard work (tag hard / hard-problem) ranks first and says how to close it', t => {
   const { store, ada, put } = setup(t);
   put('easy-new', 30);
   put('hard-old', 0, { tags: ['hard', 'H3'], reviewPolicy: 'distinct_member' });
@@ -178,7 +178,7 @@ test('hard work (tag hard / hard-problem) ranks first and says how to close it',
   assert.equal(open.top[2].hard, undefined);
 });
 
-test('a named reviewer (tag rev-<memberId>) sees a review ask until reviewing the current head', t => {
+test('[legacy compatibility] a named reviewer (tag rev-<memberId>) sees a review ask until reviewing the current head', t => {
   const { store, ada, rex, owner, put } = setup(t);
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
   const adaId = memberOf(ada), ownerId = memberOf(owner);
@@ -204,7 +204,7 @@ test('a named reviewer (tag rev-<memberId>) sees a review ask until reviewing th
   assert.deepEqual(collectNeedsMe(store, ada.secret, {}).reviewAsks?.[0].top.map(row => row.headSha), ['b'.repeat(40)], 'a new head brings it back');
 });
 
-test('a named reviewer gets one wake per new head, none once reviewed', t => {
+test('[legacy compatibility] a named reviewer gets one wake per new head, none once reviewed', t => {
   const { store, ada, owner, put } = setup(t);
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
   const adaId = memberOf(ada), ownerId = memberOf(owner);
@@ -225,7 +225,7 @@ test('a named reviewer gets one wake per new head, none once reviewed', t => {
   assert.deepEqual(wakeNamedReviewers(store, 'board', item), [], 'reviewed on the current head: no wake');
 });
 
-test('rev- tags only reach active room members: an outside id gets no wake, a handle slug resolves', t => {
+test('[legacy compatibility] rev- tags only reach active room members: an outside id gets no wake, a handle slug resolves', t => {
   const { store, ada, owner, put } = setup(t);
   const outsider = store.identities.create('Outsider');
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?').get(identity.identityId, 'board').m;
@@ -243,7 +243,7 @@ test('rev- tags only reach active room members: an outside id gets no wake, a ha
   assert.equal(wakeNamedReviewers(store, 'board', slugged).filter(result => result?.enqueued).length, 1);
 });
 
-test('myWork carries the caller\'s own held claims that need attention: lease expiring, idle; never the cursor', t => {
+test('[legacy compatibility] myWork carries the caller\'s own held claims that need attention: lease expiring, idle; never the cursor', t => {
   const { store, ada, rex, owner } = setup(t);
   const now = Date.now();
   const first = collectNeedsMe(store, ada.secret, {});
@@ -278,7 +278,7 @@ test('myWork carries the caller\'s own held claims that need attention: lease ex
   assert.equal(collectNeedsMe(store, rex.secret, {}).myWork, undefined);
 });
 
-test("the three work sections share one claim-board read per room", t => {
+test("[legacy compatibility] the three work sections share one claim-board read per room", t => {
   const { store, ada, owner, put } = setup(t);
   const memberOf = identity => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(identity.identityId, "board").m;
   const adaId = memberOf(ada), ownerId = memberOf(owner);
@@ -299,4 +299,24 @@ test("the three work sections share one claim-board read per room", t => {
   assert.equal(page.openWork[0].top[0].id, "open-1");
   assert.equal(page.reviewAsks?.length, 1);
   assert.equal(page.reviewAsks[0].top[0].id, "review-1");
+});
+
+// Canonical new-room behavior replaces board pickup suggestions with addressed
+// work obligations; the old board assertions above remain historical coverage.
+import {canonicalNeedsMeRoom,drainCanonicalNeedsMe} from './helpers/canonical-needs-me-room.mjs';
+import {isCurrentRoom} from '../server/current-room-repository.mjs';
+test('new canonical room retires board pickup and retains addressed work across observation cursors',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,worker,other,roomId}=f;
+ assert.equal(isCurrentRoom(store.db,roomId),true);
+ assert.throws(()=>store.workClaims.set(roomId,createWork({id:'retired-board',title:'Old pickup'},{now:store.now(),agentId:f.owner.identityId})),e=>e.code==='legacy_work_retired'&&e.status===409);
+ const before=drainCanonicalNeedsMe(store,worker).page;
+ for(let i=0;i<9;i++)f.propose('assigned-'+i);
+ store.room=()=>{throw Error('canonical needs-me must not hydrate legacy room');};store.workClaims.list=()=>{throw Error('canonical needs-me must not inspect legacy board');};
+ const observed=drainCanonicalNeedsMe(store,worker,{since:before.cursor});
+ assert.deepEqual([...new Set(observed.items.filter(x=>x.kind==='work').map(x=>x.id))].sort(),Array.from({length:9},(_,i)=>'assigned-'+i));
+ assert.ok(observed.calls>1,'standing work uses honest source continuation');
+ const repeated=drainCanonicalNeedsMe(store,worker,{since:observed.page.cursor});assert.ok(repeated.items.some(x=>x.kind==='work'&&x.id==='assigned-0'),'reading never clears the assignment');
+ assert.equal(repeated.page.openWork,undefined);assert.equal(repeated.page.myClaims,undefined);
+ assert.equal(repeated.page.nativeCoverage[0].globalAttentionComplete,false);assert.ok(repeated.page.nativeCoverage[0].omitted.includes('legacy board presentation'));
+ assert.equal(drainCanonicalNeedsMe(store,other).items.some(x=>x.kind==='work'),false,'another agent is not assigned this work');
 });

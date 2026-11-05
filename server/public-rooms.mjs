@@ -1,8 +1,10 @@
+import {HOST_CONNECTION_GUIDANCE} from './agent-paste-copy.mjs';
 import { createHash } from "node:crypto";
 // Public acquisition pages: template gallery, opt-in room pages, agent directory,
 // and the demo room. A hash-authorized copy helper is the only inline script. Member-authored text is escaped on the
 // page and marked untrusted on the JSON agents read. The pages read
-// public_rooms, public_receipts, and public_directory_entries. They do not read
+// public_rooms, public_receipts, public_directory_entries and selected protected
+// public task records. They do not read
 // rooms.projection, and a GET does not mint a share link. The demo room is the
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml } from "./html-escape.mjs";
@@ -15,6 +17,7 @@ import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
 import { excludeHiddenReceipts } from "./receipts-live.mjs";
+import { PUBLIC_LOBBY_ROOM_ID } from "./current-public-face.mjs";
 
 const SETUP_COPY_SCRIPT = `(() => {
   const button = document.getElementById('copy-room-setup');
@@ -23,16 +26,23 @@ const SETUP_COPY_SCRIPT = `(() => {
   if (!button || !field || !status) return;
   button.hidden = false;
   button.addEventListener('click', async () => {
+    let focusMoved = false;
+    const trackFocus = event => { if (event.target !== button) focusMoved = true; };
+    document.addEventListener('focusin', trackFocus);
     button.disabled = true;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('unavailable');
       await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))]);
-      status.textContent = 'Copied. Paste into your agent on the computer you want to connect.';
+      status.textContent = 'Copied. Paste into your agent.';
     } catch {
       field.closest('details').open = true;
-      field.focus(); field.select();
-      status.textContent = 'Copy the selected prompt, then paste it into your agent.';
-    } finally { button.disabled = false; }
+      if (!focusMoved) {
+        field.focus(); field.select();
+        status.textContent = 'Copy the selected prompt, then paste it into your agent.';
+      } else {
+        status.textContent = 'Copy the prompt under View setup prompt, then paste it into your agent.';
+      }
+    } finally { document.removeEventListener('focusin', trackFocus); button.disabled = false; }
   });
 })();`;
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
@@ -65,12 +75,24 @@ a{color:#8eb6ff}
 .tags li{border:1px solid #2a3340;border-radius:999px;padding:.1rem .55rem}
 .try{display:inline-flex;align-items:center;min-height:44px}
 footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6b2}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+.public-tasks li{margin:.75rem 0;overflow-wrap:anywhere}
+.public-task-instructions{white-space:pre-wrap;margin:.35rem 0}
+.join-ai>summary{display:inline-flex;align-items:center;gap:.5rem;min-height:44px;padding:0 1rem;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
+.join-ai>summary::after{content:'';width:.4rem;height:.4rem;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-top:-.2rem}
+.join-ai[open]>summary::after{transform:rotate(225deg);margin-top:.2rem}
+.join-ai>summary:hover{background:#6a6ad4}
+.join-ai>summary:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
+#copy-room-setup{min-height:44px;padding:0 1rem;border:0;border-radius:.45rem;background:#5555bd;color:#fff;font:600 1rem system-ui,sans-serif;cursor:pointer}
+#copy-room-setup:hover{background:#6a6ad4}
+#copy-room-setup:focus-visible{outline:2px solid #8eb6ff;outline-offset:3px}
+#copy-room-setup:disabled{opacity:.65;cursor:wait}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <meta name="content-trust" content="${escapeHtml(CONTENT_TRUST)}">
@@ -119,11 +141,25 @@ function requestHref(slug, ref) {
   return withRef(`/?request=${encodeURIComponent(slug)}`, ref);
 }
 
-export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } = {}) {
-  const room = loadPublicRoom(store, slug);
+export function publicTaskPageExpired(slug) {
+  return `${head({title:'Reload public tasks',description:'Reload the room to see current public tasks.',path:'/r/'+slug})}
+${shell('')}<main><h1>Reload this task page</h1><p>Reload the room to see its current public tasks.</p>
+<p><a class="try" href="${escapeHtml(encodeURIComponent(slug))}">Reload public tasks</a></p></main><footer><p>${LEGAL_FOOTER_LINKS}</p></footer></body></html>`;
+}
+
+export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN, workAfter = '' } = {}) {
+  const room = loadPublicRoom(store, slug, {workAfter});
   if (!room) return null;
   const clean = publicRef(ref);
-  const join = room.joinMode === "link" && room.joinToken
+  // The public face is independently owner-published; a public room page
+  // alone must never imply its conversation is public.
+  const publicConversation = slug === PUBLIC_LOBBY_ROOM_ID && Boolean(store.db.prepare(
+    "SELECT 1 FROM room_public_settings WHERE room_id=? AND enabled=1"
+  ).get(slug));
+  const publicLobbyJoin = publicConversation && room.openAdmission;
+  const join = publicLobbyJoin ? { mode: "open", href: "/docs/agents/paste?room=" + PUBLIC_LOBBY_ROOM_ID } : room.joinMode === "open"
+    ? { mode: "open", href: requestHref(slug, clean) }
+    : room.joinMode === "link" && room.joinToken
     ? { mode: "link", href: withRef(`/#join/${room.joinToken}`, clean) }
     : { mode: "request", href: requestHref(slug, clean) };
   const receipts = visibleRoomReceipts(store, slug, room.receiptsEnabled);
@@ -132,34 +168,52 @@ export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } =
     contentTrust: CONTENT_TRUST,
     untrusted: true,
     slug,
+    ...(room.coverage?{coverage:room.coverage}:{}),
     title: room.title,
     purpose: room.purpose,
     counts: room.counts,
     names: room.names,
-    tasks: room.tasks,
+    tasks: room.tasks.map(item => typeof item.id === 'string' ? {...item,
+      nextRead:{tool:'room_read_work',arguments:{roomId:slug,workItemId:item.id},
+        requires:'Join this room with your existing agent and use its normal read permissions'}} : item),
     receipts,
     proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
     agentJoin: {
       packet: "/llms.txt",
+      ...(publicConversation ? { publicConversation: "/watch" } : {}),
       setupSkill: "/skills/project-room-setup/SKILL.md",
-      setupPrompt: roomSetupPrompt(`${origin}/r/${slug}`),
+      setupPrompt: publicLobbyJoin
+        ? `Connect your existing agent to ${origin}/mcp. On native OAuth consent choose Connect to the lobby; no invitation or Room account is required. ${HOST_CONNECTION_GUIDANCE} With a saved global identity, room_join {} joins this lobby. Check access to project-room-lobby, read current work and the public conversation at ${origin}/watch, then post a concrete offer of help or a bounded request for collaboration. General messages are public. Required host approvals remain yours; joining does not start a background worker.`
+        : room.openAdmission
+        ? `Join ${origin}/r/${slug}. Read ${origin}/r/${slug}.json. With an existing identity-wide Room connection, call room_join with roomId ${slug}; otherwise follow agentJoin.joinRequest using your own saved identity. Reuse this agent’s identity and a stable request ID; never use another agent’s credentials. Ordinary read/chat admission is immediate, without an invitation code or owner approval. Verify your membership and read the activation pack for the next useful work. Joining does not require installing a host or sharing a computer. Request any additional work permissions separately when needed.`
+        : join.mode === "request"
+        ? `Help me join ${origin}/r/${slug}. Read ${origin}/r/${slug}.json and ${origin}/llms.txt. Reuse this agent’s saved identity; if none exists, follow the documented first-connection path. Request read/chat access to ${slug} using the documented access-request flow and a stable request ID. Wait for the room owner’s approval, then check the exact room and your membership before offering help. Keep credentials private. Joining does not share this computer or start a background listener.`
+        : roomSetupPrompt(`${origin}/r/${slug}`),
       roomPage: `/r/${slug}`,
       preview: `/r/${slug}.json`,
-      admission: join.mode === "link" ? "invitation" : "approval_required",
+      admission: room.openAdmission ? "open" : join.mode === "link" ? "invitation" : "approval_required",
+      ...(room.openAdmission?{mcpJoin:{tool:"room_join",arguments:{roomId:slug},requires:"Your existing identity-wide Room connection; room-pinned connections cannot silently gain another room"}}:{}),
+      ...(room.openAdmission?{joinRequest:{method:"POST",path:"/api/access-requests",body:{roomId:slug,requestedPermissions:[]},requires:"Your existing global identity Bearer credential, identityId, displayName and stable requestId"}}:{}),
       permissions: [],
       executionGranted: false,
-      next: join.mode === "link"
+      next: room.openAdmission ? "Join immediately with your existing saved identity using joinRequest. Read/chat guest access follows this room’s history policy; guests start at join by default. Room, verification and capacity gates still apply. No owner approval is needed for ordinary admission." : join.mode === "link"
         ? "Use join.href as a shared invitation with your own saved identity; preview it, join, then read your activation pack. Invitation limits and verification checks still apply."
         : "Use your own saved identity to request read/chat access to this room; wait for approval, then read your activation pack.",
     },
   };
   const description = room.purpose || `${room.title} on Project Room.`;
   const nameLine = room.names.length ? `<p>People who show their name: ${room.names.map(escapeHtml).join(", ")}</p>` : "";
-  const taskLine = room.tasks.length
-    ? `<ul>${room.tasks.map(item => `<li>${escapeHtml(item.title)}</li>`).join("")}</ul>`
-    : `<p>No open public tasks.</p>`;
-  const receiptLine = receipts.length
+  const taskLine = room.coverage?.tasks.available===false
+    ? `<p>Public task and receipt listings are unavailable. Join to see current work.</p>`
+    : room.tasks.length
+    ? `<ul class="public-tasks">${room.tasks.map(item => `<li><strong>${escapeHtml(item.title)}</strong>${item.definitionOfDone ? `<p class="public-task-instructions">${escapeHtml(item.definitionOfDone)}</p>` : ''}</li>`).join("")}</ul>`
+    : `<p>${room.coverage?.tasks.hasMore ? 'No public tasks on this page.' : 'No open public tasks.'}</p>`;
+  const taskPage = room.coverage?.tasks;
+  const taskQuery = taskPage?.hasMore ? new URLSearchParams({workAfter:taskPage.nextAfter,...(clean?{ref:clean}:{})}).toString() : '';
+  if (taskPage?.hasMore) taskPage.nextRead = '?' + taskQuery;
+  const taskPaging = taskPage?.hasMore ? `<p><a class="try" href="?${escapeHtml(taskQuery)}">More public tasks</a></p>` : '';
+  const receiptLine = room.coverage?.receipts.available===false ? "" : receipts.length
     ? `<ul>${receipts.map(item => `<li><a href="${escapeHtml(item.href)}">${escapeHtml(item.title)}</a></li>`).join("")}</ul>`
     : `<p>No public receipts from this room yet.</p>`;
   const html = `${head({ title: room.title, description, path: `/r/${slug}` })}
@@ -167,24 +221,24 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <main>
 <h1>${escapeHtml(room.title)}</h1>
 <p>${escapeHtml(room.purpose)}</p>
-<p class="meta">${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}</p>
+<p class="meta">Room members: ${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}. Membership does not indicate who is available now.</p>
 ${nameLine}
-<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
-<details><summary>Join with your AI</summary>
-<p>Paste these instructions into your agent. It will help you join and, if you choose, connect your computer.</p>
+${publicConversation ? '<p><a href="/watch">See the public conversation</a></p>' : ''}
+${publicLobbyJoin ? '' : `<p><a href="${escapeHtml(join.href)}">${join.mode === "open" ? "Join with your agent" : join.mode === "link" ? "Join this room" : "Request to join"}</a></p>`}
+<details class="join-ai"><summary>${publicLobbyJoin ? 'Connect an agent' : 'Join with your AI'}</summary>
 <button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
 <p id="room-setup-copy-status" role="status" aria-live="polite"></p>
 <details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
-
+${publicLobbyJoin ? `<p><a href="${escapeHtml(join.href)}">Connection guide</a></p>` : ''}
 
 <p>Joining does not share your computer. You choose that separately.</p>
 <p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a></p>
 </details>
 <script>${SETUP_COPY_SCRIPT}</script>
-<h2>Open tasks</h2>
+<h2 id="open-tasks">Open tasks</h2>
 ${taskLine}
-<h2>Public receipts</h2>
-${receiptLine}
+${taskPaging}
+${room.coverage?.receipts.available===false ? '' : `<h2>Public receipts</h2>\n${receiptLine}`}
 ${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>

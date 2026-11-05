@@ -37,7 +37,10 @@ function preChannelsDatabase(t) {
   delete withoutChannels.channels;
   // Exactly what a pre-channels database looks like: neither the stored
   // projection nor the checkpoint has ever heard of a channel.
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(withoutChannels));
+  // Stage this historical shape through the registered writer so its
+  // prospective proof remains valid. Raw tampering is a refusal case.
+  store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'")
+    .run(store.storedProjection("commons", withoutChannels)));
   store.db.prepare("INSERT OR REPLACE INTO projection_checkpoints VALUES(?,?,?)").run("commons", sequence, JSON.stringify(withoutChannels));
   store.close();
   return { filename, sequence };

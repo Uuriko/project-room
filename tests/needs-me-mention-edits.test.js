@@ -26,7 +26,7 @@ function seeded(t) {
   post('m-deleted', '@Ada DELETED pasted token');
   store.command(owner.secret, roomId, { id: 'edit-1', type: 'message.edited', data: { messageId: 'm-edited', expectedMessageRevision: 0, body: '@Ada do NOT deploy' } });
   store.command(owner.secret, roomId, { id: 'delete-1', type: 'message.deleted', data: { messageId: 'm-deleted', expectedMessageRevision: 0 } });
-  return { store, ada, roomId };
+  return { store, owner, ada, roomId };
 }
 
 test('needs-me mentions honour deletions and edits', t => {
@@ -81,4 +81,80 @@ test('openDirectMentions keeps the oldest mention when top deletions force multi
   del('m40');
   const rows = store.openDirectMentions(roomId, memberId, 3);
   assert.deepEqual(rows.map(r => r.messageId), ['m30', 'm20', 'm10']);
+});
+
+import {canonicalNeedsMeRoom,drainCanonicalNeedsMe} from './helpers/canonical-needs-me-room.mjs';
+import {readCurrentMessage,withCurrentRoomWriter} from '../server/current-room-repository.mjs';
+import {auditRecovery} from '../server/recovery.mjs';
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+test('canonical edits preserve opening delivery obligations without creating new wakes',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,owner,worker,other,roomId}=f;
+ f.send(owner,'message.posted',{messageId:'original-mention',body:'@Canonical worker Original request'});
+ f.send(owner,'message.posted',{messageId:'plain',body:'Plain message'});
+ const before=store.db.prepare('SELECT * FROM mention_states WHERE room_id=? ORDER BY message_event_id,mentioned_member_id').all(roomId),wakes=store.agentHeartbeats.pendingWakes(worker.identityId,{limit:50});
+ f.send(owner,'message.edited',{messageId:'original-mention',expectedMessageRevision:0,body:'Latest body without the handle'});
+ f.send(owner,'message.edited',{messageId:'plain',expectedMessageRevision:0,body:'@Canonical worker An edit is not a new delivery'});
+ assert.deepEqual(store.db.prepare('SELECT * FROM mention_states WHERE room_id=? ORDER BY message_event_id,mentioned_member_id').all(roomId),before);
+ assert.deepEqual(store.agentHeartbeats.pendingWakes(worker.identityId,{limit:50}),wakes);
+ const mentions=drainCanonicalNeedsMe(store,worker).items.filter(x=>x.kind==='mention');assert.deepEqual(mentions.map(x=>x.id),['original-mention']);assert.equal(mentions[0].summary,'Latest body without the handle');
+ f.send(owner,'message.posted',{messageId:'private-edit',body:'Private original',toMemberId:other.identityId});f.send(owner,'message.edited',{messageId:'private-edit',expectedMessageRevision:0,body:'@Canonical worker PRIVATE_EDIT_SENTINEL'});
+ assert.doesNotMatch(JSON.stringify(drainCanonicalNeedsMe(store,worker)),/PRIVATE_EDIT_SENTINEL/);assert.equal(store.openDirectMentions(roomId,worker.identityId).some(x=>x.messageId==='private-edit'),false);
+});
+test('canonical editing refuses stale or foreign changes and preserves immutable native result text',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,owner,worker,other,roomId}=f;
+ f.send(owner,'message.posted',{messageId:'editable',body:'Original'});const prior=store.headSequence(roomId);
+ assert.throws(()=>f.send(other,'message.edited',{messageId:'editable',expectedMessageRevision:0,body:'Foreign'}),e=>e.status===403||e.status===422);
+ assert.throws(()=>f.send(owner,'message.edited',{messageId:'editable',expectedMessageRevision:1,body:'Stale'}),e=>e.status===409||e.status===422);assert.equal(store.headSequence(roomId),prior);
+ f.propose('immutable');f.send(worker,'work.accepted',{workItemId:'immutable',expectedRevision:0});f.finish('immutable');
+ assert.throws(()=>f.send(worker,'message.edited',{messageId:'result-immutable',expectedMessageRevision:0,body:'Forged replacement'}),/recorded result.*cannot be changed/);
+ assert.equal(readCurrentMessage(store.db,roomId,'result-immutable').value.body,'Saved useful result immutable');assert.doesNotThrow(()=>auditRecovery(store));
+});
+test('canonical edit save fault rolls back carrier, body, command and witness then permits exact retry',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,owner,roomId}=f;f.send(owner,'message.posted',{messageId:'edit-fault',body:'Original'});
+ const sequence=store.headSequence(roomId),prepare=store.db.prepare.bind(store.db),command={id:'saved-edit-retry',type:'message.edited',data:{messageId:'edit-fault',expectedMessageRevision:0,body:'Saved after retry'}};
+ store.db.prepare=sql=>{const statement=prepare(sql);if(sql.startsWith('UPDATE rooms SET sequence=?,projection=?,archived_at=?'))return{run(...args){statement.run(...args);throw Error('Injected edit carrier save fault');}};return statement;};
+ assert.throws(()=>store.command(owner.secret,roomId,command),/Injected edit carrier save fault/);store.db.prepare=prepare;
+ assert.equal(store.headSequence(roomId),sequence);assert.equal(readCurrentMessage(store.db,roomId,'edit-fault').value.body,'Original');
+ const saved=store.command(owner.secret,roomId,command);assert.equal(saved.duplicate,false);assert.equal(store.command(owner.secret,roomId,command).duplicate,true);assert.equal(readCurrentMessage(store.db,roomId,'edit-fault').value.body,'Saved after retry');assert.doesNotThrow(()=>auditRecovery(store));
+});
+test('normalized direct mention array refuses incomplete source instead of silently losing older obligations',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,owner,worker,roomId}=f;f.send(owner,'message.posted',{messageId:'older-ask',body:'@Canonical worker Older outstanding ask'});
+ for(let i=0;i<10;i++)f.send(owner,'message.posted',{messageId:'ordinary-'+i,body:'Unrelated visible conversation '+i});
+ assert.throws(()=>store.openDirectMentions(roomId,worker.identityId,50),e=>e.code==='current_room_context_unavailable');
+ assert.ok(drainCanonicalNeedsMe(store,worker).items.some(x=>x.kind==='mention'&&x.id==='older-ask'),'the supported inbox continuation recovers the old obligation');
+});
+test('normalized edited pre-join mention stays hidden at the exact activation floor',t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
+ const add=(type,data,at)=>events.push(event({roomId:'commons',actorId:'owner',type,data,at}));
+ add('member.added',{memberId:'worker',displayName:'Worker',kind:'agent',permissions:[]},'2026-01-01T00:00:00Z');
+ add('room.history_visibility_set',{historyVisibility:'since_join'},'2026-01-01T01:00:00Z');
+ add('message.posted',{messageId:'before-reactivation',body:'@Worker Hidden old body'},'2026-01-02T00:00:00Z');
+ add('member.access_changed',{memberId:'worker',active:false,permissions:[],expectedMemberRevision:0},'2026-01-03T00:00:00Z');
+ add('member.access_changed',{memberId:'worker',active:true,permissions:[],expectedMemberRevision:1},'2026-01-04T00:00:00Z');
+ store.initialize(events,{representation:'normalized-current-v1'});const key=store.issueAccessKey('commons','owner'),worker=store.issueAccessKey('commons','worker');
+ store.command(key,'commons',{id:'edit-hidden',type:'message.edited',data:{messageId:'before-reactivation',expectedMessageRevision:0,body:'@Worker EDITED_PREJOIN_SENTINEL'}});
+ assert.deepEqual(store.openDirectMentions('commons','worker'),[]);assert.doesNotMatch(JSON.stringify(store.agentInbox(worker,'commons')),/EDITED_PREJOIN_SENTINEL/);
+});
+test('normalized mention array never treats a filtered empty source window as complete',t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const events=initialRoom();
+ const add=(type,data,at)=>events.push(event({roomId:'commons',actorId:'owner',type,data,at}));
+ add('member.added',{memberId:'worker',displayName:'Worker',kind:'agent',permissions:[]},'2026-01-01T00:00:00Z');
+ add('room.history_visibility_set',{historyVisibility:'since_join'},'2026-01-01T01:00:00Z');
+ add('member.access_changed',{memberId:'worker',active:false,permissions:[],expectedMemberRevision:0},'2026-01-03T00:00:00Z');
+ add('member.access_changed',{memberId:'worker',active:true,permissions:[],expectedMemberRevision:1},'2026-01-04T00:00:00Z');
+ add('message.posted',{messageId:'visible-below-filtered-window',body:'@Worker Still owed'},'2026-01-05T00:00:00Z');
+ for(let i=0;i<64;i++)add('message.posted',{messageId:'later-backdated-'+i,body:'Hidden by the activation time'},'2026-01-02T00:00:00Z');
+ store.initialize(events,{representation:'normalized-current-v1'});
+ assert.throws(()=>store.openDirectMentions('commons','worker'),e=>e.code==='current_room_context_unavailable','empty filtered source must retain honest continuation/refusal');
+});
+
+test('normalized mention arrays refuse malformed or oversized opening rows before returning delivery',t=>{
+ for(const mode of ['actor','id','oversized']){
+  const f=canonicalNeedsMeRoom(t),{store,owner,worker,roomId}=f;const posted=f.send(owner,'message.posted',{messageId:'bad-opening',body:'@Canonical worker Original'});
+  const raw=store.db.prepare('SELECT body FROM events WHERE room_id=? AND id=?').get(roomId,posted.event.id),bad=JSON.parse(raw.body);
+  if(mode==='actor')bad.actorId='unrelated';else if(mode==='id')bad.id='substituted';else bad.data.body='X'.repeat(140000);
+  store.transaction(()=>withCurrentRoomWriter(store.db,roomId,()=>store.db.prepare('UPDATE events SET body=? WHERE room_id=? AND id=?').run(JSON.stringify(bad),roomId,posted.event.id)));
+  assert.throws(()=>store.openDirectMentions(roomId,worker.identityId),e=>e.code==='current_room_context_unavailable',mode);
+ }
 });

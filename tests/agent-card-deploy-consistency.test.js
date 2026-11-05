@@ -264,3 +264,16 @@ test("checkAgentCardDoor rejects a streak completed after the window via fetch g
   assert.ok(failures.at(-1).startsWith("not converged"), `got: ${failures.at(-1)}`);
   assert.equal(stats.converged, false);
 });
+
+
+test("retry classification requires verified old cards, never target or unknown integrity failures", async () => {
+  for (const [revision, tamper, expected] of [[PREVIOUS, false, "verified-stale-card"], [PREVIOUS, true, null], [REVISION, true, null]]) {
+    const card = buildSignedCard(revision, { deployed: true });
+    if (tamper) card.name = "changed after signing";
+    const stats = {};
+    const seq = sequence(() => JSON.stringify(card));
+    await checkAgentCardDoor({ url: doorUrl, fetches: 2, gapMs: 1, waitMs: 2,
+      get: seq.get, ...fakeClock(), ...opts, stats });
+    assert.equal(stats.retryKind, expected);
+  }
+});

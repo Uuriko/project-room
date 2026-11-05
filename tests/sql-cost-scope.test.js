@@ -96,10 +96,12 @@ test('cursor-originated next failure counts SQL error, and counter getter failur
   db.observeStatement=undefined;assert.equal(db.prepare('ok').get().ok,true);
 });
 
-test('disabled observer fast path preserves rowsRead without accessing rowsWritten', () => {
+test('disabled observer read fast path preserves rowsRead without accessing rowsWritten', () => {
   const {db}=fixture();db.observeStatement=undefined;let writeCounterReads=0;
   db.storage.sql.exec=()=>({rowsRead:3,get rowsWritten(){writeCounterReads++;throw new Error('must not access writes when disabled')},toArray:()=>[1],*[Symbol.iterator](){yield 1;}});
-  assert.equal(db.prepare('x').get(),1);assert.deepEqual([...db.prepare('x').iterate()],[1]);assert.equal(db.rowsRead,6);assert.equal(writeCounterReads,0);
+  // Unknown SQL is conservatively a write for alarm accounting, independently
+  // of diagnostics. Exercise actual reads rather than a placeholder statement.
+  assert.equal(db.prepare('SELECT 1').get(),1);assert.deepEqual([...db.prepare('SELECT 1').iterate()],[1]);assert.equal(db.rowsRead,6);assert.equal(writeCounterReads,0);
 });
 
 test('SQL diagnostic configuration is explicit and reversible only on the production Durable Object', async () => {

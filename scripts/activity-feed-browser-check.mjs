@@ -71,9 +71,36 @@ for (const mobile of [false, true]) {
 
     // Mark unread rewinds the read horizon: the "New messages" divider
     // appears above the chosen message.
+    // Hold an automatic advance response while the user chooses Mark unread.
+    // The explicit rewind must queue behind it and own the final divider.
+    let releaseAdvance = null, horizonWrites = 0;
+    if (!mobile) {
+      let observed;
+      const started = new Promise(resolve => { observed = resolve; });
+      const gate = new Promise(resolve => { releaseAdvance = resolve; });
+      t.after(() => releaseAdvance?.());
+      await page.route('**/read-horizon', async route => {
+        if (route.request().method() !== 'POST') return route.continue();
+        horizonWrites++;
+        if (horizonWrites !== 1) return route.continue();
+        const response = await route.fetch(); observed(); await gate;
+        await route.fulfill({ response });
+      });
+      await page.locator('#message-list').evaluate(list => {
+        list.scrollTop = list.scrollHeight;
+        list.dispatchEvent(new WheelEvent('wheel', { deltaY: 100000, bubbles: true }));
+      });
+      let deadline;
+      try { await Promise.race([started, new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('advance did not start')), 10000); })]); }
+      finally { clearTimeout(deadline); }
+    }
     const unreadTarget = page.locator('[data-message-record-id="mention-owner"]');
     await unreadTarget.locator(".message-more > summary").click();
     await unreadTarget.locator('[data-message-action="mark-unread"]').click();
+    if (releaseAdvance) {
+      assert.equal(horizonWrites, 1, 'explicit rewind waits for the in-flight advance');
+      releaseAdvance();
+    }
     // Another unread divider may already exist before the asynchronous horizon
     // write finishes. Wait for this action's specific message, not that old one.
     await unreadTarget.locator('.chat-divider.unread', { hasText: "New messages" }).waitFor({ state: "visible" });

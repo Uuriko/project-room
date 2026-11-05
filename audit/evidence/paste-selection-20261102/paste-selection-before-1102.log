@@ -1,0 +1,30 @@
+✖ paste prompt is exact readonly labeled native selection field; other docs retain code blocks (7.598625ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 179.101917
+
+✖ failing tests:
+
+test at tests/agent-paste-selection.test.mjs:8:1
+✖ paste prompt is exact readonly labeled native selection field; other docs retain code blocks (7.598625ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    assert.ok(field)
+
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-cold-walkthrough-facts-1102/tests/agent-paste-selection.test.mjs:15:134)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

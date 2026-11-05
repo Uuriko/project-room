@@ -1,0 +1,15 @@
+  /api/rooms/{roomId}/needs-me:
+    get:
+      summary: Bounded native attention for the authenticated room member
+      description: Reuses the native conversation and standing-work page. Continue with the opaque returned cursor, including empty pages. Reading does not acknowledge or resolve any work; coverage lists omitted sources.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 4096 }
+      responses:
+        '200': { description: Existing native attention page, viewer binding and explicit coverage }
+        '401': { description: Authentication required }
+        '403': { description: Current room membership and read scope required }
+        '409': { description: Stale cursor or a legacy room requiring its existing Updates API }
+        '422': { description: Invalid selection or session binding }

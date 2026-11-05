@@ -10,6 +10,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { randomBytes, randomUUID } from "node:crypto";
 
 test("unified guest entry, account-bound draft recovery, catch-up and agent handoff share one room", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -35,7 +36,14 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await owner.locator("#main").waitFor({ state: "visible" });
 
   // A real invitation opens its dedicated preview; rejected links remain visible.
-  await guest.goto(`${origin}/#join/${"x".repeat(43)}`);
+  // Issue a real link and cancel it: since #5954 a never-issued token is
+  // link_not_found, not a rejected invitation.
+  const cancelledToken = randomBytes(32).toString("base64url");
+  const issued = fixture.store.shareLinks.create(fixture.keys.owner, "commons", { requestId: randomUUID(), linkToken: cancelledToken,
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: fixture.store.roomAuthority("commons").members.owner?.revision ?? 0 },
+    null, { emailVerificationUnachievable: true });
+  fixture.store.shareLinks.cancel(fixture.keys.owner, "commons", issued.link.id, null);
+  await guest.goto(`${origin}/#join/${cancelledToken}`);
   await guest.locator("#join-link-dialog").waitFor({ state: "visible" });
   await guest.locator("#join-link-status").filter({ hasText: /expired|cancelled|join limit|unavailable/i }).waitFor({ state: "visible" });
   assert.match(await guest.locator("#join-link-status").textContent(), /expired|cancelled|join limit|unavailable/i);
@@ -70,6 +78,8 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
     evidenceUrl: "https://example.invalid/unified-test", producerId: "producer", nextAction: "Review this synthetic inline result." });
   await mutate(reviewer, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: item().receipt.eventId,
     evidenceVersion: item().receipt.evidenceVersion, summary: "Synthetic reviewer checks this exact version; no independent operator claim." });
+  await owner.locator("#topbar-updates").click();
+  await owner.getByRole("button", { name: "Open Test: prepare an agenda", exact: true }).click();
   const card = owner.locator('[data-work-record-id="test-handoff"]');
   await card.locator('[data-next-step="decide"]').waitFor();
   assert.equal(await card.locator(".work-next-step").count(), 1);

@@ -195,7 +195,7 @@ test("upgrade repair backfills #general into legacy stored projections", async (
     const row = store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
     const legacy = JSON.parse(row.projection);
     delete legacy.channels;
-    store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
+    store.transaction(() => store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(store.storedProjection("commons", legacy)));
     store.repairProjectionProvenance();
     const repaired = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     assert.ok(repaired.channels?.[DEFAULT_CHANNEL_ID], "repair backfills #general");

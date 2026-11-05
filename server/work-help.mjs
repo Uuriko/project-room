@@ -37,73 +37,26 @@ export function auditWorkHelp(state, history, checkpoint = null) {
   const projected = { room: null, members: {}, workItems: {} };
   const compare = actual => {
     const expected = helpMap(projected);
-    check(canonical(helpMap(actual)) === canonical(expected));
-    check(canonical(actual.helpOffers) === canonical(projected.helpOffers));
+    workHelpAuditValue(helpMap(actual),expected);
+    workHelpAuditValue(actual.helpOffers,projected.helpOffers);
     if (!Object.keys(expected).length) return;
     check(actual.room?.id === projected.room.id && actual.room.ownerId === projected.room.ownerId);
     const participants = new Set([projected.room.ownerId]);
     for (const id of Object.keys(expected)) {
-      check(canonical(workFacts(actual.workItems?.[id])) === canonical(workFacts(projected.workItems[id])));
+      workHelpAuditValue(workFacts(actual.workItems?.[id]),workFacts(projected.workItems[id]));
       participants.add(projected.workItems[id].accountableMemberId);
     }
     for (const offer of Object.values(projected.helpOffers ?? {})) participants.add(offer.offererId);
-    for (const id of participants) check(canonical(pick(actual.members?.[id], memberFields)) === canonical(pick(projected.members[id], memberFields)));
+    for (const id of participants) workHelpAuditValue(workHelpAuditMemberFacts(actual.members?.[id]),workHelpAuditMemberFacts(projected.members[id]));
   };
   let checkpointChecked = !checkpoint;
   if (checkpoint?.sequence === 0) { compare(JSON.parse(checkpoint.projection)); checkpointChecked = true; }
   for (const { sequence, event: e } of events) {
     const d = e.data;
-    if (e.type === "room.created") { check(!projected.room); projected.room = { id: e.roomId, ownerId: d.ownerId }; }
-    // The owner can change, and compare() holds actual.room.ownerId against
-    // this one. Taking it from room.created alone meant the first
-    // ownership.transferred in a room that uses help failed this audit
-    // permanently - the same mistake auditCharters made, found the same way.
-    if (e.type === "ownership.transferred") {
-      check(projected.room && validId(d.toMemberId) && own(projected.members, d.toMemberId) && e.actorId === projected.room.ownerId);
-      // A transfer is not only a new ownerId. src/events.js transferOwnership
-      // gives the new owner the full permission set and bumps their revision,
-      // and strips manage_members and decide from an outgoing AGENT owner,
-      // bumping theirs. compare() holds permissions and revision for every
-      // participant, so all of it has to be replayed or none of it matches.
-      const incomingOwner = projected.members[d.toMemberId];
-      const outgoingOwner = projected.members[projected.room.ownerId];
-      incomingOwner.permissions = [...PERMISSIONS];
-      incomingOwner.revision += 1;
-      if (outgoingOwner && outgoingOwner.kind === "agent") {
-        outgoingOwner.permissions = outgoingOwner.permissions.filter(name => !["manage_members", "decide"].includes(name));
-        outgoingOwner.revision += 1;
-      }
-      projected.room.ownerId = d.toMemberId;
-    }
-    if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
-      check(validId(d.memberId) && !own(projected.members, d.memberId) && Array.isArray(d.permissions));
-      projected.members[d.memberId] = { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",
-        active: true, revision: 0, permissions: d.permissions };
-    }
-    if (e.type === "member.access_changed") {
-      check(validId(d.memberId)); const person = projected.members[d.memberId];
-      check(person && typeof d.active === "boolean" && Array.isArray(d.permissions) && d.expectedMemberRevision === person.revision);
-      Object.assign(person, { active: d.active, permissions: d.permissions, revision: person.revision + 1 });
-    }
+    advanceWorkHelpMembers(projected,e);
     if (relevant.has(d.workItemId)) {
-      if (e.type === "work.proposed") {
-        check(!own(projected.workItems, d.workItemId));
-        projected.workItems[d.workItemId] = { id: d.workItemId, title: d.title, definitionOfDone: d.definitionOfDone,
-          accountableMemberId: d.accountableMemberId, mode: d.mode || "read", verifierMemberId: d.verifierMemberId || null,
-          independentVerificationRequired: d.independentVerificationRequired === true, humanDecisionMakerId: d.humanDecisionMakerId || null,
-          ownerDecisionRequired: d.ownerDecisionRequired === true, sourceMessageId: d.sourceMessageId || null,
-          state: "proposed", revision: 0, receipt: null };
-      }
-      if (mutations.has(e.type)) {
-        const item = projected.workItems[d.workItemId];
-        check(item && d.expectedRevision === item.revision);
-        if (transitions[e.type]) item.state = transitions[e.type];
-        if (e.type === "work.completed") item.receipt = { eventId: e.id, evidenceVersion: d.evidenceVersion };
-        if (e.type === "verification.recorded" && d.result === "fail" && d.completionEventId === item.receipt?.eventId
-          && d.evidenceVersion === item.receipt?.evidenceVersion) item.state = "blocked";
-        if (e.type === "owner.decision_recorded" && d.decision !== "approved") item.state = "blocked";
-        item.revision++;
-      }
+      const next=advanceWorkHelpWork(projected.workItems[d.workItemId],e);
+      if(next!==undefined)projected.workItems[d.workItemId]=next;
       if (e.type === WORK_HELP_UPDATED) {
         const help = helpFromEvent(projected, e);
         projected.workItems[d.workItemId].helpWanted = help;
@@ -117,3 +70,68 @@ export function auditWorkHelp(state, history, checkpoint = null) {
   }
   check(checkpointChecked); compare(state);
 }
+
+// Exact historical supporting-fact rules shared with durable recovery. These
+// deliberately retain this audit's historical policy, not current work policy.
+export function advanceWorkHelpMembers(state,e) {
+ const d=e.data;
+    if (e.type === "room.created") { check(!state.room); state.room = { id: e.roomId, ownerId: d.ownerId }; }
+    // The owner can change, and compare() holds actual.room.ownerId against
+    // this one. Taking it from room.created alone meant the first
+    // ownership.transferred in a room that uses help failed this audit
+    // permanently - the same mistake auditCharters made, found the same way.
+    if (e.type === "ownership.transferred") {
+      check(state.room && validId(d.toMemberId) && own(state.members, d.toMemberId) && e.actorId === state.room.ownerId);
+      // A transfer is not only a new ownerId. src/events.js transferOwnership
+      // gives the new owner the full permission set and bumps their revision,
+      // and strips manage_members and decide from an outgoing AGENT owner,
+      // bumping theirs. compare() holds permissions and revision for every
+      // participant, so all of it has to be replayed or none of it matches.
+      const incomingOwner = state.members[d.toMemberId];
+      const outgoingOwner = state.members[state.room.ownerId];
+      incomingOwner.permissions = [...PERMISSIONS];
+      incomingOwner.revision += 1;
+      if (outgoingOwner && outgoingOwner.kind === "agent") {
+        outgoingOwner.permissions = outgoingOwner.permissions.filter(name => !["manage_members", "decide"].includes(name));
+        outgoingOwner.revision += 1;
+      }
+      state.room.ownerId = d.toMemberId;
+    }
+    if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
+      check(validId(d.memberId) && !own(state.members, d.memberId) && Array.isArray(d.permissions));
+      state.members[d.memberId] = { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",
+        active: true, revision: 0, permissions: d.permissions };
+    }
+    if (e.type === "member.access_changed") {
+      check(validId(d.memberId)); const person = state.members[d.memberId];
+      check(person && typeof d.active === "boolean" && Array.isArray(d.permissions) && d.expectedMemberRevision === person.revision);
+      Object.assign(person, { active: d.active, permissions: d.permissions, revision: person.revision + 1 });
+    }
+
+}
+export function advanceWorkHelpWork(previous,e) {
+ const d=e.data; let item=previous;
+      if (e.type === "work.proposed") {
+        check(item===undefined);
+        item = { id: d.workItemId, title: d.title, definitionOfDone: d.definitionOfDone,
+          accountableMemberId: d.accountableMemberId, mode: d.mode || "read", verifierMemberId: d.verifierMemberId || null,
+          independentVerificationRequired: d.independentVerificationRequired === true, humanDecisionMakerId: d.humanDecisionMakerId || null,
+          ownerDecisionRequired: d.ownerDecisionRequired === true, sourceMessageId: d.sourceMessageId || null,
+          state: "proposed", revision: 0, receipt: null };
+      }
+      if (mutations.has(e.type)) {
+        check(item && d.expectedRevision === item.revision);
+        if (transitions[e.type]) item.state = transitions[e.type];
+        if (e.type === "work.completed") item.receipt = { eventId: e.id, evidenceVersion: d.evidenceVersion };
+        if (e.type === "verification.recorded" && d.result === "fail" && d.completionEventId === item.receipt?.eventId
+          && d.evidenceVersion === item.receipt?.evidenceVersion) item.state = "blocked";
+        if (e.type === "owner.decision_recorded" && d.decision !== "approved") item.state = "blocked";
+        item.revision++;
+      }
+
+ return item;
+}
+export const workHelpAuditWorkFacts=workFacts;
+export const workHelpAuditMemberFacts=value=>pick(value,memberFields);
+export const workHelpAuditValue=(actual,expected)=>check(canonical(actual)===canonical(expected));
+export const workHelpAuditHelp=item=>own(item,'helpWanted')?validateHelp(item.helpWanted):undefined;

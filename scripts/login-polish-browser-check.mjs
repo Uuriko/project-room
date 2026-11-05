@@ -1,3 +1,4 @@
+import {readCurrentMessage,withCurrentReadContext} from "../server/current-room-repository.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -84,7 +85,7 @@ test("compact login and signup remain usable in both themes and small windows", 
   assert.equal(await page.locator('[name="password"]').evaluate(el => el === document.activeElement), true);
 });
 
-test("a real virtual-authenticator passkey can be enrolled, used after logout, and replay is refused", { timeout: 45000 }, async t => {
+test("a real virtual-authenticator passkey renews an old browser slot and refuses replay", { timeout: 45000 }, async t => {
   const { page, store, keys, origin } = await setup(t, { passkey: true });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
@@ -106,12 +107,22 @@ test("a real virtual-authenticator passkey can be enrolled, used after logout, a
   await clickChrome(page, '#signout-button');
   await page.goto(origin + '/?room=commons');
   await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
+  store.now = () => Date.now() - 29 * 86400000;
+  const aged = store.createAccountSessionSlot();
+  store.now = () => Date.now();
+  await page.context().addCookies([{ name: 'account_session', value: aged.token, url: origin, httpOnly: true, sameSite: 'Lax' }]);
+  await page.reload();
+  await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
   const assertion = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/passkey/authenticate/finish');
   await page.locator('[data-forgot-password]').click();
   await page.locator('[data-passkey-signin]').click();
   const accepted = await assertion;
   assert.equal(accepted.status(), 200, 'real browser assertion verified');
   assert.equal((await accepted.json()).account.id, before.account.id);
+  const cookie = (await page.context().cookies(origin)).find(item => item.name === 'account_session');
+  assert.ok(cookie && cookie.value !== aged.token, 'verified sign-in rotates the aged slot');
+  assert.ok(store.authenticateAccountSession(cookie.value).expiresAt - store.now() > 29 * 86400000, 'renewed slot remains valid for nearly 30 days');
+  assert.throws(() => store.authenticateAccountSession(aged.token), { code: 'unauthenticated' });
   await page.locator('#main').waitFor({ state: 'visible' });
   const replay = await page.context().request.post(origin + '/api/auth/passkey/authenticate/finish', { data: accepted.request().postDataJSON(), headers: { Origin: origin } });
   assert.ok(replay.status() >= 400, 'a consumed assertion cannot be replayed');
@@ -165,12 +176,15 @@ test("signup reconciles a committed account when its response body is interrupte
     throw new Error(`${error.message}; room status: ${await page.locator('#account-rooms-status').textContent()}; form: ${await page.locator('#account-room-create').innerText()}`);
   });
   await page.locator('#message-input').fill('First message after recovery');
+  const postedResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/commands') && response.request().method() === 'POST' && response.request().postDataJSON()?.type === 'message.posted');
   await page.locator('#message-form button[type="submit"]').click();
   await page.locator('#message-list').getByText('First message after recovery', { exact: true }).waitFor();
   const roomId = new URL(page.url()).searchParams.get('room');
-  const room = store.room(roomId).state;
-  const message = Object.values(room.messages).find(message => message.body === 'First message after recovery');
+  const posted = await postedResponse; assert.equal(posted.status(), 201);
+  const messageId = posted.request().postDataJSON().data.messageId;
+  const message = withCurrentReadContext(store.db, roomId, () => readCurrentMessage(store.db, roomId, messageId)?.value);
   assert.ok(message, 'the first useful action is durable, not an optimistic UI echo');
+  assert.equal(message.body, 'First message after recovery');
   assert.equal(store.accountForMember(roomId, message.authorId).id, actual.account.id);
 });
 

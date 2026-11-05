@@ -1,0 +1,47 @@
+[
+  {
+    "path": "/api/version",
+    "status": 200,
+    "body": {
+      "status": "ok",
+      "mode": "cloudflare-production",
+      "sourceRevision": "b6917a237004f994f60731d3d0ab9f4130e4e27a",
+      "buildId": "2026-11-02T03:16:55.923Z",
+      "deployment": "production",
+      "storage": {
+        "valueLimitBytes": 8388642
+      }
+    }
+  },
+  {
+    "path": "/api/ready",
+    "status": 200,
+    "body": {
+      "status": "ready",
+      "mode": "cloudflare-production",
+      "emailVerification": "enforced",
+      "emailVerificationScope": "durable-object",
+      "deployment": "production",
+      "do": {
+        "status": "ok",
+        "statusCode": 200,
+        "ms": 144
+      }
+    }
+  },
+  {
+    "path": "/api/health",
+    "status": 200,
+    "body": {
+      "status": "ok",
+      "liveness": "ok",
+      "jobs": {
+        "status": "ok"
+      },
+      "mode": "cloudflare-production",
+      "deployment": "production",
+      "emailVerification": "enforced",
+      "emailVerificationScope": "worker"
+    }
+  }
+]

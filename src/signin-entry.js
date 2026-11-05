@@ -76,6 +76,14 @@ export function mountSigninEntry({ openWorkspace }) {
       firstRunActions: {
         greet: () => $("#message-input")?.focus(),
         discover: () => { $("#people-panel").open = true; },
+        board: () => {
+          // The card mounts only after enterWorkspace() resolves, so the
+          // app's own board control is live; clicking it is the same open
+          // path app.js itself uses (no timers, no mounting retry).
+          const b = $("#tasks-board-open");
+          b?.click();
+          return $("#board-dialog")?.open === true;
+        },
         baseUrl: location.origin
       }
     });

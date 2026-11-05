@@ -132,7 +132,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
             ? `Wants: ${(event.data.permissions ?? []).join(", ")}${event.data.note ? `. ${event.data.note}` : ""}` : event.data.note ?? null,
           requestKind: event.data.requestKind ?? "join",
           requestedPermissions: [...(event.data.permissions ?? [])],
-          label: event.data.requestKind === "permissions"
+          label: event.data.requestKind === "agent-sponsor-transfer" ? "requests existing agent sponsorship" : event.data.requestKind === "permissions"
             ? `wants: ${(event.data.permissions ?? []).join(", ")}` : "requests to join",
         });
       }

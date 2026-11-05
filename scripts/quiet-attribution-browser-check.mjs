@@ -1,3 +1,4 @@
+import { openWorkFromSearch } from "./room-chrome.mjs";
 // Simulated local readers, not human research or identity verification.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,11 +36,11 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
+  await openWorkFromSearch(page, 'naming-work', 'Check our handoff');
   const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
-  const directed = record('naming-directed').locator('.audience-chip');
-  // RC-2026-09-19-070 made a targeted message visible only to its sender and
-  // its recipient, so the chip says private where it used to say room-visible.
-  assert.equal(await directed.textContent(), 'To Jordan · private');
+  const directed = page.locator(`#direct-message-list [data-direct-member="${jordan}"]`);
+  assert.equal(await directed.textContent(), 'Jordan', 'private conversation uses the person name');
+  assert.equal(await record('naming-directed').count(), 0, 'private message is absent from the public timeline');
   assert.match(await next.textContent(), /Next for Jordan:/); assert.equal((await next.textContent()).includes(jordan), false);
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
@@ -60,7 +61,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   await page.screenshot({ path: `test-results/quiet-attribution-${touch ? 'touch' : 'desktop'}-unique.png` });
   const reply = record('naming-root').locator('[data-message-action="reply"]'); await reply.focus();
   admitHistoricalMember(f.store, 'commons', 'owner', { memberId: duplicate, displayName: ' jordan ', kind: 'human', permissions: [] });
-  await page.waitForFunction(id => document.querySelector('[data-message-record-id="naming-directed"] .audience-chip').textContent.includes(id), jordan);
+  await page.waitForFunction(id => document.querySelector(`#direct-message-list [data-direct-member="${id}"]`).textContent.includes(id), jordan);
   assert.equal(await reply.evaluate(node => node === document.activeElement), true, 'background identity change preserves action focus');
   assert.match(await record('naming-root').locator('.message-meta strong').textContent(), new RegExp(jordan));
   assert.match(await next.textContent(), new RegExp(jordan));

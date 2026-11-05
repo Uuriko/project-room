@@ -1,0 +1,92 @@
+{
+  "sourceHead": "766f96bdb69486f43c3b1eb28441fa3e581acbff",
+  "runtimeHead": "16bf23220e26815738afecb2820365e19222202e",
+  "runtimeSourceUnchanged": true,
+  "packagingCommits": [
+    "4eb0d88f5072118276adcc0759d1208edfea343a",
+    "766f96bdb69486f43c3b1eb28441fa3e581acbff"
+  ],
+  "packageCreate": {
+    "verified": true,
+    "sourceCommit": "766f96bdb69486f43c3b1eb28441fa3e581acbff",
+    "sourceTree": "c919e5679c302bfab15c56a8e7ac6753d2f22e97",
+    "schemaVersion": 45,
+    "files": 682,
+    "assets": 142,
+    "manifestSha256": "cdf35753b36a9dd6565e1496ff17f1ca96326c4755ef83f9cc8da7f4411a7562"
+  },
+  "standaloneExtractedVerify": {
+    "verified": true,
+    "sourceCommit": "766f96bdb69486f43c3b1eb28441fa3e581acbff",
+    "sourceTree": "c919e5679c302bfab15c56a8e7ac6753d2f22e97",
+    "schemaVersion": 45,
+    "files": 682,
+    "assets": 142,
+    "manifestSha256": "cdf35753b36a9dd6565e1496ff17f1ca96326c4755ef83f9cc8da7f4411a7562"
+  },
+  "artifact": {
+    "path": "/tmp/project-room-schema45-offline-766f96bdb.tar",
+    "bytes": 14221312,
+    "sha256": "369cf02885b51a2e8f6657de83aab128e0f138bcd53cebfebe7236583a541af9",
+    "extractedPath": "/tmp/project-room-schema45-extracted-766f96bdb",
+    "verifierPath": "/tmp/current-events-standalone-verifier.mjs",
+    "verifierSha256": "31f2dff621283c4e84150d00a7154a18391b4efa44a3c3d09f1f790c48ca657d"
+  },
+  "checks": [
+    {
+      "command": "node --test tests/runtime-package.test.js tests/candidate-manifest.test.js",
+      "head": "766f96bdb69486f43c3b1eb28441fa3e581acbff",
+      "exitCode": 0,
+      "pass": 17,
+      "fail": 0
+    },
+    {
+      "command": "node --test cloudflare/current-events-worker.check.mjs",
+      "head": "766f96bdb69486f43c3b1eb28441fa3e581acbff",
+      "exitCode": 0,
+      "pass": 1,
+      "fail": 0
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js scripts/runtime-package.mjs tests/runtime-package.test.js server/current-room-events.mjs",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "command": "runtime-package.mjs create with short SHA 766f96bdb",
+      "exitCode": 1,
+      "note": "Guard refused short identifier before creating a package; successful run used full40-character SHA."
+    },
+    {
+      "command": "runtime-package.mjs create with exact full SHA; tar; extract; copied standalone runtime-package.mjs verify with exact SHA",
+      "exitCode": 0,
+      "note": "Saved create and extracted verification receipts match exactly."
+    }
+  ],
+  "logs": {
+    "audit/evidence/current-events-inherited-package-red-20261101.log": {
+      "sha256": "35c9770ba0247e2f761309a8fb133007115ee7c802a65448a334d65ebb4f6cb1"
+    },
+    "audit/evidence/current-events-package-partial-20261101.log": {
+      "sha256": "fc4b996618579464d03b756c11f45d6ae67c93eb3e74d661f030266a26c55c97"
+    },
+    "audit/evidence/current-events-package-green-20261101.log": {
+      "sha256": "a4aaea0d2bee5d42003a5d523c95f13e5df10b1ec80dc76cfe0b32c88187c2a4"
+    },
+    "audit/evidence/current-events-worker-final-20261101.log": {
+      "sha256": "fe2e345451cbf9f95fa84f61a0cdc37bf9ea98889efd0cf3db7fcfd78d6ffab0"
+    },
+    "audit/evidence/current-events-packaging-lint-20261101.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "boundaries": [
+    "Offline only; no publish/deploy/production activation.",
+    "Explicit schema45 acceptance preserves supported8..44; unsupported46 with matching synthetic hashes still refuses.",
+    "Complete existing normalized/restore import closure registered; no grandfather/verifier bypass.",
+    "Existing private/hash/symlink/duplicate/omitted-module guards remain.",
+    "Cold-export probes qualify distribution/export availability and narrow entry-point execution, not replacement unit qualification of every module.",
+    "Late writer inbox/cap modules are not in this source; root owns the final whole-candidate package."
+  ]
+}

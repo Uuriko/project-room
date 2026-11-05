@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { roomAcpInputs } from "./build-room-acp-pack.mjs";
 import { publicAssets } from "./runtime-package.mjs";
 
 export const MANIFEST_PATH = "scripts/CANDIDATE-MANIFEST.json";
@@ -46,7 +47,9 @@ const agentDocInputs = publicAssets
   .filter(path => GENERATED_AGENT_PAGE.test(path))
   .map(path => path.replace(/\.html$/, ".md"));
 const ASSET_FILES = [
-  ...publicAssets.filter(path => !GENERATED_AGENT_PAGE.test(path)),
+  ...publicAssets.filter(path => !GENERATED_AGENT_PAGE.test(path) && path !== "room-acp.tgz"),
+  ...roomAcpInputs.map(path => `room-acp/${path}`),
+  "scripts/build-room-acp-pack.mjs",
   ...agentDocInputs,
   "docs/agents/paste.md",
   "docs/agents/START.md",

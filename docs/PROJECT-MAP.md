@@ -37,6 +37,17 @@ a files/symbols/imports/calls projection, not Graphify's full semantic graph.
 Large graphs can exceed hosted limits; use local queries or an explicit scope.
 Missing results on a scoped/truncated map do not prove absence of dependencies.
 
+Graphify imports retain definitions across the accepted input (at most 20,000
+nodes and 4,000 files), including files with more than 200 symbols. File query and
+explain responses still return at most 200 symbols; `symbolCount` and
+`symbolsReturned` distinguish stored coverage from the response size. Exact
+symbol lookup searches all retained definitions. The fallback source parser
+still caps each file at 200 symbols; imports/call edges and global input limits
+can still make a graph incomplete. An imported graph exceeding the 1,500,000-byte
+storage limit is rejected without replacing the prior map; use an explicit
+smaller source scope when necessary.
+
+
 Rebuild at the intended new commit to refresh. There is currently no automatic
 GitHub push hook or PR-file synchronizer. A successful local build is not a hosted
 update. Check revision before using a map for a current change.
@@ -102,3 +113,18 @@ filesystem graph read or subprocess runs inside a Room request or Worker.
 
 Disable Graphify intake, or the entire map, to stop use. Preserve the prior graph
 for diagnosis. Rebuild from the intended exact revision before enabling stale data.
+
+## Adoption of the retained Graphify fixes
+
+The Graphify importer and query fixes from [PR #5087](https://github.com/Uuriko/project-room/pull/5087)
+are adopted separately from its manual inline-schema deployment changes. That
+workflow portion remains deferred at commit `d611358001f4694430e5aa9c7531095cc8bad4c2`;
+merging its ancestry does not mean those deployment changes were adopted.
+
+After this code lands and the serving revision is verified, build a new compact
+map from that exact landed revision. Read the existing hosted revision and digest,
+publish with both compare-and-swap values, then verify REST and discovered
+`room_map` queries return the intended revision, digest and source scope. A local
+candidate graph is qualification evidence, not proof of hosted activation. Keep
+scope and truncation visible; the fallback source parser still limits definitions
+per file and Graphify edge/input/storage limits remain in force.

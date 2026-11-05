@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "base": "ef583ba81eeeb284c8b743829aa4a0555752a0e8",
+  "controlsPassed": 4,
+  "intentionalRedGuards": 1,
+  "runtimeChanged": false,
+  "liveCalls": false,
+  "logs": [
+    {
+      "path": "/tmp/identity-continuity-final2.log",
+      "sha256": "2ea523129d4b40f9be7f63b6f0ff2f9408efc24e43091d930c2c0dcf4f6d6735"
+    },
+    {
+      "path": "/tmp/identity-continuity-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

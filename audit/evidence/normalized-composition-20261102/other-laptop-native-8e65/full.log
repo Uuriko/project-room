@@ -1,0 +1,10 @@
+✔ verified offline archive runs the actual Native durable restore qualification (126751.994625ms)
+ℹ PACKAGED_NATIVE_DURABLE_RESTORE {"sourceCommit":"8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000","package":{"verified":true,"sourceCommit":"8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000","sourceTree":"36859a748c14a28c6a69066c1c239adebe27e227","schemaVersion":45,"files":722,"assets":144,"manifestSha256":"8a545e5c2d2067b4b23244262deab0adfc3b0ae7d30e608c1b487570d1b622b5"},"qualification":{"runtimeSource":"retained-checkpoint-seed","auditProtocol":20,"actualNative":true,"importedPartialEvents":1000,"sourceSeal":true,"coverageSteps":1118,"cleanupSteps":144,"cleanupGuardCount":0,"coverageRows":6096,"maxPayloadRowsPerStep":128,"coldDuringCoverage":true,"preopenedPreparedDenied":true,"ordinaryReady503UntilAudit":true,"finalUnboundedAuditRequired":true,"coldReady":true,"exactRetry":true,"wholeRecoveryBounded":false,"acceptedNativeWorkCapacity":true,"nativeWorkExactRetry":true,"privateWorkRequestPreserved":true,"messageAncestryCensus":true,"historyFloorCensus":true,"mandatoryBatchedEngine":true,"strictEventHistory":true,"legalHistoryTimestampBytes":160029,"engineChecks":{"version":2,"stage":"complete","tableAfter":"","quickTables":227,"foreignKeyTables":228,"lastBatch":{"fromStage":"foreign_key_check","fromTable":"web_research_log","atoms":6,"largeTable":null}},"replayContinuation":{"rooms":1,"deferred":0,"originalFullOracleRequired":true},"retainedCheckpoint":null,"reportVersion":1},"fixturesOutsideArchive":["durable-coverage.check.mjs","durable-coverage-seed.test-fixture.mjs","durable-coverage-native.test-fixture.mjs","current-room-serving.test-fixture.mjs"],"productionSource":"verified offline archive","archiveUnchanged":true}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 126797.287583

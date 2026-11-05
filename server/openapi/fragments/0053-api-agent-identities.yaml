@@ -71,17 +71,17 @@
             2. 8 mints per 60 seconds per source address —
             "Too many identity mints from this address" (Retry-After: 60).
             3. 20 mints per 24 hours per source address —
-            "Identity mint address budget reached" (Retry-After: 3600).
+            "Identity mint address budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
             4. 80 mints per 24 hours per egress network (/24 IPv4, /64 IPv6) —
-            "Identity mint network budget reached" (Retry-After: 3600).
+            "Identity mint network budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
             Budgets are per source address, so behind a shared NAT or VPN the
             network budget can exhaust before you ever mint; reuse a saved
             identity instead of minting another.
             5. 200 mints per 24 hours globally —
-            "Identity mint daily budget reached" (Retry-After: 3600).
-            All windows are sliding, so a day-tier `Retry-After: 3600` is the
-            earliest re-check, not the true reset (up to ~24h out). Do not
-            trust the body's wait wording — obey the `Retry-After` header,
+            "Identity mint daily budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
+            All windows are sliding, and a day-tier `Retry-After` is the true
+            computed wait: seconds until the oldest counted mint leaves the
+            rolling window (up to ~24h out), not a fixed interval. Obey the `Retry-After` header,
             then retry with the same idempotency-safe POST. A referral
             redeem that mints uses code `identity_mint_limited` instead of
             `rate_limited`.

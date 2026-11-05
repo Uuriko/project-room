@@ -24,7 +24,7 @@ import { parse as parseYaml } from "yaml";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const doc = parseYaml(readFileSync(join(ROOT, "docs", "openapi.yaml"), "utf8"));
 
-test("docs/openapi.yaml: GET /api/rooms/{roomId}/search documents the limit cap and total count", t => {
+test("docs/openapi.yaml: GET /api/rooms/{roomId}/search documents legacy counts and native bounded unknown totals", t => {
   const op = doc.paths?.["/api/rooms/{roomId}/search"]?.get;
   assert.ok(op, "search operation is documented");
 
@@ -38,8 +38,19 @@ test("docs/openapi.yaml: GET /api/rooms/{roomId}/search documents the limit cap 
 
   const ok = op.responses?.["200"]?.content?.["application/json"]?.schema;
   assert.ok(ok, "documents the 200 response schema");
-  assert.ok(ok.properties?.total, "documents the total full-match-count field");
-  assert.equal(ok.properties.total.type, "integer");
+  assert.ok(ok.properties?.total, "documents the legacy/native total field");
+  assert.deepEqual(ok.properties.total.type, ["integer", "null"]);
+  assert.match(ok.properties.total.description, /Legacy full match count/);
+  assert.match(ok.properties.total.description, /null for normalized bounded search/);
+  assert.deepEqual(ok.properties.contractVersion.enum, [2]);
+  assert.equal(ok.properties.sourceWindow.type, "object");
+  assert.equal(ok.properties.page.type, "object");
+  assert.deepEqual(ok.properties.nextCursor.type, ["string", "null"]);
+  assert.match(op.description, /empty filtered pages/);
+  assert.match(op.description, /unknown\s+totals are never zero/);
+  const before = params.find(p => p.name === "before");
+  assert.match(before.description, /total.*remains null throughout/s);
+  assert.match(before.description, /total.*remains the full match count/s);
 
   assert.ok(op.responses?.["422"], "documents the 422 invalid_search response for bad limit values");
 });

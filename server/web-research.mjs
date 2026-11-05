@@ -102,6 +102,7 @@ export const webResearchSchema = `
     plan_only INTEGER NOT NULL CHECK(plan_only IN (0,1)),
     created_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS web_research_log_retention ON web_research_log(created_at, request_id);
   CREATE INDEX IF NOT EXISTS web_research_log_room_time ON web_research_log(room_id, created_at);
   CREATE INDEX IF NOT EXISTS web_research_log_member_time ON web_research_log(room_id, member_id, created_at);
 `;
@@ -351,6 +352,32 @@ export class WebResearch {
       VALUES(?,?,?,?,?,?,?,?,?)`)
       .run(requestId, roomId, memberId, credentialHash ?? null, questionHash,
         JSON.stringify(sources), evidenceCount, planOnly ? 1 : 0, at);
+  }
+
+  // Quota reservation (T2-L10b-C1), mirroring WebFetch's reserveQuota
+  // (#2963): the quota used to be checked in checkRateLimits and only
+  // journaled after the awaited fetch/provider legs, so concurrent calls
+  // all passed the count check against the same journal count and
+  // overshot the daily limits (executed: seeded at 49/50, five concurrent
+  // calls all fulfilled and the journal ended at 54 > 50). Reserve
+  // instead: run the check and insert the journal row as an executed
+  // reservation in ONE transaction, before any await, so concurrent
+  // requests count each other's reservations. settleJournal() then
+  // rewrites the reservation with the real evidence count instead of
+  // journaling a second row. A crash mid-research leaves the reservation
+  // billed: conservative, never an over-admission.
+  reserveQuota(entry) {
+    const reserve = () => {
+      this.checkRateLimits(entry.roomId, entry.memberId, entry.at); // rate_limited: 429 + retry info
+      this.journal({ ...entry, evidenceCount: 0, planOnly: false });
+    };
+    if (typeof this.store.transaction === "function") this.store.transaction(reserve);
+    else reserve();
+  }
+
+  settleJournal(requestId, evidenceCount) {
+    this.db.prepare("UPDATE web_research_log SET evidence_count=? WHERE request_id=?")
+      .run(evidenceCount, requestId);
   }
 
   // -- Planner: deterministic, no model. Returns [{ source, status, reason, cost }].
@@ -621,7 +648,10 @@ export class WebResearch {
       return { plan, evidence: [], fetch_errors: [], provider_status: providerStatus(req.sources.includes("provider")), request_id: requestId, plan_only: true };
     }
 
-    this.checkRateLimits(roomId, memberId, now); // 429 with retry info, never a 500
+    // Reserve the quota slot atomically before any await (T2-L10b-C1): a
+    // rate_limited refusal rolls the reservation back, so it leaves no
+    // journal row, exactly like the old check-only refusal.
+    this.reserveQuota({ requestId, roomId, memberId, credentialHash, questionHash, sources: req.sources, at: now });
     const keywords = researchKeywords(req.question);
     const evidence = [];
     const fetchErrors = [];
@@ -667,7 +697,9 @@ export class WebResearch {
       }
     }
 
-    this.journal({ requestId, roomId, memberId, credentialHash, questionHash, sources: req.sources, evidenceCount: evidence.length, planOnly: false, at: now });
+    // Settle the pre-execution reservation to the real evidence count
+    // instead of journaling a second row.
+    this.settleJournal(requestId, evidence.length);
     return {
       plan,
       evidence,

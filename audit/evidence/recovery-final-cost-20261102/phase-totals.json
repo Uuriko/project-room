@@ -1,0 +1,14 @@
+{
+  "finalization": {
+    "statements": 922,
+    "rowsRead": 833947,
+    "rowsWritten": 6,
+    "materializedBytes": 396587
+  },
+  "auditRecovery": {
+    "statements": 14706,
+    "rowsRead": 111003,
+    "rowsWritten": 0,
+    "materializedBytes": 6568397
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "source": "6e4c90eb0654a1d9520ad5f7f4503a02d7a0e250",
+  "priorSource": "c47419c54c2e7c50e008dc49956d4eab1890fb78",
+  "authorBase": "08f1cd18ed40d68438d432a135417102233caac3",
+  "node": "24.22.1",
+  "causalControls": [
+    "Original: drained webhook initial delivery leaves alarm null instead of1750000300000",
+    "Original: actual work-only ack returns signal but coalescer remains pending",
+    "Scheduler-only fix: job runs but transport call count remains1 instead2 because retry shares delivered row idempotency key"
+  ],
+  "fixes": [
+    "Read-only nextRewakeAt from pending/unexhausted coalescer entries, enabled-only plugin exposure, minimum with webhook/missed wake scheduler deadlines",
+    "Retry attempt-specific durable idempotency suffix on subscription and host-url delivery; repeat same attempt remains deduplicated",
+    "Call noteWakeRead after both ordinary and work acknowledgement results accumulated"
+  ],
+  "commands": [
+    "TMPDIR=$PWD/.tmp /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/wake-adapters-scheduler.test.mjs tests/wake-adapters.test.js tests/webhook-drain-concurrency.test.js",
+    "TMPDIR=$PWD/.tmp /Users/johnpotter/.local/bin/node --test --test-name-pattern=ack|work_wakes tests/agent-heartbeats.test.js (actual shell pattern: ack|work wakes)"
+  ],
+  "results": {
+    "focused": {
+      "pass": 15,
+      "fail": 0
+    },
+    "existingAck": {
+      "pass": 3,
+      "fail": 0
+    }
+  },
+  "limits": [
+    "Synthetic SQLite and fake DNS/transport only; localhost for existing ack controls; no provider/browser/Native/deploy",
+    "Actual job.run and earliestFutureAlarm/jobIsDue exercised under injected clock; no five-minute wall-clock or real DO alarm run",
+    "Coalescer remains memory-only as original feature; no restart persistence claim",
+    "Existing room-wide acknowledgement semantics retained; no new per-signal ack redesign",
+    "Intermediate test assumed data.signalId instead of actual data.signal.signalId; failure retained in harness-shape.log, harness corrected without production change"
+  ],
+  "defaultFlag": "off"
+}

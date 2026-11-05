@@ -55,10 +55,11 @@ test("a sequence change updates the checksum without a full replay", async () =>
   } finally { fixture.close(); }
 });
 
-test("projection bytes that change without a new event wait for that room's sweep", async () => {
+test("projection bytes that change without a new event fail verification once the sweep reaches the room", async () => {
   const fixture = openStore();
   try {
     await settle(fixture.store);
+    const baseline = snapshotText(fixture.store);
     const projection = fixture.store.db.prepare("SELECT projection FROM rooms WHERE id='gamma'").get().projection;
     const tampered = projection.replace("Project Room Commons", "Project Room Commons (edited)");
     assert.notEqual(tampered, projection);
@@ -68,9 +69,23 @@ test("projection bytes that change without a new event wait for that room's swee
     assert.equal(beforeSweep.checked, 0);
     assert.equal(fixture.store.db.prepare("SELECT projection FROM rooms WHERE id='gamma'").get().projection, tampered);
     assert.notEqual(snapshotText(fixture.store), fixture.store.integrityChecksum().text);
+    // L05-C1: where the pre-cure sweep detection fell through to a full
+    // pass that rebaselined the tampered bytes as verified:1, the content
+    // digest now makes the sweep's finding a durable failure — the
+    // snapshot keeps the clean baseline and later ticks keep failing.
     const swept = await fixture.store.verifyRoomIntegrity({ yieldBetween: async () => {} });
-    assert.equal(swept.verified, 1);
-    assert.equal(snapshotText(fixture.store), fixture.store.integrityChecksum().text);
+    assert.equal(swept.verified, 0);
+    assert.equal(swept.matched, 0);
+    assert.equal(swept.contentDrift, 1);
+    assert.equal(snapshotText(fixture.store), baseline);
+    const failures = fixture.store.integrityFailures();
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].step, "projection_content");
+    assert.equal(failures[0].recordId, "gamma");
+    const again = await fixture.store.verifyRoomIntegrity({ yieldBetween: async () => {} });
+    assert.equal(again.verified, 0);
+    assert.equal(again.matched, 0);
+    assert.equal(snapshotText(fixture.store), baseline);
   } finally { fixture.close(); }
 });
 

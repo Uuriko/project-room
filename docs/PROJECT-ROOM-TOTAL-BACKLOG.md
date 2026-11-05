@@ -6,6 +6,86 @@ Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 e
 
 This is the full captured inventory, not a priority shortlist. Existing source requirements remain binding. A task to reconcile or qualify a capability does not assert it has never been built. Schema 41 and earlier measured gains are local qualified checkpoints; the overall architecture overhaul remains incomplete.
 
+## Subsequent reconciliation — 2026-10-29
+
+The older audit below remains bound to its original source. These narrower
+updates prevent its unresolved rows from being mistaken for current missing work:
+
+- **#5193:** incorporated through #5321 at `30367102`, including failed-page
+  gesture retry, retired-session fencing and disconnect cleanup. It was merged,
+  not deployed, at this observation. The preserved before/after evidence covers
+  80 client/history boundary checks; it is not a productivity comparison.
+- **Graphify:** exact `1528c577` map publication passed three REST and three fresh
+  MCP readbacks. Compact edge keys retain normalized contents. Coverage remains
+  server-only/truncated; this does not imply the entire codebase is mapped.
+- **#5180:** merged; current process-group cleanup retains the profile lock until
+  group absence is established. A historical full-suite descendant timing failure
+  remains unexplained: 30 serial controls and 15 focused checks did not reproduce
+  it. Do not reopen the EPERM fix as missing or mark the timing failure resolved.
+- **#5163:** registry pointers adopted in #5319; optional SEO-title change declined.
+  The old mixed PR was closed with that explicit partial disposition.
+- **#4998 and #4983:** incorporated through #5329 and #5332 respectively;
+  original PRs are marked merged through ancestry. Current main `580b380a`
+  contains recorded receipt-privacy enforcement and hosted OG asset loading,
+  including no-store render failures. These are not in production `1528c577`.
+- **#5165:** useful enrollment/replay guidance salvaged in #5331; the conflicting
+  draft was closed with an explicit partial disposition. Its duplicate unbounded
+  solver, fixed quota assumptions and cosmetic changes were not adopted.
+
+For deployed versus merged state, use the [release checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045).
+No captured inventory entry below is silently deleted or marked complete.
+
+## Current-source review of retained proposals — 2026-10-29
+
+Seven PRs were reviewed against `580b380ad3416b23810fbe3544b10c9ae0f1aa85` using exact heads and source diffs. None is wholly superseded; no closure or deployment follows from this review.
+
+| PR and reviewed head | Disposition | Remaining work |
+| --- | --- | --- |
+| [#4988](https://github.com/Uuriko/project-room/pull/4988) · `818e2a4c` | partial | Extract only retained failure-status and Retry behavior onto current native lifecycle. Recheck locks, stopping, bounded error codes and no raw stderr; compile Swift and exercise real failed-start→retry. Do not reapply old request-runner code or claim installed upgrade. |
+| [#5059](https://github.com/Uuriko/project-room/pull/5059) · `5418bae3` | unique-unfinished | Rebase only with current cancellation/supervisor semantics. Reprove locks, exact room incarnation/opening/attempt, missing-proof refusal, legacy/generic refusal, no dispatch and no runtime attempt. No automatic unresolved-journal reset. |
+| [#5080](https://github.com/Uuriko/project-room/pull/5080) · `09e17fc6` | unique-unfinished | Qualify current tool catalog and identity binding, environment/file connection mismatch, revocation on child reload, tool list/call allowlist equality and packaged imports. Test actual model use separately; preserve authentication-only mode and capability fingerprint fences. |
+| [#4958](https://github.com/Uuriko/project-room/pull/4958) · `352ee470` | deferred-unique | Compare unique durable outbox/unknown-outcome guarantees with existing tools before selecting a slice. No operational merge-train claim. Provider mutation, authorization bindings, capacity indexing/retention and Workers qualification remain separate unfinished work. |
+| [#5187](https://github.com/Uuriko/project-room/pull/5187) · `6e0a67b3` | deferred-unique | Evaluate one real client use case against existing scoped reads; retain privacy/redaction/history floors, audit view and omittedClasses contract. Require measured total work before adopting an extra endpoint. Do not represent as cold hydration repair. |
+| [#5194](https://github.com/Uuriko/project-room/pull/5194) · `34bd4e73` | deferred-unique | Reconcile current private conversations, initial work/navigation access, partial-state semantics, generation and session binding, beforeId paging and explicit lazy-history behavior. Endpoint-only synthetic wire reduction is insufficient; no broad old app.js overwrite. |
+| [#5260](https://github.com/Uuriko/project-room/pull/5260) · `f1f16a3f` | held-not-rejected | Keep held unless narrower direct/HTTP benefit is justified or telemetry interaction solved without weakening mutation/auth guarantees. Preserve same-head corruption, external writes/schema, attempted failed mutations, outer read commit and raw-adapter bypass limitations. Not the same proposal as reverted5256; no explicit rejection found. |
+
+The refresh of open GitHub metadata found 500 PRs and 191 non-PR issues in a non-atomic paginated capture. That is discovery coverage, not 691 reviewed obligations. The original October 18 counts remain historical. Review bodies, dependencies and unique behavior before consolidation; closing an old branch is not acceptance evidence.
+
+## Bounded older-work dispositions — 2026-10-29
+
+This twelve-item audit is bound to source `c7a214cbe1452cec7d293a99a10cd400948dc8f2`.
+It supplements the captured inventory; it is not exhaustive, a live PR-status
+feed or a new execution plan. “Missing” below means absent from that inspected
+source, not never implemented. Refresh each head/base and owner before acting;
+subsequent integrations can supersede a row without erasing its retained scope.
+No checkbox or PR is closed by this table.
+
+Composition update: main `6bda3388f6225eb4b468d4cd9ca522ebb926686f` includes
+[#5266](https://github.com/Uuriko/project-room/pull/5266),
+[#5268](https://github.com/Uuriko/project-room/pull/5268) and
+[#5270](https://github.com/Uuriko/project-room/pull/5270). These are source
+integrations; at the 2026-10-29 16:30 UTC observation, production was `c47c3fc`
+and their deployed behavior was unverified. They do not retroactively expand this audit's `c7a214cb` coverage.
+
+| Existing work / evidence | Disposition at inspected source | Concrete remaining action |
+| --- | --- | --- |
+| [#5180](https://github.com/Uuriko/project-room/pull/5180), `client/codex-stdio.mjs` (`alive()`) | Runtime profile-lock safety when a process-group observation returns EPERM is absent; Grok owns qualification. Output-byte budgeting is a separate concern. | Reuse the existing patch; validate permission-denied versus nonexistent group handling and lock retention before adoption. |
+| [#5174](https://github.com/Uuriko/project-room/pull/5174), `scripts/release-evidence.mjs` | Source-bound executed-qualification recorder not incorporated; integration assigned separately. | Preserve command/toolchain/log and before/after source binding, interruption uncertainty and existing receipt compatibility. Do not create another recorder. |
+| [#5193](https://github.com/Uuriko/project-room/pull/5193) | Removal of forced full-history fill after 24 reads remains unintegrated in this snapshot. | Reconcile the existing proposal with bounded paging, cursor/horizon and reconnect tests; distinguish UI page reads from cold projection hydration. |
+| [#5087](https://github.com/Uuriko/project-room/pull/5087), [#5083](https://github.com/Uuriko/project-room/pull/5083), [#5066](https://github.com/Uuriko/project-room/pull/5066), `server/project-map.mjs` | Graphify is present, but the #5087 candidate combining #5083/#5066 is not integrated; the inspected importer still drops definitions after 200 per file. Last retained hosted-map evidence is server-only, truncated `8ebdea`; current freshness is unverified. | Trace the intended cap-preservation change through current source, distinguish import retention from response bounds, and verify authorized map revision/digest before relying on it. Do not infer “not built” from stale notes. |
+| [#4988](https://github.com/Uuriko/project-room/pull/4988), [#5226](https://github.com/Uuriko/project-room/pull/5226), [#5227](https://github.com/Uuriko/project-room/pull/5227), [#5229](https://github.com/Uuriko/project-room/pull/5229) | Native selection/recovery is partially superseded; the older PR also claims startup-failure explanation and Retry UI whose remaining hunks need current comparison. | Compare retained hunks and installed behavior. Do not close the whole older PR based only on selection/recovery integration or packaged-CLI success. |
+| [#5059](https://github.com/Uuriko/project-room/pull/5059) | Reconciliation modules absent; existing proposal is stacked rather than independently integrated. | Inspect its dependency chain and actual completion/recovery semantics, then adopt or explicitly supersede only the unique remainder. |
+| [#5080](https://github.com/Uuriko/project-room/pull/5080) | Identity-bound tools modules absent from inspected main; stacked work exists. | Qualify identity, authorization/revocation and tool invocation boundaries against the composed base before exposing capability claims. |
+| [#5218](https://github.com/Uuriko/project-room/pull/5218) | Entity constructor arming remains default-off/unintegrated. | Reuse the existing candidate only after constructor, restart, write-cost and corruption qualification; a flag or prototype is not active production behavior. |
+| `cloudflare/room-shard.mjs`, `server/room-shard-route.mjs` | RoomShard is built, but ordinary Worker requests still use the shared pilot Durable Object; route helper explicitly documents that limitation. | Treat placement/copy/compare code as migration groundwork. Wire only with authority, copy/cutover/recovery evidence and a measured need; do not claim current room isolation. |
+| [#4958](https://github.com/Uuriko/project-room/pull/4958) | Durable journal/shadow prototype remains unintegrated, not an operational merge train. | Inspect execution ownership, restart/unknown-outcome reconciliation and existing landing-tool overlap before selecting any unique part. |
+| [#5187](https://github.com/Uuriko/project-room/pull/5187), [#5194](https://github.com/Uuriko/project-room/pull/5194) | Projection/summary boot stack remains a candidate; smaller wire payload does not establish lower total CPU. | Compare exact composed sources using body allocation, SQL work and end-to-end timings, retaining slower results and privacy/recovery controls. |
+| [#5195](https://github.com/Uuriko/project-room/pull/5195), [#5125](https://github.com/Uuriko/project-room/pull/5125), [#5137](https://github.com/Uuriko/project-room/pull/5137) | Follow-up remains dependent on the earlier attention/needs-me proposals in this audit. | Reconcile dependency heads and overlapping behavior first; do not revive a title-based duplicate or treat dependency presence as shipped adoption. |
+
+These dispositions retain acceptance questions, not blanket approval to revive
+all twelve. Select useful remaining work through the focused plan, keep current
+owners and source-bound evidence, and preserve rejected alternatives.
+
 ## How this stays complete
 
 1. Discover sources: active/archived chats, local plans and transcripts, agent bus/Room records, branches, patches, issue/PR history, code contracts and user feedback. Record inaccessible or unread sources explicitly.
@@ -14,7 +94,7 @@ This is the full captured inventory, not a priority shortlist. Existing source r
 4. Attach owner, dependencies, implementation status, exact revision and acceptance evidence as each item is triaged. The current JSON deliberately does not fabricate unknown owners or dependency graphs.
 5. Distinguish proposal, required work, locally qualified, integrated, deployed and verified. A closed issue, merged PR or green unrelated test is not sufficient completion evidence.
 6. Refresh moving inventories and compare changes. Require a disposition for every source obligation; report unread sources, orphaned tasks and unmet acceptance conditions.
-7. Execute B00–B09 from the build-to-completion plan. Newly discovered scope changes that plan through explicit dependency and acceptance updates; it does not erase prior work.
+7. Select execution through the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). B00–B09 are historical package mappings, not a competing mandatory sequence. Reconcile newly discovered obligations into the retained outcomes with dependency, acceptance and supersession evidence; do not erase prior work.
 8. Complete a task only with evidence; retain superseded/cancelled IDs and the linked replacement or explicit decision.
 
 ## Coverage and limitations
@@ -477,7 +557,7 @@ Acceptance: Exact integrated artifacts pass supported suites and recovery drills
 - [ ] **OPS-09** — Rehearse disaster recovery, credential reissue and first-tick validation; measure RPO/RTO and user impact.
 - [ ] **OPS-10** — Provide operator status for deployment, jobs, backup freshness, integrity, queue health and actionable failures.
 - [ ] **OPS-11** — Define error budgets, alerts and incident ownership without creating noisy polling loops.
-- [ ] **OPS-12** — Publish only after current-session authorization; verify production journeys and running versions after any eventual release.
+- [ ] **OPS-12** — Use existing authorization and serialized deployment; verify production journeys and running versions after release. The historical per-session approval restriction is superseded by standing authorization.
 - [ ] **OPS-13** — Retire compatibility paths, obsolete tables, unused workers, duplicate docs and dead tests only after evidence permits removal.
 - [ ] **OPS-14** — Close backlog items with exact implementation and acceptance evidence; distinguish local, main and production completion.
 

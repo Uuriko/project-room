@@ -1,0 +1,34 @@
+{
+  "authSource": "e6d0af4255d01549d96892ae2b7f616aa8328ed1",
+  "authTests": 34,
+  "composedSource": "404921a36",
+  "composedTests": 77,
+  "nativeSource": "404921a36",
+  "nativeTests": 3,
+  "monitorReleaseSource": "b82a136f207057b718f93a44ef3690d6873d6d85",
+  "monitorTests": 28,
+  "claudeLiveSeatVerified": false,
+  "productionChanged": false,
+  "logs": [
+    {
+      "log": "claude-reconnect-auth-1102.log.gz",
+      "sha256": "b355212ad80ffa41b3301e3f44a248a9e472c1cc9c60a4458fd3a9e4bd93af13"
+    },
+    {
+      "log": "claude-storage-composed-1102.log.gz",
+      "sha256": "bb6d3bb9fcb2d906192a6016de451cc747a965700e77784a1db518f20bf73222"
+    },
+    {
+      "log": "claude-storage-native-1102.log.gz",
+      "sha256": "8e3c1de3f05b89e573aec941a872ecc8b80985b41aafad30fbd396734323aa45"
+    },
+    {
+      "log": "oauth-probe-final-before.log.gz",
+      "sha256": "3480714bc661e0a5a5145aa0f236737332d6f6ab200b96c93caa072d999d5ace"
+    },
+    {
+      "log": "claude-probe-release-1102.log.gz",
+      "sha256": "f9045b2633b9f390dbc25cd04198c28f51c04548efcfa87b7f7c7d4868e40088"
+    }
+  ]
+}

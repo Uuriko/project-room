@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -21,9 +22,25 @@ export class OutsideAgents {
       fail: (status, code, message) => fail(status, code, message)
     });
   }
-  #view(roomId, room) {
+  #view(roomId, room, auth) {
     const verifiers = this.#verifiers(roomId, room);
-    const agents = assembleOutsideAgents([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, { verifiers });
+    const records = [...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })];
+    let agents = assembleOutsideAgents(records, room.state.members ?? {}, { verifiers });
+    if (auth) {
+      const floor = summaryHistoryFloor(this.store, roomId, auth.member.id, room.sequence);
+      // Assemble canonical state before applying visibility. Replaying a suffix
+      // can attach an approval to a different link after an earlier link is hidden.
+      // Without field-level provenance, withhold a card touched by hidden history.
+      const hidden = new Set();
+      for (const message of records) {
+        if (message.toMemberId || message.deletedAt || messageVisibleToViewer(message, auth.member.id, floor)) continue;
+        const record = parseOutsideAgentBody(message.body);
+        if (record) for (const ref of [record.externalRef, record.fromRef, record.toRef]) if (ref) hidden.add(ref);
+      }
+      agents = agents.filter(agent => !hidden.has(agent.externalRef));
+      const visible = new Set(agents.map(agent => agent.externalRef));
+      agents = agents.map(agent => ({ ...agent, knows: agent.knows.filter(ref => visible.has(ref)), knownBy: agent.knownBy.filter(ref => visible.has(ref)) }));
+    }
     // Human approve/deny surface (1e hs2-outside-agent-approval): links
     // waiting on a decision, plus the verify step for each. Mirrors the
     // access-requests list/next[] pattern.
@@ -59,14 +76,14 @@ export class OutsideAgents {
     return verifiers;
   }
   list(token, roomId, expectedSessionBinding = null) {
-    const { room } = this.#open(token, roomId, expectedSessionBinding);
-    return this.#view(roomId, room);
+    const { auth, room } = this.#open(token, roomId, expectedSessionBinding);
+    return this.#view(roomId, room, auth);
   }
   record(token, roomId, input, expectedSessionBinding = null) {
     const { auth, room } = this.#open(token, roomId, expectedSessionBinding);
     this.#refuse(auth, roomId, room);
     const plan = planOutsideAgentRecord([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, roomId, auth.member.id, input);
-    if (plan.recorded === "replay") return { ...this.#view(roomId, room), recorded: "replay", externalRef: plan.externalRef };
+    if (plan.recorded === "replay") return { ...this.#view(roomId, room, auth), recorded: "replay", externalRef: plan.externalRef };
     this.#post(token, roomId, plan.commandId, plan.record, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: plan.recorded, externalRef: plan.externalRef };
   }
@@ -80,7 +97,7 @@ export class OutsideAgents {
     const from = this.#view(roomId, room).agents.find(agent => agent.externalRef === fromRef);
     if (![from.introducedBy, from.linkedMemberId].includes(auth.member.id)) fail(403, "outside_agent_forbidden", "Only the introducer or self-linked member may report this relationship");
     const already = from.knows.includes(toRef);
-    if (already) return { ...this.#view(roomId, room), recorded: "replay", fromRef, toRef };
+    if (already) return { ...this.#view(roomId, room, auth), recorded: "replay", fromRef, toRef };
     this.#post(token, roomId, commandId("knows", roomId, fromRef, toRef), { v: 1, kind: "knows", fromRef, toRef, externalRef: fromRef }, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: "knows", fromRef, toRef };
   }
@@ -95,7 +112,7 @@ export class OutsideAgents {
       fail(404, "outside_agent_not_found", "Link only to a member who already joined. This does not grant access.");
     const existing = this.#view(roomId, room).agents.find(agent => agent.externalRef === externalRef);
     if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before linking a joined member");
-    if (existing.linkedMemberId === memberId) return { ...this.#view(roomId, room), recorded: "replay", externalRef, memberId };
+    if (existing.linkedMemberId === memberId) return { ...this.#view(roomId, room, auth), recorded: "replay", externalRef, memberId };
     if (existing.linkedMemberId) fail(409, "outside_agent_changed", "This agent is already linked to a member");
     // A34: the link command id carries the member and a per-ref link
     // sequence, so a re-link after a denial is a fresh command - a bare
@@ -122,7 +139,7 @@ export class OutsideAgents {
     if (!verifiers.has(auth.member.id))
       fail(403, "outside_agent_forbidden", "Only the room owner or a membership administrator may decide on outside-agent links");
     const plan = planOutsideAgentVerify([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, roomId, auth.member.id, input, { verifiers });
-    if (plan.recorded === "replay") return { ...this.#view(roomId, room), recorded: "replay", externalRef: plan.externalRef, decision: plan.decision };
+    if (plan.recorded === "replay") return { ...this.#view(roomId, room, auth), recorded: "replay", externalRef: plan.externalRef, decision: plan.decision };
     this.#post(token, roomId, plan.commandId, plan.record, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: plan.recorded, externalRef: plan.externalRef, decision: plan.decision };
   }

@@ -1,0 +1,1 @@
+i18n-harness FAIL: 1 tracked file(s) in the scan surface are not in strings/i18n-scope.json (showing 5): src/current-record-context.js. Run `node scripts/i18n-harness.mjs --baseline`.

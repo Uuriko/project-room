@@ -1,0 +1,11 @@
+  /watch:
+    get:
+      summary: Watch the explicitly published Project Room lobby without signing in
+      security: []
+      responses:
+        '200':
+          description: Bounded public General-channel messages from the owner-published official lobby, or a helpful empty state when none is published. Private rooms, DMs and other channels are excluded.
+          content:
+            text/html:
+              schema:
+                type: string

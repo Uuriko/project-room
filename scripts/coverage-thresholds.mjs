@@ -36,6 +36,7 @@
 //   but still contribute coverable lines, so a brand-new untested module file
 //   drags the module percentage down and trips the gate.
 import { spawnSync } from "node:child_process";
+import { discoverUnitTests } from "./unit-shards.mjs";
 import {
   existsSync,
   mkdirSync,
@@ -96,22 +97,46 @@ export function loadConfig(configPath, root = ROOT) {
   return config;
 }
 
+// Isolate two expensive qualification files without changing discovery, test
+// limits or coverage membership. This is workload isolation, not a claim that
+// concurrency caused any particular CI timeout.
+export function coverageTestBatches(root = ROOT) {
+  const directory = resolve(root);
+  const files = discoverUnitTests(directory);
+  if (!files.length || new Set(files).size !== files.length) {
+    throw new Error("coverage collector requires nonempty, unique discovered test files");
+  }
+  const isolated = ["tests/runtime-package.test.js", "tests/store-relief-bounded.test.js"]
+    .map(file => join(directory, file)).filter(file => files.includes(file));
+  const remaining = files.filter(file => !isolated.includes(file));
+  return [...isolated.map(file => [file]), ...(remaining.length ? [remaining] : [])];
+}
+
 /** Run the root `node --test` suite with V8 coverage into coverageDir. Returns the suite exit status. */
 export function collectCoverage({ root = ROOT, coverageDir, tmpDir } = {}) {
-  const dir = coverageDir || join(root, "coverage");
-  const tmp = tmpDir || join(root, ".tmp");
+  const batches = coverageTestBatches(root);
+  const dir = resolve(coverageDir || join(root, "coverage"));
+  const tmp = resolve(tmpDir || join(root, ".tmp"));
   mkdirSync(dir, { recursive: true });
   mkdirSync(tmp, { recursive: true });
   // Drop stale coverage files so a re-run never mixes old and new data.
   for (const name of readdirSync(dir)) {
     if (name.endsWith(".json")) rmSync(join(dir, name));
   }
-  const res = spawnSync(process.execPath, ["--test"], {
-    cwd: root,
-    stdio: "inherit",
-    env: { ...process.env, NODE_V8_COVERAGE: dir, TMPDIR: tmp },
-  });
-  return { status: res.status ?? 1, coverageDir: dir };
+  const env = { ...process.env, NODE_V8_COVERAGE: dir, TMPDIR: tmp };
+  delete env.NODE_TEST_CONTEXT;
+  let status = 0;
+  for (const files of batches) {
+    const result = spawnSync(process.execPath, ["--test", ...files], {
+      cwd: root,
+      stdio: "inherit",
+      env,
+    });
+    // Finish every batch, preserving every payload in the directory cleared
+    // above exactly once. A failed or interrupted batch still fails the gate.
+    if (result.status !== 0) status = 1;
+  }
+  return { status, coverageDir: dir };
 }
 
 /** Read every coverage-*.json payload in dir, yielding parsed payloads one at a time. */
@@ -341,7 +366,7 @@ export function listModuleFiles(root, dir, extraExclude = []) {
  * coverage is monotonic in the test set. Files with no coverage data count
  * as 0 covered lines (decay-catching).
  */
-export function evaluateModules(root, config, grouped) {
+function evaluateCoverage(root, config, coverageForFile) {
   const rootPrefix = pathToFileURL(root + sep).href;
   const results = {};
   for (const [name, mod] of Object.entries(config.modules)) {
@@ -354,15 +379,8 @@ export function evaluateModules(root, config, grouped) {
       const text = readFileSync(join(root, rel), "utf8");
       const coverableArr = coverableLines(text);
       const coverableCount = coverableArr.filter(Boolean).length;
-      const payloads = grouped.get(rootPrefix + rel);
-      const union = new Set();
-      if (payloads) {
-        for (const functions of payloads) {
-          for (const i of coveredLinesForPayload(text, functions)) union.add(i);
-        }
-      } else {
-        zeroCoverageFiles.push(rel);
-      }
+      const { union, seen } = coverageForFile(rootPrefix + rel, text);
+      if (!seen) zeroCoverageFiles.push(rel);
       const pct = coverableCount === 0 ? 100 : (100 * union.size) / coverableCount;
       covered += union.size;
       coverable += coverableCount;
@@ -385,6 +403,49 @@ export function evaluateModules(root, config, grouped) {
     };
   }
   return results;
+}
+
+/** Retained reference evaluator for already-grouped payloads. */
+export function evaluateModules(root, config, grouped) {
+  return evaluateCoverage(root, config, (url, text) => {
+    const payloads = grouped.get(url);
+    const union = new Set();
+    if (payloads) for (const functions of payloads) {
+      for (const line of coveredLinesForPayload(text, functions)) union.add(line);
+    }
+    return { union, seen: Boolean(payloads) };
+  });
+}
+
+/**
+ * Fold each payload into line sets immediately, preserving per-payload range
+ * semantics. Retained memory depends on configured source lines, not the
+ * number of test processes or their accumulated function/range records.
+ */
+export function evaluatePayloads(root, config, payloads) {
+  const rootPrefix = pathToFileURL(root + sep).href;
+  const files = new Map();
+  for (const mod of Object.values(config.modules)) {
+    for (const rel of listModuleFiles(root, mod.dir, mod.exclude || [])) {
+      const url = rootPrefix + rel;
+      if (!files.has(url)) files.set(url, {
+        text: readFileSync(join(root, rel), "utf8"), union: new Set(), seen: false,
+      });
+    }
+  }
+  let payloadCount = 0;
+  for (const payload of payloads) {
+    payloadCount++;
+    for (const [url, lists] of groupFunctionsByUrl([payload], root)) {
+      const file = files.get(url);
+      if (!file) continue;
+      file.seen = true;
+      for (const functions of lists) {
+        for (const line of coveredLinesForPayload(file.text, functions)) file.union.add(line);
+      }
+    }
+  }
+  return { payloadCount, results: evaluateCoverage(root, config, url => files.get(url)) };
 }
 
 /** Compare module percentages against thresholds. */
@@ -488,26 +549,11 @@ if (isMain) {
     }
   }
 
-  const payloads = readCoveragePayloads(coverageDir);
-  const grouped = new Map();
-  let payloadCount = 0;
-  for (const payload of payloads) {
-    payloadCount++;
-    const one = groupFunctionsByUrl([payload], ROOT);
-    for (const [url, list] of one) {
-      let target = grouped.get(url);
-      if (!target) {
-        target = [];
-        grouped.set(url, target);
-      }
-      target.push(...list);
-    }
-  }
+  const { payloadCount, results } = evaluatePayloads(ROOT, config, readCoveragePayloads(coverageDir));
   if (payloadCount === 0) {
     console.error(`coverage gate: no coverage data in ${coverageDir}`);
     process.exit(2);
   }
-  const results = evaluateModules(ROOT, config, grouped);
 
   if (opts.baseline) {
     const out = {};

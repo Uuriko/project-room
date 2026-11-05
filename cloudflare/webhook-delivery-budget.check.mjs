@@ -11,9 +11,9 @@ const BUDGET = 20_000;
 
 async function measure(mf, n, { passes = 1, oracle = false } = {}) {
   const response = await mf.dispatchFetch(`http://localhost/measure?n=${n}&passes=${passes}${oracle ? "&oracle=1" : ""}`);
-  const body = await response.json();
-  assert.equal(response.status, 200, JSON.stringify(body));
-  return body;
+  const text = await response.text();
+  assert.equal(response.status, 200, text.slice(0, 1500));
+  return JSON.parse(text);
 }
 
 test("production-sized webhook hydration stays under 20k rows and scales linearly", async () => {

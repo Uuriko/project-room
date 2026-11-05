@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import {RoomClient} from '../room-acp/src/room.mjs';
 
 // Fixture-only setup/revocation/state. Every adapter read/register/poll/ACK
 // traverses the real production Worker entry and authenticated HTTP routes.
@@ -23,6 +24,19 @@ export class WakeTestRoom extends ProjectRoom {
    const identity = this.store.identities.create('Synthetic listener');
    linkWithProof(this.store, owner.secret, 'wake-room', identity, { memberId:'linked-worker', displayName:'Listener', permissions:[] });
    return Response.json({identity,ownerSecret:owner.secret,roomKey:this.store.issueAccessKey('wake-room','linked-worker')});
+  }
+  if (path === '/__fixture/scope-setup') {
+   const owner=this.store.identities.create('Synthetic scoped owner'),identity=this.store.identities.create('Synthetic scoped listener');
+   for(const roomId of ['scope-a','scope-b']) {
+    new AgentRooms(this.store).create(owner.secret,{roomId,title:roomId,purpose:'Disposable scope qualification',starter:false,visibility:'private'});
+    linkWithProof(this.store,owner.secret,roomId,identity,{memberId:'linked-worker',displayName:'Listener',permissions:[]});
+   }
+   return Response.json({identity,ownerSecret:owner.secret});
+  }
+  if (path === '/__fixture/scope-revoke') {
+   const input=await request.json(),member=this.store.roomAuthority('scope-a',{memberId:'linked-worker'}).members['linked-worker'];
+   this.store.command(input.ownerSecret,'scope-a',{id:'revoke-held',type:'member.access_changed',data:{memberId:'linked-worker',expectedMemberRevision:member.revision,permissions:[],active:false}});
+   return Response.json({revoked:true});
   }
   if (path === '/__fixture/state') return Response.json({hosts:this.store.db.prepare('SELECT count(*) n FROM agent_hosts').get().n,
    signals:this.store.db.prepare('SELECT signal_id,delivered_at FROM agent_wake_signals').all(),
@@ -93,4 +107,19 @@ test('actual Worker wake setup/poll survives disposal, ordinary mention releases
     assert.equal(after.credits, before.credits); assert.equal(after.identityLinks, before.identityLinks);
     assert.equal(after.signals.length, 1); assert.notEqual(after.signals[0].delivered_at, null);
   } finally { await worker.dispose(); await rm(persistence, { recursive: true, force: true }); }
+});
+
+test('actual Worker global identity poll is narrowed to selected room across cold restart and held revocation', {timeout:60000}, async()=>{
+ const bundled=await build({stdin:{contents:fixture,resolveDir:fileURLToPath(new URL('.',import.meta.url)),sourcefile:'scope-fixture.mjs'},bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
+ const persistence=await mkdtemp(join(tmpdir(),'acp-scoped-native-')),origin='https://room.example.test',config={modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'WakeTestRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:origin},durableObjectsPersist:persistence};let worker=new Miniflare(config);
+ const fetchImpl=(url,options)=>worker.dispatchFetch(url,options),api=(path,body,token)=>fetchImpl(origin+path,{method:body===undefined?'GET':'POST',headers:{...(token?{authorization:'Bearer '+token}:{}),...(body===undefined?{}:{'content-type':'application/json',origin})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ try{
+  const setup=await api('/__fixture/scope-setup',{});assert.equal(setup.status,200);const{identity,ownerSecret}=await setup.json(),client=new RoomClient({apiBase:origin,roomId:'scope-a',memberId:'linked-worker',credential:identity.secret,fetchImpl}),lease=await client.heartbeat({hostId:'existing-global'});
+  for(const roomId of ['scope-b','scope-a']){const r=await api('/api/rooms/'+roomId+'/commands',{id:'mention-'+roomId,type:'message.posted',data:{messageId:'mention-'+roomId,body:'<@linked-worker> Current directed ask'}},ownerSecret);assert.equal(r.status,201,await r.clone().text());}
+  const global=await(await api('/api/agent-wakes/poll?hostId=existing-global&waitMs=0',undefined,identity.secret)).json();assert.deepEqual(new Set(global.pendingWakes.map(w=>w.roomId)),new Set(['scope-a','scope-b']));
+  const selected=await client.poll({hostId:'existing-global',waitMs:0});assert.equal(selected.roomId,'scope-a');assert.equal(selected.pendingWakes.length,1);assert.equal(selected.pendingWakes[0].roomId,'scope-a');await client.ack({signalIds:selected.pendingWakes.map(w=>w.signalId),fencingToken:lease.listener.fencingToken});
+  await worker.dispose();worker=new Miniflare(config);const empty=await client.poll({hostId:'existing-global',waitMs:20});assert.equal(empty.roomId,'scope-a');assert.equal(empty.timedOut,true);assert.deepEqual(empty.pendingWakes,[]);
+  const stillForeign=await(await api('/api/agent-wakes/poll?hostId=existing-global&waitMs=0',undefined,identity.secret)).json();assert.deepEqual(stillForeign.pendingWakes.map(w=>w.roomId),['scope-b']);
+  const held=client.poll({hostId:'existing-global',waitMs:200});await new Promise(r=>setTimeout(r,50));assert.equal((await api('/__fixture/scope-revoke',{ownerSecret})).status,200);await assert.rejects(held,error=>error.status===403);
+ }finally{await worker.dispose();await rm(persistence,{recursive:true,force:true});}
 });

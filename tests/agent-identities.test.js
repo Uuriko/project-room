@@ -726,7 +726,7 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
   const delegated = await otherClient.checkConnection();
   assert.equal(delegated.status, "credential_accepted");
   assert.ok(delegated.permissions.includes("manage_members"));
-  assert.equal(store.room("keeper-den").state.room.ownerId, identity.identityId);
+  assert.equal(store.roomAuthority("keeper-den").ownerId, identity.identityId);
   const snapshot = await otherClient.snapshot();
   assert.equal(snapshot.state.members[other.identityId].delegatedAdmin, true);
   for (const marker of [undefined, false, "true"]) {

@@ -28,7 +28,7 @@ A public report stores the kind of target (room, receipt, or agent), the target 
 
 ## Cookies
 
-The browser holds an HttpOnly `account_session` cookie and, inside a room, an HttpOnly `room_session` cookie. Signing in authenticates that browser for up to 8 hours. The account-session cookie can remain for up to 30 days so the same browser can sign in again. Both cookies are SameSite=Strict, and Secure on HTTPS.
+The browser holds an HttpOnly `account_session` cookie and, inside a room, an HttpOnly `room_session` cookie. Account sign-in authenticates that browser for up to 30 days, bounded by the session and credential expiry. Room-key sessions and guest access last up to 8 hours. Both cookies are SameSite=Strict, and Secure on HTTPS.
 
 Connecting Gmail sets a short-lived HttpOnly `gmail_oauth` cookie (10 minutes, SameSite=Lax) that carries the OAuth state. It is cleared when the connection finishes.
 
@@ -48,7 +48,7 @@ Account deletion purges sign-in credentials, browser sessions, login methods, pa
 
 Deleting a message hides it in the room. The event history can still contain the earlier text.
 
-The scheduled retention job does not delete room events, commands, audit rows, invitations, activity, or webhook deliveries. An audit planner classifies events by age (critical about 7 years, high 2 years, normal 180 days, low 30 days) and records a plan. That planner does not delete those rows.
+The scheduled retention job does not delete room events, commands, audit rows, invitations, or activity. Webhook delivery records are the one exception: once a delivery is finished — delivered, or dead-letter after its retries ran out — its record is deleted only when it is older than 7 days and outside the newest 100 records for its subscription. Deliveries that are still pending or being retried are never deleted. An audit planner classifies events by age (critical about 7 years, high 2 years, normal 180 days, low 30 days) and records a plan. That planner does not delete those rows.
 
 There is no room setting that automatically deletes messages after a number of days.
 
