@@ -3,6 +3,7 @@ import { createSchedulerDiagnostics, readSchedulerDiagnostics } from "./job-sche
 import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
+import { downloadPageCsp } from "../server/download-page.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -43,7 +44,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -827,7 +828,7 @@ export default {
     const started = Date.now();
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
-    let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalPublicPolicy = null, browserPublicPolicy = null, internalDownloadPolicy = null, browserDownloadPolicy = null;
     let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
@@ -838,6 +839,11 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserDownloadPolicy && response.headers.get('Content-Security-Policy') === internalDownloadPolicy) {
+        // /download adds one hashed copy script to the public policy.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserDownloadPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
         // /about carries its own path-pinned policy (see aboutPageCsp);
@@ -894,6 +900,8 @@ export default {
     browserPublicPolicy = publicPageCsp(browserOrigin);
     internalAboutPolicy = aboutPageCsp(url.origin);
     browserAboutPolicy = aboutPageCsp(browserOrigin);
+    internalDownloadPolicy = downloadPageCsp(url.origin);
+    browserDownloadPolicy = downloadPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
@@ -957,6 +965,9 @@ export default {
       const response = await durableObjectJobsHealth({
         start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        // ROOM_HEALTH_JOBS_CACHE_MS (off by default): skip the Durable Object RPC
+        // for that long after a good job-health read in this isolate.
+        cacheMs: healthCacheMs(env.ROOM_HEALTH_JOBS_CACHE_MS),
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
         onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })

@@ -1,4 +1,5 @@
 import { digestMessagePage } from "../src/message-digest.js";
+import { experimentArm } from "./experiments.mjs";
 import { filterMessagePage } from "../src/message-query.js";
 import {redactSelectedEventPage} from './current-room-events.mjs';
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
@@ -94,7 +95,9 @@ function stampRoom(value, roomId) {
 async function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const latest = args.latest ?? false;
+  // EXP-1 cold_read_latest (ROOM_EXPERIMENTS, default off; qa- rooms only by default).
+  const coldRead = args.after === undefined && args.latest === undefined;
+  const latest = args.latest ?? (coldRead && experimentArm("cold_read_latest", memberId, { roomId }) === "latest");
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
   const fetchPage = (cursor, pageLimit) =>

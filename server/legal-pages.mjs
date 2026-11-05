@@ -70,6 +70,7 @@ function pageHtml({ title, main, path = null }) {
   const description = `${title} for Project Room at room.trydemigod.com, operated by Demigod Labs, Inc.`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 ${path && path !== "/terms" ? `<link rel="canonical" href="${LEGAL_CANONICAL_ORIGIN}${path}">\n` : ""}<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
@@ -114,6 +115,7 @@ export function legalPageHtml(pathname) {
 export function reportPageHtml() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <meta name="robots" content="noindex"><title>Report</title>
 <style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}label{display:block;margin:.75rem 0}textarea,input,select{width:100%;max-width:36rem}</style>
 </head><body>

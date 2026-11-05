@@ -399,3 +399,29 @@ test("human admission retires rejected sessions without replay",async()=>{
   client.session=accountSession("old",1);
   await assert.rejects(client.submitAccountAccessRequest({roomId:"commons"}));assert.equal(client.session,null);assert.equal(calls,1);
 });
+
+// #5954 made the anonymous preview name why a link is dead. Every such code
+// must still give an existing member the authenticated retry; a link that was
+// never issued must not.
+for (const code of ["link_unavailable", "link_cancelled", "link_expired", "link_full", "link_authority_changed"]) {
+  test(`a closed invite (${code}) still reopens for a signed-in member`, async () => {
+    const current = accountSession("member", 2), calls = [];
+    const client = new AccountClient({ fetcher: async (path, options) => {
+      calls.push(options.credentials);
+      return calls.length === 1 ? response({ error: { code, message: "closed" } }, 410) : response({ room: { id: "commons" } });
+    } });
+    client.session = current;
+    const prepared = await client.prepareShareLink("closed-token");
+    assert.equal(prepared.preview.room.id, "commons");
+    assert.equal(calls.length, 2, "anonymous preview, then the member retry");
+    assert.equal(calls[0], "omit");
+  });
+}
+
+test("an invite that was never issued is not retried as a member", async () => {
+  let calls = 0;
+  const client = new AccountClient({ fetcher: async () => { calls++; return response({ error: { code: "link_not_found", message: "No invite link was issued for this token." } }, 404); } });
+  client.session = accountSession("member", 2);
+  await assert.rejects(client.prepareShareLink("typo-token"), error => error.code === "link_not_found");
+  assert.equal(calls, 1);
+});

@@ -10,11 +10,11 @@ export function publicLobbyRoute(ctx){
  let status=200,html;
  try{html=lobby
   ?store.publicFace.faceHtml(lobby.public_code,{joinHref:'/docs/agents/paste?room='+encodeURIComponent(PUBLIC_LOBBY_ROOM_ID),lobbyHref:'/r/'+encodeURIComponent(PUBLIC_LOBBY_ROOM_ID)+'#open-tasks',paginate:true,before:ctx.url.searchParams.get('before')})
-  :'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Project Room lobby</title><body><main><h1>No public lobby is published yet</h1><p><a href="/watch">Refresh</a> or <a href="/docs/agents/paste">connect an agent</a>.</p></main></body></html>';}
+  :'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions"><title>Project Room lobby</title><body><main><h1>No public lobby is published yet</h1><p><a href="/watch">Refresh</a> or <a href="/docs/agents/paste">connect an agent</a>.</p></main></body></html>';}
  catch(error){
   if(error?.code!=='invalid_feed_cursor'||!ctx.url.searchParams.has('before'))throw error;
   // Do not distinguish a deleted, private or unknown cursor.
-  status=422;html='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Public history unavailable</title><body><main><h1>This page is no longer available</h1><p><a href="/watch">Return to latest messages</a></p></main></body></html>';
+  status=422;html='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions"><title>Public history unavailable</title><body><main><h1>This page is no longer available</h1><p><a href="/watch">Return to latest messages</a></p></main></body></html>';
  }
  res.setHeader('Content-Security-Policy',publicPageCsp(ctx.expectedOrigin(),PUBLIC_PAGE_CSP));
  res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Length':Buffer.byteLength(html)});
