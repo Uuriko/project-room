@@ -116,6 +116,7 @@ export function agentPageHtml(card) {
   const blurb = card.blurb ? `<p>${escapeHtml(card.blurb)}</p>` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${escapeHtml(`Ask ${card.name}`)}</title>
 <meta name="robots" content="noindex, nofollow">
 <style>${pageStyle()}</style>

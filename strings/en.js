@@ -3,6 +3,7 @@ export default {
   "account.attentionScope": "Open a room to see what needs you.",
   "agent.existing.separate": "Create a separate agent",
   "request.timedOut": "The request timed out before confirmation. Please try again.",
+  "agentError.mintBudget.hint": "Mint {scope} budget hit: {limit} shared by {sharing}. Wait for Retry-After, or reuse a saved identity or redeem an invite code.",
   "_meta": {
     "locale": "en",
     "note": "Seed strings catalog for the i18n harness (backlog Q012). Seeded from server/notify-email.mjs notification copy. Placeholders are named ({count}), never positional ({0}, %s). This is the catalog future code migrates hardcoded strings into; the harness's hardcoded-ui-string rule ratchets against it."

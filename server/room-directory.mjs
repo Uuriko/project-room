@@ -26,6 +26,7 @@
 
 import { isUnpublished } from "./legal-store.mjs";
 import { refreshListedRoom, refreshDirectoryForRoom } from "./public-read-model.mjs";
+import { currentInviteContext } from "./current-room-repository.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -85,7 +86,15 @@ export class RoomDirectory {
   }
 
   _roomState(roomId) {
-    const room = this.store.room(roomId);
+    // Current-format rooms refuse the legacy whole-room read; read the
+    // addressed invite context instead (census: the owner check needs the
+    // owner record and the public entry counts active members), with the
+    // legacy read as the fallback for legacy rooms. Minimal stores without
+    // the current-read transaction surface (the directory suite's fake
+    // store) keep the legacy read exactly as at the pin.
+    const room = (typeof this.store.readTransaction === "function"
+      ? currentInviteContext(this.store, roomId, { census: true })?.room
+      : null) ?? this.store.room(roomId);
     if (!room) fail(404, "room_not_found", "No such room");
     return room.state;
   }

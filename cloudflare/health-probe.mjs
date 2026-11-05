@@ -12,11 +12,21 @@
 // This is a bounded tolerance, not a retry or completed-result cache.
 export const HEALTH_PROBE_TIMEOUT_MS = 2500;
 
+// cacheMs (default 0 = off): reuse the last successful snapshot for that long
+// in this isolate. Only for job health, whose answer changes on cron cadence;
+// readiness never passes it. Capped at MAX_HEALTH_CACHE_MS.
+export const MAX_HEALTH_CACHE_MS = 30000;
+export const healthCacheMs = value => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_HEALTH_CACHE_MS) : 0;
+};
+
 export function createHealthProbe() {
-  let inflight = null;
-  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil }) {
+  let inflight = null, cached = null;
+  return async function probe({ start, timeoutMs = HEALTH_PROBE_TIMEOUT_MS, onSnapshot, onUnready, waitUntil, cacheMs = 0 }) {
     const started = performance.now();
     const timing = () => ({ elapsedMs: Math.round(performance.now() - started), timeoutMs });
+    if (cacheMs > 0 && cached && started - cached.at <= cacheMs) return onSnapshot(cached.snapshot, timing());
     // A returned health response must not cancel the probe. The runtime drops
     // in-flight I/O that is not passed to waitUntil, which would abort the
     // constructor every 200 ms and never let the object become ready.
@@ -36,6 +46,7 @@ export function createHealthProbe() {
     const task = (async () => {
       try {
         const snapshot = await snapshotResponse(await start());
+        if (snapshot.status === 200) cached = { snapshot, at: performance.now() };
         settle({ error: false, snapshot });
         return { snapshot, timing: timing() };
       } catch (error) {

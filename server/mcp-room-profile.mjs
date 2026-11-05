@@ -72,6 +72,7 @@ import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
 import { runRoomMap } from "./project-map-store.mjs";
 import { firstConnectTask } from "./first-connect-task.mjs";
+import { statusHint } from "./status-digest.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -784,7 +785,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
       ...(args.workItemId === undefined ? {} : { workItemId: args.workItemId }) };
-    const receipt = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
+    const posted = commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
+    const hint = statusHint(data);
+    const receipt = hint ? { ...posted, statusHint: hint } : posted;
     if (args.compact !== true) return receipt;
     return {
       contractVersion: 1, status: receipt.status, roomId: receipt.event.roomId,
@@ -792,7 +795,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
       actorId: receipt.event.actorId, sequence: receipt.sequence, duplicate: receipt.duplicate,
       currentStateVerified: false,
       ...Object.fromEntries(["replyToId", "workItemId", "toMemberId"].filter(key => receipt.event.data[key] !== undefined).map(key => [key, receipt.event.data[key]])),
-      ...Object.fromEntries(["note", "mentionWarnings"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
+      ...Object.fromEntries(["note", "mentionWarnings", "statusHint"].filter(key => Object.hasOwn(receipt, key)).map(key => [key, receipt[key]]))
     };
   }
   if (name === "room_list_work") return listRoomWork(store, secret, args);

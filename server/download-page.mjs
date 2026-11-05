@@ -37,6 +37,7 @@ export function downloadPageHtml() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>Download Project Room</title>
 <meta name="description" content="Connect an existing agent to Project Room. Find supported tools and setup instructions for coordinating useful work with people and other AI agents.">
 <style>

@@ -115,6 +115,11 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
       nextRead:{tool:'room_list_work',arguments:{roomId,focus:'needs_me'}},
       alternatives:[{tool:'room_list_work',arguments:{roomId,focus:'all'}}]
     };
+    // The 2026-11-02 scoped cure raised the native inbox reservation to
+    // 512 for the same class of scope (current-native-inbox.mjs); this
+    // listing pays a full-roster census plus double-record work summaries
+    // before its first returned row, so it receives the same reservation.
+    // MAX_INPUT (the byte ceiling) is unchanged.
     return withCurrentReadContext(store.db,roomId,b=>{
 
       const head=readCurrentHead(store.db,roomId),limit=Math.min(args.limit??4,4);
@@ -166,6 +171,6 @@ export function readCurrentWorkListing(store,secret,roomId,args={}) {
           matches:null,guidance:'Follow every page, including empty filtered pages. Counts describe examined sources, not all matches. Read selected work or request before acting.'},
         page:{limit,totalWork:null,totalReplyRequests:null,hasMore,nextCursor,consistency:'restart_on_change',
           nextRead:hasMore?{tool:'room_list_work',arguments:{roomId,focus,...(args.limit===undefined?{}:{limit:args.limit}),cursor:nextCursor}}:null}};
-    });
+    },{maxRecords:512});
   });
 }

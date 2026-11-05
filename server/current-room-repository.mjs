@@ -694,7 +694,7 @@ function currentClaimAdmissionAt(store,roomId,actorId,item,command,b,instant) {
 }
 export function currentCommandContext(store,roomId,command,{actorId}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
-  if(['room.public_page_set','room.join_link_set'].includes(command.type))
+  if(['room.public_page_set','room.join_link_set','room.public_receipts_set'].includes(command.type))
     return currentInviteContext(store,roomId,{memberIds:[actorId],census:command.type==='room.public_page_set'&&command.data.enabled===true});
   // Membership additions and reactivation need the exact admitted roster for
   // capacity/name/authority checks, but no messages or unrelated work bodies.
@@ -1159,6 +1159,26 @@ export function currentConversationRows(store,roomId,{viewerId,limit,before,befo
     const available=streams.filter(stream=>stream.rows.length);if(!available.length)break;
     available.sort((a,c)=>c.rows[0].seq-a.rows[0].seq||Buffer.compare(Buffer.from(c.rows[0].message_id),Buffer.from(a.rows[0].message_id)));
     const row=available[0].rows.shift();if(seen.has(row.message_id))continue;seen.add(row.message_id);
+    if(floor) {
+      // PRIV-2 accounting: a candidate whose scalar creation instant is
+      // strictly before the reader's history floor is unreturnable by
+      // construction (messageInHistory can only deny it), so it is charged
+      // the scalar denial the addressed path already uses
+      // (currentMessageMayBeVisible: charge 256), not a full proof read of
+      // a body the reader may never see. The equal-instant tie-break and
+      // every returnable row stay on the authoritative proof path below.
+      // D4 guard (lane-11 rework): the scalar charge sits inside the same
+      // budget-error catch discipline as the loop's other throws (pin
+      // :1150/:1156/:1160) — if it exhausts the budget after at least one
+      // candidate has been examined (last set), the read degrades to the
+      // partial page with a continuation instead of hard-409ing.
+      try{
+        const at=db.prepare("SELECT CASE WHEN length(CAST(created_at AS BLOB))<=128 THEN created_at END AS at FROM messages WHERE room_id=? AND message_id=?").get(roomId,row.message_id)?.at;
+        charge(b,256);
+        const instant=typeof at==='string'?Date.parse(at):NaN,joined=Date.parse(floor.at);
+        if(Number.isFinite(instant)&&Number.isFinite(joined)&&instant<joined){examined++;last={position:row.seq,messageId:row.message_id};continue;}
+      }catch(error){if(error.code==='current_room_context_unavailable'&&last){interrupted=true;break;}throw error;}
+    }
     let source;
     try{source=readCurrentMessage(db,roomId,row.message_id,b);}
     catch(error){if(error.code==='current_room_context_unavailable'&&last){interrupted=true;break;}throw error;}

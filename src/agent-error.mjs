@@ -828,6 +828,45 @@ export function parseOwnerHeldClaimCopy(message) {
   return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
 }
 
+// MINT-BUDGET Pack 1 (D3): mint-budget 429s get a mint-specific hint/next.
+// This envelope layer receives no error detail (agentErrorAx is called with
+// httpStatus/code/message only), so it cannot read the body's mintBudget
+// {scope, limit, windowMs, retryAfterSeconds, resetAt} — the sub-branch keys
+// on the mint refusal messages themselves (the pack's flagged fallback) and
+// derives the scope from the message. The exact wait stays where the server
+// already puts it: the Retry-After header and the body's retryAfterSeconds /
+// mintBudget fields; nothing here invents a reset time. Scope text follows
+// the lane-04 D3 template: address = this source address alone; network =
+// every agent behind your egress network together — other people's mints
+// spent it too; global = all minting on this service together. The hint
+// stays under this layer's 160-char contract; the proof re-solve warning
+// and the alternatives ride in next[].
+const MINT_BUDGET_SCOPES = Object.freeze([
+  Object.freeze({ prefix: "Too many identity mints from this address", scope: "address", limit: "8/minute", sharing: "this source address alone" }),
+  Object.freeze({ prefix: "Identity mint address budget reached", scope: "address", limit: "20/day", sharing: "this source address alone" }),
+  Object.freeze({ prefix: "Identity mint network budget reached", scope: "network", limit: "80/day", sharing: "all agents behind your egress network" }),
+  Object.freeze({ prefix: "Identity mint daily budget reached", scope: "global", limit: "200/day", sharing: "all minting on this service" }),
+]);
+export function mintBudgetAx(message) {
+  const text = String(message || "");
+  const hit = MINT_BUDGET_SCOPES.find(entry => text.startsWith(entry.prefix));
+  if (!hit) return null;
+  const global = hit.scope === "global";
+  return {
+    status: "action_required", reason: "rate_limited",
+    hint: global
+      ? "Mint global budget hit: 200/day shared by all minting service-wide. Wait for Retry-After, or reuse a saved identity; invites spend this budget too."
+      : uiText("agentError.mintBudget.hint", { scope: hit.scope, limit: hit.limit, sharing: hit.sharing }),
+    next: [
+      command("Wait for Retry-After, then retry (re-solving any proof first)"),
+      command("Reuse a saved identity if you hold one"),
+      command(global
+        ? "Do not mint around it: agent invite and referral redemption spend this same global budget"
+        : "Ask a room member for an agent invite code and POST /api/agent-invites/redeem"),
+    ]
+  };
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -1402,6 +1441,11 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
+    // Mint-budget refusals name their mintBudget scope and a non-wait
+    // alternative (reuse a saved identity, redeem an invite code) via
+    // mintBudgetAx above; every other 429 keeps the generic wait hint.
+    const mint = mintBudgetAx(message);
+    if (mint) return mint;
     return {
       status: "action_required", reason: "rate_limited",
       hint: "Wait for the Retry-After interval, then retry the same request unchanged.",
