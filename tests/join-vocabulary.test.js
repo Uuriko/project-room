@@ -28,7 +28,10 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 // A new user knows one word: "invite". These internal mechanism names must
 // never reach them in copy, errors, or docs. RM- is matched with a lookbehind
 // so ordinary words like SWARM-PLUG-IN.md do not trip the scanner.
-const BANNED = [/(?<![A-Za-z])RM-/, "ga1.", "self-mint", "self minted", "access-request"];
+// `RM-…` (with the ellipsis) is the documented shape of an agent invite code,
+// which agents must recognize to use the right door (#5954); it names a
+// format, not a mechanism, so only that exact placeholder is allowed.
+const BANNED = [/(?<![A-Za-z])RM-(?!…)/, "ga1.", "self-mint", "self minted", "access-request"];
 // Route paths and CLI command names stay stable for compatibility; they are
 // not user-facing copy, so the scanner ignores them.
 const PATH_LINE = /^[ \t]*(\/api\/[^\s:]*|access-requests|access-decide|request-access)[ \t]*:?[ \t]*$/gm;
@@ -121,11 +124,22 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   }, null);
   const linkPreview = await post("/api/share-links/preview", { linkToken });
   assert.equal(linkPreview.status, 200);
-  // A used-up/unknown link fails in invite vocabulary.
+  // An unknown link (404 link_not_found since #5954) and a cancelled one
+  // (410 link_cancelled) both fail in invite vocabulary.
   const badLink = await post("/api/share-links/preview", { linkToken: randomBytes(32).toString("base64url") });
-  assert.equal(badLink.status, 410);
+  assert.equal(badLink.status, 404);
   const badLinkJson = await badLink.json();
+  assert.equal(badLinkJson.error.code, "link_not_found");
   assert.match(badLinkJson.error.message, /[Ii]nvite link/);
+  const endedToken = randomBytes(32).toString("base64url");
+  const ended = store.shareLinks.create(ownerKey, "commons", { requestId: randomUUID(), linkToken: endedToken,
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 }, null);
+  store.shareLinks.cancel(ownerKey, "commons", ended.link.id, null);
+  const endedLink = await post("/api/share-links/preview", { linkToken: endedToken });
+  assert.equal(endedLink.status, 410);
+  const endedJson = await endedLink.json();
+  assert.equal(endedJson.error.code, "link_cancelled");
+  assert.match(endedJson.error.message, /[Ii]nvite link/);
 
   // --- 3. Guest invite: the owner mints a GX- code; the agent redeems it
   // short-lived with its identity and a signed card. ---
