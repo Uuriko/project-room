@@ -1274,6 +1274,7 @@ paths:
         '409': { description: Continuation authority changed or normalized selection unavailable; follow the refusal or restart }
         '422': { description: Invalid selection or continuation }
   /api/inbox/setup:
+    x-self-host-only: true
     get:
       summary: Read or save resumable setup preferences.
       security:
@@ -1309,6 +1310,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail:
+    x-self-host-only: true
     get:
       summary: Gmail availability and connection status. No tokens are returned.
       security:
@@ -1320,6 +1322,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/mailbox:
+    x-self-host-only: true
     post:
       summary: Read, search, compose, save provider drafts and organize the owner's Gmail mailbox.
       security:
@@ -1373,6 +1376,7 @@ paths:
         '502': { description: Gmail unavailable. }
         '503': { description: Gmail is not configured. }
   /api/inbox/gmail/connect:
+    x-self-host-only: true
     post:
       summary: Start Gmail read, send and organize OAuth; returns authorizationUrl.
       security:
@@ -1393,6 +1397,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/sync:
+    x-self-host-only: true
     post:
       summary: Apply a bounded Gmail history sync; expired history reloads 50 recent inbox messages. No remote mailbox edits.
       security:
@@ -1412,6 +1417,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/disconnect:
+    x-self-host-only: true
     post:
       summary: Delete locally stored Gmail credentials and disconnect. Saved copies remain.
       security:
@@ -1431,6 +1437,7 @@ paths:
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
   /api/auth/gmail/callback:
+    x-self-host-only: true
     get:
       summary: Consume single-use PKCE state, check initiating account session, save encrypted grant, return to inbox.
       security: []
@@ -13371,6 +13378,7 @@ paths:
         '422': { description: invalid_deletion or invalid_purge_plan }
         '429': { description: rate_limited }
   /api/inbox/connections:
+    x-self-host-only: true
     get:
       summary: List the account's channel connections
       description: |
@@ -13396,6 +13404,7 @@ paths:
                     items: { $ref: '#/components/schemas/ChannelConnection' }
         '401': { description: account_session_required }
   /api/inbox/connections/{id}:
+    x-self-host-only: true
     get:
       summary: Read one channel connection
       description: Account-session route. 404 channel_connection_not_found for another account's connection.
@@ -13433,6 +13442,7 @@ paths:
                       - $ref: '#/components/schemas/TelegramLiveStatus'
         '404': { description: channel_connection_not_found }
   /api/inbox/connections/{id}/reconnect:
+    x-self-host-only: true
     post:
       summary: Owner-authenticated live import trigger (Telegram)
       description: |
@@ -13501,6 +13511,7 @@ paths:
         '422': { description: invalid_channel_update (body shape) }
         '429': { description: rate_limited }
   /api/inbox/connections/commands:
+    x-self-host-only: true
     post:
       summary: Add, update or remove one of the account's channel connections
       description: |
@@ -13575,6 +13586,7 @@ paths:
         '422': { description: "invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape)" }
         '429': { description: rate_limited }
   /api/inbox/channel-sends:
+    x-self-host-only: true
     post:
       summary: Dispatch or reconcile a queued Inbox reply through the channel transport
       description: |
@@ -13637,6 +13649,7 @@ paths:
         '422': { description: invalid_inbox_send }
         '429': { description: rate_limited }
   /api/inbox/connections/{id}/sync:
+    x-self-host-only: true
     post:
       summary: Import one recorded Telegram page
       description: |
@@ -13671,6 +13684,7 @@ paths:
         '409': { description: "channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor" }
         '422': { description: invalid_channel_update }
   /api/inbox/webhooks/{connectionId}:
+    x-self-host-only: true
     post:
       summary: Provider webhook delivery (Telegram)
       description: |
@@ -13708,6 +13722,7 @@ paths:
         '422': { description: invalid_channel_update }
         '429': { description: rate_limited (60 per minute per verified connection; 1200 per minute per address) }
   /api/inbox:
+    x-self-host-only: true
     get:
       summary: The account's private inbox
       description: >-
@@ -13735,6 +13750,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
   /api/inbox/search:
+    x-self-host-only: true
     get:
       summary: Full-text search over the account's visible inbox sources
       description: >-
@@ -13767,6 +13783,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
   /api/inbox/threads:
+    x-self-host-only: true
     get:
       summary: Conversation/thread view over the account's visible inbox sources
       description: >-
@@ -13798,6 +13815,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_limit or unsupported_inbox_view }
   /api/inbox/sla/dashboard:
+    x-self-host-only: true
     get:
       summary: SLA dashboard — response-time percentiles, breach counts, open-conversation sweep
       description: >-
@@ -14373,6 +14391,7 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ total, closed, byStatus, escalationRate }" }
   /api/inbox/quarantine:
+    x-self-host-only: true
     get:
       summary: Held-message quarantine review listing
       description: >-
@@ -14398,6 +14417,7 @@ paths:
         '401': { description: account_session_required }
         '422': { description: invalid_quarantine }
   /api/inbox/quarantine/coverage:
+    x-self-host-only: true
     get:
       summary: Per-signal review-coverage dashboard for the quarantine queue
       description: >-
@@ -14416,6 +14436,7 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, generatedAt, totals: { held, confirmed, dismissed, split, reviewed, total, reviewCoverage }, zeroCoverageSignals: [signalKey], perSignal: [{ key, held, confirmed, dismissed, reviewed, split, total, reviewCoverage, shareOfHolds, avgScore, avgWeight }] } — sorted least-covered first; reviewCoverage is null when a denominator is zero" }
         '401': { description: account_session_required }
   /api/inbox/quarantine/release:
+    x-self-host-only: true
     post:
       summary: Owner confirms a held message (accepts it into the inbox)
       description: >-
@@ -14441,6 +14462,7 @@ paths:
         '422': { description: invalid_quarantine_release }
         '404': { description: quarantine_not_found }
   /api/inbox/quarantine/dismiss:
+    x-self-host-only: true
     post:
       summary: Owner dismisses a held message as spam
       description: >-
@@ -14466,6 +14488,7 @@ paths:
         '422': { description: invalid_quarantine_dismiss }
         '404': { description: quarantine_not_found }
   /api/inbox/quarantine/split:
+    x-self-host-only: true
     post:
       summary: Owner splits a held message off its thread
       description: >-
@@ -14494,6 +14517,7 @@ paths:
         '404': { description: quarantine_not_found }
         '409': { description: quarantine_already_split }
   /api/inbox/sources/{sourceId}/attachments:
+    x-self-host-only: true
     get:
       summary: List one inbox source's attachment descriptors
       description: >-
@@ -14516,6 +14540,7 @@ paths:
         '404': { description: inbox_source_not_found }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}/attachments/{attachmentId}:
+    x-self-host-only: true
     get:
       summary: Verify one attachment's descriptor membership
       description: >-
@@ -14543,6 +14568,7 @@ paths:
         '404': { description: inbox_source_not_found or inbox_attachment_not_found }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
+    x-self-host-only: true
     get:
       summary: Read one inbox source and its private draft
       description: >-
@@ -14561,6 +14587,7 @@ paths:
         '404': { description: Source not found for this account }
         '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}/share-context:
+    x-self-host-only: true
     get:
       summary: Audience for sharing a source into a room
       description: >-
@@ -14580,6 +14607,7 @@ paths:
         '403': { description: Not a member of the room }
         '422': { description: invalid_room }
   /api/inbox/sources/{sourceId}/room-results:
+    x-self-host-only: true
     get:
       summary: Room results that can answer a source
       description: >-
@@ -14601,6 +14629,7 @@ paths:
         '200': { description: "{ contractVersion, viewer, sourceId, roomId, sourceRevision, results }" }
         '422': { description: invalid_room or invalid_inbox_result }
   /api/inbox/sources/{sourceId}/send-context:
+    x-self-host-only: true
     get:
       summary: What a send from this source would use
       description: >-
@@ -14616,6 +14645,7 @@ paths:
         '200': { description: Send context plus simulationAvailable }
         '409': { description: channel_sending_unavailable }
   /api/inbox/sources/{sourceId}/sends:
+    x-self-host-only: true
     get:
       summary: Send attempts recorded for a source
       description: Account-session read of the durable send journal for one source.
@@ -14627,6 +14657,7 @@ paths:
         '422': { description: session_binding_required }
         '200': { description: "{ contractVersion, viewer, sourceId, sends, simulationAvailable }" }
   /api/inbox/sources/{sourceId}/reply-review:
+    x-self-host-only: true
     get:
       summary: Reply review context
       description: >-
@@ -14645,6 +14676,7 @@ paths:
         '200': { description: "{ contractVersion, view, viewer, sourceId, attempt, comparison, update }" }
         '422': { description: unsupported_inbox_view }
   /api/inbox/commands:
+    x-self-host-only: true
     post:
       summary: Apply one private inbox command
       description: >-
@@ -14687,6 +14719,7 @@ paths:
         '422': { description: "invalid_inbox_request, invalid_inbox_source, invalid_inbox_draft, invalid_inbox_result or invalid_inbox_share" }
         '429': { description: rate_limited }
   /api/inbox/review:
+    x-self-host-only: true
     post:
       summary: Record a reply review
       description: >-
@@ -14715,6 +14748,7 @@ paths:
         '409': { description: "idempotency_conflict, reply_update_unresolved or a stale revision" }
         '422': { description: invalid_reply_review }
   /api/inbox/simulation:
+    x-self-host-only: true
     post:
       summary: Drive the synthetic send transport (local only)
       description: >-
