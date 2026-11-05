@@ -30,7 +30,7 @@ function workAttention(store, secret, roomId, memberId, from, through) {
     scanned = page.next;
   }
   if (!ids.size) return {through: scanned, items: []};
-  // Each candidate is read in its own bounded context, newest-event order, so
+  // Each candidate is read in its own bounded context, oldest event first, so
   // many small proposals cannot exhaust one shared read budget (409). Stop at
   // four pointers or MAX_WORK_CANDIDATES examined, holding the cursor at the
   // last examined event so the rest are read on the next wait.
