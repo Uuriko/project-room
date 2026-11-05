@@ -34,9 +34,10 @@ if (!token) {
   process.exit(2);
 }
 
-function ghJson(args) {
+function ghJson(args, input) {
   const r = spawnSync("gh", ["api", ...args], {
     encoding: "utf8",
+    input: input ?? undefined,
     env: { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token },
   });
   if (r.status !== 0) {
@@ -91,26 +92,8 @@ if (!force) {
 }
 
 const next = [...new Set([...labels, "ready-to-land"])];
-ghJson([
-  "--method",
-  "PATCH",
-  `repos/${REPO}/issues/${pr}`,
-  "-f",
-  `labels=${JSON.stringify(next)}`,
-]);
-// gh -f for array is awkward; use raw input
-const body = JSON.stringify({ labels: next });
-const r = spawnSync(
-  "gh",
-  ["api", "--method", "PATCH", `repos/${REPO}/issues/${pr}`, "--input", "-"],
-  {
-    encoding: "utf8",
-    input: body,
-    env: { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token },
-  },
+ghJson(
+  ["--method", "PATCH", `repos/${REPO}/issues/${pr}`, "--input", "-"],
+  JSON.stringify({ labels: next }),
 );
-if (r.status !== 0) {
-  console.error(r.stderr || r.stdout);
-  process.exit(1);
-}
 console.log(`labeled #${pr} ready-to-land @ ${head.slice(0, 8)}`);
