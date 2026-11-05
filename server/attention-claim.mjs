@@ -53,7 +53,7 @@ export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = 
   return withImmediate(db, () => {
     db.prepare("DELETE FROM needs_me_claims WHERE expires_at < ?").run(now);
     const get = db.prepare(
-      "SELECT expires_at AS expiresAt FROM needs_me_claims WHERE room_id=? AND member_id=? AND kind=? AND item_id=");
+      "SELECT expires_at AS expiresAt FROM needs_me_claims WHERE room_id=? AND member_id=? AND kind=? AND item_id=?");
     const put = db.prepare(
       `INSERT INTO needs_me_claims(room_id, member_id, kind, item_id, claimed_at, expires_at)
        VALUES(?,?,?,?,?,?)
