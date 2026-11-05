@@ -943,6 +943,34 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
     };
   }
+  // FUNNEL-FIXES pack 4: an RM- agent invite code at the share-link door is
+  // the wrong door, not a dead invite. The hint names no liveness: the 422
+  // is shape-only and identical for live, dead and fabricated codes.
+  if (reasonCode === "wrong_link_kind_agent_invite") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This code belongs to the agent-invite door. It is an agent invite code (RM-…), not a share link, and this answer says nothing about whether the invite is live.",
+      next: [path("/api/agent-invites/preview"),
+        command("Preview it with POST /api/agent-invites/preview with {\"code\":\"RM-…\"} in the request body, or fetch the invite's own /a/ link. Do not ask for a new invite on the strength of this answer.")]
+    };
+  }
+  // FUNNEL-FIXES pack 4: a genuine share link's preview names its own dead
+  // state (single cause) instead of the folded guest-invite hint.
+  if (["link_cancelled", "link_expired", "link_full", "link_authority_changed", "link_not_found"].includes(reasonCode)) {
+    const cause = {
+      link_cancelled: "This invite link was cancelled.",
+      link_expired: "This invite link has expired.",
+      link_full: "This invite link has reached its join limit.",
+      link_authority_changed: "This invite link is no longer valid because its issuer's authority changed.",
+      link_not_found: "No invite link was issued for this token. Check for typos or ask the inviter for a fresh link.",
+    }[reasonCode];
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: `${cause} Ask the inviter for a new link.`,
+      next: [path("/api/share-links/preview"),
+        command("Ask the inviter for a fresh link, then preview it with POST /api/share-links/preview before joining.")]
+    };
+  }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
@@ -1142,9 +1170,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       hint: cap
         ? "Only the room owner can set the per-member claim cap. Ask the owner to set it."
         : "Work claims need a contribute, review, or collaborate profile. Ask the room owner to grant one.",
-      next: [tool("room_check_access"), command(cap
-        ? "Ask the room owner to set the per-member claim cap."
-        : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
+      next: cap
+        ? [tool("room_check_access"), command("Ask the room owner to set the per-member claim cap.")]
+        // FUNNEL-FIXES C2: the core-MCP room_claim refusal (the store's
+        // claim.acquired gate renders through here) carries the same gate
+        // legs as the REST refusal — contribute invite, the permission
+        // request with its tokens and 7-day undecided expiry, and the
+        // public-work match that needs no room profile.
+        : [tool("room_check_access"),
+          command("Ask the owner for a contribute, review, or collaborate profile before creating or claiming work."),
+          command("Request the accept_work and complete_work permissions through the access-request path; requests expire undecided after 7 days."),
+          path("/api/public-work/match")]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {

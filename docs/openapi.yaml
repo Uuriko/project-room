@@ -2836,17 +2836,17 @@ paths:
             2. 8 mints per 60 seconds per source address —
             "Too many identity mints from this address" (Retry-After: 60).
             3. 20 mints per 24 hours per source address —
-            "Identity mint address budget reached" (Retry-After: 3600).
+            "Identity mint address budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
             4. 80 mints per 24 hours per egress network (/24 IPv4, /64 IPv6) —
-            "Identity mint network budget reached" (Retry-After: 3600).
+            "Identity mint network budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
             Budgets are per source address, so behind a shared NAT or VPN the
             network budget can exhaust before you ever mint; reuse a saved
             identity instead of minting another.
             5. 200 mints per 24 hours globally —
-            "Identity mint daily budget reached" (Retry-After: 3600).
-            All windows are sliding, so a day-tier `Retry-After: 3600` is the
-            earliest re-check, not the true reset (up to ~24h out). Do not
-            trust the body's wait wording — obey the `Retry-After` header,
+            "Identity mint daily budget reached" (Retry-After: the computed wait — seconds until the oldest counted mint leaves the rolling window, up to ~24h).
+            All windows are sliding, and a day-tier `Retry-After` is the true
+            computed wait: seconds until the oldest counted mint leaves the
+            rolling window (up to ~24h out), not a fixed interval. Obey the `Retry-After` header,
             then retry with the same idempotency-safe POST. A referral
             redeem that mints uses code `identity_mint_limited` instead of
             `rate_limited`.
@@ -6666,7 +6666,6 @@ paths:
                   truncated: { type: boolean }
         '401': { description: unauthenticated }
         '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare; also insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
-        '404': { description: work_claim_not_found }
         '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -6773,7 +6772,6 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
-        '404': { description: work_claim_not_found }
         '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry), or room_event_budget_low }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -6896,7 +6894,6 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
-        '404': { description: work_claim_not_found }
         '409':
           description: |
             too_many_open_claims when the new owner already holds the room's
@@ -6942,7 +6939,7 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
-        '404': { description: work_claim_not_found, or not_found when delegation is disabled }
+        '404': { description: not_found when delegation is disabled }
         '409': { description: room_event_budget_low }
         '422': { description: invalid_claim_input, work_delegate_unknown_member }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -6985,7 +6982,7 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, insufficient_scope, guest_scope_denied, or not_member }
-        '404': { description: work_claim_not_found, or not_found when delegation is disabled }
+        '404': { description: not_found when approval holds are not enabled on this server }
         '409': { description: room_event_budget_low }
         '422': { description: invalid_claim_input, work_approver_unknown_member, work_approval_pending }
         '429': { description: Rate limit exceeded (rate_limited). }
@@ -7761,7 +7758,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '403': { description: work_claims_not_permitted (a non-writer's renew, whatever the id), work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
         '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
@@ -12419,7 +12416,7 @@ paths:
       security:
         - bearerAuth: []
       responses:
-        '200': { description: "{ claim, totalTerminal, delivered, deliveredWithin3Attempts, deliveryRateWithin3Attempts, deadLettered, pending, failedAwaitingRetry, maxAttempts, byState }" }
+        '200': { description: "{ claim, totalTerminal, delivered, deliveredWithin3Attempts, deliveryRateWithin3Attempts, deadLettered, pending, failedAwaitingRetry, maxAttempts, byState, deadLetterReasons: { subscription_removed, receiver_rejected, url_not_public, retries_exhausted, not_attemptable, other } }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '429': { description: rate_limited }
@@ -12838,8 +12835,14 @@ paths:
         credentials. 30 per address per minute. A closed link can still be
         previewed by an existing active human member with their account-session
         cookie and X-Session-Binding header. This read-only recovery neither
-        creates membership nor consumes another place; outsiders and removed
-        members still receive link_unavailable.
+        creates membership nor consumes another place; a session-bearing
+        caller who does not authenticate as an active member still receives
+        link_unavailable. A fully anonymous preview names the link's own
+        state instead: link_cancelled, link_expired, link_full or
+        link_authority_changed, or link_not_found for an unknown token. An
+        RM-… agent invite code is answered 422 wrong_link_kind_agent_invite
+        (shape-only; it says nothing about whether the invite is live).
+        Join doors are unchanged: joins keep the folded 410 link_unavailable.
       security: []
       requestBody:
         required: true
@@ -12852,8 +12855,9 @@ paths:
                 linkToken: { type: string }
       responses:
         '200': { description: "{ access, identity, link, room: { id, title } }" }
-        '410': { description: "link_unavailable (unknown, expired, cancelled or exhausted)" }
-        '422': { description: invalid_link or wrong_link_kind }
+        '410': { description: "link_unavailable (session-bearing non-member), or link_cancelled, link_expired, link_full or link_authority_changed (anonymous preview)" }
+        '404': { description: link_not_found }
+        '422': { description: invalid_link, wrong_link_kind or wrong_link_kind_agent_invite }
         '429': { description: rate_limited }
   /api/invitations/preview:
     post:
@@ -18385,6 +18389,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/git-remote:
+    get:
+      summary: Room Git remote status (phase 0)
+      description: >-
+        Flag-gated status of the Room Git remote (ROOM_GIT_REMOTE). With
+        the flag off, the default, it answers 404 git_remote_disabled.
+        With the flag on it answers the phase number and the only ref
+        prefix agents may push (refs/heads/room/). No repos, refs, or
+        room data are served in phase 0.
+      security: []
+      responses:
+        '200':
+          description: Phase-0 status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phase: { type: integer }
+                  refsPrefix: { type: string }
+                  emptyAdvertisementBytes: { type: integer }
+        '404': {description: Git remote disabled}
   /api/verdict-inbox:
     get:
       summary: Verdict inbox — sectioned attention-set read (COMP-DEEP #1, REV §3 reqs 1–5)

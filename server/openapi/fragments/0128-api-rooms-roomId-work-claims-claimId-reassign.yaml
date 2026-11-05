@@ -39,7 +39,6 @@
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
-        '404': { description: work_claim_not_found }
         '409':
           description: |
             too_many_open_claims when the new owner already holds the room's

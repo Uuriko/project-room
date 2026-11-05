@@ -242,7 +242,7 @@ export class StoreTestRoom {
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();
       store.shareLinks.cancel(owner, 'commons', link.id, null);
-      assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_unavailable' });
+      assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_cancelled' });
       const send = (type, data) => store.command(owner, 'commons', { id: randomUUID(), type, data });
       const session = store.createSession(owner), managedToken = randomBytes(32).toString('base64url');
       store.agentConnections.apply(session.token, 'commons', { action: 'create', requestId: randomUUID(), memberId: 'managed-reader',

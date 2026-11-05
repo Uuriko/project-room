@@ -272,7 +272,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply, Boolean(modern)), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl, signal } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl, signal, connectFunnel = null } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -357,6 +357,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     signal?.removeEventListener('abort', cancel);
   }
   if (cancellation.signal.aborted) return;
+  connectFunnel?.observe({ authorization: req.headers.authorization, message, reply });
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();

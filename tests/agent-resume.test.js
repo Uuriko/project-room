@@ -346,7 +346,7 @@ test('reply-only resume retains old open requests independently of delta observa
   const capped = await resumeAgent({ ...options, maxPages: 1, fetchImpl: async (url, init) => {
     const response = await fetch(url, init);
     if (!String(url).includes('/needs-me')) return response;
-    const value = await response.json(); value.hasMore = true;
+    const value = await response.json(); value.hasMore = true; value.complete = false; value.status = 'incomplete';
     return Response.json(value);
   } });
   assert.deepEqual(capped.openRequests.map(request => request.id), ['old-open']);

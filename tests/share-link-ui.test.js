@@ -718,3 +718,34 @@ test("a dead invite link asks for a fresh one and offers sign-in", async () => {
     assert.equal(dom.node("#join-link-scope").textContent.includes("incomplete"), false);
   } finally { dom.uninstall(); }
 });
+
+// #5954: anonymous previews name the reason a link is dead. Both dead-link
+// branches must treat every such code like the folded link_unavailable.
+for (const code of ["link_cancelled", "link_expired", "link_full", "link_authority_changed"]) {
+  test(`a named dead invite (${code}) shows the ended-invite view`, async () => {
+    const dom = guestJoinDom();
+    const accountClient = { session: { authenticated: true, account: { id: "p" } },
+      async prepareShareLink() { throw Object.assign(new Error("gone"), { code, status: 410 }); } };
+    dom.install();
+    try {
+      const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, openRoom() {} });
+      await ui.open({ token: "d".repeat(43) });
+      assert.equal(dom.node("#join-link-title").textContent, "This invite has ended");
+      assert.equal(dom.node("#join-link-retry").hidden, true);
+    } finally { dom.uninstall(); }
+  });
+  test(`reload still recovers a pending join when the preview says ${code}`, async () => {
+    const dom = guestJoinDom(); let recovered = null;
+    const token = "r".repeat(43), redemptionId = crypto.randomUUID();
+    const accountClient = { session: {}, async restore() { return this.session; },
+      async prepareShareLink() { throw Object.assign(new Error("closed"), { code, status: 410 }); },
+      async joinShareLink(request) { recovered = request; return { roomId: "commons", session: { member: { id: "same-guest" } } }; } };
+    dom.install();
+    try {
+      writeUncertainJoin({ linkToken: token, redemptionId, displayName: "Jill", roomId: "commons", roomTitle: "Room" });
+      const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, async openRoom() {} });
+      await ui.open({ token });
+      assert.equal(recovered?.redemptionId, redemptionId);
+    } finally { dom.uninstall(); }
+  });
+}

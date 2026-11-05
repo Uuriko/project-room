@@ -70,7 +70,7 @@ test("an additional agent admin issues usable human and agent invitations until 
   assert.equal(f.store.verifyInvitationAudit().consistent, true);
   assert.doesNotThrow(() => f.store.shareLinks.verify());
   change([]);
-  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_authority_changed" });
   assert.throws(() => f.store.shareLinks.list(identity.secret, "commons", null), { code: "access_denied" });
   assert.equal(f.store.room("commons").state.members[identity.identityId].active, true);
 });
@@ -88,14 +88,14 @@ test("retries keep the same guest, do not consume another use, and require uncha
 test("join limits, expiry, cancellation and current inviter authority bound future joins", t => {
   const f = fixture(t); f.guest("Ada").accept(); f.guest("Nia").accept();
   assert.throws(() => f.guest("Bea").accept(), { code: "link_unavailable" });
-  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_full" });
   const newToken = randomBytes(32).toString("base64url");
   const created = f.store.shareLinks.create(f.ownerKey, "commons", { ...f.details, requestId: randomUUID(), linkToken: newToken }, null);
   f.store.shareLinks.cancel(f.ownerKey, "commons", created.link.id, null);
-  assert.throws(() => f.store.shareLinks.preview(newToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(newToken), { code: "link_cancelled" });
   assert.equal(f.store.shareLinks.cancel(f.ownerKey, "commons", created.link.id, null).link.status, "cancelled");
   f.setNow(f.details.expiresAt);
-  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_expired" });
 });
 
 test("cancelling a link preserves existing membership and committed audit across restart", t => {
@@ -130,7 +130,7 @@ test("existing account membership is reused and changed issuer authority invalid
   assert.equal(same.session.member.id, accepted.session.member.id);
   f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
     data: { memberId: "owner", expectedMemberRevision: 0, permissions: f.store.room("commons").state.members.owner.permissions, active: true } });
-  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken), { code: "link_authority_changed" });
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links[0].status, "authority_changed");
 });
 
@@ -368,7 +368,7 @@ test("an agent-issued link goes authority_changed when the issuer loses ownershi
   new AgentRooms(f.store).transfer(f.identity.secret, "commons", { toMemberId: "owner" });
   assert.equal(f.store.roomAuthority("commons").ownerId, "owner");
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links.find(link => link.id === created.link.id).status, "authority_changed");
-  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_authority_changed" });
 });
 
 test("v34 databases migrate share-link and invitation history to v36 with issuer columns nullable", async t => {
@@ -564,8 +564,10 @@ test("closed-link preview only admits a bound active member without creating or 
   const binding = accepted.session.sessionBinding;
   const before = f.store.db.prepare('SELECT count(*) n FROM share_link_joins').get().n;
   assert.equal(f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding).link.status, 'full');
-  for (const [token, fence] of [[null, null], [guest.slot.token, null], [guest.slot.token, 'wrong-binding']]) {
-    assert.throws(() => f.store.shareLinks.preview(f.linkToken, token, fence), { code: 'link_unavailable' });
+  // Pack 4: a fully anonymous preview names the link's own state (link_full);
+  // any session-bearing attempt that fails authentication stays folded.
+  for (const [token, fence, code] of [[null, null, 'link_full'], [guest.slot.token, null, 'link_unavailable'], [guest.slot.token, 'wrong-binding', 'link_unavailable']]) {
+    assert.throws(() => f.store.shareLinks.preview(f.linkToken, token, fence), { code });
   }
   const outsider = f.store.createAccount('Outsider', 'audit');
   const slot = f.store.createAccountSessionSlot();
@@ -601,7 +603,7 @@ test("persisted links with inherited or missing issuers fail public preview with
     const response = await fetch(`${origin}/api/share-links/preview`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ linkToken }) });
     assert.equal(response.status, 410);
     const body = await response.json();
-    assert.equal(body.error.code, "link_unavailable");
+    assert.equal(body.error.code, "link_authority_changed");
     for (const privateValue of [issuer, admitted.session.account.id, linkToken]) assert.equal(JSON.stringify(body).includes(privateValue), false);
     assert.throws(() => f.store.shareLinks.join(guest.slot.token, linkToken, { displayName: "Denied guest", redemptionId: guest.redemptionId,
       expectedSessionRevision: slotBefore.sessionRevision, expectedSessionBinding: slotBefore.sessionBinding }), { code: "link_unavailable" });

@@ -48,7 +48,10 @@ test('HTTP claims and next-actions retain the same claim across a real process r
  const second=run('read',first.key);assert.equal(second.read.status,200);
  assert.equal(second.read.body.owner,'owner');assert.equal(second.read.body.leaseExpiresAt,first.lease);
  assert.deepEqual(second.read.body.files,['server/shared.mjs']);assert.deepEqual(second.list.body.swept,[]);
- assert.equal(second.conflict,409);assert.equal(second.next.status,200);
+ // FUNNEL-FIXES C2: 'other' holds no work profile, so claiming the held
+ // claim refuses at the gate (403) instead of the post-load 409 — the
+ // response no longer confirms the claim exists or is held.
+ assert.equal(second.conflict,403);assert.equal(second.next.status,200);
  assert.ok(second.next.body.items.some(x=>x.ref?.workClaimId==='persistent'));
 });
 
