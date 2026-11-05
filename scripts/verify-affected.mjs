@@ -45,6 +45,7 @@ export const TREE_GUARDS = [
   "tests/candidate-manifest.test.js",
   "tests/mcp-catalog-contract.test.js",
   "tests/plain-room-setup.test.js",
+  "tests/runtime-source-guard.test.mjs",
 ];
 
 // Changing one of these can break any test; always add the smoke set.

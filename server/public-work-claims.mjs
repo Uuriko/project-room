@@ -259,9 +259,12 @@ export class PublicWorkClaims {
   // match() opts out: its `after` cursor is an offer_id-order scan position
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
-  list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
+  // Optional roomId keeps first-connect (and other room-scoped callers) on
+  // work from the room the agent just joined, not the global board.
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true, roomId = null } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
     check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    check(roomId == null || identifier(roomId), 'Invalid page');
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
@@ -271,7 +274,8 @@ export class PublicWorkClaims {
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
       // packets (including submittedReceiptId) must never be built or served.
-      let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
+      // roomId, when set, further scopes to that room (joined-room-first).
+      let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id) && (roomId == null || row.room_id === roomId))
         .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
