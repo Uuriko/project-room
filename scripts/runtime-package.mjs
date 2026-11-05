@@ -486,6 +486,26 @@ optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-r
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage
 optional.push("server/room-shard-copy.mjs"); // operator copy of one room's room-tables and the digest compare; not called from the command path
+// Historical board-v2 / receipts-data / emissary modules (A-006): the seven
+// modules below were deleted from the current tree — the board-v2 trio and
+// server/receipts-data.mjs on 2026-10-01, the emissary trio on 2026-10-03 —
+// but genuine historical packages legitimately import them (in the
+// 2026-10-01 parent tree, server/http.mjs imports ./board-v2.mjs,
+// ./board-v2-durable.mjs and ./receipts-data.mjs, server/store.mjs imports
+// ./board-v2-sqlite.mjs, ./emissary-lure.mjs, ./emissary-graph.mjs and
+// ./emissary-receipts.mjs, and server/mcp-room-profile.mjs imports
+// ./emissary-lure.mjs), and createRuntimePackage verifies those packages
+// against this current allowlist. Their registrations therefore stay as
+// historical entries only, following the deploy/ entries above:
+// registration alone never ships a file, and they are optional, not
+// required — the placement each held at the parent tree — so current-tree
+// packages that no longer contain them still verify. They are registered
+// once here rather than restored to their former scattered positions for
+// exactly that reason.
+optional.push("server/board-v2.mjs", "server/board-v2-durable.mjs",
+  "server/board-v2-sqlite.mjs", "server/receipts-data.mjs",
+  "server/emissary-lure.mjs", "server/emissary-graph.mjs",
+  "server/emissary-receipts.mjs"); // historical only; deleted from the current tree
 // Retired UI files remain recognized only when an historical commit contains them.
 // They are not advertised or required by the current runtime.
 const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board", "pwa-install", "push-ask"].map(name => `src/${name}.js`);
