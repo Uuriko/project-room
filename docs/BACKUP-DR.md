@@ -170,10 +170,16 @@ options are unchanged and cannot be mixed with continuation mode.
   [Cloudflare SQLite-backed Durable Objects support point-in-time recovery of SQL and KV data over the preceding 30 days](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
   That platform recovery path is distinct from this export/restore protocol;
   neither automatically reconciles authority changes after the chosen recovery point.
-- **RTO: hours, not minutes.** File replay is rehearsed, but re-issuing
-  credentials and re-applying post-backup revocations (below) are manual.
-  There is no runbook rehearsal against production — and there must never be
-  one that touches production data.
+- **RTO: the mechanical core measures ~1 minute; the human tail is the
+  variable part.** In the 2026-10-15 game-day (production-shaped
+  90,650,112-byte backup, local instance): KV restore 42.8 s, production
+  entry booted and healthy in 11.6 s, disaster-declared → completed
+  claim → finish → receipt loop in 60.1 s, and a second-generation
+  backup → restore → smoke inside 2 minutes total. Production adds
+  provisioning an empty store, setting secrets, and switching traffic.
+  Re-issuing credentials and re-applying post-backup revocations (below)
+  stay manual. Rehearsals run against production-shaped fixtures, never
+  against production data.
 
 ## What a restore recovers — and what it destroys
 
@@ -212,7 +218,8 @@ Restoring data does not rotate credentials or fence delayed pre-restore requests
    A failed replay leaves the destination unpromoted.
 3. Keep access closed while revoking and re-issuing credentials, replacing
    sanitized secrets, and re-applying post-backup revocations (see
-   above). Treat the restored room as authoritative **as of `backedUpAt`**.
+   above; exact commands in [RESTORE-RUNBOOK.md](RESTORE-RUNBOOK.md)
+   step 3). Treat the restored room as authoritative **as of `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
