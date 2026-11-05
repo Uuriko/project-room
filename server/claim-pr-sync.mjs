@@ -21,8 +21,12 @@
 //     enumerating the registry, checks the deadline between chunks, and a
 //     tick whose housekeeping cannot finish reports an error rather than
 //     letting the poll starve behind a green-looking budgetExceeded (#3698)
-// The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
-// repositories still answer when it is absent.
+// The tick's GitHub credential resolves at the poll (resolveGithubAccess):
+// an installation token minted through the GitHub App credentials when
+// they are configured, else a static GITHUB_TOKEN or GH_TOKEN, else no
+// token. Tokens are never logged or stored; the tick summary names only
+// which source supplied the credential. Public repositories still answer
+// when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { notifyConcurrentMerge } from "./agent-collisions.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, ClaimError, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
@@ -35,6 +39,7 @@ import {
   stampVerifiedPullOutcome, usableEtag
 } from "./claim-coordination.mjs";
 import { verifyWebhook } from "./github-app/verify.mjs";
+import { GitHubAppError, githubAppCredentials, githubAppInstallationId, installationToken } from "./github-app/auth.mjs";
 
 // #3464: the durable registry decodes stored rows WITHOUT validation while
 // every state-machine touch re-validates, so one stored row with a malformed
@@ -108,6 +113,70 @@ function prWebhookKey(env) {
 // Receipt verification (server/receipt-verify.mjs) resolves its GitHub
 // token exactly the way the poll does — one token source for both.
 export { githubToken as githubTokenFromEnv };
+
+// --- GitHub credential resolution -----------------------------------------
+// One credential per tick, resolved where the poll used to call
+// githubToken(env) directly. The GitHub App path goes first: when the App
+// credentials and an installation id are configured, an installation
+// token is minted through server/github-app/auth.mjs (cached there until
+// 5 minutes before expiry, so most ticks mint nothing) and feeds the
+// sync's existing token parameter. A mint that fails — or App
+// configuration that is present but incomplete — falls back to the
+// static token, and the failure is reported by error code only, never
+// by message or credential value. With neither source the tick runs
+// unauthenticated, exactly as before: a missing credential does not
+// fail the tick. The returned source name ("github_app" | "env_token" |
+// "none") rides the tick summary so the job health view can say which
+// credential the poll used. The App token is minted narrowed to the read
+// permissions the sync's own calls need (CLAIM_PR_SYNC_TOKEN_PERMISSIONS
+// below), so the job never holds the grant's write capability.
+
+// The sync's GitHub calls are all reads, so the installation token it
+// mints is narrowed to the read permissions those calls need:
+//   pull_requests: read — GET /repos/{owner}/{repo}/pulls/{number}, and
+//     the pull-request hits of GET /search/issues (the settlement path)
+//   checks: read — GET /repos/{owner}/{repo}/commits/{sha}/check-runs
+//   contents: read — GET /repos/{owner}/{repo}/commits/main (deploy status)
+//   metadata: read — the baseline every installation token carries
+// One call sits outside the set because the grant itself lacks the
+// permission, not because of the narrowing: GET .../commits/{sha}/status
+// needs the Commit statuses permission, which the App manifest does not
+// hold at any level, so no token from this grant — narrowed or full —
+// can serve it. That leg already fails soft (the CI cursor stays on
+// "status" and the next tick retries it); growing the grant is an
+// App-settings act, named in the PR body beside the landing gate.
+const CLAIM_PR_SYNC_TOKEN_PERMISSIONS = Object.freeze({
+  pull_requests: "read",
+  checks: "read",
+  contents: "read",
+  metadata: "read"
+});
+
+export async function resolveGithubAccess(env, { fetchImpl = fetch, nowMs = Date.now(), deadline = Infinity, appTokenCache = undefined } = {}) {
+  const installationId = githubAppInstallationId(env);
+  const credentials = githubAppCredentials(env);
+  let appError = null;
+  if (installationId && credentials) {
+    const budgetMs = Math.min(5_000, deadline - Date.now());
+    if (budgetMs > 0) {
+      try {
+        const mintFetch = (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(budgetMs) });
+        const token = await installationToken(installationId, {
+          env, fetchFn: mintFetch, now: nowMs, permissions: CLAIM_PR_SYNC_TOKEN_PERMISSIONS,
+          ...(appTokenCache ? { cache: appTokenCache } : {})
+        });
+        return { token, source: "github_app" };
+      } catch (error) {
+        appError = error instanceof GitHubAppError ? error.code : "token_failed";
+      }
+    }
+  } else if (installationId || credentials) {
+    appError = "not_configured";
+  }
+  const token = githubToken(env);
+  if (token) return { token, source: "env_token", ...(appError ? { appError } : {}) };
+  return { token: null, source: "none", ...(appError ? { appError } : {}) };
+}
 
 function githubHeaders(token) {
   const headers = {
@@ -917,20 +986,33 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   const staleProgress = {};
   sweepStaleUnclaimedClaims(store, nowMs, { skipped: skippedInvalid, deadline, progress: staleProgress });
   if (staleProgress.complete === false) return starved();
-  const access = token === undefined ? githubToken(env ?? process.env) : token;
+  // The credential resolves once per tick (App installation token first,
+  // static token second, none last) and its source rides every return
+  // from here on, so the heartbeat summary can name it. A caller that
+  // passes a token keeps ownership of it and no source is reported.
+  let access = token;
+  let authSummary = {};
+  if (token === undefined) {
+    const resolved = await resolveGithubAccess(env ?? process.env, { fetchImpl, nowMs, deadline });
+    access = resolved.token;
+    authSummary = {
+      githubAuthSource: resolved.source,
+      ...(resolved.appError ? { githubAuthError: resolved.appError } : {})
+    };
+  }
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1, ...skipSummary() };
   // While the shared core budget is spent, the REST poll makes no call; the
   // search batch (separate quota) still settles merged and closed pulls.
   if (readClaimPullBudget(store) > nowMs) {
     const searchSettled = await settleFromSearch(store, { env: env ?? process.env, fetchImpl, token: access, nowMs, deadline });
-    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}), ...skipSummary() };
+    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}), ...authSummary, ...skipSummary() };
   }
   const live = loadDueClaims(store, nowMs);
   // #3661: verification candidates fill only the candidate capacity the
   // live claims leave unused, appended after them so the lookup budget is
   // spent live-first.
   const due = [...live, ...loadVerificationClaims(store, nowMs, PULL_CANDIDATE_CAP - live.length)];
-  if (due.length === 0) return { checked: 0, updated: 0, ...skipSummary() };
+  if (due.length === 0) return { checked: 0, updated: 0, ...authSummary, ...skipSummary() };
   // Claim ids are room-scoped, so lookup results carry their room and the
   // room map is keyed by (roomId, claimId): the same claimId can be due in
   // two rooms in one tick, and a bare-claimId key would settle one room's
@@ -969,7 +1051,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...skipSummary() };
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...authSummary, ...skipSummary() };
 }
 
 // #3698: housekeeping candidate selection. The phases below used to decode
