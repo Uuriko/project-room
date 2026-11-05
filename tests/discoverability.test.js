@@ -360,6 +360,27 @@ test("openapi: routes declaring request bodies document them on the served spec"
       assert.ok(schema.properties?.[field], `POST ${path} defines required field ${field}`);
     }
   }
+  // QA5: POST /api/rooms/{roomId}/agent-pause is Stop. The served spec used
+  // to omit requestBody, so a generated client sent {} or {"paused":false}
+  // and the handler answered 422. Pause requires reason (null allowed);
+  // resume is the three shared fields and rejects reason.
+  const pauseOp = doc.paths["/api/rooms/{roomId}/agent-pause"]?.post;
+  assert.ok(pauseOp, "openapi documents POST /api/rooms/{roomId}/agent-pause");
+  assert.equal(pauseOp.requestBody?.required, true, "agent-pause marks its body required");
+  const pauseSchema = pauseOp.requestBody?.content?.["application/json"]?.schema;
+  assert.equal(pauseSchema?.type, "object");
+  assert.equal(pauseSchema?.additionalProperties, false, "agent-pause rejects undeclared fields such as paused");
+  for (const field of ["action", "memberId", "requestId"]) {
+    assert.ok(pauseSchema.required?.includes(field), `agent-pause requires ${field}`);
+    assert.ok(pauseSchema.properties?.[field], `agent-pause defines ${field}`);
+  }
+  assert.deepEqual(pauseSchema.properties.action.enum, ["pause", "resume"]);
+  assert.deepEqual(pauseSchema.properties.reason?.type, ["string", "null"]);
+  assert.equal(pauseSchema.properties.reason?.maxLength, 200);
+  const pauseBranch = pauseSchema.oneOf?.find(branch => branch.properties?.action?.const === "pause");
+  const resumeBranch = pauseSchema.oneOf?.find(branch => branch.properties?.action?.const === "resume");
+  assert.ok(pauseBranch?.required?.includes("reason"), "pause requires reason or null");
+  assert.deepEqual(resumeBranch?.not, { required: ["reason"] }, "resume rejects reason");
   // General contract: every route-table-declared body is emitted verbatim —
   // the served spec cannot drift from the table's declared schemas.
   let declared = 0;
