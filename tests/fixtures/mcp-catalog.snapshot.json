@@ -183,7 +183,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1035,7 +1035,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1737,7 +1737,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2109,7 +2109,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2351,7 +2351,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2593,7 +2593,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2977,7 +2977,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "4387e3e57a8156bf",
+      "inputSchema": "cfb2179dbdcbd51a",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
