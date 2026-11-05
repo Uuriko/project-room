@@ -99,7 +99,7 @@ test("optional real MCP pull/read-pointer/ack shares persisted identity with CLI
   const f = await fixture(t); f.charter("An exact synthetic instruction");
   const disabled = await f.mcp(false);
   const disabledTools = (await disabled.request("tools/list")).result.tools;
-  assert.equal(disabledTools.length, 48);
+  assert.equal(disabledTools.length, 49);
   assert.ok(disabledTools.some(tool => tool.name === "room_map"));
   assert.equal((await disabled.call("room_read_attention")).error.code, -32602); await disabled.close();
   let mcp = await f.mcp(); const tools = (await mcp.request("tools/list")).result.tools;
