@@ -327,7 +327,7 @@ export class GuestInvites {
       // The minter's authority was a delegation grant. It stands only
       // while the grant stands — unless the minter has since become the
       // room owner, in which case the authority is their own.
-      const ownerId = this.store.roomAuthority(row.room_id).ownerId;
+      const ownerId = this.store.roomOwnerId(row.room_id);
       if (row.minted_by_member_id !== ownerId) {
         const identityId = this.store.identities.identityIdForMember(row.room_id, row.minted_by_member_id);
         if (!identityId || !this.store.ownerDelegates.hasGrant(row.room_id, identityId)) {
@@ -527,7 +527,8 @@ export class GuestInvites {
       // asserts they saw the current owner state. A delegate's own member
       // revision is irrelevant to their delegated authority, so the check
       // always reads the owner's record.
-      const authority = this.store.roomAuthority(roomId);
+      const ownerId = this.store.roomOwnerId(roomId);
+      const authority = this.store.roomAuthority(roomId, { memberId: ownerId });
       if (expectedOwnerRevision !== authority.members[authority.ownerId]?.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       // Expiry rides the existing sweep: any expired guest-agent-* member
       // (ga1. or GX-redeemed) is deactivated here, during owner mint activity.

@@ -25,7 +25,7 @@ import { handoffPacketEnabled } from "./handoff-packet.mjs";
 export const hostedRoomTools = [
   tool("room_wait_for_attention", "Wait for new caller-addressed mentions, replies, DMs or formal requests after a saved inbox cursor. Normalized rooms only. Returns pointers or an explicit catch-up continuation; never acknowledges messages or starts an AI. timeoutSec defaults to 25, maximum 120; your host may cancel earlier. Standing work and older obligations require separate inbox/work reads.", schema({roomId: roomIdField, after: {type: "integer", minimum: 0}, timeoutSec: {type: "integer", minimum: 0, maximum: 120}}, ["roomId", "after"])),
   tool("room_check_access", "Check this identity's Room access. Pass roomId for access and nativeMonitoring diagnostics on this connection; omit it to list linked rooms. A subscription does not prove execution. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
-  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
+  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read. An answer is complete only when complete:true; items:[] with complete:false or hasMore:true means NOT YET CHECKED — follow nextRead / pass the cursor back. Never report 'nothing needs you' from an incomplete page.", schema({
     roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
