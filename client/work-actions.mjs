@@ -65,7 +65,8 @@ const definitions = [
     evidenceVersion: { ...text, description: "Version of the partial evidence; required with evidenceUrl." },
     nextAction: { ...text, description: "The exact next action for whoever picks this up." },
     limitReason: { ...text, description: "Why you cannot continue (limit hit, missing permission, context exhausted)." },
-    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." }
+    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." },
+    toMemberId: { ...id, description: "Optional. The member who should pick this up; triage goes to them instead of the Room owner." }
   }, ["doneSummary", "nextAction", "limitReason"]],
   ["clear_halt", "Clear a member halt", T.WORK_HALT_CLEARED, "Clear one exact recorded halt-all after triage. Requires steer or decide. Names the exact halt event inspected.", {
     memberId: id, haltEventId: id, note: { ...text, maxLength: 512, description: "Optional triage note." }

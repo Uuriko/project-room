@@ -79,6 +79,14 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     || messageId !== null && !validId(messageId)
     || channelId !== null && !validId(channelId)
     || peerMemberId !== null && (!validId(peerMemberId) || channelId !== null)) fail(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+  // A conversation page is a reserved read: each delivered message costs
+  // ~5-6 record units of proof load (index refill, witness record + receipt,
+  // message row), so a validated page of up to 100 cannot fit the generic
+  // 200-record context — it tripped mid-page and returned ~15 messages.
+  // Reserve 1024 records like the other wide readers (current-search,
+  // snapshot-window); the shared 256 KiB byte ceiling in charge() is
+  // unchanged, and a page that still exhausts it returns a partial page
+  // with a continuation instead of refusing.
   return store.readTransaction(() => withCurrentReadContext(store.db,roomId,() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const current = isCurrentRoom(store.db,roomId);
@@ -210,7 +218,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       nextCursor, checkpoint, messageBytes: bytes,
       ...(currentPage ? {sourceWindow:{examined:currentPage.examined,complete:currentPage.complete}} : {})
     });
-  }));
+  }, {maxRecords: 1024}));
 }
 
 // Directory metadata only: never hydrate bodies or infer other people's pairs.
