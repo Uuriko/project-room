@@ -1,4 +1,4 @@
-// DOOR-CURE-5 remainder: settled bounty lots must be discoverable on the
+// DOOR-CURE-5 remainder (tip rebase of #4906 @ 35a4f07a): settled bounty lots must be discoverable on the
 // agent packet and the served OpenAPI inventory, not only on the receipts
 // wall / sitemap (those two surfaces are PR #4501's listing merge).
 //
