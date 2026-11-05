@@ -8,7 +8,7 @@ const browserType = browserEngine === 'webkit' ? webkit : chromium;
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
+import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed, openSearch } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 
@@ -27,8 +27,14 @@ function deferredResultResponse() {
   return { promise, resolve };
 }
 
-async function openHumanResult(page, workId) {
+async function openHumanResult(page, workId, title = workId) {
   const task = page.locator(`[data-work-record-id="${workId}"]`), details = task.locator('details.work-details');
+  if (!await task.isVisible()) {
+    await openSearch(page);
+    await page.locator('#message-search').fill(title);
+    await page.locator(`#search-list [data-open-work="${workId}"]`).click();
+    await task.waitFor({state:'visible'});
+  }
   if (!await details.evaluate(node => node.open)) await details.locator(':scope > summary').click();
   await task.locator('[data-action="complete"]').click();
   await page.locator('#human-share-result').waitFor({state:'visible'});
@@ -125,9 +131,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#human-advanced').check(); assert.equal(await owner.locator('#human-advanced').isChecked(),true);
   await owner.locator('#human-advanced').uncheck();
   await owner.keyboard.press('Escape');
-  const resultTask = owner.locator('[data-work-record-id="human-result-task"]');
-  await resultTask.locator('details.work-details > summary').click();
-  await resultTask.locator('[data-action="complete"]').click();
+  await openHumanResult(owner,'human-result-task','Write a short result');
   const humanResultBody = 'A result written by a human, without protocol fields.';
   await owner.locator('#human-share-result textarea').fill(humanResultBody);
   // The task changes after opening the result editor. The real server rejects
@@ -714,8 +718,9 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
     if (width === 390) {
       await page.locator('#composer-options > summary').click();
-      await page.locator('#message-to-select').selectOption('producer');
-      await page.locator('#composer-options > summary').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
+      await page.locator('#new-direct-people [data-direct-member="producer"]').click();
+      await page.locator('#message-input').fill('Keep a separate private draft.');
     }
     await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
     await page.locator('#human-advanced').check(); await closeSettings(page);
@@ -751,7 +756,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     assert.equal(added.replyToId, 'shared-ask');
     assert.equal(added.toMemberId, null);
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the existing design thread draft.');
-    assert.equal(await page.locator('#message-to-select').inputValue(), width === 390 ? 'producer' : '');
+    assert.equal(await page.locator('#message-to-select').inputValue(), '', 'shared thread remains public despite a separate private draft');
     assert.equal(await page.locator('#reply-bar').isVisible(), false, 'the restored thread draft still replies to its original root');
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click();
@@ -769,6 +774,13 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     assert.equal((await api('producer')).runs.length, 1, 'leaving context mode does not turn ordinary chat into a new ask');
     await (await historyContribution()).click();
     assert.equal(await page.locator('#message-input').inputValue(), 'Unsent additional context.');
+    if (width === 390) {
+      await page.locator('#composer-options > summary').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
+      await page.locator('#new-direct-people [data-direct-member="producer"]').click();
+      assert.equal(await page.locator('#message-input').inputValue(), 'Keep a separate private draft.');
+      assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+    }
     assert.deepEqual(errors, []);
   });
 }
@@ -947,7 +959,7 @@ for (const width of [1280, 390]) {
     assert.equal(stops[1].expectedAttemptId, 'race-host', 'Review rebinds Stop to the attempt it just showed, still as an exact id');
     const run = (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === 'race-run');
     assert.equal(run.status, 'cancel_requested');
-    await page.screenshot({ path: `/tmp/probe/race-${width}.png` });
+    await page.screenshot({ path: `test-results/assistant-stop-race-${browserEngine}-${width}.png` });
   });
 }
 
@@ -1094,4 +1106,50 @@ test('human room admin connects assistant without owner identity or redundant st
   const runs=f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=?').all('commons');
   assert.equal(runs.length,1);
   assert.equal(JSON.parse(runs[0].value).initiatorId,'guest');
+});
+
+
+for (const width of [1280, 390]) {
+  test(`keyboard Review keeps focus on Retry without changing Stop intent (${width}px)`, { timeout: 60000 }, async t => {
+    const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'keyboard-review-run', ask: 'keyboard-review-ask' });
+    await api('producer', { action: 'claim', runId: 'keyboard-review-run', attemptId: 'keyboard-review-host', expectedRevision: 0 });
+    const stop = page.locator('#assistant-face [data-cancel]');
+    await stop.focus(); await page.keyboard.press('Enter');
+    const review = page.getByRole('button', { name: 'Review current request', exact: true });
+    await review.waitFor({ state: 'visible' });
+    await review.focus(); state.frozen = false; await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Retry request', exact: true }).waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'assistant-retry');
+    assert.equal(state.controls.length, 1, 'Review does not send another control');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#assistant-error')?.textContent === '');
+    assert.equal(state.controls.length, 2);
+    assert.equal(state.controls[1].expectedAttemptId, 'keyboard-review-host');
+    assert.equal(state.controls[1].expectedRevision, 1);
+    assert.equal((await read()).status, 'cancel_requested', 'request acknowledged, not proof of native halt');
+  });
+}
+
+
+test('Review completing after keyboard navigation does not steal focus back', { timeout: 60000 }, async t => {
+  const { api, page, state } = await claimRaceFixture(t, 1280, { run: 'focus-away-run', ask: 'focus-away-ask' });
+  await api('producer', { action: 'claim', runId: 'focus-away-run', attemptId: 'focus-away-host', expectedRevision: 0 });
+  await page.locator('#assistant-face [data-cancel]').click();
+  const review = page.getByRole('button', { name: 'Review current request', exact: true });
+  await review.waitFor({ state: 'visible' });
+  const captured = deferredResultResponse(), release = deferredResultResponse();
+  t.after(() => release.resolve()); state.frozen = false;
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch(); captured.resolve(); await release.promise;
+    await route.fulfill({ response });
+  });
+  await review.focus(); await page.keyboard.press('Enter'); await captured.promise;
+  await page.keyboard.press('Tab');
+  const destination = await page.evaluate(() => document.activeElement?.id);
+  assert.ok(destination && destination !== 'assistant-review', 'Tab moved focus to another named control');
+  release.resolve();
+  await page.getByRole('button', { name: 'Retry request', exact: true }).waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), destination);
+  assert.equal(state.controls.length, 1);
 });

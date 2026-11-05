@@ -16,6 +16,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { JOB_ALERT_FAILURES, ownerOverview } from "../server/owner-overview.mjs";
 import { applyOutcomes, jobHealthView } from "../cloudflare/job-heartbeat.mjs";
 import { spendAllowanceReport } from "../server/spend-allowance.mjs";
+import { currentResult } from "../src/work-selectors.js";
+import { renderMoney } from "../src/owner-cockpit.js";
 import { foldSessionEvents } from "../server/usage-summary.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { createReceiptSigner, generateReceiptKeyPair, verifyBountyReceipt } from "../server/bounty-receipts.mjs";
@@ -332,11 +334,11 @@ function seedAgentMember(f, roomId, memberId = "agent", displayName = "Worker") 
   return f.store.issueAccessKey(roomId, memberId);
 }
 
-function proposeAndAccept(f, roomId, agentKey, workItemId, title) {
+function proposeAndAccept(f, roomId, agentKey, workItemId, title, gates = {}) {
   const key = roomId === "room-a" ? f.keys.a : f.keys.b;
   f.send(key, roomId, T.WORK_PROPOSED, { workItemId, title, definitionOfDone: "done",
     accountableMemberId: "agent", mode: "read", independentVerificationRequired: false,
-    ownerDecisionRequired: false });
+    ownerDecisionRequired: false, ...gates });
   const revision = () => f.store.room(roomId).state.workItems[workItemId].revision;
   f.send(agentKey, roomId, T.WORK_ACCEPTED, { workItemId, expectedRevision: revision() });
   return revision;
@@ -438,11 +440,11 @@ test("slice2-3: an unreported session renders unknown everywhere, is counted, an
   assert.equal(rosterRow.unreportedAttempts, 1);
 });
 
-test("slice2-4: cost per accepted outcome shows the ratio at n=2 and suppresses it at n=0", async t => {
+test("slice2-4: reported spend per recorded outcome shows the ratio at n=2 and suppresses it at n=0", async t => {
   const f = await setup(t, { serve: true });
   const agentKey = seedAgentMember(f, "room-a");
   const complete = workItemId => {
-    const revision = proposeAndAccept(f, "room-a", agentKey, workItemId, `Done ${workItemId}`);
+    const revision = proposeAndAccept(f, "room-a", agentKey, workItemId, `Done ${workItemId}`, { ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
     f.send(agentKey, "room-a", T.WORK_STARTED, { workItemId, expectedRevision: revision() });
     const rev2 = () => f.store.room("room-a").state.workItems[workItemId].revision;
     f.send(agentKey, "room-a", T.WORK_COMPLETED, { workItemId, expectedRevision: rev2(),
@@ -450,6 +452,8 @@ test("slice2-4: cost per accepted outcome shows the ratio at n=2 and suppresses 
       nextAction: "none", signedEvidence: f.signEvidence() });
   };
   complete("w-done-1"); complete("w-done-2");
+  assert.equal(currentResult(f.store.room("room-a").state.workItems["w-done-1"]), null,
+    "a completion awaiting owner approval still contributes to the compatibility count");
   const revision = proposeAndAccept(f, "room-a", agentKey, "w-spend", "Spend run");
   runSession(f, "room-a", agentKey, "w-spend", revision, { status: "processing", budget: { maxSpendCents: 2000 } });
   const revSpend = () => f.store.room("room-a").state.workItems["w-spend"].revision;
@@ -462,7 +466,16 @@ test("slice2-4: cost per accepted outcome shows the ratio at n=2 and suppresses 
   assert.equal(outcome.status, "ok");
   assert.equal(outcome.acceptedOutcomes, 2);
   assert.equal(outcome.ratioCents, 500);
-  assert.equal(outcome.label, "$5.00 / accepted outcome (n=2, 0 unreported)");
+  assert.equal(outcome.label, "$5.00 reported spend / recorded outcome (n=2, 0 unreported attempts)");
+  for (const status of ["ok", "unknown", "no_outcomes"]) {
+    const money = structuredClone(body.money);
+    money.cents.costPerAcceptedOutcome.status = status;
+    const html = renderMoney(money);
+    assert.doesNotMatch(html, /accepted outcome/i);
+    assert.match(html, /may overlap/);
+    assert.match(html, /independent acceptance/);
+    assert.match(html, /human effort/);
+  }
   const rosterRow = body.roster.rows.find(entry => entry.roomId === "room-a" && entry.memberId === "agent");
   assert.equal(rosterRow.lifetimeAcceptedOutcomes, 2);
 
@@ -470,7 +483,7 @@ test("slice2-4: cost per accepted outcome shows the ratio at n=2 and suppresses 
   const none = await getOverview(empty, empty.owner.headers);
   assert.equal(none.body.money.cents.costPerAcceptedOutcome.status, "no_outcomes");
   assert.equal(none.body.money.cents.costPerAcceptedOutcome.ratioCents, null);
-  assert.equal(none.body.money.cents.costPerAcceptedOutcome.label, "no accepted outcomes in window");
+  assert.equal(none.body.money.cents.costPerAcceptedOutcome.label, "no recorded completions or paid bounties in window");
 });
 
 test("slice2-5: roster derivations agree with presence() and claimIdle on the same fixture", async t => {

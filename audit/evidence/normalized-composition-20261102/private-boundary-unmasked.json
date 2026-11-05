@@ -1,0 +1,15 @@
+{
+  "base": "ae07381c5",
+  "tests": 9,
+  "pass": 3,
+  "fail": 6,
+  "change": "Fixture uses authenticated IDs and addressed message proof; existence privacy rejects future hidden horizons and timestamps while accepting absent/zero current observations. No content/privacy assertion removed.",
+  "remaining": [
+    "unwindowed snapshots require explicit current window",
+    "work snapshot lacks selected private-work context",
+    "bootstrap summary omits definitionOfDone; selected detail required",
+    "legacy search still whole-room",
+    "needs-me port pending composition"
+  ],
+  "productionChanged": false
+}

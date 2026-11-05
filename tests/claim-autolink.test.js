@@ -95,6 +95,22 @@ const prPayload = (overrides = {}) => ({
   ...(overrides.top ?? {}),
 });
 
+// RES-0140: the settlement leg re-verifies the delivery inside
+// applyPullRequestWebhook; tests that expect settlement present the
+// signed delivery material the route forwards.
+const WEBHOOK_SECRET = "autolink-test-secret";
+const signedDelivery = payload => {
+  const rawBody = JSON.stringify(payload);
+  return {
+    rawBody,
+    signature256: "sha256=" + createHmac("sha256", WEBHOOK_SECRET).update(rawBody).digest("hex"),
+  };
+};
+const signedOpts = payload => ({
+  webhook: signedDelivery(payload),
+  env: { [PR_WEBHOOK_SECRET_ENV]: WEBHOOK_SECRET },
+});
+
 // --- 1. claim-id parsing -----------------------------------------------
 
 test("parseClaimId: explicit claim marker outranks branch, title and body", () => {
@@ -207,8 +223,8 @@ test("autoLinkPullRequest: refuses settled and unclaimed items", async t => {
   const settled = autoLinkPullRequest(make.store, make.roomId, "lane-settled", { url: URL_A, source: "branch" }, {});
   assert.equal(settled.linked, true);
   // settle it via the existing webhook path, then auto-link must refuse
-  handlePrWebhookPayload(make.store,
-    prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-settled" }, merged: true, state: "closed" } }), {});
+  const settledPayload = prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-settled" }, merged: true, state: "closed" } });
+  await handlePrWebhookPayload(make.store, settledPayload, signedOpts(settledPayload));
   const done = make.store.workClaims.get(make.roomId, "lane-settled");
   assert.equal(done.state, "done");
   const refused = autoLinkPullRequest(make.store, make.roomId, "lane-settled", { url: URL_B, source: "branch" }, {});
@@ -221,8 +237,8 @@ test("autoLinkPullRequest: refuses settled and unclaimed items", async t => {
 test("handlePrWebhookPayload: closed+merged on an unlinked PR auto-links and settles", async t => {
   const make = makeRoom(t);
   await liveClaim(make, "lane-webhook");
-  const out = handlePrWebhookPayload(make.store,
-    prPayload({ top: { action: "closed" }, pull_request: { merged: true, state: "closed" } }), {});
+  const webhookPayload = prPayload({ top: { action: "closed" }, pull_request: { merged: true, state: "closed" } });
+  const out = await handlePrWebhookPayload(make.store, webhookPayload, signedOpts(webhookPayload));
   assert.equal(out.ok, true);
   assert.equal(out.linked.claimId, "lane-webhook");
   assert.equal(out.linked.source, "branch");
@@ -237,19 +253,19 @@ test("handlePrWebhookPayload: opened only links, unknown ids and garbage never w
   const make = makeRoom(t);
   await liveClaim(make, "lane-open");
   const before = claimEvents(make.store, make.roomId).length;
-  const opened = handlePrWebhookPayload(make.store,
+  const opened = await handlePrWebhookPayload(make.store,
     prPayload({ pull_request: { head: { ref: "lane-open" } } }), {});
   assert.equal(opened.ok, true);
   assert.equal(opened.linked.claimId, "lane-open");
   assert.equal(opened.settled.length, 0);
   assert.equal(make.store.workClaims.get(make.roomId, "lane-open").state, "claimed");
-  const unknown = handlePrWebhookPayload(make.store,
+  const unknown = await handlePrWebhookPayload(make.store,
     prPayload({ pull_request: { html_url: URL_B, head: { ref: "no-such-claim" }, title: "x", body: "y" } }), {});
   assert.equal(unknown.ok, true);
   assert.equal(unknown.linked, null);
-  const garbage = handlePrWebhookPayload(make.store, { action: "closed" }, {});
+  const garbage = await handlePrWebhookPayload(make.store, { action: "closed" }, {});
   assert.equal(garbage.ok, false);
-  const nulls = handlePrWebhookPayload(make.store, null, {});
+  const nulls = await handlePrWebhookPayload(make.store, null, {});
   assert.equal(nulls.ok, false);
   assert.equal(claimEvents(make.store, make.roomId).length, before + 1);
 });
@@ -290,7 +306,7 @@ test("discoverUnlinkedPulls: fresh webhook delivery skips the repo; a held budge
   const make = makeRoom(t);
   await liveClaim(make, "lane-skip");
   // record a fresh delivery via the webhook core (unknown claim: no link, delivery still recorded)
-  handlePrWebhookPayload(make.store,
+  await handlePrWebhookPayload(make.store,
     prPayload({ pull_request: { html_url: URL_B, head: { ref: "ghost" }, title: "ghost", body: "" } }), {});
   const seen = [];
   const skipped = await discoverUnlinkedPulls(make.store, {
@@ -314,8 +330,8 @@ test("linkDeployToSettledClaims: stamped revision links back to the items it shi
   const rev = "a".repeat(40);
   const before = claimEvents(make.store, make.roomId).length;
   // settle via merge, then stamp the required revision and close it live
-  handlePrWebhookPayload(make.store,
-    prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-deploy" }, merged: true, state: "closed" } }), {});
+  const deployPayload = prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-deploy" }, merged: true, state: "closed" } });
+  await handlePrWebhookPayload(make.store, deployPayload, signedOpts(deployPayload));
   let item = make.store.workClaims.get(make.roomId, "lane-deploy");
   assert.equal(item.revision, null); // normal claims carry no required revision
   const out = linkDeployToSettledClaims(make.store, { revision: rev, nowMs: 1_700_000_000_000 });

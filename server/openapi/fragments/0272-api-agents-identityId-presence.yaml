@@ -10,8 +10,11 @@
         derivation, so a room the caller cannot stand in contributes no
         row. Each entry is `{ roomId, ...row }` where the row is the same
         per-room presence row `GET /api/rooms/{roomId}/presence` derives
-        for that member (host `presence { status, lastSeenAt }` included;
-        `watching` is false — this read holds no stream). An identity
+        for that member (`presence { status, lastSeenAt, basis }` included —
+        host-derived with basis `host`, or `unregistered` with basis
+        `last-command`/`member-added` for an identity-linked member with
+        no registered host; `watching` is false — this read holds no
+        stream). An identity
         sharing no room with the caller, an identity with no presence,
         and an unknown identity id all return `{ identityId, rooms: [] }`
         — the read never confirms an identity exists elsewhere. Quickstart:

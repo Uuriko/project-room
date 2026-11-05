@@ -28,6 +28,8 @@ const KIND_LABEL = {
   spend: "Spend",
 };
 
+// #3891: the only owner-attention POST actions that are decisions.
+const COCKPIT_DECIDE_ACTIONS = new Set(["approve", "deny"]);
 const SEVERITY_LABEL = { critical: "Critical", warn: "Warning", info: "Note" };
 
 export function formatAge(ageMs) {
@@ -220,7 +222,10 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
     const label = KIND_LABEL[item.kind] ?? item.kind;
     const age = formatAge(item.ageMs);
     const actions = (item.actions ?? []).map(action => {
-      if (action.method === "POST") {
+      // #3891: only approve/deny are decisions the cockpit can POST verbatim.
+      // Any other POST (spend adjust needs a body the owner chooses) is a
+      // pointer, so it falls through to the room link instead of a Deny button.
+      if (action.method === "POST" && COCKPIT_DECIDE_ACTIONS.has(action.action)) {
         return `<button type="button" class="button ${action.action === "approve" ? "primary" : "ghost"}" data-cockpit-decide="${esc(action.action)}" data-item-id="${esc(item.id)}">${esc(action.action === "approve" ? "Approve" : "Deny")}</button>`;
       }
       return `<a class="text-button" href="./?room=${encodeURIComponent(item.roomId)}">Review in room</a>`;
@@ -298,7 +303,8 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
   async function onDecide(button, doc) {
     if (busy) return;
     const item = doc.decisions.items.find(entry => entry.id === button.dataset.itemId);
-    const action = item?.actions?.find(entry => entry.action === button.dataset.cockpitDecide && entry.method === "POST");
+    const action = item?.actions?.find(entry => entry.action === button.dataset.cockpitDecide && entry.method === "POST"
+      && COCKPIT_DECIDE_ACTIONS.has(entry.action));
     if (!item || !action) return;
     busy = true;
     button.disabled = true;

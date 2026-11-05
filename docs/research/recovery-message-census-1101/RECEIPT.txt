@@ -1,0 +1,12 @@
+Source: 9e2acf488, parent c456a821e (truthful report1), audit-scratch protocol3.
+Offline synthetic qualification only. No publish, deploy, live schema/key/config change.
+Node: 32/32; actual production Native constructor/operator/cold restore: 1/1.
+Native: 128 calls, 6093 covered rows; 1000 partially imported events; independent message ancestry; accepted native-work capacity/private request preserved; exact task/message retries; readiness503 and prepared writer refusal until final required full audit.
+Nested ancestry: 150 replies to one root across cold continuations, exact deduplicated participant count.
+Canonical archive: actual legacy archive/pin -> canonical migration/H conversion -> source audit/export -> cold continuation -> full required audit; pinned early root and all8 canonical rows preserved, retained3/archive slots1.
+Genuine old 4aa/625/7a/312/75aa/c456 cold and preopened controls retained; c456 v2 cannot continue protocol3 or suspend guards (zero DROP/progress).
+Scratch outputs/cursor/receipt atomic; queued reads scoped synchronously; only explicit target-owned scratch rows mutable. Source business/history/credential freeze unchanged.
+Shared full-audit leaf predicates retain canonical ancestry and archive order semantics. Existing report remains version1. No new independent simplified verifier.
+Remaining critical gates: independent history floors/exclusions; strict replay/history and all subsystem validators; typed-cell streaming report2; measured atomic SQLite table checks/FKs; resumable KV/stream original source ingestion/seal.
+Still invokes monolithic full audit before final verified:true. This checkpoint is NOT whole bounded recovery and must not ship as completion.
+Logs omit repetitive JSON cold/request diagnostics; original full logs: /tmp/recovery-message-census-node-final.log and /tmp/recovery-message-census-native-final.log. Lint0errors; existing raw-member-index warning outside changed hunks.

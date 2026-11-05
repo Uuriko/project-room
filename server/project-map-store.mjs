@@ -19,7 +19,7 @@ const LIVE = new Set(["claimed", "in_progress", "blocked", "delivered"]);
 const HIDDEN = new Set(["done", "closed", "cancelled"]);
 const MAX_GRAPH = 1_500_000;
 
-const SCHEMA = `
+export const PROJECT_MAP_SCHEMA = `
 CREATE TABLE IF NOT EXISTS project_maps (
   room_id TEXT NOT NULL,
   repo TEXT NOT NULL,
@@ -63,7 +63,7 @@ export function featureEnv(store) {
 
 function ensure(store) {
   if (!store?.db) return false;
-  store.db.exec(SCHEMA);
+  store.db.exec(PROJECT_MAP_SCHEMA);
   return true;
 }
 

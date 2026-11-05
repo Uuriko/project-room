@@ -3,7 +3,11 @@
       summary: Search completed-work receipts
       description: |
         The "what has this room already solved" surface: done work-claim
-        items projected as receipts, most recently completed first. Each
+        items projected as receipts, most recently completed first. In
+        current-format (native) rooms, which never write Board claims,
+        terminal native completions (completed, with receipt evidence,
+        and verification satisfied or owner-approved where required) are
+        projected as receipts the same way. Each
         receipt carries a stable `receiptId` (`"rc_" + workItemId`), the
         work item id, free-form `tags` recorded on the done transition,
         a 240-char `summary` (the completion note, falling back to the
@@ -63,3 +67,40 @@
             allowed methods — resend with a named method instead of
             retrying the same one.
         '422': { description: invalid_receipt_query }
+  /api/rooms/{roomId}/receipts/{receiptId}:
+    get:
+      summary: Read one receipt by its receiptId
+      description: |
+        Read a single completed-work receipt by the stable `receiptId`
+        (`"rc_" + workItemId`) issued by the receipts list, so a caller who
+        saved a receiptId can re-find that outcome without re-listing and
+        searching. Same member contract as the list: member-only (403
+        `not_member`); API keys need `rooms:read`. A receiptId with no
+        `done` claim (or, in a current-format room, no terminal native
+        completion) behind it in this room returns 404 `receipt_not_found`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: receiptId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 256 }
+          description: The `rc_`-prefixed receipt identifier from the receipts list
+      responses:
+        '200':
+          description: The receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipt:
+                    $ref: '#/components/schemas/Receipt'
+        '401': { description: unauthenticated }
+        '403': { description: not_member }
+        '404': { description: receipt_not_found }
+        '405':
+          description: >-
+            method_not_allowed: this route only serves GET. A wrong-method
+            response may carry an RFC 9110 Allow header naming the route's
+            allowed methods — resend with a named method instead of
+            retrying the same one.

@@ -1,0 +1,34 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":70,"integrity":"eager","phases":{"schema":{"ms":17,"rowsRead":0},"plugin":{"ms":28,"rowsRead":0},"fence":{"ms":15,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":71,"heapBytes":39555128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":71,"legacyColdStartMs":70,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✖ actual operator HTTP requires operator auth, exact confirmation and allowlisted room (119.08175ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 427.949958
+
+✖ failing tests:
+
+test at tests/operator-lifecycle-archive.test.mjs:29:1
+✖ actual operator HTTP requires operator auth, exact confirmation and allowlisted room (119.08175ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  404 !== 200
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-archived-claim-retirement-1102/tests/operator-lifecycle-archive.test.mjs:33:42)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

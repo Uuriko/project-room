@@ -2,7 +2,7 @@
 //
 // scripts/weekly-learnings.mjs
 //
-// Weekly "learnings" auto-post for muse-room (backlog W007).
+// Weekly "learnings" auto-post for the current Project Room (backlog W007).
 //
 // Gathers the week's signal and posts ONE concise digest to the room:
 //   - merged PRs (via gh), each with a one-line lesson (a `Lesson:` line in
@@ -476,13 +476,13 @@ async function postToRoom(room, text) {
   });
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv, env = process.env) {
   const args = {
     since: null,
     week: null,
     queue: null,
     repo: process.env.WEEKLY_LEARNINGS_REPO || "Uuriko/project-room",
-    room: process.env.WEEKLY_LEARNINGS_ROOM || "muse-room",
+    room: env.WEEKLY_LEARNINGS_ROOM || "room-fafdae79cf8c",
     stateDir:
       process.env.WEEKLY_LEARNINGS_STATE_DIR ||
       join(homedir(), ".config", "weekly-learnings"),

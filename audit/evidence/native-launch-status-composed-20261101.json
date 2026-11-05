@@ -1,0 +1,39 @@
+{
+  "sourceRevision": "589fb4453e8ce387429d851d00669fd9c1acb3ee",
+  "base": "bdeb01bdb889db40f2f025aeea92dc5beeb0cee7",
+  "nodePass": 85,
+  "nodeFail": 0,
+  "nodeSkip": 0,
+  "fullNativeHostAcceptance": "LOCAL_ROOM_HOST_ACCEPTANCE_OK",
+  "releaseAppBuild": "pass",
+  "codesignDeepStrict": "pass",
+  "runtimeFilesVerified": 54,
+  "runtimeBytes": 911403,
+  "installed": false,
+  "limits": [
+    "Fake-child native lifecycle tests; no provider or model turn",
+    "Ad-hoc development build, not public signed distribution"
+  ],
+  "logHashes": {
+    "native-launch-composed-node-1101.log": "296b4b316a91c0e60cdeab5e3541347b632f04541da7ec50e3d99e8279dec490",
+    "native-launch-composed-neighborhood-1101.log": "41d472d250049ec60375ce5c1e66951221715e30c4f8f2e3562c3e968745a7e7",
+    "native-launch-composed-swift-1101.log": "e45d9fff220a628404b822c5220e3c744cac1c75371231668a24de0cfc0b3ba5",
+    "native-launch-composed-build-1101.log": "1d4187ee67141ac7e31a0ea31d3b6743c6d868c8d3f5fc42f633e0c1f692b6ef"
+  },
+  "fixturePortability": {
+    "cause": "CI temporary fixture inherits repository type=module; fake CommonJS executable now has explicit .cjs extension",
+    "insidePackageBefore": {
+      "pass": 3,
+      "fail": 2
+    },
+    "insidePackageAfter": {
+      "pass": 5,
+      "fail": 0
+    },
+    "runtimeChanged": false,
+    "logHashes": {
+      "native-launch-inside-package-red-1101.log": "7a5b8a16c66af16fbd1f0d562846592aef9f91983e2aafcd73bac78f99f2b007",
+      "native-launch-inside-package-green-1101.log": "a6a035ef72db9b3a929218c0f8a2603b6cebe7dd18e051ab5a5e335599f8f4e5"
+    }
+  }
+}

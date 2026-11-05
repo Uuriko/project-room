@@ -1,0 +1,48 @@
+{
+  "parent": "5118487ac28f6553ba2ec4219f255713b7a7a5df",
+  "node": "v24.22.1",
+  "pendingBefore": {
+    "tests": 2,
+    "fail": 2
+  },
+  "pendingAfter": {
+    "tests": 10,
+    "pass": 10,
+    "skip": 0
+  },
+  "finalRenameRegression": {
+    "tests": 3,
+    "pass": 3
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "compatibilityDate": "2026-07-30",
+    "flags": [
+      "nodejs_compat"
+    ],
+    "workerd": "1.20260730.1",
+    "runtime": "local Miniflare Native SQLite, not production",
+    "controls": [
+      "normalized room archive",
+      "registry set/delete/configure refused before room hydrate",
+      "original archive exact retry",
+      "cold reopen and same refusal/receipt"
+    ]
+  },
+  "commands": [
+    "node --test tests/archived-pending-delivery.test.mjs tests/room-guide-flush.test.js tests/human-push-preferences.test.js",
+    "node --test cloudflare/archived-claim-retirement.check.mjs"
+  ],
+  "limits": [
+    "Human push is transient promise delivery, not a persistent retry queue. Existing authorized active-room delivery semantics remain unchanged.",
+    "No all-side-table freeze, no landqueue rewrite, no production operation."
+  ],
+  "logs": {
+    "archived-pending-before-1102.log": "38ef820db6a6566d25b5b758206e3fd42108fd723fba27674c8ed7dfbd250dfc",
+    "archived-pending-after-1102.log": "90c62497392bf3f91e80a16040ca6c08d96412545d235d22c3692f33bb7a4edc",
+    "archived-pending-final-1102.log": "6ece111c16cc2cc83b60d95d3e505fa7419ae23fdb7e447094ad3837a296a9e5",
+    "archived-claim-native-1102.log": "f4c290d9ce322761174fe9f1ece90f0c3b19dd5f9e30e57d77d220a9378f29a5",
+    "archived-pending-lint-1102.log": "2ea867b2ca4157d3aceca587c3f832257bd47977b5b6a3084847f67f96fb4b0f"
+  }
+}

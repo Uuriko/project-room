@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { AgentRooms } from "../server/agent-rooms.mjs";
+import { legacyAgentRoom } from "./helpers/legacy-agent-room.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
@@ -12,7 +12,7 @@ import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 test("hosted and bound stdio selected-work hints and briefs expose callable participant reply pointers", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-work-replies-")), store = new RoomStore(join(directory, "room.sqlite"));
   const identity = store.identities.create("Owen");
-  new AgentRooms(store).create(identity.secret, { roomId: "test-room", title: "Test", purpose: "Selected replies", kind: "personal", displayName: "Owner" });
+  legacyAgentRoom(store, identity, { roomId: "test-room", title: "Test", purpose: "Selected replies", kind: "personal", displayName: "Owner" });
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, config = join(directory, "agent");
   let stdio;
@@ -24,7 +24,7 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   send("message.posted", { messageId: "pending", body: "PRIVATE-BODY-SENTINEL", toMemberId: "peer", requestKind: "reply", workItemId: "task" });
   const call = async (name, args) => (await (await fetch(`${origin}/room/mcp?profile=full`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${identity.secret}` }, body: JSON.stringify({ jsonrpc: "2.0", id: "test", method: "tools/call", params: { name, arguments: args } }) })).json()).result;
   for (let i = 0; i < 25; i++) send("message.posted", { messageId: `pending-extra-${i}`, body: "PRIVATE-BODY-SENTINEL", toMemberId: "peer", requestKind: "reply", workItemId: "task" });
-  const before = store.room("test-room").sequence;
+  const before = store.roomAuthority("test-room", { memberId: identity.identityId }).sequence;
   const hosted = (await call("room_read_work", { roomId: "test-room", workItemId: "task" })).structuredContent;
   assert.equal(hosted.replyRequestContext.truncated, true);
   assert.deepEqual(hosted.replyRequestContext.nextRead.arguments, { roomId: "test-room", direction: "both", status: "open" });
@@ -51,5 +51,5 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   const boundBrief = (await stdio.call("room_read_work", { workItemId: "task", brief: true })).result.structuredContent.brief;
   assert.match(boundBrief, /Pending linked reply requests: 26/); assert.match(boundBrief, /pending/);
   assert.equal(boundBrief.includes("PRIVATE-BODY-SENTINEL"), false);
-  assert.equal(store.room("test-room").sequence, before);
+  assert.equal(store.roomAuthority("test-room", { memberId: identity.identityId }).sequence, before);
 });

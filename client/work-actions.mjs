@@ -1,18 +1,21 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
-import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
+import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
+import { WRITE_GRANT_POLICY_VERSION } from "../src/work-reducers.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
-const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
+// Match the complete string for hosts that full-match JSON Schema patterns.
+const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" };
 const bool = { type: "boolean" }, revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const object = (properties, required = Object.keys(properties)) => ({ type: "object", properties, required, additionalProperties: false });
 const common = { requestId: { ...id, description: "Optional stable business operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; keep the returned ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
   workItemId: id, expectedRevision: { ...revision, description: "Optional exact work revision you inspected. Omit to use the current revision; a conflict means the work changed before this attempt was recorded." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
+const attempt = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: "Optional exact finished successful session attempt of this work. Must belong to you and match producerId. Its declared metadata is snapshotted, not independently verified; omission means unknown." };
 const externalProducer = { ...text, maxLength: 160, description: "Optional reported outside person, team or AI credit. Use only with producerId=null (or omitted for external evidence). Does not create membership, verify identity or establish reviewer independence." };
 // RC-2026-09-19-063: fact / inference / proposal marks on a result. A
 // passage of the result is labeled as observed fact, derived inference, or
@@ -25,27 +28,27 @@ const definitions = [
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
-    externalProducer, segments: resultSegments,
+    externalProducer, attempt, segments: resultSegments,
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
-    title: text, definitionOfDone: text, accountableMemberId: id, mode: { type: "string", enum: ["read", "write"] },
+    title: text, definitionOfDone: text, accountableMemberId: id, dependsOn: { type: "array", maxItems: 16, items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, description: "Existing same-room Board claim IDs, not message/session IDs. Every prerequisite must be done before claiming or starting. Read dependencies on room_read_work; acceptance rechecks existence." }, mode: { type: "string", enum: ["read", "write"] },
     independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id
   }, ["title", "definitionOfDone", "accountableMemberId", "mode", "independentVerificationRequired", "ownerDecisionRequired"]],
   ["accept_work", "Accept assignment", T.WORK_ACCEPTED, "Accept your assigned proposed task. Requires accept_work. Does not grant outside access or start a runtime.", {}],
   ["start_work", "Record work started", T.WORK_STARTED, "Record that you are starting your assigned task. Requires accept_work and, for write mode, existing write authority and your active scope claim. Does not run code or tools. Starting blocked work requires resolvedBlocker.", { resolvedBlocker: text }, []],
   ["block_work", "Report blocker", T.WORK_BLOCKED, "Report a blocker or reopen your completed task for rework. Requires assigned accept_work. Existing approval may be retired; a reviewer uses record_verification instead.", { reason: text, nextAction: text }],
   ["resolve_blocker", "Resolve blocker", T.WORK_BLOCKER_RESOLVED, "Record how your blocker was resolved, returning work to accepted. Requires assigned accept_work. Does not restart work or renew a claim.", { resolution: text }],
-  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
+  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority (the write_external permission, or the item's one-item grant when the room owner or a write_external holder proposed the item to you) and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
-    externalProducer, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
+    externalProducer, attempt, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
-  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim and is still required to finish write-mode work. Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
+  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim; finishing write-mode work requires write_external or the item's one-item grant (an item proposed to you by the room owner or a write_external holder carries that grant for you alone). Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." },
     pullRequests: { type: "array", maxItems: 16, items: { ...text, maxLength: 300 } },
@@ -63,9 +66,10 @@ const definitions = [
     evidenceVersion: { ...text, description: "Version of the partial evidence; required with evidenceUrl." },
     nextAction: { ...text, description: "The exact next action for whoever picks this up." },
     limitReason: { ...text, description: "Why you cannot continue (limit hit, missing permission, context exhausted)." },
-    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." }
+    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." },
+    toMemberId: { ...id, description: "Optional. The member who should pick this up; triage goes to them instead of the Room owner." }
   }, ["doneSummary", "nextAction", "limitReason"]],
-  ["clear_halt", "Clear a member halt", T.WORK_HALT_CLEARED, "Clear one exact recorded halt-all after triage. Requires steer or decide; the halted member cannot clear its own halt. Names the exact halt event inspected.", {
+  ["clear_halt", "Clear a member halt", T.WORK_HALT_CLEARED, "Clear one exact recorded halt-all after triage. Requires steer or decide. Names the exact halt event inspected.", {
     memberId: id, haltEventId: id, note: { ...text, maxLength: 512, description: "Optional triage note." }
   }, ["memberId", "haltEventId"]]
 ];
@@ -231,7 +235,12 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
   const entry = receipt?.event;
   let data = command.data;
   try {
-    if (command.type === T.MESSAGE_POSTED && replyPostMode(data)) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+    const mode = command.type === T.MESSAGE_POSTED ? replyPostMode(data) : null;
+    if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+    // The server stamps which credential answered; it is never in the command.
+    if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
+    // Proposals admitted under the item write grant policy carry its version (#5960).
+    if (command.type === T.WORK_PROPOSED && entry?.data?.writeGrantPolicyVersion === WRITE_GRANT_POLICY_VERSION) data = { ...data, writeGrantPolicyVersion: WRITE_GRANT_POLICY_VERSION };
   } catch { return false; }
   return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0 && typeof receipt.duplicate === "boolean"
     && validId(entry?.id) && entry.type === command.type && entry.roomId === roomId && entry.actorId === memberId
@@ -257,16 +266,72 @@ export function withWorkDeprecation(name, recorded) {
       ? `Use ${deprecated.successor} with action="${deprecated.action}".`
       : `Use ${deprecated.successor}.` }, successor: deprecated.successor } : recorded;
 }
+// Recover only the revision that this adapter supplied for a prior operation.
+// This is a bounded read of authenticated durable history, not a local cache or
+// a replacement success receipt. A missing/redacted/incomplete read fails closed.
+const RECONCILABLE_WORK_ACTIONS = new Set([
+  "room_accept_work", "room_start_work", "room_submit_text_result", "room_record_verification"
+]);
+async function reconcileWorkRevision(client, identity, name, args, command, observedThrough, signal) {
+  if (typeof client.changes !== "function" || !Number.isSafeInteger(observedThrough) || observedThrough < 0) return null;
+  const key = createHash("sha256").update(`${identity.memberId}:${command.id}`).digest("hex");
+  // Reuse the authenticated work-context horizon already read by the normal
+  // path. Search the newest 100-sequence window first, then older windows.
+  // Follow a concurrently advancing tail before walking back; all reads share
+  // one five-page budget. Event bodies never supply this starting horizon.
+  let windowStart = Math.max(0, observedThrough - 100), after = windowStart, tail = true;
+  for (let page = 0; page < 5; page += 1) {
+    const result = await client.changes(after, 100, { signal });
+    if (!Array.isArray(result?.events) || result.events.length > 100
+        || typeof result.hasMore !== "boolean" || !Number.isSafeInteger(result.next)
+        || result.next < after || (result.hasMore && result.next <= after)) return null;
+    for (const row of result.events) {
+      const event = row?.event;
+      if (!Number.isSafeInteger(row?.sequence) || row.sequence <= after || row.sequence > result.next) return null;
+      if (event?.idempotencyKey !== key || event.roomId !== identity.roomId || event.actorId !== identity.memberId) continue;
+      // A different intent under this ID is still a conflict. Only the omitted
+      // adapter-filled revision may be reconstructed; evidence and all other
+      // caller fields must match the original event exactly.
+      if (!Number.isSafeInteger(event.data?.expectedRevision) || event.data.expectedRevision < 0) return null;
+      const original = buildWorkCommand(name, args, identity, { expectedRevision: event.data.expectedRevision });
+      if (!confirmsAgentCommand({ sequence: row.sequence, event, duplicate: true }, original, identity)) return null;
+      return original;
+    }
+    if (tail && result.hasMore) {
+      after = result.next;
+      continue;
+    }
+    tail = false;
+    if (windowStart === 0) return null;
+    windowStart = Math.max(0, windowStart - 100);
+    after = windowStart;
+  }
+  return null;
+}
+
 export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
-  let expectedRevision;
+  let expectedRevision, observedThrough;
   if (workUsesExpectedRevision(name) && args && typeof args === "object" && !Array.isArray(args)
       && args.expectedRevision === undefined && validId(args.workItemId)) {
     const context = await client.workContext(args.workItemId, { signal });
     if (!Number.isSafeInteger(context?.work?.revision)) throw Object.assign(new Error("Current work revision unavailable"), { code: "invalid_work_action" });
     expectedRevision = context.work.revision;
+    observedThrough = context.evaluatedThrough;
   }
-  const command = buildWorkCommand(name, args, identity, { expectedRevision }), receipt = await client.command(command, { signal });
+  let command = buildWorkCommand(name, args, identity, { expectedRevision }), receipt;
+  try {
+    receipt = await client.command(command, { signal });
+  } catch (error) {
+    if (error?.status !== 409 || error.code !== "idempotency_conflict"
+        || args.expectedRevision !== undefined || !RECONCILABLE_WORK_ACTIONS.has(name)) throw error;
+    const original = await reconcileWorkRevision(client, identity, name, args, command, observedThrough, signal);
+    if (!original) throw error;
+    command = original;
+    // Reauthenticate and check the complete command fingerprint at the normal
+    // write boundary. Reading an old event never grants present authority.
+    receipt = await client.command(command, { signal });
+  }
   if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
   return withWorkDeprecation(name, recordedWorkAction(name, command, receipt));

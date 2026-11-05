@@ -527,7 +527,15 @@ test("a new referral redeem shares the anonymous identity mint limiter", async t
   const limitedBody = await limited.json();
   assert.equal(limited.status, 429);
   assert.equal(limitedBody.error.code, "identity_mint_limited");
-  assert.equal(limited.headers.get("retry-after"), "60");
+  // Retry-After is the true wait until the oldest of the 8 counted mints
+  // leaves the minute window (mint-retry-after-truth): at most 60, less the
+  // seconds those mints have already aged — not a fixed "60".
+  const retryAfter = Number(limited.headers.get("retry-after"));
+  assert.ok(Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= 60,
+    `Retry-After must be the true minute-window wait, got ${retryAfter}`);
+  assert.equal(limitedBody.retryAfterSeconds, retryAfter);
+  assert.equal(limitedBody.mintBudget.scope, "address");
+  assert.equal(limitedBody.mintBudget.windowMs, 60_000);
   assert.equal(ninth.json.token.length > 0, true);
 });
 

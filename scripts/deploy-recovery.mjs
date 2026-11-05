@@ -1,5 +1,6 @@
 // Schema-aware recovery for deploy-prod. Reading /api/version/worker does not
 // open a Durable Object; schemas are parsed from exact Git blobs, never evaluated.
+import { timeoutOnlyEvidence } from './readiness-recovery-hold.mjs';
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -39,7 +40,22 @@ export function schemaAt(revision, git = args => command(['git', ...args])) {
     const imports = [...new Set([...text.matchAll(/^\s*import\s[^;]*?\sfrom\s+["']\.\/([\w.-]+\.mjs)["']/gm)].map(match => `server/${match[1]}`))].sort();
     const pinned = [['server/writer-fence.mjs', blob], ...imports.map(path => [path, git(['rev-parse', `${revision}:${path}`]).trim()])];
     if (!pinned.every(([, sha]) => shaPattern.test(sha))) return null;
-    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
+    // Reader semantics can change without a storage-floor change. Keep an
+    // absent historical contract unknown for automatic recovery, while leaving
+    // its schema proof available to the separately qualified manual path.
+    let replyContractBlob = null;
+    try {
+      const proof = git(['rev-parse', `${revision}:src/reply-requests.js`]).trim();
+      if (shaPattern.test(proof)) replyContractBlob = proof;
+    } catch { /* an older source may not contain the reply contract */ }
+    if (replyContractBlob) pinned.push(['src/reply-requests.js', replyContractBlob]);
+    let messageReaderBlob = null;
+    try {
+      const proof = git(['rev-parse', `${revision}:server/current-room-repository.mjs`]).trim();
+      if (shaPattern.test(proof)) messageReaderBlob = proof;
+    } catch { /* absent reader evidence cannot authorize automatic rollback */ }
+    if (messageReaderBlob) pinned.push(['server/current-room-repository.mjs', messageReaderBlob]);
+    return { version: Number(matches[0][1]), revision, path: 'server/writer-fence.mjs', blob, replyContractBlob, messageReaderBlob, definitions: pinned.map(([path, sha]) => `${path}@${sha}`).join('\n') };
   } catch { return null; }
 }
 export function allocation(status) {
@@ -65,8 +81,8 @@ export function rollbackDecision(previous, candidateSchema) {
 export function automaticRollbackDecision(previous, candidateSchema, candidateSource) {
   const floor = rollbackDecision(previous, candidateSchema);
   if (!floor.eligible) return floor;
-  // Equal schema numbers can still introduce tables unknown to the old
-  // recovery/export code. Compare exact Git definitions, never just integers.
+  // Equal schema numbers can introduce tables or accepted reply shapes unknown
+  // to prior code. Compare exact Git definitions, never just integers.
   const prior = previous.schemaSource;
   if (!shaPattern.test(candidateSource?.blob ?? '') || candidateSource?.version !== candidateSchema
     || !shaPattern.test(candidateSource?.revision ?? '') || !shaPattern.test(prior?.blob ?? '')
@@ -74,9 +90,17 @@ export function automaticRollbackDecision(previous, candidateSchema, candidateSo
     return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
   if (typeof prior.definitions !== 'string' || typeof candidateSource.definitions !== 'string')
     return { eligible: false, reason: 'exact writer-fence source proof missing or inconsistent' };
+  if (!shaPattern.test(prior.replyContractBlob ?? '') || !shaPattern.test(candidateSource.replyContractBlob ?? ''))
+    return { eligible: false, reason: 'exact reply-contract source proof missing or inconsistent' };
+  if (prior.replyContractBlob !== candidateSource.replyContractBlob)
+    return { eligible: false, reason: 'reply-contract definitions changed; prior readers may reject newly accepted responses' };
+  if (!shaPattern.test(prior.messageReaderBlob ?? '') || !shaPattern.test(candidateSource.messageReaderBlob ?? ''))
+    return { eligible: false, reason: 'exact canonical-message reader source proof missing or inconsistent' };
+  if (prior.messageReaderBlob !== candidateSource.messageReaderBlob)
+    return { eligible: false, reason: 'canonical-message reader changed; prior code may reject newly accepted entities' };
   if (prior.blob !== candidateSource.blob || prior.definitions !== candidateSource.definitions)
-    return { eligible: false, reason: 'writer-fence definitions changed; prior recovery may reject new tables' };
-  return { eligible: true, reason: 'schema floor and exact writer-fence definition match; row/runtime compatibility is not established by this check' };
+    return { eligible: false, reason: 'writer-fence or reply-contract definitions changed; prior recovery or readers may be incompatible' };
+  return { eligible: true, reason: 'schema floor, exact writer-fence definitions, reply contract and canonical-message reader match; other row/runtime compatibility is not established by this check' };
 }
 export async function observeWorker({ status, readVersion, schema = schemaAt }) {
   const before = allocation(await status());
@@ -88,7 +112,44 @@ export async function observeWorker({ status, readVersion, schema = schemaAt }) 
   const known = before.known && after.known && before.versionId === after.versionId && !!proof;
   return { known, versionId: before.versionId, sourceRevision, codeSchemaVersion: proof?.version ?? null, schemaSource: proof, allocationBefore: before, allocationAfter: after, error };
 }
-export async function recoverWorkers(snapshot, attempted, { status, rollback, readVersion }) {
+// The shared authority can retain candidate code after the edge allocation
+// rolls back. Observe both routes after all commands; never retry mutations.
+export async function verifyRollbackSources(expected, { readVersion, readDurableVersion,
+  timeoutMs = 420000, pollMs = 15000, now = Date.now,
+  sleep = ms => new Promise(done => setTimeout(done, ms)) } = {}) {
+  const started = now(), deadline = started + Math.min(420000, Math.max(1, timeoutMs));
+  const evidence = { verified: false, attempts: 0, elapsedMs: 0, doors: {} };
+  if (!Object.keys(expected).length || Object.values(expected).some(target => !shaPattern.test(target.edge ?? '') || !shaPattern.test(target.durable ?? ''))) return { ...evidence, reason: 'Expected edge or Durable Object source unknown' };
+  if (typeof readDurableVersion !== 'function') return { ...evidence, reason: 'Durable Object source reader unavailable' };
+  async function read(reader, name) {
+    const remaining = Math.min(15000, deadline - now());
+    if (remaining <= 0) return null;
+    const controller = new AbortController(); let timer;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => reader(name, { signal: controller.signal, timeoutMs: remaining })),
+        new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, remaining); })
+      ]);
+    } catch { return null; } finally { clearTimeout(timer); }
+  }
+  while (now() < deadline) {
+    evidence.attempts++;
+    const rows = await Promise.all(Object.entries(expected).map(async ([name, target]) => {
+      const [edge, durable] = await Promise.all([read(readVersion, name), read(readDurableVersion, name)]);
+      const edgeRevision = edge?.status === 'ok' && edge.servedBy === 'worker' && shaPattern.test(edge.sourceRevision ?? '') ? edge.sourceRevision : null;
+      const durableRevision = durable?.status === 'ok' && (durable.servedBy === undefined || durable.servedBy === 'durable-object') && shaPattern.test(durable.sourceRevision ?? '') ? durable.sourceRevision : null;
+      return [name, { edgeRevision, durableRevision, expectedEdgeRevision: target.edge,
+        expectedDurableRevision: target.durable, matched: edgeRevision === target.edge && durableRevision === target.durable }];
+    }));
+    evidence.doors = Object.fromEntries(rows);
+    evidence.elapsedMs = Math.max(0, now() - started);
+    if (now() < deadline && rows.every(([, row]) => row.matched)) return { ...evidence, verified: true };
+    if (now() >= deadline) break;
+    await sleep(Math.min(Math.max(1, pollMs), deadline - now()));
+  }
+  return { ...evidence, elapsedMs: Math.max(0, now() - started), reason: 'Edge and shared Durable Object source convergence not verified within deadline' };
+}
+export async function recoverWorkers(snapshot, attempted, { status, rollback, readVersion, readDurableVersion, convergence = {} }) {
   const workers = {};
   for (const name of ['prod', 'entry']) {
     const previous = snapshot[name];
@@ -103,25 +164,36 @@ export async function recoverWorkers(snapshot, attempted, { status, rollback, re
       result.rollbackAttempted = true;
       await rollback(name, previous.versionId);
       result.observedAfter = allocation(await status(name));
-      const signal = await readVersion(name);
-      if (!result.observedAfter.known || result.observedAfter.versionId !== previous.versionId || signal?.status !== 'ok' || signal?.servedBy !== 'worker' || signal?.sourceRevision !== previous.sourceRevision) throw new Error('rollback command completed but version/source readback is not verified');
-      result.disposition = 'rollback_verified';
+      if (!result.observedAfter.known || result.observedAfter.versionId !== previous.versionId) throw new Error('rollback command completed but allocation readback is not verified');
+      result.disposition = 'rollback_unverified';
+      result.allocationRollbackVerified = true;
     } catch (failure) {
       result.disposition = result.rollbackAttempted ? 'rollback_unverified' : 'roll_forward_required';
       result.reason = failure.message;
     }
   }
+  const pending = Object.entries(workers).filter(([, row]) => row.allocationRollbackVerified);
+  if (pending.length) {
+    const expected = Object.fromEntries(pending.map(([name]) => [name, { edge: snapshot[name]?.sourceRevision, durable: snapshot.prod?.known === true ? snapshot.prod.sourceRevision : null }]));
+    const proof = await verifyRollbackSources(expected, { readVersion, readDurableVersion, ...convergence });
+    for (const [name, row] of pending) {
+      row.sourceConvergence = { ...proof, doors: { [name]: proof.doors[name] ?? null } };
+      if (proof.verified) row.disposition = 'rollback_verified';
+      else row.reason = proof.reason;
+    }
+  }
   const rows = Object.values(workers);
   const statusValue = rows.some(row => row.disposition === 'roll_forward_required') ? 'ROLL FORWARD REQUIRED' : rows.some(row => row.disposition === 'rollback_unverified') ? 'ROLLBACK NOT VERIFIED' : rows.some(row => row.disposition === 'rollback_verified') ? 'ROLLBACK VERIFIED' : 'NO DEPLOYMENT CHANGE OBSERVED';
-  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor and exact writer-fence definition only; this does not prove prior code understands new rows, semantics or retained runtime.', recordedAt: new Date().toISOString(), workers };
+  return { status: statusValue, targetSha: snapshot.targetSha, candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion, compatibilityLimit: 'Code-schema floor, exact writer-fence definitions, reply contract and canonical-message reader only; this does not prove prior code understands other new rows, semantics or retained runtime. Manual rollback requires separate explicit compatibility qualification.', recordedAt: new Date().toISOString(), workers };
 }
 export function recoveryDescription(report) {
   if (!report) return 'Recovery not attempted or report unavailable; no rollback is claimed.';
   return `${report.status} · ${Object.entries(report.workers).map(([name, row]) => `${name}: ${row.disposition} (previous schema ${row.previousCodeSchemaVersion ?? 'unknown'}, candidate schema ${row.candidateCodeSchemaVersion ?? 'unknown'}, target ${row.previousVersionId ?? 'unknown'})${row.reason ? `: ${row.reason}` : ''}`).join(' · ')}`;
 }
 const workerUrl = origin => `${origin.replace(/\/+$/, '')}/api/version/worker`;
-export async function readVersion(origin) {
-  const response = await fetch(workerUrl(origin), { redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 project-room-schema-recovery', accept: 'application/json', 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(15000) });
+export async function readVersion(origin, { signal, timeoutMs = 15000 } = {}, durable = false) {
+  const url = durable ? `${origin.replace(/\/+$/, '')}/api/version` : workerUrl(origin);
+  const response = await fetch(url, { redirect: 'error', headers: { 'user-agent': 'Mozilla/5.0 project-room-schema-recovery', accept: 'application/json', 'cache-control': 'no-cache' }, signal: signal ?? AbortSignal.timeout(timeoutMs) });
   if (response.status !== 200) throw new Error(`Worker version HTTP ${response.status}`);
   return response.json();
 }
@@ -180,6 +252,21 @@ export async function deploymentStatus(name, run = command, retry = {}, rest = r
     return rest(name);
   }
 }
+export function heldRecovery(snapshot, raw, context) {
+  if (context.sha !== snapshot.targetSha || context.prodOutcome !== 'success' || context.entryOutcome !== 'success' || context.smokeOutcome !== 'failure'
+      || !timeoutOnlyEvidence(raw, { ...context, sha: snapshot.targetSha })) return null;
+  return { status: 'RECOVERY HELD — MANUAL DIAGNOSIS REQUIRED', targetSha: snapshot.targetSha,
+    releaseFailed: true, smokeSha256: context.digest, recordedAt: new Date().toISOString(),
+    compatibilityLimit: 'Only DO readiness timed out. This is inconclusive health evidence, not a healthy release or proof that prior code will improve it. No automatic rollback was attempted.',
+    workers: Object.fromEntries(['prod', 'entry'].map(name => [name, {
+      disposition: 'recovery_held', rollbackAttempted: false,
+      previousVersionId: snapshot[name]?.versionId ?? null,
+      previousCodeSchemaVersion: snapshot[name]?.codeSchemaVersion ?? null,
+      candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion,
+      reason: 'Complete matching smoke passed versions, signed cards, health and pages; DO readiness timeout only. Diagnose before another code transition.',
+    }])) };
+}
+
 async function main() {
   const [mode, path, output] = process.argv.slice(2);
   if (mode === 'snapshot') {
@@ -203,11 +290,16 @@ async function main() {
   } else if (mode === 'recover') {
     const snapshot = JSON.parse(readFileSync(path, 'utf8'));
     const attempted = { prod: !['', undefined, 'skipped'].includes(process.env.PROD_OUTCOME), entry: !['', undefined, 'skipped'].includes(process.env.ENTRY_OUTCOME) };
-    const report = await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: name => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
+    let rawSmoke = null;
+    try { if (process.env.SMOKE_REPORT_PATH) rawSmoke = readFileSync(process.env.SMOKE_REPORT_PATH, 'utf8'); } catch { /* no usable evidence: existing recovery policy */ }
+    const held = heldRecovery(snapshot, rawSmoke, { sha: process.env.SHA, digest: process.env.SMOKE_REPORT_SHA256,
+      origin: process.env.PROD_ORIGIN, entry: process.env.ENTRY_ORIGIN,
+      prodOutcome: process.env.PROD_OUTCOME, entryOutcome: process.env.ENTRY_OUTCOME, smokeOutcome: process.env.SMOKE_OUTCOME });
+    const report = held ?? await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: (name, options) => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN, options), readDurableVersion: (name, options) => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN, options, true), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
     writeFileSync(output, JSON.stringify(report, null, 2) + '\n');
     console.log(recoveryDescription(report));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${recoveryDescription(report)}\n\n${report.compatibilityLimit}\n`);
-    process.exitCode = ['ROLL FORWARD REQUIRED', 'ROLLBACK NOT VERIFIED'].includes(report.status) ? 1 : 0;
+    process.exitCode = (report.releaseFailed === true || ['ROLL FORWARD REQUIRED', 'ROLLBACK NOT VERIFIED'].includes(report.status)) ? 1 : 0;
   } else throw new Error('Usage: deploy-recovery.mjs snapshot <output> | recover <pre-deploy> <output>');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

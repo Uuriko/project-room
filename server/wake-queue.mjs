@@ -1,3 +1,9 @@
+// Legacy internal intent queue: its drain methods (due/lease/complete/fail)
+// have no production route, job or native-host caller. Retained for stored
+// data/receipt and historical import compatibility; not a native delivery API.
+// Current agent delivery uses agent-heartbeats / WorkWakes. Pause and inspect
+// remain active product controls. Do not add a second drain engine here.
+// See docs/research/2026-11-01-legacy-wake-drain-removal.md.
 // W4-45 H3: durable wake queue. A wake is a recorded intent to re-check
 // something later (for example, re-evaluate an H1 recipe trigger). The queue
 // is durable (SQLite, survives restart), coalescing (one row per queue key),

@@ -14,14 +14,17 @@ test('discovery transfer measurement counts identity reads and separates result 
       assert.ok(metric.decodedBodyBytes.min > 0); assert.ok(metric.resultJsonBytes.min > 0);
     }
   }
-  // The full snapshot is the control. Do not turn today's excess discovery
-  // transfer into a required contract that blocks a future optimization.
-  assert.ok(chat.metrics.full.decodedBodyBytes.min > small.metrics.full.decodedBodyBytes.max + 10000);
+  // Full orientation now deliberately omits unrelated chat. Retain the larger
+  // underlying projection as the control, while verifying bounded transfer.
+  assert.ok(chat.projectionJsonBytes > small.projectionJsonBytes + 10000);
+  assert.ok(Math.abs(chat.metrics.full.decodedBodyBytes.max - small.metrics.full.decodedBodyBytes.max) < 100,
+    "unrelated messages do not grow orientation transfer");
   assert.ok(Math.abs(chat.metrics.selected.decodedBodyBytes.max - small.metrics.selected.decodedBodyBytes.max) < 100);
   assert.ok(Math.abs(chat.metrics.search.resultJsonBytes.max - small.metrics.search.resultJsonBytes.max) < 100);
   assert.ok(Math.abs(chat.metrics.search.decodedBodyBytes.max - small.metrics.search.decodedBodyBytes.max) < 100,
     'unrelated messages do not grow current work-only discovery transfer');
-  assert.ok(chat.metrics.search.decodedBodyBytes.max < chat.metrics.full.decodedBodyBytes.min);
+  for (const name of ["search", "full"]) assert.ok(chat.metrics[name].decodedBodyBytes.max < chat.projectionJsonBytes,
+    `${name} transfers less than the chat-heavy full projection`);
 });
 
 test('discovery profiler refuses unbounded or noninteger fixture sizes before setup', async () => {

@@ -42,6 +42,23 @@ test('Worker SQLite, same instance: legacy shapes refuse the archive until the u
   } finally { await mf.dispose(); await rm(persistence, { recursive: true, force: true }); }
 });
 
+test('Worker SQLite: legacy upgrade refuses an unregistered metadata overwrite without repairing it', async () => {
+  const persistence = await mkdtemp(join(tmpdir(), 'room-archive-corrupt-'));
+  const mf = worker(persistence, 10);
+  try {
+    await timed(mf, '/seed');
+    await timed(mf, '/tamper');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await mf.dispatchFetch('http://localhost/upgrade');
+      assert.equal(response.status, 500);
+      assert.match(await response.text(), /projection_corrupt: stored metadata does not match its write proof/);
+      const state = await timed(mf, '/state');
+      assert.deepEqual(state.audit, []);
+      assert.deepEqual(state.legacy, { cardMissingReceiptId: true, m1HasReactions: true });
+    }
+  } finally { await mf.dispose(); await rm(persistence, { recursive: true, force: true }); }
+});
+
 test('Worker SQLite, cold start: the Durable Object open path upgrades legacy shapes, and the archive door then catches up and archives', async () => {
   const persistence = await mkdtemp(join(tmpdir(), 'room-archive-cold-'));
   const messages = Number(process.env.R59_MESSAGES ?? 3000);

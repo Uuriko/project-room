@@ -1,0 +1,25 @@
+{
+  "runtimeChecks": [
+    {
+      "path": "/Users/johnpotter/.local/bin/node",
+      "version": "24.22.1",
+      "passed": 7,
+      "failed": 0
+    },
+    {
+      "path": "/opt/homebrew/Cellar/node/26.8.2/bin/node",
+      "version": "26.8.2",
+      "passed": 7,
+      "failed": 0
+    }
+  ],
+  "before": {
+    "node24Png": "8be24cd4a63e7f43b33b20584c1b24594910bfe4b1f3b6755eedcb3831199a71",
+    "node26Png": "2b5528bb655e44717c2c84ab5f14ef1305582cd12419e9a34dae8e426c5c6011",
+    "bothRgba": "4b72e0c424a96843a6e6d0fb46e7e03809cde1279025acd3341eaa159d922be4",
+    "failedGoldenTests": 3
+  },
+  "afterRgba": "5eb5c838d45674a48ce37a19e2bc132743460e46a4d0ffaf042c5c38882d9972",
+  "visualReview": "Rendered images inspected: unsupported middot replaced with slash; footer lifted within card. Pixel hash retains layout/atlas regression checks; decoder verifies CRC. No atlas regeneration.",
+  "scope": "Local renderer tests; no deployed image verification."
+}

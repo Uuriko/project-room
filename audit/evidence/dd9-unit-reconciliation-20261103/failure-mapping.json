@@ -1,0 +1,370 @@
+{
+  "artifact": {
+    "run": "41737780046",
+    "id": "13282237579",
+    "revision": "dd9f34d324ad32eb359bd48d7eb6eafa98dfc14b",
+    "zipSha256": "ce84ef6b71d14ba2acc5a87a21ac30ba0223c06affb14aa8c21a8054181cb94f"
+  },
+  "candidate": "23a8936d504e44ecdcde6fb0d801fd531ac4cbad",
+  "unitCases": 28,
+  "mappedToExistingRepair": 26,
+  "stillReproduced": 2,
+  "unitFailures": [
+    {
+      "name": "genuine v8 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v9 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v10 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v11 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v12 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v13 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v14 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v15 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v16 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v17 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v18 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v19 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v20 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v21 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v22 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v23 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v24 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v25 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v26 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "genuine v27 data upgrades atomically; old writers cannot write the current schema",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/agent-upgrade.test.js",
+      "message": [
+        "legacy account-session slots gain only the documented login provenance fields",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "actual five-scope API-key HTTP inbox traverses overlapping obligations without leaks/duplicates and survives cold reopen",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/current-scoped-inbox.test.mjs",
+      "message": [
+        "Cannot read properties of undefined (reading 'nextRead')"
+      ],
+      "candidateStatus": "reproduced failing on23a; repaired test-only at135354b55 and affected file4/4pass",
+      "repair": "135354b554717d859a4ebed5cbd3dfbd290ce69e"
+    },
+    {
+      "name": "MCP inbox continuation can be called verbatim",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/current-scoped-inbox.test.mjs",
+      "message": [
+        "The expression evaluated to a falsy value:",
+        ""
+      ],
+      "candidateStatus": "reproduced failing on23a; repaired test-only at135354b55 and affected file4/4pass",
+      "repair": "135354b554717d859a4ebed5cbd3dfbd290ce69e"
+    },
+    {
+      "name": "a failed optional public preview cannot hide committed lobby admission or duplicate its seat",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/mcp-public-context-recovery.test.mjs",
+      "message": [
+        "Expected values to be strictly equal:",
+        "+ actual - expected"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "31c573dd2"
+    },
+    {
+      "name": "lean is opt-in: default core and full lists are unchanged, lean is short and much smaller",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/mcp-search-actions.test.js",
+      "message": [
+        "full includes room_claim, room_handoff, room_map, room_merge_members, room_read_bootstrap and room_activation_pack",
+        ""
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "31c573dd2"
+    },
+    {
+      "name": "normalized invisible first window refuses partial coverage instead of reporting complete or empty",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/normalized-agent-work.test.mjs",
+      "message": [
+        "Missing expected rejection."
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    },
+    {
+      "name": "a crashed agent restarts and the thread resumes with session/load",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/room-acp-restart.test.js",
+      "message": [
+        "timed out waiting"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "31c573dd2"
+    },
+    {
+      "name": "without loadSession a restarted thread gets the full context again",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/room-acp-restart.test.js",
+      "message": [
+        "timed out waiting"
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "31c573dd2"
+    },
+    {
+      "name": "Add agent markup lists the four roster names",
+      "classname": "test",
+      "file": "/home/runner/work/project-room/project-room/tests/room-roster.test.js",
+      "message": [
+        "The input did not match the regular expression /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, queuedNote, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery/. Input:",
+        ""
+      ],
+      "candidateStatus": "mapped to adopted repair and existing source-pinned green evidence; not rerun here",
+      "repair": "f2ac2cf6a"
+    }
+  ],
+  "otherDirectCases": [
+    {
+      "name": "actual Worker projects bounded historical message envelopes before unrelated HTTP catch-up, including cold reopen",
+      "repair": "6e5a3eb1f",
+      "rerunHere": false
+    },
+    {
+      "name": "refresh after expiry ends at actionable sign-in",
+      "repair": "f2ac2cf6a",
+      "rerunHere": false
+    }
+  ],
+  "extraFailedJobs": 4,
+  "extraDirectFailedCases": 2,
+  "command": "node --test --test-name-pattern='^(actual five-scope API-key HTTP inbox traverses overlapping obligations without leaks/duplicates and survives cold reopen|MCP inbox continuation can be called verbatim)$' tests/current-scoped-inbox.test.mjs",
+  "result": {
+    "tests": 2,
+    "pass": 0,
+    "fail": 2,
+    "skip": 0
+  },
+  "log": "/tmp/dd9-scoped-inbox-candidate-23a893-1103.log",
+  "logSha256": "357d470c0a4aae1500adf7cec95038b6d683be7ff1328c088822be5ff5302bb1",
+  "sourceEdits": "one test file only; no runtime",
+  "nativeOrBrowserRuns": false,
+  "testRepair": "135354b554717d859a4ebed5cbd3dfbd290ce69e",
+  "after": {
+    "tests": 4,
+    "pass": 4,
+    "fail": 0,
+    "skip": 0
+  },
+  "freshRequalification": "only two original failed cases before and the four-case affected file after; no Native/browser reruns",
+  "logs": {
+    "before": {
+      "sha256": "357d470c0a4aae1500adf7cec95038b6d683be7ff1328c088822be5ff5302bb1",
+      "rawBytes": 3329
+    },
+    "after": {
+      "sha256": "dcb58e065aaf6f11c38e0244663b0b6751ceec6dc5d55240133d6c6b7b002b80",
+      "rawBytes": 4020
+    },
+    "lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawBytes": 0
+    },
+    "secret": {
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "rawBytes": 24
+    }
+  },
+  "junitSha256": "7ed75cf54622e8f412ecd5023ae817f531a678fb3603f7ea2ba33d75d7ff4a60"
+}

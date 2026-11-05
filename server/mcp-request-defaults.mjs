@@ -1,3 +1,5 @@
+import { isIdentitySecret } from "./agent-identities.mjs";
+import { PUBLIC_LOBBY_ROOM_ID } from "./current-public-face.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 
 export function pinnedRoomForApiKey(store, secret) {
@@ -11,6 +13,11 @@ export function pinnedRoomForApiKey(store, secret) {
 
 export function withDefaultRoomId(store, secret, name, args, schema) {
   if (!args || typeof args !== "object" || Array.isArray(args) || args.roomId !== undefined) return args;
+  // A destination-free join means the published welcome lobby, never a private
+  // maintainer room. Explicit invitations, pairing and scoped grants keep their paths.
+  if (name === "room_join" && isIdentitySecret(secret)
+    && ["linkToken", "inviteCode", "pairId", "publicKey", "keyProof"].every(key => args[key] === undefined))
+    return { ...args, roomId: PUBLIC_LOBBY_ROOM_ID };
   if (name === "room_check_access" || name === "room_create") return args;
   if (!schema?.properties || !Object.hasOwn(schema.properties, "roomId")) return args;
   if (name !== "room_needs_me" && !schema.required?.includes("roomId")) return args;

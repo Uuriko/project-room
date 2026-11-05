@@ -64,9 +64,17 @@ for (const kind of ["join", "invite", "code", "code-stale"]) test(`returning Goo
   });
   const page = await browser.newPage(), errors = [];
   page.setDefaultTimeout(10000); page.on("pageerror", error => errors.push(error.message));
-  await page.route(`${origin}/api/auth/google/start`, async route => {
+  let googleStarts = 0;
+  // Match the endpoint, including the explicit invitation account-choice query.
+  // Exact-string interception silently sends ?switch=1 to the real provider.
+  await page.route(url => url.origin === origin && url.pathname === "/api/auth/google/start", async route => {
+    googleStarts++;
+    const start = new URL(route.request().url());
+    assert.equal(start.searchParams.get("switch"), kind === "invite" ? "1" : null);
     const response = await route.fetch({ maxRedirects: 0 }); assert.equal(response.status(), 302);
     const authorize = new URL(response.headers().location);
+    assert.equal(authorize.searchParams.get("prompt"), kind === "invite" ? "select_account" : null,
+      "invitations retain explicit account choice; ordinary continuation does not force a chooser");
     await route.fulfill({ response, headers: { ...response.headers(), location: providerOrigin + authorize.pathname + authorize.search } });
   });
   if (kind === "code-stale") {
@@ -84,6 +92,7 @@ for (const kind of ["join", "invite", "code", "code-stale"]) test(`returning Goo
     await page.locator("#invitation-google").click();
   }
   assert.equal((await callback).status(), 200);
+  assert.equal(googleStarts, 1, "the real Room OAuth start passed through the synthetic provider exactly once");
   await page.waitForURL(url => new URL(url).pathname === "/" && new URL(url).searchParams.get("room") === "a-home");
   const dialog = kind !== "invite" ? "#join-link-dialog" : "#invitation-dialog";
   try { await page.locator(dialog).waitFor({ state: "visible", timeout: 8000 }); }

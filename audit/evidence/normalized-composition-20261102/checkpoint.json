@@ -1,0 +1,49 @@
+{
+  "source": "fb68aa28a",
+  "fullUnit": {
+    "source": "80b05fbf0",
+    "exit": 1,
+    "tests": 14814,
+    "passed": 14456,
+    "failed": 324,
+    "skipped": 34,
+    "seconds": 750,
+    "note": "room-listen child terminated after setup failure leaked an HTTP server; counted failed, not waived. Packaged Native restore exceeded timeout under full-suite load. Neither result is green."
+  },
+  "currentFocused": {
+    "node": {
+      "passed": 117,
+      "failed": 0
+    },
+    "nativeWorker": {
+      "passed": 4,
+      "failed": 0
+    }
+  },
+  "pending": [
+    "needs-me normalized discovery",
+    "agent-work normalized read",
+    "canonical START recipe",
+    "rerun previously failing files",
+    "isolated staging",
+    "production deployment and activation"
+  ],
+  "productionChanged": false,
+  "logs": {
+    "full-unit": {
+      "localLog": "/tmp/project-room-80b05-full-unit.log",
+      "sha256": "e06fd8265051951fd351b81aa5611f2952a3980b15a8b55df49b63f94763c06d",
+      "bytes": 7203215
+    },
+    "integration": {
+      "localLog": "/tmp/project-room-fb68-integration.log",
+      "sha256": "a879b4b73179a96ed33a47b06cfa16cc682e673e5d070a2cead8260083a0cc04",
+      "bytes": 78225
+    },
+    "native-membership": {
+      "localLog": "/tmp/project-room-fb68-native-membership.log",
+      "sha256": "69a15d965822f29471c0301cad636d8394e5b694d13f40921c027a8565252dd5",
+      "bytes": 18973
+    }
+  }
+}

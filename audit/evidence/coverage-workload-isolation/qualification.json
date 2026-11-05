@@ -1,0 +1,41 @@
+{
+  "source": "ddd1dfc8767cdf0f47814cede7390107fb1f78c5",
+  "base": "a392f675c1a9589559d1003ed614fcdc7fd873e2",
+  "node": "v24.22.1",
+  "commands": {
+    "red": "node --test --test-name-pattern='collector isolates expensive' tests/coverage-thresholds.test.js",
+    "green": "node --test tests/coverage-thresholds.test.js",
+    "lint": "node node_modules/eslint/bin/eslint.js scripts/coverage-thresholds.mjs tests/coverage-thresholds.test.js",
+    "whitespace": "git diff --check"
+  },
+  "red": {
+    "fail": 1,
+    "reason": "shared original runner:1 !==3 distinct runner parent PIDs"
+  },
+  "green": {
+    "pass": 20,
+    "fail": 0,
+    "cancelled": 0,
+    "skip": 0,
+    "existingGuards": 17,
+    "newControls": 3
+  },
+  "proof": [
+    "Separate heavy runners, ordinary remainder last",
+    "Real V8 payloads retain100% fixture module coverage across batches",
+    "Stale payload cleared before collection",
+    "Failure first batch still executes later batches and returns failure",
+    "Inherited NODE_TEST_CONTEXT cleared",
+    "Exact existing discovery partition, no missing/duplicate files"
+  ],
+  "limits": [
+    "Defensive workload isolation, not proof of CI contention cause",
+    "No full suite/Native/browser/production run",
+    "No threshold/timeouts/runtime changes",
+    "Source membership test reads repository files without running those tests"
+  ],
+  "logs": {
+    "red.log": "42f6db13a7a906589f6fcb2030677d2d3438c6df6cf67849c8fa8ca19c0dc64b",
+    "green.log": "c8b1ddbef3c0925ecf3ef87d7093be06e57fe317320be000c18cea617110daf9"
+  }
+}

@@ -1,6 +1,7 @@
+import { AccessRequests } from "../server/access-requests.mjs";
 import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openSearch } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
@@ -92,6 +93,15 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator("#main").waitFor({ state: "visible" });
   await enableHumanAdvanced(page);
 
+  const selectWork = async (id, title) => {
+    await openSearch(page);
+    await page.locator('#message-search').fill(title);
+    const link = page.locator(`#search-list [data-open-work="${id}"]`);
+    await link.focus();
+    await link.press('Enter');
+    await page.locator(`[data-work-record-id="${id}"]`).waitFor({ state: 'visible' });
+  };
+  await selectWork('unknown-producer', 'Unknown producer evidence');
   const receipt = page.locator('[data-work-record-id="unknown-producer"] .receipt');
   assert.match(await receipt.textContent(), /Completion reporter\s*Room owner/);
   assert.match(await receipt.textContent(), /Producer\s*Unknown — no producer was reported/);
@@ -120,6 +130,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
 
   // Result sharing remains a visible primary action; Advanced exposes its protocol form.
+  await selectWork('producer-choice', 'Explicit producer choice');
   const producerCard = page.locator('[data-work-record-id="producer-choice"]');
   assert.equal(await producerCard.locator('.button.primary').isVisible(), true);
   assert.equal(await producerCard.locator('[data-action="complete"]').isVisible(), true);
@@ -148,6 +159,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.match(knownReceipt, /Completion reporter\s*Room owner/);
   assert.match(knownReceipt, /Producer\s*Room owner/);
 
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "complete", { keyboard: true });
   await page.locator('#action-form select[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter cannot establish who produced the result");
@@ -202,9 +214,13 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await signInFixture(page, maya);
   await page.locator("#main").waitFor({ state: "visible" });
   await enableHumanAdvanced(page);
+  await selectWork('producer-choice', 'Explicit producer choice');
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");
+  await selectWork('producer-conflict', 'Verifier produced this result');
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
+  await selectWork('producer-unknown-choice', 'Explicit unknown producer choice');
   await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "verify", { keyboard: true });
   assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
   assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy independent verification or unlock approval/s);
@@ -386,4 +402,44 @@ test("phone Menu moves focus into the drawer and Escape brings it back", { timeo
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.getElementById("main").classList.contains("sidebar-open"));
   assert.equal(await page.evaluate(() => document.activeElement.id), "sidebar-toggle", "Escape returns focus to Menu");
+});
+
+test("create-room brand and action labels satisfy ARIA and contrast in both themes", { timeout: 30000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  await page.goto(`http://127.0.0.1:${server.address().port}/?account=1`);
+  const account = fixture.store.accountForMember("commons", "owner");
+  await signInFixture(page, fixture.store.issueAccountAccessKey(account.id));
+  await clickChrome(page, "#nav-rooms");
+  await page.locator("#account-room-create summary").click();
+  await page.locator("#account-room-title").waitFor({ state: "visible" });
+  assert.equal(await page.locator(".brand strong").innerText(), "Project Room");
+  assert.equal(await page.locator(".brand").isVisible(), true);
+  const findings = await new AxeBuilder({ page }).include(".brand").withRules(["aria-prohibited-attr"]).analyze();
+  assert.deepEqual(findings.violations, [], "the real room header must not name a generic container");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  assert.equal(await page.locator(".brand strong").isVisible(), true, "desktop brand text remains visible");
+  const joiner = fixture.store.identities.create("Contrast applicant");
+  new AccessRequests(fixture.store).request("commons", { identityId: joiner.identityId,
+    displayName: "Contrast applicant", requestedPermissions: [], requestId: "contrast-request" }, joiner.secret);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await clickChrome(page, "#topbar-updates");
+  const label = page.locator(".attention-severity-action .attention-kind").filter({ hasText: "Join request" });
+  await label.waitFor({ state: "visible" });
+  for (const width of [390, 1280]) for (const theme of ["light", "dark"]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+    const contrast = await new AxeBuilder({ page }).include(".attention-severity-action .attention-kind").withRules(["color-contrast"]).analyze();
+    assert.deepEqual(contrast.violations, [], `action label contrast at ${width}px in ${theme}`);
+  }
+
 });

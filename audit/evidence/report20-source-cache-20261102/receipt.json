@@ -1,0 +1,73 @@
+{
+  "results": [
+    {
+      "source": "8a4bac05688a8d26a5dd88cc3d8ddfa863433dec",
+      "requests": 260,
+      "max": {
+        "statements": 454,
+        "rowsRead": 30957,
+        "rowsWritten": 53,
+        "bytes": 1395394,
+        "drops": 6,
+        "unknown": 0
+      },
+      "totalRowsRead": 7706107,
+      "totalMaterializedJSONBytes": 143436260,
+      "nativePass": 1,
+      "nativeExit": 0
+    },
+    {
+      "source": "27aa75aabfb9b57219ab2eca46f38fd2b1278e06",
+      "requests": 260,
+      "max": {
+        "statements": 454,
+        "rowsRead": 30957,
+        "rowsWritten": 53,
+        "bytes": 715893,
+        "drops": 6,
+        "unknown": 0
+      },
+      "totalRowsRead": 7706105,
+      "totalMaterializedJSONBytes": 142637298,
+      "nativePass": 1,
+      "nativeExit": 0
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact": "report20-source-cache-result-1102.json.gz",
+      "sha256": "72dfc11876109d876651ae9af07ea147d9fb474b3f5f492899c52b5bfc30738d",
+      "bytes": 2744950,
+      "gzipSha256": "1f24cbfb75f01c8a1c3a89ac04fefd4a94b395a8ca440afe2e390c4471842084"
+    },
+    {
+      "artifact": "report20-source-cache-native-1102.log.gz",
+      "sha256": "126f324555f7b42a6d80d416b31b7d3542bdbbc7d18102fd6a8fb890129461e8",
+      "bytes": 68910,
+      "gzipSha256": "1e1b006c05ddeae8796c65ef67d08c63b1665d77a62f48b98d25e208a79fdc4d"
+    },
+    {
+      "artifact": "report20-source-cache-focused-1102.log.gz",
+      "sha256": "c72803d67520dbdbe4caa6b34de0fbc9db737c1df6d29f4c35e9fe532caee192",
+      "bytes": 5385,
+      "gzipSha256": "b080c8e669bddd3fb85867310576749fc1590bfb7b0d81d05861251dda3c3976"
+    },
+    {
+      "artifact": "report20-source-cache-neighbors-1102.log.gz",
+      "sha256": "17607204ef065dcd6f11fe343894083dccaa3313458874d464eae3934fa2eaa1",
+      "bytes": 14127,
+      "gzipSha256": "8952bda10cda22187561295d83c62f38871f06dff520f2a78a940d1162006658"
+    },
+    {
+      "artifact": "report20-source-cache-scan-1102.log.gz",
+      "sha256": "fbda0d5beb887ed63ae623ee67b08870547cc70746cff1ebaea2c6fa493e0b21",
+      "bytes": 53,
+      "gzipSha256": "c4d0ce634c744719b05f89ee87d675e04b3ab2eb285e3f0bcf6c61a121d50055"
+    }
+  ],
+  "focusedNodePass": 9,
+  "neighborNodePass": 16,
+  "allExit": 0,
+  "productionCalls": false,
+  "newerPolicyD1NotIncluded": true
+}

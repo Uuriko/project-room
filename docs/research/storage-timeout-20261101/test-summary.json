@@ -1,0 +1,20 @@
+{
+  "actualWorkerFailingBefore": {
+    "expectedBytes": 28672,
+    "reportedBytes": 0
+  },
+  "actualWorkerPassingAfter": {
+    "nativeBytes": 28672,
+    "reportedBytes": 28672,
+    "pagePragmas": 0
+  },
+  "command": "node --test cloudflare/store-growth-size.check.mjs tests/store-growth.test.js tests/store-relief.test.js",
+  "tests": 16,
+  "passed": 16,
+  "failed": 0,
+  "deployed": false,
+  "files": {
+    "server/jobs.mjs": "da1aa940650c287b0e82d60e9cb4cb2ccbe1f01f69423d14780c4068276378df",
+    "cloudflare/store-growth-size.check.mjs": "cec7f3fb9c93797220c441d5c5a03a3158a0ff743ad60d844d65bf5f2558dd81"
+  }
+}

@@ -48,3 +48,17 @@ test('vendored sanitizer blocks namespace-prefixed SMIL URL retargeting', () => 
     }
   }
 });
+
+// GHSA-c9rx-x947-fp3h: short malformed iframe fallbacks must not recursively
+// restart the parser until the process stack overflows. Exercise shipped bytes.
+test('Gmail HTML rejects deeply repeated discarded iframe fallback without overflowing', () => {
+  let output;
+  assert.doesNotThrow(() => { output = safeGmailHtml('<html><body>' + '<iframe>'.repeat(4000) + '</body></html>'); });
+  assert.doesNotMatch(output, /<iframe\b/i);
+});
+test('discarded iframe fallback cannot reset the configured nesting limit', () => {
+  const output = bundled(('<iframe>' + '<b>'.repeat(3)).repeat(50) + 'x', { allowedTags: ['b'], nestingLimit: 3 });
+  let depth=0,maxDepth=0;
+  for(const tag of output.match(/<\/?b>/g)??[]) { depth+=tag==='<b>'?1:-1;maxDepth=Math.max(maxDepth,depth); }
+  assert.ok(maxDepth<=3,`configured depth 3 was bypassed: ${maxDepth}`);
+});

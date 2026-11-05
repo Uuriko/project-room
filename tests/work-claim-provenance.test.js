@@ -229,7 +229,8 @@ test("HTTP premise-invalid flags the premise and all downstream claims", async t
 // The hosted MCP tool room_work_claim_provenance must return the same graph
 // as the REST route, through the real tools/call dispatch.
 import { mkdtempSync, rmSync } from "node:fs";
-import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
+import { agentRoomSchema } from "../server/agent-rooms.mjs";
+import { legacyAgentRoom } from "./helpers/legacy-agent-room.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 
 test("MCP room_work_claim_provenance returns the same downstream graph", async t => {
@@ -238,9 +239,8 @@ test("MCP room_work_claim_provenance returns the same downstream graph", async t
   store.initialize(initialRoom("commons"));
   store.db.exec(agentRoomSchema);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create("Owen");
-  const created = rooms.create(owner.secret, { title: "Provenance room", purpose: "walk test", displayName: "Owen" });
+  const created = legacyAgentRoom(store, owner, { roomId: "historical-provenance", title: "Provenance room", purpose: "walk test", displayName: "Owen" });
   const roomId = created.roomId;
   store.workClaims.set(roomId, createWork({ id: "root", title: "Root" }, { now: NOW, agentId: "coord" }));
   store.workClaims.set(roomId, createWork({ id: "child", title: "Child", parentClaimId: "root" }, { now: NOW, agentId: "coord" }));

@@ -12,7 +12,8 @@
 // This replaces the deleted src/multi-instance-election.mjs: that module was
 // a lease election for a multi-instance deploy that was never wired to any
 // production path. The supported topology is one server per database.
-import { openSync, readFileSync, statSync, unlinkSync, writeSync, closeSync } from "node:fs";
+import { openSync, readFileSync, statSync, fstatSync, unlinkSync, writeSync, closeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 export const INSTANCE_LOCK_ERRORS = Object.freeze(["instance_lock_held", "instance_lock_io"]);
@@ -87,8 +88,12 @@ export function acquireInstanceLock(lockPath) {
       throw lockError("instance_lock_io", `instance lock: lock contention on ${lockPath}: ${fd.createError?.message ?? fd.createError}`);
     }
   }
+  // Ownership token (T3-L10g-C3): this acquisition's random token is
+  // written into the payload and checked by release() before it unlinks,
+  // so a stale owner can never delete a successor's lock at the same path.
+  const ownerToken = randomUUID();
   try {
-    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), token: ownerToken }));
   } catch (error) {
     try { closeSync(fd); } catch { /* never mask the write error */ }
     try { unlinkSync(lockPath); } catch { /* never mask the write error */ }
@@ -101,7 +106,25 @@ export function acquireInstanceLock(lockPath) {
     release() {
       if (released) return;
       released = true;
+      // Unlink only if the file at the path is still THIS acquisition:
+      // its payload must carry our ownership token, and the path must
+      // still name the same file our fd opened. If a racing boot has
+      // reclaimed the path (overwritten in place or unlinked and
+      // recreated), the file there is a successor's live lock — leave it.
+      let owns = false;
+      try {
+        const current = readLock(lockPath);
+        owns = Boolean(current && current.pid === process.pid && current.token === ownerToken);
+        if (owns) {
+          try {
+            const held = fstatSync(fd);
+            const atPath = statSync(lockPath);
+            if (held.dev !== atPath.dev || held.ino !== atPath.ino) owns = false;
+          } catch { /* stat unavailable: the token check above stands */ }
+        }
+      } catch { owns = false; }
       try { closeSync(fd); } catch { /* fd already closed; shutdown must not throw */ }
+      if (!owns) return;
       try { unlinkSync(lockPath); } catch { /* a racing boot may have reclaimed; shutdown must not throw */ }
     }
   };

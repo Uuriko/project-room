@@ -20,7 +20,8 @@ test("a later success marks the kept lastError as not current", () => {
   stored = applyOutcomes(stored, [{ job: "claim-prs", ok: true, at: T0 + 60_000, summary: { checked: 0, updated: 0, rateLimited: true, skippedInvalid: 3 } }]);
   const job = claimPrs(jobHealthView(stored, T0 + 120_000));
   assert.equal(job.status, "degraded");
-  assert.equal(job.lastError, REPO_ERROR, "history is kept");
+  assert.equal(stored["claim-prs"].lastError, REPO_ERROR, "history is kept internally");
+  assert.equal(job.lastError, "Job failed", "public health conceals exception text");
   assert.equal(job.lastErrorCurrent, false);
 });
 

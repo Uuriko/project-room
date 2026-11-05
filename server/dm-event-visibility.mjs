@@ -7,7 +7,10 @@
 // they passed the filter, so a non-party (the Room owner included) could read
 // an edited DM body and see that a DM existed. These predicates hide those
 // follow-up events too. They look up the referenced message in the room
-// projection, and fall back to DMs seen in the same page of events.
+// projection, and fall back to DMs seen in the same page of events and to
+// the archived-parties lookup. If the referenced message resolves nowhere,
+// the follow-up is hidden from everyone (fail closed): an unresolvable
+// party set is not evidence that the message was public.
 
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -17,17 +20,26 @@ export const DM_FOLLOW_UP_TYPES = new Set([
   T.MESSAGE_REDACTED,
   T.POLL_VOTED,
   T.MESSAGE_PINNED,
-  T.MESSAGE_UNPINNED
+  T.MESSAGE_UNPINNED,
+  // A formal request is always addressed (toMemberId), so its cancellation
+  // reason is as private as the request body. Keyed by requestMessageId.
+  T.REPLY_REQUEST_CANCELLED,
+  T.REPLY_REQUEST_PROGRESSED
 ]);
+const referencedMessage = event => event.data?.messageId ?? event.data?.requestMessageId;
 
 function partiesFromMessages(messages) {
   const parties = new Map();
+  const known = new Set();
   for (const message of messages ?? []) {
-    if (message && typeof message.id === "string" && typeof message.toMemberId === "string" && message.toMemberId) {
-      parties.set(message.id, [message.authorId, message.toMemberId]);
+    if (message && typeof message.id === "string" && message.id) {
+      known.add(message.id);
+      if (typeof message.toMemberId === "string" && message.toMemberId) {
+        parties.set(message.id, [message.authorId, message.toMemberId]);
+      }
     }
   }
-  return parties;
+  return { parties, known };
 }
 
 // Returns a predicate (event) => boolean for one viewer.
@@ -37,19 +49,24 @@ function partiesFromMessages(messages) {
 // on the first follow-up check. rows: optional events in the same read, so a
 // DM that the projection no longer holds is still known.
 export function dmEventVisibility(viewerId, messagesOrThunk, rows = [], lookupParties = null) {
-  let parties = null;
-  const getParties = () => {
-    if (parties) return parties;
+  let resolved = null;
+  const getResolved = () => {
+    if (resolved) return resolved;
     const messages = typeof messagesOrThunk === "function" ? messagesOrThunk() : messagesOrThunk;
-    parties = partiesFromMessages(messages);
+    resolved = partiesFromMessages(messages);
     for (const row of rows) {
       const event = row?.event ?? row;
-      if (event?.type === T.MESSAGE_POSTED && typeof event?.data?.toMemberId === "string" && event.data.toMemberId) {
-        const id = typeof event.data.messageId === "string" ? event.data.messageId : event.id;
-        if (!parties.has(id)) parties.set(id, [event.actorId, event.data.toMemberId]);
+      if (event?.type === T.MESSAGE_POSTED) {
+        const id = typeof event.data?.messageId === "string" ? event.data.messageId : event.id;
+        if (typeof id === "string" && id) {
+          resolved.known.add(id);
+          if (typeof event?.data?.toMemberId === "string" && event.data.toMemberId && !resolved.parties.has(id)) {
+            resolved.parties.set(id, [event.actorId, event.data.toMemberId]);
+          }
+        }
       }
     }
-    return parties;
+    return resolved;
   };
   return event => {
     if (!event || typeof event !== "object") return true;
@@ -59,8 +76,20 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = [], lookupPa
     if (!DM_FOLLOW_UP_TYPES.has(event.type)) return true;
     // An archived DM is not in the projection; ask the table so its follow-up
     // events stay hidden from non-parties.
-    const pair = getParties().get(event.data?.messageId) ?? lookupParties?.(event.data?.messageId);
-    return !pair || pair.includes(viewerId);
+    const { parties, known } = getResolved();
+    const ref = referencedMessage(event);
+    const pair = parties.get(ref) ?? lookupParties?.(ref);
+    if (pair) return pair.includes(viewerId);
+    // No pair resolved. The follow-up is visible only when the referenced
+    // message itself was resolved and is not a DM (a known public message).
+    // When the message resolves nowhere — not in the projection, not in the
+    // same page of events, and not in the archived-parties lookup — fail
+    // CLOSED: the event is hidden from every viewer. An unresolvable party
+    // set must never classify as unrestricted, because the follow-up can
+    // carry the edited DM body (T3-L10b-C1 / G12). This is the same
+    // fail-closed posture as historyFloor (history-visibility.mjs) and
+    // peerEventVisible for dm.posted (bonds.mjs).
+    return known.has(ref);
   };
 }
 

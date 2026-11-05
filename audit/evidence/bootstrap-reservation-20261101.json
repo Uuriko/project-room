@@ -1,0 +1,247 @@
+{
+  "status": "offline intermediate",
+  "defaultRecords": 200,
+  "composedMetadataRecords": 1024,
+  "inputByteLimit": 262144,
+  "parentReservationReused": true,
+  "before": [
+    {
+      "members": 1,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 202,
+      "bytes": 89567
+    },
+    {
+      "members": 1,
+      "tasks": 9,
+      "maxRecords": 512,
+      "records": 208,
+      "bytes": 92086,
+      "shown": 8
+    },
+    {
+      "members": 2,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 202,
+      "bytes": 87871
+    },
+    {
+      "members": 2,
+      "tasks": 9,
+      "maxRecords": 512,
+      "records": 221,
+      "bytes": 95901,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 32,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 201,
+      "bytes": 98365
+    },
+    {
+      "members": 4,
+      "tasks": 32,
+      "maxRecords": 512,
+      "records": 250,
+      "bytes": 112983,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 128,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 201,
+      "bytes": 135513
+    },
+    {
+      "members": 4,
+      "tasks": 128,
+      "maxRecords": 512,
+      "records": 253,
+      "bytes": 151417,
+      "shown": 8
+    },
+    {
+      "members": 32,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 202,
+      "bytes": 85337
+    },
+    {
+      "members": 32,
+      "tasks": 9,
+      "maxRecords": 512,
+      "error": "current_room_context_unavailable",
+      "records": 514,
+      "bytes": 179752
+    },
+    {
+      "members": 100,
+      "tasks": 9,
+      "phase": "key",
+      "error": "current_room_context_unavailable"
+    }
+  ],
+  "withAddressedAuthAndExplicitReservation": [
+    {
+      "members": 1,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 201,
+      "bytes": 89689
+    },
+    {
+      "members": 1,
+      "tasks": 9,
+      "maxRecords": 512,
+      "records": 206,
+      "bytes": 92012,
+      "shown": 8
+    },
+    {
+      "members": 1,
+      "tasks": 9,
+      "maxRecords": 1024,
+      "records": 206,
+      "bytes": 92012,
+      "shown": 8
+    },
+    {
+      "members": 2,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 201,
+      "bytes": 88110
+    },
+    {
+      "members": 2,
+      "tasks": 9,
+      "maxRecords": 512,
+      "records": 211,
+      "bytes": 93389,
+      "shown": 8
+    },
+    {
+      "members": 2,
+      "tasks": 9,
+      "maxRecords": 1024,
+      "records": 211,
+      "bytes": 93389,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 32,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 205,
+      "bytes": 95734
+    },
+    {
+      "members": 4,
+      "tasks": 32,
+      "maxRecords": 512,
+      "records": 224,
+      "bytes": 105595,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 32,
+      "maxRecords": 1024,
+      "records": 224,
+      "bytes": 105595,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 128,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 208,
+      "bytes": 134162
+    },
+    {
+      "members": 4,
+      "tasks": 128,
+      "maxRecords": 512,
+      "records": 227,
+      "bytes": 144029,
+      "shown": 8
+    },
+    {
+      "members": 4,
+      "tasks": 128,
+      "maxRecords": 1024,
+      "records": 227,
+      "bytes": 144029,
+      "shown": 8
+    },
+    {
+      "members": 32,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 202,
+      "bytes": 85378
+    },
+    {
+      "members": 32,
+      "tasks": 9,
+      "maxRecords": 512,
+      "records": 335,
+      "bytes": 133127,
+      "shown": 8
+    },
+    {
+      "members": 32,
+      "tasks": 9,
+      "maxRecords": 1024,
+      "records": 335,
+      "bytes": 133127,
+      "shown": 8
+    },
+    {
+      "members": 100,
+      "tasks": 9,
+      "maxRecords": 200,
+      "error": "current_room_context_unavailable",
+      "records": 202,
+      "bytes": 67861
+    },
+    {
+      "members": 100,
+      "tasks": 9,
+      "maxRecords": 512,
+      "error": "current_room_context_unavailable",
+      "records": 513,
+      "bytes": 187566
+    },
+    {
+      "members": 100,
+      "tasks": 9,
+      "maxRecords": 1024,
+      "records": 608,
+      "bytes": 223073,
+      "shown": 8
+    }
+  ],
+  "limits": [
+    "Small-profile100member snapshot qualified, not arbitrary maximal profile rosters.",
+    "Input byte bound unchanged; wide invalid selections still refuse.",
+    "Record/channel/request UI coverage remains partial and unqualified.",
+    "No schema45 deployment or format activation."
+  ]
+}

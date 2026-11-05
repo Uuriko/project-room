@@ -1,0 +1,80 @@
+{
+  "source": "3793a08e576d55d13a523c1e358d4651600aad56",
+  "base": "a637e3d107ec5f53d0d3e9c514d88907ad6c8886",
+  "status": "NODE_QUALIFIED_HOLD_FOR_ROOT_V46_NATIVE_ROLLBACK",
+  "repairs": [
+    "a2c51a5c5 revocation after body: five red-before then green",
+    "2b7a71917 denied approval/reassigned delegate/current delegate review: three red-before then green",
+    "b835eeb74 owner API-key rooms:write: two real HTTP controls red201 then green403; write positive201"
+  ],
+  "tests": {
+    "integration-final": {
+      "pass": 18,
+      "fail": 0,
+      "skip": 0,
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/integration-api-key-scope.test.js tests/integration-revocation.test.js tests/inbound-task-hooks.test.js tests/event-automations.test.js"
+    },
+    "claim-boundaries-after": {
+      "pass": 9,
+      "fail": 0,
+      "skip": 0,
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/claim-authority-boundaries.test.js tests/claim-delegate.test.js tests/approval-hold.test.js"
+    }
+  },
+  "unresolved": [
+    "Root owns v46 writer fence and actual separate already-open v45 connection/Native/rollback validation. Old writer ordinary-note round trip demonstrably drops both fields.",
+    "No cold archive or Native executed here; runtime source/import closure passed752files, candidate manifest no drift.",
+    "Automation authority negative controls use synthetic persisted former-owner rules; no real external delivery/provider call."
+  ],
+  "fenceProposal": "Use existing versioned writer-fence migration covering work_claims, register new writer version and protect pre-existing connections; old v45 code must fail writes after migration. Update rollback compatibility gates and Native tests. Do not treat flags off as a stored-row compatibility guarantee. No schema changed here.",
+  "limits": [
+    "Node24 only",
+    "No live records/providers/Native/browser/deploy",
+    "Revocation timing uses actual handler and SQLite with controlled body/auth boundaries; scoped-key tests use actual HTTP and real synthetic owner API keys",
+    "Automation creator probe stubs event emitter and asserts persisted task, not real wake delivery"
+  ],
+  "excluded": [
+    5858,
+    5874,
+    5891,
+    5898
+  ],
+  "finalTests": {
+    "pass": 64,
+    "fail": 0,
+    "skip": 0,
+    "node": "24.22.1",
+    "durationMs": 2273.49125,
+    "log": "final-node.tap",
+    "files": [
+      "integration-api-key-scope",
+      "integration-revocation",
+      "inbound-task-hooks",
+      "event-automations",
+      "automation-owner-authority",
+      "claim-authority-boundaries",
+      "claim-delegate",
+      "approval-hold",
+      "work-claim-live-close",
+      "work-claim-reassign-unclaimed",
+      "work-claim-reassign-round",
+      "work-claim-release-round-refusal",
+      "mcp-call-log",
+      "candidate-manifest"
+    ]
+  },
+  "additionalRepairs": [
+    "fcc3f2146 current active owner authority for automation effects, two causal failures repaired",
+    "f8923a112 trusted allowlists for logger metadata, one synthetic token leak repaired",
+    "14eaa01d6 release/expiry/fresh claim delegation cleanup and automatic approval hold enforcement, three causal failures repaired",
+    "3793a08e5 original-member binding after body, two causal failures repaired"
+  ],
+  "writerProof": "Exact a637 durable registry get + exact a637 updateWork note + registry set on synthetic v45 store erases delegate and approvalHold, verified current registry reread.",
+  "heads": {
+    "5875": "001d102636a0fb732fccc3488798579d112d1589",
+    "5876": "410c04c108380234e9c712c63438fab64f41fcbc",
+    "5877": "ad494d2d34cecaed742e3e117a96bdb94e96048a",
+    "5878": "0621906955d268d20f6e3d89a243041bcefabf20",
+    "5880": "d44cb5a25424713d12a52eda5076565b5106e869"
+  }
+}

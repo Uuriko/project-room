@@ -1,0 +1,459 @@
+{
+  "date": "2026-11-01",
+  "status": "offline-only; original full oracle mandatory",
+  "runtimeDelta": "3741ee4c6",
+  "runtimeParent": "bd1e4c745",
+  "baselineCausalFailure": "bd1e4c745 performs whole-checkpoint json_valid; new control fails with no whole checkpoint parse or payload read",
+  "focusedNode": {
+    "passed": 17,
+    "failed": 0
+  },
+  "originalAndFocusedNode": {
+    "passed": 88,
+    "failed": 0
+  },
+  "native": {
+    "passed": 1,
+    "failed": 0,
+    "finalColdReadiness200": true,
+    "finalCompletedReceiptColdRetryExact": true,
+    "wholeOracleRequired": true,
+    "receipt": {
+      "seed": {
+        "events": 142,
+        "helps": 13,
+        "offers": 14
+      },
+      "sourceBytes": 664344,
+      "finalCounters": {
+        "rooms": 1,
+        "deferred": 0,
+        "offersScanned": 14,
+        "offerChecks": 197,
+        "helpsScanned": 13
+      },
+      "calls": [
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 222,
+            "rowsRead": 45184,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "clockMs": 8,
+          "bytes": 211582
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 227,
+            "rowsRead": 45177,
+            "rowsWritten": 11,
+            "unknown": 0
+          },
+          "clockMs": 6,
+          "bytes": 146187
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 231,
+            "rowsRead": 45183,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 6,
+          "bytes": 146864
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 235,
+            "rowsRead": 45186,
+            "rowsWritten": 13,
+            "unknown": 0
+          },
+          "clockMs": 6,
+          "bytes": 147462
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "faultSearchNoTrigger": true,
+          "cost": {
+            "statements": 231,
+            "rowsRead": 45183,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 7,
+          "bytes": 147205
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 283,
+            "rowsRead": 49893,
+            "rowsWritten": 29,
+            "unknown": 0
+          },
+          "clockMs": 7,
+          "bytes": 162669
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 322,
+            "rowsRead": 37673,
+            "rowsWritten": 27,
+            "unknown": 0
+          },
+          "clockMs": 17,
+          "bytes": 183031
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 599,
+            "rowsRead": 45560,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 9,
+          "bytes": 197688
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 537,
+            "rowsRead": 37845,
+            "rowsWritten": 20,
+            "unknown": 0
+          },
+          "clockMs": 17,
+          "bytes": 200473
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 713,
+            "rowsRead": 45679,
+            "rowsWritten": 16,
+            "unknown": 0
+          },
+          "clockMs": 9,
+          "bytes": 191546
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 507,
+            "rowsRead": 37820,
+            "rowsWritten": 17,
+            "unknown": 0
+          },
+          "clockMs": 17,
+          "bytes": 191991
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 787,
+            "rowsRead": 45748,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 10,
+          "bytes": 200376
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 679,
+            "rowsRead": 37991,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 195119
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 788,
+            "rowsRead": 45749,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 10,
+          "bytes": 194716
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 670,
+            "rowsRead": 37982,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 194418
+        },
+        {
+          "surface": "target",
+          "warm": true,
+          "cost": {
+            "statements": 803,
+            "rowsRead": 45764,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 11,
+          "bytes": 179892
+        },
+        {
+          "surface": "target",
+          "warm": false,
+          "cost": {
+            "statements": 252,
+            "rowsRead": 37561,
+            "rowsWritten": 14,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 70109
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 107,
+            "rowsRead": 37420,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 211582
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 112,
+            "rowsRead": 37413,
+            "rowsWritten": 11,
+            "unknown": 0
+          },
+          "clockMs": 14,
+          "bytes": 146187
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 116,
+            "rowsRead": 37419,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 146864
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 120,
+            "rowsRead": 37422,
+            "rowsWritten": 13,
+            "unknown": 0
+          },
+          "clockMs": 13,
+          "bytes": 147462
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 116,
+            "rowsRead": 37419,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "clockMs": 15,
+          "bytes": 147205
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 162,
+            "rowsRead": 37464,
+            "rowsWritten": 29,
+            "unknown": 0
+          },
+          "clockMs": 16,
+          "bytes": 162669
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 322,
+            "rowsRead": 37673,
+            "rowsWritten": 27,
+            "unknown": 0
+          },
+          "clockMs": 17,
+          "bytes": 183031
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 484,
+            "rowsRead": 37796,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 18,
+          "bytes": 197688
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 537,
+            "rowsRead": 37845,
+            "rowsWritten": 20,
+            "unknown": 0
+          },
+          "clockMs": 17,
+          "bytes": 200473
+        },
+        {
+          "surface": "corrupt",
+          "warm": false,
+          "cost": {
+            "statements": 132,
+            "rowsRead": 6379,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "clockMs": 13,
+          "bytes": null
+        }
+      ],
+      "faultCalls": [
+        {
+          "cost": {
+            "statements": 255,
+            "rowsRead": 28119,
+            "rowsWritten": 19,
+            "unknown": 0
+          },
+          "clockMs": 8,
+          "unchanged": true
+        }
+      ],
+      "counterScope": "per-request adapter spans; excludes cold constructors, raw runtime permit SQL and test-only forensic snapshots",
+      "fullOracleStillRequired": true
+    },
+    "sampledMetrics": {
+      "target": {
+        "sampledHelpRequests": 17,
+        "sumAdapterCost": {
+          "statements": 8086,
+          "rowsRead": 731178,
+          "rowsWritten": 292,
+          "unknown": 0
+        },
+        "maxAdapterCost": {
+          "statements": 803,
+          "rowsRead": 49893,
+          "rowsWritten": 29,
+          "unknown": 0
+        },
+        "maxReportedInputBytes": 211582,
+        "summedSampledClockMs": 191
+      },
+      "corrupt": {
+        "sampledHelpRequests": 10,
+        "sumAdapterCost": {
+          "statements": 2208,
+          "rowsRead": 344250,
+          "rowsWritten": 170,
+          "unknown": 0
+        },
+        "maxAdapterCost": {
+          "statements": 537,
+          "rowsRead": 37845,
+          "rowsWritten": 29,
+          "unknown": 0
+        },
+        "maxReportedInputBytes": 211582,
+        "summedSampledClockMs": 153
+      }
+    }
+  },
+  "sourceFiles": {
+    "server/recovery-work-help.mjs": "a0aa23f510d12b96fb3c4d5104377ef73668e261abd05e4c2e0eaba8c3fb9bcb",
+    "server/work-help.mjs": "5ca83c7e39dceddfa37533e94cc544eb69eb3a45522317b75c6d570c195971f6",
+    "src/help-offers.js": "004b38c6b6273b35143d79c9095fbd64409a17beb3c15ade4026cbf4fa900d41",
+    "cloudflare/recovery-work-help-native.check.mjs": "076f15299227656a40ff41379652e082328717aa7b4568764d3d48328a61b276"
+  },
+  "logs": {
+    "causalRed": {
+      "localPath": "/tmp/recovery-workhelp-leaf-causal-red.log",
+      "sha256": "a2f77151713d67c7cbfcab51946b91fd0a60f2b89a98ca118342a368e24a4ccf"
+    },
+    "focusedNode": {
+      "localPath": "/tmp/recovery-workhelp-leaf-control.log",
+      "sha256": "5e2f33f38ffc133b56f341ac869484529206230a95ce100f13513f276fb4617f"
+    },
+    "qualificationNode": {
+      "localPath": "/tmp/recovery-workhelp-qualification-final.log",
+      "sha256": "0855c6115c298a7bcc08eba4345a5596200820a401ec62f33c00f8e880ba2b8b"
+    },
+    "native": {
+      "localPath": "/tmp/recovery-workhelp-native-leaf-cold-final.log",
+      "sha256": "779f2ef38681c181f4966a77e09d7fcc7286e77392dacea5061761a4537a8478"
+    },
+    "lint": {
+      "localPath": "/tmp/recovery-workhelp-leaf-lint.log",
+      "sha256": "94352629052547911888ba21f0aad75cd822e1e39be18bdfbcafbc81a9dda7f5"
+    },
+    "secretScan": {
+      "localPath": "/tmp/recovery-workhelp-final-secret.log",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  },
+  "limitations": [
+    "No deployment or live verification.",
+    "Unsupported checkpoint grammar remains explicitly deferred to final original oracle.",
+    "One legal sealed large atom is atomic; no strict CPU or peak heap bound.",
+    "Global offers are fully scanned before each offer transition; total work may be quadratic within existing500 cap.",
+    "Final original oracle duplicates qualified phase work; no net speedup claimed.",
+    "Adapter SQL samples exclude cold constructors, raw runtime permits, completed receipt retries and forensic snapshots; samples are not total recovery cost.",
+    "Clock durations are illustrative elapsed time, not CPU."
+  ]
+}

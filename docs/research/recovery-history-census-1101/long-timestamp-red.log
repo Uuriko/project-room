@@ -1,0 +1,29 @@
+Exact runtime3644d2a7e; new long timestamp regression copied unchanged from current test.
+✖ history continuation accepts legal long timestamp strings using exact original equality (291.079167ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 393.223083
+
+✖ failing tests:
+
+test at tests/restore-durable-coverage.test.mjs:154:1
+✖ history continuation accepts legal long timestamp strings using exact original equality (291.079167ms)
+  AssertionError [ERR_ASSERTION]: {"error":{"code":"restore_continuation_refused","message":"Independent recovery census requires reconciliation"}}
+  
+  422 !== 202
+  
+      at TestContext.<anonymous> (file:///private/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/history-long-red-yog7d022/tests/restore-durable-coverage.test.mjs:155:779)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 202,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

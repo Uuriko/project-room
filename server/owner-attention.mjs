@@ -13,6 +13,7 @@
 // are avoided here to keep the Workers bundle cycle-free; http.mjs injects
 // its store and AccessRequests instances. The work-claims kernel is a pure
 // module (no store import), so its close/review predicates are safe to use.
+import {isCurrentRoom} from './current-room-repository.mjs';
 import { createHash } from "node:crypto";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { canCloseWork, hasCurrentReview, resolveNamedReviewers } from "./work-claims.mjs";
@@ -40,7 +41,7 @@ function orderedAttention(items) {
 
 function requireOwner(store, auth, roomId) {
   // Mirrors the diagnostics-export owner gate on main.
-  if (auth.member.kind !== "human" || auth.member.id !== store.room(roomId).state.room.ownerId
+  if (auth.member.kind !== "human" || auth.member.id !== store.roomOwnerId(roomId)
     || !auth.member.permissions.includes("manage_members")) {
     fail(403, "owner_required", "Only the room owner can view the attention rollup");
   }
@@ -48,6 +49,7 @@ function requireOwner(store, auth, roomId) {
 
 function decideActions(roomId, request) {
   const path = `/api/rooms/${roomId}/access-requests/${request.requestId}/decide`;
+  if(request.kind==='agent-sponsor-transfer')return Object.freeze(['approve','deny'].map(decision=>Object.freeze({action:decision,method:'POST',path,body:Object.freeze({decision})})));
   return Object.freeze([
     Object.freeze({ action: "approve", method: "POST", path,
       body: Object.freeze({ decision: "approve", permissions: request.requestedPermissions, note: null }) }),
@@ -64,8 +66,8 @@ export function accessRequestAttentionItem(roomId, request) {
     kind: "access_request",
     id: request.requestId,
     severity: "action",
-    title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
-    detail: `Requested ${request.requestedPermissions.join(", ")}`,
+    title: request.kind === "agent-sponsor-transfer" ? `Connect ${request.displayName} to the requesting human` : request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
+    detail: request.kind === "agent-sponsor-transfer" ? request.note : `Requested ${request.requestedPermissions.join(", ")}`,
     actions: decideActions(roomId, request),
   });
 }
@@ -103,6 +105,13 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
   if (!store || !accessRequests) fail(500, "misconfigured", "Attention rollup is not wired");
   const auth = store.authenticate(token, roomId, expectedSessionBinding);
   requireOwner(store, auth, roomId);
+  if(isCurrentRoom(store.db,roomId)){
+    const page=store.currentWorkListing(token,roomId,{focus:'needs_me',limit:4,...(cursor?{cursor}:{}),expectedSessionBinding});
+    const items=[...page.work.map(work=>({kind:work.next.action==='verify'?'verification':work.next.action==='decide'?'decision':'native_work',id:work.id,severity:'action',title:work.title,detail:work.next.label,actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/work/${encodeURIComponent(work.id)}`}]})),...(page.replyRequests??[]).map(request=>({kind:'reply_request',id:request.id,severity:'action',title:'Reply requested',detail:'Inspect the selected conversation before answering',actions:[{action:'inspect',method:'GET',path:`/?room=${encodeURIComponent(roomId)}#pr-record/message/${encodeURIComponent(request.id)}`}]}))];
+    return{...page,contractVersion:2,ownerOnly:true,items,itemCount:null,actionCount:null,pageOffset:0,reset:false,previousCursor:null,nextCursor:page.page.nextCursor,
+      coverage:{complete:!page.page.hasMore,kind:'canonical-personal-work-and-requests',omitted:['room-wide-oversight','legacy-claims','spend','shadow-diagnostics'],separate:[{path:`/api/rooms/${roomId}/access-requests?status=pending`,kind:'membership-approval-queue'}]},
+      nextRead:page.page.hasMore?{path:`/api/rooms/${roomId}/needs-attention?cursor=${encodeURIComponent(page.page.nextCursor)}`} :null};
+  }
   const items = [];
 
   // 1. Pending access requests — the only item with true inline approve/deny.

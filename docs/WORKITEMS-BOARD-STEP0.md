@@ -1,6 +1,6 @@
 # workItems → board claims — Step 0 characterization (charter B-4)
 
-Status: **Step 0 complete. The council kill criterion is TRIGGERED — the
+Historical Step 0 status (see current normalized-storage amendment below): **Step 0 complete. The council kill criterion is TRIGGERED — the
 migration halts here and the council re-convenes with this census. No code
 was cut, no mapping was improvised.** The write-path sync
 (`syncWorkItemClaim`) stays, named and costed (§7), until the council
@@ -59,7 +59,7 @@ signed evidence or checks (§4.4).
 ## 2. Census — every live reader and writer
 
 Method: full-text scan for `workItems` over the shipped tree at the Step 0
-base, pinned file-by-file in the Step 0 census test (55 files under
+base, pinned file-by-file in the Step 0 census test (66 files under
 `server/` + `src/`; outside those trees: `client/` 2, `machine/` 1,
 `cloudflare/` 4 check/fixture files, `scripts/` ≈60 operational and
 browser-check scripts that consume the client/store shapes).
@@ -83,7 +83,7 @@ test). Work-mutating events **not** synced: `work.proposed` (deliberate,
 §1), `work.help_updated`, `work.public_set`, `work.halt_cleared` — the
 last three carry state with no board field (§4.5).
 
-### Readers, by family (all 55 pinned sites)
+### Readers, by family (66 pinned sites)
 
 - **Kernel/reducer:** `src/events.js`, `src/workflow.js`,
   `src/work-item-session.js`, `server/claim-scopes.mjs`.
@@ -91,7 +91,21 @@ last three carry state with no board field (§4.5).
   `server/work-item-board.mjs` (the mapping itself), `server/recovery.mjs`,
   `server/writer-fence.mjs`, `server/purge-registry.mjs`,
   `server/messages-store.mjs`, `server/message-redaction.mjs`,
-  `server/content-trust.mjs`.
+  `server/content-trust.mjs`, `server/write-integrity.mjs` (checks normalized work payload/reference digests without changing work state).
+- **Canonical message admission:** `server/message-authority.mjs` reads inline
+  work metadata to decline round-limit resumes and canonical work references
+  before selecting a bounded ordinary-post context (2026-11-01). It does not
+  hydrate normalized work bodies, mutate work, add a board mapping, or change
+  the board sync event set; those contexts retain the full command path.
+- **Operator conversion admission:** `server/operator-message-authority.mjs`
+  caps normalized `work_entities` rows and bytes before preparing or converting
+  message authority (2026-11-01). This is a bounded dependency census, not a new
+  work-item writer, board mapping or sync event.
+- **Explicit historical-session reconciliation:** `server/legacy-session-replay.mjs`
+  reuses the public reducer while restoring only the three documented pre749
+  session/lifecycle effects; `server/operator-legacy-session-repair.mjs` compares
+  the result with independently proved current work records before changing only
+  derived backfill artifacts. Neither writes work entities or serving metadata.
 - **Discovery:** `server/available-work.mjs`, `server/opportunities.mjs`,
   `server/orient.mjs`, `server/room-activation-pack.mjs`,
   `server/needs-me.mjs`, `server/public-read-model.mjs`.
@@ -104,7 +118,7 @@ last three carry state with no board field (§4.5).
   `server/return-brief.mjs`, `src/reminders.js`, `src/reply-requests.js`.
 - **Work surfaces (server):** `server/work-context.mjs`,
   `server/work-discussion.mjs`, `server/work-help.mjs`,
-  `server/work-wakes.mjs`, `server/mcp-room-profile.mjs`,
+  `server/work-wakes.mjs`, `server/mcp-events-runtime.mjs`, `server/mcp-room-profile.mjs`,
   `server/project-offers.mjs`, `server/public-work-reviews.mjs`,
   `server/spend-allowance.mjs`, `server/text-results.mjs`,
   `server/usage-summary.mjs`, `server/agent-fleet.mjs`,
@@ -117,7 +131,7 @@ last three carry state with no board field (§4.5).
 
 Direct `state.workItems` reads concentrate in `server/store.mjs` (≈42
 sites: validation, search, sessions, integrity) and `src/app.js` (≈40: the
-human work surface). Reader migration is therefore not 55 equal jobs: the
+human work surface). Reader migration is therefore not 61 equal jobs: the
 long tail reads one or two fields (usually lifecycle state, receipt, or
 help), and the two hubs read everything.
 
@@ -363,3 +377,73 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Agent orientation reader reconciliation (2026-10-29)
+
+The pinned source census includes `server/agent-orientation.mjs`. Its read-only
+orientation projection maps the existing room work items through
+`orientationRecord`; it does not write work or alter board synchronization.
+This reader was present in source but omitted from the census. Recording it
+does not close reader-migration debt: it still enumerates the room's work items.
+
+2026-10-30 native Events amendment: `server/mcp-events-runtime.mjs` reads
+current work item revision and next-step ownership before webhook delivery,
+suppressing stale work notifications. It introduces no work item writer.
+
+
+## Normalized-storage census reconciliation (2026-11-02)
+
+The current census is **83 source files**, including the following 17 additions.
+The first 15 were reviewed at `988a8c236`; the search and work snapshot readers
+were reviewed against `ca7508fd5`. The older counts and council migration proposal above
+record their historical checkpoints; they are not the current serving contract.
+The legacy field-fate and rework/divergence tests remain unchanged.
+
+| Source | Role | Actual work dependency |
+|---|---|---|
+| `server/current-room-repository.mjs` | writer-reader-audit | Protected work references, addressed bodies and derived summaries/privacy/capacity; command writes retain canonical work_entities and shared reducer semantics. |
+| `server/current-search.mjs` | reader | Bounded authorized search matches selected canonical work bodies from protected summary windows; total remains unknown and continuations are viewer, credential and head bound. No work writer or board absorption. |
+| `server/current-work-capacity.mjs` | constraint | Derived canonical-work capacity index preserves legacy cap and dormancy rules; it is not a board claim writer. |
+| `server/current-work-list.mjs` | reader | Authorized paged native work discovery, selected result pointers and continuation; partial summaries are not a complete work map. |
+| `server/current-work-privacy.mjs` | derived-policy | Derives private request parties and work-request links from canonical work and requests; no board mapping. |
+| `server/current-work-snapshot.mjs` | reader | Bounded work-view pages load selected canonical work records, with protected private-party redaction and explicit partial coverage; no lifecycle writes or complete-map claim. |
+| `server/recovery-census-continuation.mjs` | recovery | Independent protected work-reference/body/summary/capacity/privacy census and complete membership counts. |
+| `server/recovery-checkpoint-seed.mjs` | recovery | Partitions checkpoint work maps into restore scratch and applies existing control defaults; scratch is not serving authority. |
+| `server/recovery-reminder-consumption.mjs` | recovery-oracle | Preserves default reminder oracle work lookups and consumes only independently qualified reminder coverage in operator scope. |
+| `server/recovery-reminder-continuation.mjs` | recovery | Checks selected member and hydrated canonical work dependencies for reminder eligibility. |
+| `server/recovery-replay-continuation.mjs` | recovery | Resumable historical replay counts and ordered claim-overlap work dependencies, with explicit deferred cases. |
+| `server/recovery-replay-step.mjs` | recovery-reducer | Loads selected work and authority dependencies, invokes existing reducers and checkpoints derived replay work changes. |
+| `server/recovery-reply-continuation.mjs` | recovery | Tracks historical work existence for reply-request event validation, not replacement work bodies. |
+| `server/recovery-reply-rules.mjs` | shared-audit-rules | Original and resumable reply audits share work-proposal membership rules. |
+| `server/recovery-work-help.mjs` | recovery | Checks historical work/help state and help-offer invariants through bounded checkpoint and event scans. |
+| `server/replay-cutover.mjs` | migration | Independently qualifies H work fields/references and converts to the same protected current representation; reconciled legacy work is required at publication. |
+| `server/replay-projection-codec.mjs` | codec | Partitions workItems maps into bounded source records; no lifecycle mutation or board absorption. |
+
+The storage conversion preserves the canonical work aggregate rather than
+absorbing it into board claims. `work_entities` retains full work bodies;
+protected `workItems` records provide membership/reference proofs, and derived
+summary, capacity and privacy records serve bounded readers and constraints.
+A returned summary page is explicitly partial, not a full room work map.
+Recovery scratch and checkpoint-codec records are intermediate verification
+state, never another serving work authority. Independent phases cover named
+invariants; unsupported historical grammar remains deferred and the remaining
+final oracle remains mandatory.
+
+`Store.command` invokes `syncWorkItemClaim` for the 12 named event types only on
+the legacy path (`!messageContext?.current`). Normalized commands persist through
+the protected current writer instead. Before publication,
+`assertLegacyWorkReconciled` refuses independently active legacy assignments;
+mapped mirrors need explicit reviewed retirement without closing their native
+canonical task. After activation the existing legacy write guard refuses new
+or reopened assignments while retaining close/release and history inspection.
+This does not delete the board history, authorize an unresolved assignment to
+disappear, or establish that every old board operation has a native equivalent.
+The native capacity derivation retains the existing cap/dormancy constraint;
+its indexed COUNT cost is real work, not a claim of constant physical cost.
+
+Consequently the historical lossy field-fate evidence still rules out replacing
+canonical work with board rows. The old statement that every sync event always
+replans a room applies to the legacy path, not normalized serving. This census
+update changes no reducer, storage owner, permission, guard or migration gate.
+It is source reconciliation and does not claim production activation or complete
+removal of the blob/recovery cost problem.

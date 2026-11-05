@@ -1,0 +1,68 @@
+{
+  "source": "7e7f935f72f89b890e3b1837ab3258780aa02285",
+  "base": "d4f8ae4bb827189d5e442968229da85d99a59791",
+  "files": [
+    "tests/restore-durable-coverage.test.mjs"
+  ],
+  "sourceSha256": "30e2a78926de53ade34c7a5a1fc7d8bbc60f0ada69ce61950a4f1389dc4e3fb0",
+  "results": {
+    "before": {
+      "exit": 1,
+      "pass": 0,
+      "fail": 6
+    },
+    "after": {
+      "exit": 0,
+      "pass": 6,
+      "fail": 0,
+      "skip": 0
+    },
+    "focusedEslint": {
+      "exit": 0
+    },
+    "secretScan": {
+      "exit": 0,
+      "files": 1822
+    },
+    "diffCheck": {
+      "exit": 0
+    }
+  },
+  "preserved": {
+    "caseCount": 6,
+    "coldPartialHistoryProgress": true,
+    "latestReactivationVsPermissionOnlyChange": true,
+    "allMembersInclUnlimitedOwner": true,
+    "timestampBytes": [
+      24,
+      229
+    ],
+    "badCounterRefusalCheckpointUnchangedAndServing503": true,
+    "missingActivationRefusalCheckpointUnchangedAndServing503": true,
+    "sameInstantEarlierValidJoinReferenceRefusal": true,
+    "strictHistoryInterveningTestByteIdentical": true,
+    "prefixAndRemainingTestsByteIdentical": true
+  },
+  "logs": {
+    "history-v2-six-fixtures-before": {
+      "sha256": "e2d59a67a9ee5a1e32836f4ab2c69da8eaecfe55ed6d27c647a1c73bfa47f195",
+      "bytes": 10569
+    },
+    "history-v2-six-fixtures-after": {
+      "sha256": "b447f692164615c08bb35a0f34025cab910555e64c2463d670d05dd32a630ca9",
+      "bytes": 6710
+    },
+    "history-v2-six-fixtures-secret": {
+      "sha256": "f5108caadf9914df4f0e1cfbbf701ec6d6f290fdcb39bcaec4c1ae64dc7be025",
+      "bytes": 53
+    },
+    "history-v2-six-fixtures-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "limitations": [
+    "Fixture reconciliation only; no production source, protocol, guard, permission or storage changes.",
+    "No full suite, Worker rerun or deployment; exact six affected Node cases and focused lint/scan verified."
+  ]
+}

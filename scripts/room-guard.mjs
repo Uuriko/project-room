@@ -124,7 +124,13 @@ export async function runGuard({ files, client, memberId, strict = false, warn =
     const code = connectionDiagnostic(error).code;
     return { code: strict ? 3 : 0, lines: [`room-guard: Room unreachable (${code})${strict ? "" : "; not blocking"}`], conflicts: [] };
   }
-  const conflicts = guardConflicts(claims, files, { memberId, now });
+  let conflicts;
+  try { conflicts = guardConflicts(claims, files, { memberId, now }); }
+  catch (error) {
+    if (!(error instanceof CoordError) || error.code !== "claims_incomplete") throw error;
+    return { code: strict ? 3 : 0, lines: ["room-guard: claim coverage incomplete; overlap safety unknown"
+      + (strict ? "" : "; not blocking")], conflicts: [], incomplete: true, nextCursor: error.details.nextCursor };
+  }
   if (!conflicts.length) return { code: 0, lines: [`room-guard: ${files.length} file(s) clear of other members' live claims`], conflicts };
   const lines = [
     `room-guard: ${conflicts.length} file(s) are claimed by another member`,
@@ -148,7 +154,7 @@ async function main() {
     memberId = config.memberId;
   } catch (error) { unavailable = connectionDiagnostic(error).code; }
   const result = await runGuard({ files, client, memberId, strict: options.strict, warn: options.warn, unavailable });
-  if (options.json) console.log(JSON.stringify({ code: result.code, conflicts: result.conflicts }, null, 2));
+  if (options.json) console.log(JSON.stringify({ code: result.code, conflicts: result.conflicts, ...(result.incomplete ? { incomplete: true, nextCursor: result.nextCursor } : {}) }, null, 2));
   else (result.code ? console.error : console.log)(result.lines.join("\n"));
   process.exitCode = result.code;
 }

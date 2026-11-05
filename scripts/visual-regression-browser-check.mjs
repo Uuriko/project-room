@@ -124,6 +124,17 @@ test("login/join entry pages match visual baselines", { timeout: 180000 }, async
   async function capture(url, waitFor, name) {
     await page.goto(url);
     await page.locator(waitFor).waitFor({ state: "visible" });
+    if (name === "join-consent") {
+      // Keep the invitation prose/layout visible to the gate; normalize only
+      // the ephemeral server origin and random single-use code.
+      const instructions = page.locator("#join-existing-agent-instructions");
+      const value = await instructions.inputValue();
+      assert.ok(value.includes(`${origin}/join/${code}`));
+      await instructions.evaluate((element, { origin, code }) => {
+        element.value = element.value.replaceAll(origin, "https://room.example")
+          .replaceAll(code, "RM-0123456789ABCDEF");
+      }, { origin, code });
+    }
     await settleForScreenshot(page);
     await assertScreenshotMatches(page, name, { mask });
   }

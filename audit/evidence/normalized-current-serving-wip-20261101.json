@@ -1,0 +1,178 @@
+{
+  "status": "offline WIP, NOT release ready",
+  "causalRedCommit": "9e398cee9",
+  "node": {
+    "pass": 12,
+    "fail": 0,
+    "log": "/tmp/normalized-current-serving-excluded.log"
+  },
+  "worker": {
+    "samples": [
+      {
+        "surface": "small",
+        "count": 1000,
+        "excluded": {
+          "statements": 179,
+          "rowsRead": 312,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "missing": {
+          "statements": 42,
+          "rowsRead": 111,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "old": {
+          "statements": 49,
+          "rowsRead": 2606,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "oldCostSources": [
+          {
+            "sql": "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          },
+          {
+            "sql": "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          },
+          {
+            "sql": "SELECT sql FROM sqlite_master WHERE name=? AND type='table'",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        ],
+        "window": {
+          "examined": 64,
+          "complete": false
+        }
+      },
+      {
+        "surface": "large",
+        "count": 5000,
+        "excluded": {
+          "statements": 179,
+          "rowsRead": 312,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "missing": {
+          "statements": 42,
+          "rowsRead": 111,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "old": {
+          "statements": 49,
+          "rowsRead": 2606,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "oldCostSources": [
+          {
+            "sql": "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          },
+          {
+            "sql": "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          },
+          {
+            "sql": "SELECT sql FROM sqlite_master WHERE name=? AND type='table'",
+            "cost": {
+              "statements": 1,
+              "rowsRead": 830,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        ],
+        "window": {
+          "examined": 64,
+          "complete": false
+        }
+      }
+    ],
+    "post": {
+      "statements": 103,
+      "rowsRead": 3522,
+      "rowsWritten": 33,
+      "unknown": 0
+    },
+    "reply": {
+      "statements": 104,
+      "rowsRead": 204,
+      "rowsWritten": 29,
+      "unknown": 0
+    },
+    "retry": {
+      "statements": 31,
+      "rowsRead": 871,
+      "rowsWritten": 6,
+      "unknown": 0
+    },
+    "restartRead": {
+      "statements": 41,
+      "rowsRead": 113,
+      "rowsWritten": 0,
+      "unknown": 0
+    },
+    "head": 1006,
+    "historyCertified": false,
+    "existingRoomMigration": false
+  },
+  "sourceSha256": {
+    "server/activity.mjs": "5c0e25b38c69f45c4aa1656002207b257dee713afef56dadaafd48a77b5e2ec4",
+    "server/conversation-sync.mjs": "dda962d1b8529c0be0e0adff88d514d75daff405ec6cc99096a4f968ab65c477",
+    "server/message-repository.mjs": "646fc23a2d963e7e10fc9099d0d69774cc33df073cfde1c6f312b0080b512c46",
+    "server/recovery.mjs": "fb01c11224026efd6e5135c40027e491f18da4b9eec19ff06aa4347c63caa1cc",
+    "server/store.mjs": "5f3f9b70baa669a05e69d88ac394f24f6caac57f3bcc50e056261ea0855925b4",
+    "server/work-claim-events.mjs": "64530059227ecac9a4e12685ea6e219a28da53d6cc81a8287dd45bf2a58e48f9",
+    "server/work-repository.mjs": "28c4c3408e30770fe51050be0bec9caf5c86b327561b49f1aaeba34015a72fe6",
+    "server/writer-fence.mjs": "b514978bd924c7afaf4e8255ab827d7008947ab75ed8fbce0b5c2921ead3dad9",
+    "src/events.js": "9b2eb5e5e049c077f55fec897b4f2438a2039f46b63e82dae1423a3300d01a05",
+    "src/reply-requests.js": "3b6fa8c2f330cd6ad69305ea165e59fa8664ed7397e63633a63ea8a8b2275a3f",
+    "tests/normalized-current-serving.test.mjs": "93ec4206be0fb5022c21b518017502a9b75bab967ea641f986070581d6368137",
+    "cloudflare/current-room-serving.check.mjs": "4ca12bcdd02b220d5d9cf5e2e6c505a2396057021044c67bc8dd0f400ebde97e",
+    "cloudflare/current-room-serving.test-fixture.mjs": "4b35e87d42ea6cc5146f5e544862284fdfcb79cd05f53db67c9ee4a7acfe19b7",
+    "server/current-room-repository.mjs": "d64bbeb626b1c91bd40723b0b715137481274be0a2876f17be27b496a455cdd2",
+    "src/current-record-context.js": "fd080eafcff2a974c78b5b20e82477023a4b2afc7efd750166b3774a9c114b41"
+  },
+  "remaining": [
+    "retry adds4 format admission writes before idempotency; existing runtime permit adds2",
+    "existing-room H/message/floor/tail/equality/net-drain/barrier/publication incomplete",
+    "restore/old44/preopen fence not qualified",
+    "board broad history/claims and legacy work view/backfill remain",
+    "snapshot/work-context/private index/deletion privacy incomplete",
+    "large inactive membership addressed context incomplete"
+  ],
+  "liveChange": false,
+  "schemaFloor": "45 candidate OFFLINE",
+  "historicalProvenance": "unknown; existing journal-gap red remains"
+}

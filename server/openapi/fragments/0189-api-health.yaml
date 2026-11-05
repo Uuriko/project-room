@@ -2,8 +2,11 @@
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
-        operational metadata only. `emailVerification` is `enforced` when a
+        Open (also HEAD). HTTP 200 reports liveness. Node returns `status: ok`;
+        Worker adds `liveness: ok` and `jobs.status`, with `status: degraded`
+        when its bounded job-health probe is unhealthy, unknown, or times out.
+        Use `/api/health/jobs` for job details and `/api/ready` for storage readiness.
+        `emailVerification` is `enforced` when a
         magic-link mailer is configured, or `relaxed-no-mailer` when it is not
         and the email-verification gates follow the agent-invites escape hatch.
         Worker liveness adds `emailVerificationScope: worker`: this describes
@@ -11,7 +14,7 @@
         bound Durable Object. Use `/api/ready` for the authority policy.
       security: []
       responses:
-        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
+        '200': { description: "Liveness; Worker status ok or degraded, liveness ok, jobs.status; Node status ok" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.

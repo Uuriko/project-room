@@ -174,3 +174,12 @@ test("latest:true is a snapshot, so following next as after does not repeat the 
     assert.deepEqual(again.messages.map(m => m.messageId), []);
   }
 });
+
+for(const sourceLimit of [1,3,16])test('latest completes partial event windows of '+sourceLimit,async()=>{
+ const all=Array.from({length:125},(_,i)=>({sequence:i+1,event:{type:i%7===0?'message.posted':'member.updated',data:{body:String(i)}}}));
+ const result=await paginateRoomMessages(async(after)=>{const events=all.filter(x=>x.sequence>after).slice(0,sourceLimit);const next=events.at(-1)?.sequence??after;return{events,next,hasMore:next<125};},{after:0,end:126,limit:3,latest:true});
+ assert.deepEqual(result.messages.map(x=>x.sequence),[106,113,120]);
+});
+test('latest refuses an incomplete nonadvancing source rather than return stale messages',async()=>{
+ await assert.rejects(paginateRoomMessages(async after=>({events:[],next:after,hasMore:true}),{after:0,end:40,limit:1,latest:true}),e=>e.code==='message_window_unavailable');
+});

@@ -16,13 +16,13 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 // read and missing fields take these defaults, so rows written by older code
 // (plain JSON, no envelope) still load.
 export const WORK_CLAIM_ROW_KIND = "work-claim";
-const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
+export const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
-  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration", "claimRound"];
+  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration", "claimRound", "delegate", "approvalHold", "planning"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
@@ -30,7 +30,7 @@ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, hist
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
   kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, requestOutcomes: {},
-  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0, claimRound: 0 };
+  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0, claimRound: 0, delegate: null, approvalHold: null, planning: null };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -38,6 +38,11 @@ const decodeItem = text => {
   if (item.historyOmitted == null) delete item.historyOmitted;
   // plan-pr-autolink: deploy links are sparse; absent means never deployed.
   if (item.deploy == null) delete item.deploy;
+  // Linear-parity delegate: sparse; absent means no delegate.
+  if (item.delegate == null) delete item.delegate;
+  if (item.approvalHold == null) delete item.approvalHold;
+  // Board planning fields are sparse too (server/board-planning.mjs).
+  if (item.planning == null) delete item.planning;
   // PRODUCT-200 A4: idempotency records are sparse; absent means none seen.
   if (item.requestOutcomes == null || Object.keys(item.requestOutcomes).length === 0) delete item.requestOutcomes;
   return item;
@@ -65,13 +70,33 @@ export const workClaimSchema = `
   );
 `;
 
+// Inbox discovery reads metadata, never claim histories or artifact bodies.
+// Keep these expressions shared with the index: SQLite expression indexes
+// require the query expression to match the indexed expression.
+const inboxData = `(CASE WHEN json_type(item_json, '$.v') IN ('integer','real')
+  THEN json_extract(item_json, '$.data') ELSE item_json END)`;
+const inboxOwner = `json_extract(${inboxData}, '$.owner')`;
+const inboxState = `json_extract(${inboxData}, '$.state')`;
+const inboxReviewCandidate = `COALESCE(${inboxState}, 'unclaimed') NOT IN ('done','closed')
+  AND json_array_length(json_extract(${inboxData}, '$.tags')) > 0`;
+export const workClaimInboxIndexSchema = `
+  CREATE INDEX IF NOT EXISTS work_claim_inbox_owner ON work_claims(room_id, ${inboxOwner});
+  CREATE INDEX IF NOT EXISTS work_claim_inbox_review ON work_claims(room_id) WHERE ${inboxReviewCandidate};
+`;
+const inboxFields = ["id", "state", "owner", "supersededBy", "tags", "reviews",
+  "claimedAt", "revision", "deliveryGeneration", "pullRequest", "pullRequests"];
+const inboxProjection = `json_object(${inboxFields.map(field =>
+  `'${field}', ${field === 'state' ? `CASE WHEN json_type(${inboxData}, '$.state') IS NULL THEN 'unclaimed' ELSE ${inboxState} END` : `json_extract(${inboxData}, '$.${field}')`}`).join(", ")},
+  'ci', json_object('headSha', json_extract(${inboxData}, '$.ci.headSha')),
+  'delivery', json_object('digest', json_extract(${inboxData}, '$.delivery.digest')))`;
+
 const parse = text => {
   const value = JSON.parse(text);
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("work claim row is not an object");
   return value;
 };
 
-export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
+export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null, beforeSet = null, beforeWrite = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
   const statement = sql => ({
@@ -162,6 +187,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     transaction,
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+      // Additive indexes may be absent on read-only pre-upgrade handles.
+      // A conflicting definition must not silently disable the optimization.
+      for (const sql of workClaimInboxIndexSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
+        const name = /CREATE INDEX IF NOT EXISTS ([a-z_]+)/.exec(sql)[1];
+        const actual = db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql;
+        if (actual !== undefined && normalize(sql) !== normalize(actual)) throw new Error("Work-claim inbox index requires operator reconciliation");
+      }
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
       const shapes = definitions.map(sql => ({ name: /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1], sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
       // work_claim_history is the purely additive spill sidecar (W3): an
@@ -197,14 +229,40 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       return item;
     },
     set(roomId, item) {
+      if (typeof beforeWrite === "function") beforeWrite(roomId);
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
+      if(typeof beforeSet==='function')beforeSet(roomId,item);
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());
       if (typeof onChange === "function") onChange(roomId);
       return item;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
+    // The caller applies semantic filters before its result limit. Keyset
+    // batches bound JS memory without hiding reviews after unrelated rows.
+    *inboxCandidates(roomId, ownerId, { review = false } = {}) {
+      let after = 0;
+      const query = `SELECT rowid AS ordinal, ${inboxProjection} AS metadata,
+        CASE WHEN json_type(item_json, '$.v') IN ('integer','real') THEN json_extract(item_json, '$.v') END AS version,
+        json_extract(item_json, '$.kind') AS kind
+        FROM work_claims WHERE room_id=? AND rowid>?
+        AND ${inboxOwner} ${review ? "!=?" : "=?"}
+        ${review ? `AND ${inboxReviewCandidate}` : `AND ${inboxState} IN ('claimed','in_progress','blocked','delivered')`}
+        ORDER BY rowid ASC LIMIT 128`;
+      for (;;) {
+        const rows = db.prepare(query).all(roomId, after, ownerId);
+        for (const row of rows) {
+          const metadata = JSON.parse(row.metadata);
+          // Preserve the persisted codec's kind check for selected rows.
+          if (typeof row.version === "number") decodeRow({ v: row.version, kind: row.kind, data: {} }, { kind: WORK_CLAIM_ROW_KIND });
+          yield metadata;
+          after = row.ordinal;
+        }
+        if (rows.length < 128) return;
+      }
+    },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
+      if (typeof beforeWrite === "function") beforeWrite(roomId);
       // #1527: readyClaims treats a missing dependency as "not done", so a
       // claim depending on a deleted claim could never return to
       // queue=ready -- stranded, ownerless, invisible. Waive the deleted id
@@ -229,6 +287,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
+        if (typeof beforeWrite === "function") beforeWrite(roomId);
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
         upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
       }

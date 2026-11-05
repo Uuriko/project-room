@@ -7,7 +7,10 @@ class SearchError extends Error { constructor(code, message) { super(message); t
 const fail = (code, message) => { throw new SearchError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_search_input", message); };
 
-const tokenize = text => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(term => term.length > 1);
+// Unicode letters/numbers are terms in any script (Arabic, Cyrillic, CJK,
+// accented Latin, ...). For pure-ASCII text \p{L}/\p{N} reduce to a-z/0-9, so
+// ASCII tokenisation is unchanged from the previous [^a-z0-9] split.
+const tokenize = text => String(text ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(term => term.length > 1);
 const textOf = (message, fields) => fields.map(field => message[field]).filter(value => typeof value === "string").join("\n");
 const messageOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "messages must be objects");

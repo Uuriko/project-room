@@ -1,5 +1,6 @@
 // Explicit host opt-in for pointer-only work delivery on the heartbeat pull path.
 // Separate additive tables leave the existing mention/DM journal readable by old hosts.
+import { readWakeWindow } from './wake-delivery-window.mjs';
 import { randomUUID } from "node:crypto";
 import { nextWorkStep } from "../src/workflow.js";
 import { firstBlockedWakeTarget } from "../src/events.js";
@@ -81,6 +82,7 @@ export class WorkWakes {
         event: "suppressed_policy", kind: "work", subjectId: memberId });
       return;
     }
+    this.store.enqueueNativeMcpEvent?.({ roomId, memberId, eventId: incoming.id, actorId: incoming.actorId, kind: "work", workItemId: id, workRevision: item.revision });
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
     if (!agentId || !this.optedIn(agentId, roomId)) {
       recordWakeEvent(this.db, { at, roomId, store: "work",
@@ -102,32 +104,39 @@ export class WorkWakes {
     // door sleeps through the assignment until its wait expires.
     if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
-  pending(agentId, { roomId = null, hostId = null, limit = 50, after = null } = {}) {
+  pending(agentId, { roomId = null, hostId = null, limit = 50, after = null, bounded = false, order = "oldest" } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery
     // requires the reporting host, whose explicit consent is checked below.
-    if (!this.available || hostId === null) return [];
-    const rows = this.db.prepare(`SELECT * FROM agent_work_wakes WHERE agent_id=? AND delivered_at IS NULL
+    if (!this.available || hostId === null) return bounded ? { signals: [], more: false, through: null } : [];
+    const window = bounded ? readWakeWindow(this.db, 'agent_work_wakes', agentId, after, roomId, order) : null;
+    const rows = window ? window.rows : this.db.prepare(`SELECT * FROM agent_work_wakes WHERE agent_id=? AND delivered_at IS NULL
       AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       ORDER BY created_at,signal_id`).all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0, after?.createdAt ?? 0, after?.signalId ?? "");
-    const result = [], rooms = new Map(), now = this.store.now();
+    const result = [], rooms = new Map(), memberships = new Map(), policies = new Map(), now = this.store.now();
     for (const row of rows) {
-      if (!this.optedIn(agentId, row.room_id, hostId)) continue;
+      if (roomId !== null && row.room_id !== roomId) continue;
+      if (!policies.has(row.room_id)) policies.set(row.room_id, { optedIn: this.optedIn(agentId, row.room_id, hostId), members: new Map() });
+      const policy = policies.get(row.room_id); if (!policy.optedIn) continue;
       if (!rooms.has(row.room_id)) rooms.set(row.room_id, this.store.room(row.room_id).state);
       const state = rooms.get(row.room_id), item = state.workItems[row.work_item_id];
+      const key = JSON.stringify([row.room_id, row.member_id]);
+      if (!memberships.has(key)) memberships.set(key, this.store.identities.identityIdForMember(row.room_id, row.member_id));
+      if (!policy.members.has(row.member_id)) policy.members.set(row.member_id, { paused: this.store.wakeQueue.pauseStatus(row.room_id, row.member_id), prefs: this.store.attention.prefs(row.room_id, row.member_id) });
+      const memberPolicy = policy.members.get(row.member_id);
       if (!item || item.revision !== row.work_revision || !this.permitted(state, item, row.member_id, row.actor_id)
-          || this.store.identities.identityIdForMember(row.room_id, row.member_id) !== agentId
-          || this.store.wakeQueue.pauseStatus(row.room_id, row.member_id)) continue;
+          || memberships.get(key) !== agentId
+          || memberPolicy.paused) continue;
       const next = nextWorkStep(item, now, state.room.ownerId), pointer = JSON.parse(row.pointer);
       if (!next.needsAttention || next.memberId !== row.member_id || next.action !== pointer.action) continue;
-      const prefs = this.store.attention.prefs(row.room_id, row.member_id);
+      const prefs = memberPolicy.prefs;
       // The digest deadline is anchored, so polling shortly after its hour still delivers.
       if ((heldUntil(prefs, Math.max(row.created_at, prefs?.updatedAt ?? 0)) ?? 0) > now
           || heldUntil(prefs ? { ...prefs, delivery: "immediate" } : null, now) !== null) continue;
       result.push({ signalId: row.signal_id, agentId, ...pointer, createdAt: row.created_at, deliveredAt: null });
       if (result.length >= limit) break;
     }
-    return result;
+    return bounded ? { signals: result, more: window.more, through: window.through } : result;
   }
   ack(agentId, signalIds, roomId = null) {
     if (!this.available) return [];

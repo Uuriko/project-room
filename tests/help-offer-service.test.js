@@ -172,7 +172,7 @@ test("event/projection capacity allows only valid offer cleanup with exact recei
   const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
   // Synthetic capacity projection only; not evidence of recoverable history.
   // G11b: the event cap is PILOT_LIMITS.eventsPerRoom now, not a 10000 literal.
-  f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
+  f.store.transaction(() => f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, f.store.storedProjection("commons", state)));
   assert.throws(() => f.send("producer", f.update("pending")), { code: "pilot_limit" });
   const invalid = f.update("selected", "released"); invalid.data.externalActivityUnverified = false;
   assert.throws(() => f.send("guest", invalid), { status: 422 });

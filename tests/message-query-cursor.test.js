@@ -33,3 +33,19 @@ test('working-set messages beyond the certified archive remain ordered and visib
   assert.equal(f.queries.countMetadata(),expected.length);
  }finally{db.close();}
 });
+
+// Sequence cursors belong to /messages; unlike ID cursors they also work
+// when the cursor points between posts or at an invisible message.
+test('descending sequence seeks preserve privacy, history floors and retained records',()=>{
+ const db=new DatabaseSync(':memory:');
+ try{
+  const f=cursorFixture(db);
+  const visibility={viewerId:'viewer',floor:{at:'2026-10-27T00:00:30.000Z',sameInstant:new Set(['m000030','m000150'])}};
+  const expected=f.expected.filter(m=>Number(m.id.slice(1))<600
+   &&(!m.toMemberId||m.authorId==='viewer'||m.toMemberId==='viewer')
+   &&(m.createdAt>visibility.floor.at||m.createdAt===visibility.floor.at&&!visibility.floor.sameInstant.has(m.id))).reverse();
+  assert.deepEqual([...f.queries.records({descending:true,beforeSequence:300,visibility})],expected);
+  assert.deepEqual([...f.queries.records({descending:true,beforeSequence:0})],[]);
+  assert.throws(()=>[...f.queries.records({beforeSequence:1})],TypeError);
+ }finally{db.close();}
+});

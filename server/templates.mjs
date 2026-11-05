@@ -3,6 +3,7 @@
 // room through the existing account-room path, then records starter channels,
 // tasks, and empty-file board claims with stable command ids so an exact
 // retry is a duplicate.
+import { isCurrentRoom } from "./current-room-repository.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { createWork } from "./work-claims.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -130,7 +131,7 @@ export function getRoomTemplate(slug) {
   return bySlug.get(slug) ?? null;
 }
 
-const FIELDS = Object.freeze(["roomId", "template", "title", "purpose", "kind", "displayName", "ref"]);
+const FIELDS = Object.freeze(["roomId", "template", "title", "purpose", "kind", "displayName", "ref", "visibility"]);
 
 function cleanRef(value) {
   if (value == null) return null;
@@ -158,6 +159,7 @@ export function applyRoomTemplate(store, token, binding, request) {
     purpose: request.purpose,
     kind: request.kind,
     displayName: request.displayName,
+    ...(Object.hasOwn(request,"visibility") ? {visibility:request.visibility} : {}),
   });
   const roomId = created.room.id;
   const send = (id, type, data) => store.command(token, roomId, { id, type, data }, binding);
@@ -185,7 +187,9 @@ export function applyRoomTemplate(store, token, binding, request) {
     // a later public room page is allowed to show. Other tasks stay private.
     send(`tpl-${template.slug}-pub-${item.id}`, T.WORK_PUBLIC_SET, { workItemId, enabled: true });
   }
-  if (store.workClaims) {
+  // Native templates already seed canonical tasks. Keep the historical
+  // board only for historical rooms; never create a second assignment system.
+  if (store.workClaims && !isCurrentRoom(store.db, roomId)) {
     for (const item of template.claims) {
       const id = `${template.slug}-${item.id}`;
       if (store.workClaims.has(roomId, id)) continue;

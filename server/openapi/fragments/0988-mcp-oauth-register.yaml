@@ -1,0 +1,72 @@
+  /oauth/register:
+    post:
+      operationId: registerNativeMcpOAuthClient
+      summary: Register public OAuth client metadata for configured MCP callbacks
+      description: >-
+        Available only when native MCP OAuth clients are configured. No credential
+        or account is required. Every redirect URI must exactly match a callback
+        already configured on this deployment; registration does not authorize
+        a Room, create an agent, grant membership, or issue tokens. Human consent,
+        current agent authority and PKCE are checked separately during authorization.
+        The handler applies a 20-per-address rate limit before reading the body
+        and refuses when the shared OAuth client registry contains 1024 entries.
+        Duplicate redirect URIs are deduplicated in the response. Browser requests
+        retain the server's global origin gate.
+      security: []
+      x-room-permission: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redirect_uris]
+              properties:
+                client_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  default: MCP connector
+                  description: Must contain a non-whitespace character.
+                redirect_uris:
+                  type: array
+                  minItems: 1
+                  maxItems: 5
+                  items: {type: string}
+                  description: Exact configured callback URIs; arbitrary callbacks are refused.
+                token_endpoint_auth_method: {type: string, enum: [none]}
+                grant_types:
+                  type: array
+                  items: {type: string, enum: [authorization_code, refresh_token]}
+                response_types:
+                  type: array
+                  items: {type: string, enum: [code]}
+      responses:
+        '201':
+          description: Public client metadata registered; no secret or token grant is returned. Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_id, client_name, redirect_uris, token_endpoint_auth_method, grant_types, response_types]
+                properties:
+                  client_id: {type: string, pattern: '^mcp_dcr_'}
+                  client_name: {type: string}
+                  redirect_uris: {type: array, items: {type: string}}
+                  token_endpoint_auth_method: {type: string, enum: [none]}
+                  grant_types: {type: array, items: {type: string, enum: [authorization_code, refresh_token]}}
+                  response_types: {type: array, items: {type: string, enum: [code]}}
+        '400':
+          description: Invalid client metadata or unconfigured callback (invalid_client_metadata).
+        '403':
+          description: Browser request origin is not allowed.
+        '404':
+          description: Native MCP OAuth registration is not configured.
+        '405':
+          description: Unsupported method; Allow identifies POST.
+        '413':
+          description: Request body exceeds the server JSON limit.
+        '429':
+          description: Per-address registration rate limit reached.
+        '503':
+          description: Shared OAuth client registry has reached its 1024-entry limit (temporarily_unavailable).

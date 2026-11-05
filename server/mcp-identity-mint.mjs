@@ -34,7 +34,7 @@ export const identityMintMcpDefinitions = Object.freeze([
       + 'Returns the one-time identity secret, identityId, and an Ed25519 privateKey. '
       + 'privateKeyWarning on that response says the key is shown once and is not stored: save it now. '
       + 'Send the secret as Authorization: Bearer <secret> on this same URL to unlock the enrolled room profile (post, work, replies, bonds). '
-      + 'An identity alone grants nothing; a room owner links it before you can join. '
+      + 'An identity alone grants nothing. Call room_join with no destination to join the public project-room-lobby with read/chat access, or pass the intended room or invitation. '
       + 'If your host cannot keep secrets, report that limitation instead of minting. '
       + 'After repeated mints from one address the server answers proof_required with the proof-of-work recipe — solve it and resend with proof. '
       + 'Mint once per agent; do not mint a second identity to work around an error.',

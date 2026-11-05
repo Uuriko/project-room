@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {RoomStore} from '../server/store.mjs';
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+import {createSquad,getSquad,updateSquadMembers,disbandSquad} from '../server/squads.mjs';
+
+test('normalized squad roster and channel operations use selected authority and preserve privacy',t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());
+ store.initialize([...initialRoom(),event({roomId:'commons',actorId:'owner',type:'member.added',data:{memberId:'peer',displayName:'Peer',kind:'human',permissions:[]}})],{representation:'normalized-current-v1'});
+ const owner=store.issueAccessKey('commons','owner'),peer=store.issueAccessKey('commons','peer');
+ const send=(type,data,id=crypto.randomUUID())=>store.command(owner,'commons',{id,type,data});
+ send('message.posted',{messageId:'public-root',body:'Coordinate here'});
+ send('message.posted',{messageId:'private-root',body:'Private',toMemberId:'peer'});
+ store.room=()=>{throw Error('Whole room hydration forbidden');};
+ assert.throws(()=>createSquad(store,owner,'commons',{name:'private',channelMessageId:'private-root'}),e=>e.code==='squad_channel_unknown');
+ const squad=createSquad(store,owner,'commons',{name:'crew',channelMessageId:'public-root',memberIds:['peer']}).squad;
+ const mention=send('message.posted',{messageId:'squad-ask',body:'@squad/crew please review'});
+ assert.equal(store.db.prepare('SELECT count(*) n FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?').get('commons',mention.event.id,'peer').n,1);
+ assert.deepEqual(squad.members,['peer','owner']);assert.equal(getSquad(store,peer,'commons',squad.id).squad.channel,'public-root');
+ assert.throws(()=>updateSquadMembers(store,peer,'commons',squad.id,{remove:['owner']}),e=>e.code==='squad_owner_required');
+ updateSquadMembers(store,peer,'commons',squad.id,{remove:['peer']});
+ const member=store.roomAuthority('commons',{memberId:'peer'}).members.peer;
+ send('member.access_changed',{memberId:'peer',expectedMemberRevision:member.revision,permissions:[],active:false});
+ assert.throws(()=>updateSquadMembers(store,owner,'commons',squad.id,{add:['peer']}),e=>e.code==='squad_member_unknown');
+ assert.deepEqual(getSquad(store,owner,'commons',squad.id).squad.members,['owner']);
+ assert.equal(disbandSquad(store,owner,'commons',squad.id).changed,true);
+ assert.equal(disbandSquad(store,owner,'commons',squad.id).changed,false);
+ send('room.archived',{reason:'Finished'});
+ assert.throws(()=>createSquad(store,owner,'commons',{name:'after'}),e=>e.code==='room_archived');
+});

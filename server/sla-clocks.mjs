@@ -107,11 +107,25 @@ export function assessThreadSla({ threadId, channel, messages, now, targets = sl
 export function assessSlaBatch(threads, { now, targets = slaTargets } = {}) {
   check(Array.isArray(threads) && threads.length <= 10000, "threads must be a list of at most 10000");
   const at = msOf(now), validated = targetOf(targets);
-  const assessed = threads.map(thread => assessThreadSla({ ...thread, now: at, targets: validated }));
+  // Per-item isolation: one malformed or clock-skewed thread (e.g. a
+  // future-dated latest inbound) must not deny the whole batch. Failed
+  // threads are excluded from assessed and reported in errors with their
+  // threadId and the SlaError code, so the failure stays visible.
+  const assessed = [], errors = [];
+  for (const thread of threads) {
+    try {
+      assessed.push(assessThreadSla({ ...thread, now: at, targets: validated }));
+    } catch (error) {
+      if (!(error instanceof SlaError)) throw error;
+      errors.push(Object.freeze({
+        threadId: typeof thread?.threadId === "string" ? thread.threadId : null,
+        code: error.code, message: error.message }));
+    }
+  }
   const open = assessed.filter(a => ["on_track", "at_risk", "breached"].includes(a.status));
   const openByChannel = {};
   for (const a of open) openByChannel[a.channel] = (openByChannel[a.channel] ?? 0) + 1;
-  return Object.freeze({ assessed: Object.freeze(assessed),
+  return Object.freeze({ assessed: Object.freeze(assessed), errors: Object.freeze(errors),
     openByChannel: Object.freeze(openByChannel),
     atRisk: Object.freeze(open.filter(a => a.status === "at_risk").map(a => a.threadId)),
     breached: Object.freeze(open.filter(a => a.status === "breached").map(a => a.threadId)),

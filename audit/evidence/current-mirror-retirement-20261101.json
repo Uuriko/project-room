@@ -1,0 +1,87 @@
+{
+  "receipts": [
+    {
+      "count": 32,
+      "plan": {
+        "statements": 64,
+        "rowsRead": 86,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "inputBytes": 95048,
+      "retired": {
+        "statements": 70,
+        "rowsRead": 16560,
+        "rowsWritten": 4,
+        "unknown": 0
+      },
+      "retiredRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 23,
+        "rowsRead": 908,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      }
+    },
+    {
+      "count": 128,
+      "plan": {
+        "statements": 64,
+        "rowsRead": 86,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "inputBytes": 95053,
+      "retired": {
+        "statements": 70,
+        "rowsRead": 16560,
+        "rowsWritten": 4,
+        "unknown": 0
+      },
+      "retiredRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 23,
+        "rowsRead": 908,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      }
+    }
+  ],
+  "historyCertified": false,
+  "existingRooms": true,
+  "sourceParent": "1dfd7b8d5",
+  "runtimeFiles": [
+    "server/replay-mirror-retirement.mjs",
+    "server/replay-cutover.mjs",
+    "server/work-claim-sqlite.mjs"
+  ],
+  "nodeTests": 10,
+  "workerTests": 1,
+  "deployed": false,
+  "liveVerified": false,
+  "proofLimits": [
+    "Operator preparation only; no historical certification",
+    "Per-record input bounded262144B; publication still requires all independent legacy obligations reconciled",
+    "Cold schema admission cost included separately from task history; no bounded CPU claim",
+    "Only selected unambiguous mapped mirror closes; native task identity/revision/body unchanged",
+    "New captured active work does not authorize activation; final gate remains mandatory"
+  ]
+}

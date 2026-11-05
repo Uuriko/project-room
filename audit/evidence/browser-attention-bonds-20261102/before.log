@@ -1,0 +1,52 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":63,"heapBytes":76567992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":54,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✖ owner attention pages 26 pending requests without losing the total (529.643417ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":50,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":90868952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":50,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+room diagnostic op_ezJmm9lg 403 no_bond access /api/rooms/:roomId/commands
+room diagnostic op_s-4Qttbz 403 bond_pending access /api/rooms/:roomId/commands
+✖ People Friend control proposes without scopes, accepts, messages, and refuses until active (31334.646541ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31694.006084
+
+✖ failing tests:
+
+test at scripts/access-preview-browser-check.mjs:154:33
+✖ owner attention pages 26 pending requests without losing the total (529.643417ms)
+  AssertionError [ERR_ASSERTION]: the first page is bounded while count remains global
+  
+  26 !== 25
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-post-blob-browser-fixes-1102/scripts/access-preview-browser-check.mjs:159:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 26,
+    expected: 25,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at scripts/friend-bond-browser-check.mjs:38:1
+✖ People Friend control proposes without scopes, accepts, messages, and refuses until active (31334.646541ms)
+  locator.waitFor: Timeout 30000ms exceeded.
+  Call log:
+  [2m  - waiting for locator('#presence-list .presence-member[data-member-record-id="ai_owdwDogOm7npN7Lx"]').locator('.friend-chip[data-friend-state="incoming"]') to be visible[22m
+  
+      at TestContext.<anonymous> (/Users/johnpotter/src/pr-post-blob-browser-fixes-1102/scripts/friend-bond-browser-check.mjs:142:72) {
+    name: 'TimeoutError',
+    log: [ `  - waiting for locator('#presence-list .presence-member[data-member-record-id="ai_owdwDogOm7npN7Lx"]').locator('.friend-chip[data-friend-state="incoming"]') to be visible` ]
+  }

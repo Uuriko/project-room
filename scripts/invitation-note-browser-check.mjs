@@ -209,6 +209,7 @@ for (const change of ['collapse', 'focus move']) test(`invitation copy failure a
 
 for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'desktop'}: human arrival and copyable agent connection`, { timeout: 45000 }, async t => {
   const { page, fixture, origin, errors } = await setup(t, touch);
+  await page.locator('#share-link-access').selectOption('guest');
   const url = await create(page);
   await page.locator('#share-link-close').click();
   await page.goto(url);
@@ -217,9 +218,11 @@ for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'de
   assert.equal(await page.locator('#join-link-name').isVisible(), true);
   await page.locator('#shared-agent-details > summary').click();
   const instructions = await page.locator('#shared-agent-instructions').inputValue();
-  assert.ok(instructions.includes(url)); assert.ok(instructions.includes('releases/latest'));
-  assert.ok(instructions.includes('scripts/agent-inbox.mjs join'));
-  assert.ok(instructions.includes('--accept'));
+  assert.ok(instructions.includes(url));
+  assert.match(instructions, /supports shared invitation links/);
+  assert.match(instructions, /room_check_access.*read the shared brief/);
+  assert.match(instructions, /explain the exact next step and wait/);
+  assert.doesNotMatch(instructions, /scripts\/agent-inbox|npx/);
   await page.locator('#shared-agent-copy').click();
   assert.equal(await page.evaluate(() => window.noteCopies.at(-1)), instructions);
   assert.equal(await page.locator('#join-link-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);

@@ -14,7 +14,7 @@ function setup(t, mode = "normal") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "room-stdio-"))), cwd = join(root, "workspace"), codexHome = join(root, "codex-home");
   mkdirSync(cwd); mkdirSync(codexHome, { mode: 0o700 });
   const command = join(root, "fake-codex");
-  writeFileSync(command, `#!${process.execPath}\nimport readline from 'node:readline';import {spawn} from 'node:child_process';\nconst mode=${JSON.stringify(mode)};\nconst stubborn=mode==='descendant'?spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}):null;\nconst send=v=>process.stdout.write(JSON.stringify(v)+'\\n');\nif(process.argv[2]!=='app-server'||process.argv[3]!=='--listen'||process.argv[4]!=='stdio://')process.exit(2);\nconst lines=readline.createInterface({input:process.stdin});\nlines.on('line',line=>{const m=JSON.parse(line);if(m.id===999){send({method:'approvalResponse',params:{error:m.error}});return;}if(!m.id)return;\nif(mode==='hang')return;if(mode==='invalid'){process.stdout.write('not JSON\\n');return;}if(mode==='exit')process.exit(3);\nif(m.method==='initialize'){send({id:m.id,result:{argv:process.argv.slice(2),childPid:stubborn?.pid,home:process.env.HOME,codexHome:process.env.CODEX_HOME,secret:process.env.ROOM_AGENT_CONFIG??null,other:process.env.OPENAI_API_KEY??null}});return;}\nif(mode==='exit-after-init')process.exit(3);\nif(m.method==='thread/name/set'){send({id:m.id,result:{}});return;}\nif(m.method==='thread/start'){send({id:m.id,result:{thread:{id:'owned-thread'}}});return;}\nif(m.method==='turn/start'&&mode==='complete'){send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress',items:[]}}});setTimeout(()=>send({method:'turn/completed',params:{threadId:'owned-thread',turn:{id:'owned-turn',status:'completed',items:[{id:'answer',type:'agentMessage',phase:'final_answer',text:'Completed through the real subprocess host.'}]}}}),5);return;}\nif(m.method==='turn/start'){send({id:999,method:'item/commandExecution/requestApproval',params:{command:'secret command'}});send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress'}}});return;}\nif(m.method==='thread/read'||m.method==='thread/resume'){send({id:m.id,result:{thread:{id:m.params.threadId,turns:[]}}});return;}\nsend({id:m.id,error:{code:-32601,message:'unknown'}});});\n`);
+  writeFileSync(command, `#!${process.execPath}\nimport readline from 'node:readline';import {spawn} from 'node:child_process';\nconst mode=${JSON.stringify(mode)};\nconst stubborn=mode==='descendant'?spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}):null;\nconst send=v=>process.stdout.write(JSON.stringify(v)+'\\n');\nif(process.argv[2]!=='app-server'||process.argv[3]!=='--listen'||process.argv[4]!=='stdio://')process.exit(2);\nconst lines=readline.createInterface({input:process.stdin});\nlines.on('line',line=>{const m=JSON.parse(line);if(m.id===999){send({method:'approvalResponse',params:{error:m.error}});return;}if(!m.id)return;\nif(mode==='hang')return;if(mode==='invalid'){process.stdout.write('not JSON\\n');return;}if(mode==='exit')process.exit(3);\nif(m.method==='initialize'){send({id:m.id,result:{argv:process.argv.slice(2),childPid:stubborn?.pid,home:process.env.HOME,codexHome:process.env.CODEX_HOME,secret:process.env.ROOM_AGENT_CONFIG??null,other:process.env.OPENAI_API_KEY??null}});return;}\nif(mode==='exit-after-init')process.exit(3);\nif(m.method==='thread/name/set'){send({id:m.id,result:{}});return;}\nif(m.method==='thread/start'){send({id:m.id,result:{thread:{id:'owned-thread'}}});return;}\nif(m.method==='turn/start'&&mode==='complete'){send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress',items:[]}}});setTimeout(()=>send({method:'turn/completed',params:{threadId:'owned-thread',turn:{id:'owned-turn',status:'completed',items:[{id:'answer',type:'agentMessage',phase:'final_answer',text:'Completed through the real subprocess host.'}]}}}),5);return;}\nif(m.method==='turn/start'&&mode==='slow-turn'){setTimeout(()=>send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress'}}}),2000);return;}\nif(m.method==='turn/start'){send({id:999,method:'item/commandExecution/requestApproval',params:{command:'secret command'}});send({id:m.id,result:{turn:{id:'owned-turn',status:'inProgress'}}});return;}\nif(m.method==='thread/read'||m.method==='thread/resume'){send({id:m.id,result:{thread:{id:m.params.threadId,turns:[]}}});return;}\nsend({id:m.id,error:{code:-32601,message:'unknown'}});});\n`);
   chmodSync(command, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return { root, config: { command, cwd, codexHome, policy: { approvalPolicy: "never", sandbox: "read-only" }, requestTimeoutMs: mode === "hang" ? 100 : 3000 } };
@@ -41,6 +41,21 @@ test("server interactive requests get a typed refusal, never an approval or hang
   await rpc.request("initialize", {}); await rpc.request("thread/start", {}); await rpc.request("turn/start", { threadId: "owned-thread" });
   assert.equal((await response).params.error.code, -32601);
   assert.equal(attention.length, 1); assert.equal(JSON.stringify(attention).includes("secret command"), false);
+});
+test("turn/start first frame after requestTimeoutMs but within turnTimeoutMs succeeds", async t => {
+  const { config } = setup(t, "slow-turn"), rpc = openCodexStdio({ ...config, requestTimeoutMs: 1000, turnTimeoutMs: 30000 });
+  t.after(() => rpc.close());
+  await rpc.request("initialize", {}); await rpc.request("thread/start", {});
+  const result = await rpc.request("turn/start", { threadId: "owned-thread" });
+  assert.equal(result.turn.id, "owned-turn");
+});
+test("turn/start first frame after turnTimeoutMs times out at the turn timeout, not the request timeout", async t => {
+  const { config } = setup(t, "slow-turn"), rpc = openCodexStdio({ ...config, requestTimeoutMs: 10000, turnTimeoutMs: 500 });
+  t.after(() => rpc.close());
+  await rpc.request("initialize", {}); await rpc.request("thread/start", {});
+  const started = Date.now();
+  await assert.rejects(rpc.request("turn/start", { threadId: "owned-thread" }), /uncertain/);
+  assert.ok(Date.now() - started < 5000, "rejected by turnTimeoutMs, not requestTimeoutMs");
 });
 for (const mode of ["hang", "invalid", "exit"]) test(`subprocess ${mode} rejects uncertain requests without retry`, async t => {
   const { config } = setup(t, mode), rpc = openCodexStdio(config); t.after(() => rpc.close());
@@ -103,6 +118,29 @@ test("closing kills a TERM-resistant descendant even after the app-server parent
   assert.equal(existsSync(join(config.codexHome, ".room-runtime.lock")), false);
 });
 
+
+test("denied process-group observation retains the profile lock and refuses cleanup success", async t => {
+  const { config } = setup(t), rpc = openCodexStdio(config);
+  await rpc.request("initialize", {});
+  const kill = process.kill.bind(process);
+  let denied = 0;
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (pid < 0 && signal === 0) {
+      denied++;
+      throw Object.assign(new Error("Synthetic denied group observation"), { code: "EPERM" });
+    }
+    return kill(pid, signal);
+  });
+  try {
+    await assert.rejects(rpc.close(), /process group is unresolved/);
+    assert.ok(denied > 0, "the real transport attempted the denied observation");
+    assert.equal(existsSync(join(config.codexHome, ".room-runtime.lock")), true);
+    assert.throws(() => openCodexStdio(config), /active or unresolved/);
+  } finally {
+    t.mock.restoreAll();
+    await rpc.close().catch(() => {});
+  }
+});
 
 test("activation CLI runs through a symlink entrypoint", t => {
   const { root } = setup(t);

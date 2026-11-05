@@ -1,3 +1,5 @@
+// Existing legacy-board semantics are retained below using an explicit historical journal fixture.
+// New-product canonical behavior is qualified separately in this file.
 // Agent-inbox v1: needs-me myClaims + actionsNeeded standing sections.
 // Before this, needs-me told a polling agent about other people's asks
 // (mentions, review asks, open work) and two urgent cases on its own claims
@@ -8,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -22,11 +24,10 @@ function setup(t) {
   // (wall-clock) store would read every fixture claim as long expired.
   const store = new RoomStore(':memory:', { now: () => Date.parse('2026-10-05T00:00:00Z') });
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
-  rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
   for (const identity of [ada, bob]) {
     linkWithProof(store, owner.secret, 'board', identity, { displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
   }
@@ -47,7 +48,7 @@ function setup(t) {
   return { store, owner, ada, bob, memberOf, put, own, t0 };
 }
 
-test('myClaims lists every open claim the member owns, with state and next step', t => {
+test('[legacy compatibility] myClaims lists every open claim the member owns, with state and next step', t => {
   const { store, ada, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   assert.equal(collectNeedsMe(store, ada.secret, {}).myClaims, undefined, 'no claims, no section');
@@ -73,7 +74,7 @@ test('myClaims lists every open claim the member owns, with state and next step'
   assert.match(mine.next, /^GET \/api\/rooms\/board\/work-claims$/);
 });
 
-test('myClaims never moves the cursor and retires as claims close', t => {
+test('[legacy compatibility] myClaims never moves the cursor and retires as claims close', t => {
   const { store, ada, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   const before = collectNeedsMe(store, ada.secret, {});
@@ -86,7 +87,7 @@ test('myClaims never moves the cursor and retires as claims close', t => {
   assert.equal(collectNeedsMe(store, ada.secret, {}).myClaims, undefined, 'a closed claim leaves the list');
 });
 
-test("one identity's sections never surface another member's claims", t => {
+test("[legacy compatibility] one identity's sections never surface another member's claims", t => {
   const { store, ada, bob, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   const bobId = memberOf(bob);
@@ -104,7 +105,7 @@ test("one identity's sections never surface another member's claims", t => {
   assert.equal(bobPage.actionsNeeded[0].top[0].why, 'ci_failed');
 });
 
-test('actionsNeeded surfaces a failed CI rollup on my own claim with its pointers', t => {
+test('[legacy compatibility] actionsNeeded surfaces a failed CI rollup on my own claim with its pointers', t => {
   const { store, ada, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   let item = own('red-build', adaId, 'in_progress');
@@ -127,7 +128,7 @@ test('actionsNeeded surfaces a failed CI rollup on my own claim with its pointer
   assert.equal(mine.ci, 'failure', 'myClaims carries the rollup state too');
 });
 
-test('actionsNeeded surfaces a changes-requested review on the current round only', t => {
+test('[legacy compatibility] actionsNeeded surfaces a changes-requested review on the current round only', t => {
   const { store, ada, bob, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   const bobId = memberOf(bob);
@@ -161,7 +162,7 @@ test('actionsNeeded surfaces a changes-requested review on the current round onl
   assert.equal(after.myClaims[0].top.find(entry => entry.id === 'old-round').changesRequested, undefined);
 });
 
-test('a fresh delivery generation retires the changes-requested ask', t => {
+test('[legacy compatibility] a fresh delivery generation retires the changes-requested ask', t => {
   const { store, ada, bob, memberOf, own } = setup(t);
   const adaId = memberOf(ada);
   const bobId = memberOf(bob);
@@ -187,11 +188,10 @@ function pinnedSetup(t) {
   let clock = Date.parse('2026-10-05T00:00:00Z');
   const store = new RoomStore(':memory:', { now: () => clock });
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
-  rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
   for (const identity of [ada, bob]) {
     linkWithProof(store, owner.secret, 'board', identity, { displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
   }
@@ -200,7 +200,7 @@ function pinnedSetup(t) {
   return { store, ada, bob, memberOf, t0: clock, advance: ms => { clock += ms; } };
 }
 
-test('an expired lease is not reported as held: myClaims and actionsNeeded derive liveness (#3898)', t => {
+test('[legacy compatibility] an expired lease is not reported as held: myClaims and actionsNeeded derive liveness (#3898)', t => {
   const { store, ada, bob, memberOf, t0, advance } = pinnedSetup(t);
   const adaId = memberOf(ada);
   let stale = { ...createWork({ id: 'stale-task', title: 'Stale task' }, { now: t0, agentId: adaId }) };
@@ -223,4 +223,20 @@ test('an expired lease is not reported as held: myClaims and actionsNeeded deriv
   const bobPage = collectNeedsMe(store, bob.secret, {});
   assert.ok(bobPage.openWork?.[0]?.top.some(row => row.id === 'stale-task'),
     'lapsed claim returns to open work');
+});
+
+import {canonicalNeedsMeRoom,drainCanonicalNeedsMe} from './helpers/canonical-needs-me-room.mjs';
+test('canonical own work uses exact roles and revisions without manufacturing board lease metadata',t=>{
+ const f=canonicalNeedsMeRoom(t),{store,worker,other,roomId}=f;f.propose('my-task');
+ const initial=drainCanonicalNeedsMe(store,worker);assert.ok(initial.items.some(x=>x.kind==='work'&&x.id==='my-task'));
+ assert.throws(()=>f.send(other,'work.accepted',{workItemId:'my-task',expectedRevision:0}),e=>e.status===403||e.status===422);
+ const accepted=f.send(worker,'work.accepted',{workItemId:'my-task',expectedRevision:0},'exact-accept');
+ assert.equal(f.send(worker,'work.accepted',{workItemId:'my-task',expectedRevision:0},'exact-accept').duplicate,true,'lost response retries exact saved action');
+ assert.equal(accepted.duplicate,false);
+ assert.ok(drainCanonicalNeedsMe(store,worker).items.some(x=>x.kind==='work'&&x.id==='my-task'),'accepted work still needs its start action');
+ f.send(worker,'work.started',{workItemId:'my-task',expectedRevision:f.item('my-task').revision});
+ assert.equal(drainCanonicalNeedsMe(store,worker).items.some(x=>x.kind==='work'&&x.id==='my-task'),false,'in progress is not a new dispatch request');
+ f.finish('my-task');const done=drainCanonicalNeedsMe(store,worker);
+ assert.equal(done.items.some(x=>x.kind==='work'&&x.id==='my-task'),false);assert.equal(done.page.myClaims,undefined);assert.equal(done.page.actionsNeeded,undefined);
+ assert.equal(store.workContext(worker.secret,roomId,'my-task').work.state,'completed');
 });

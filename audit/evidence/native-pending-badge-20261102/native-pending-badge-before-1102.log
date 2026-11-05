@@ -1,0 +1,35 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":53,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":20,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":84,"heapBytes":73898112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":53,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":90968536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ normalized join approvals remain visible and reusable in Needs me at 1280 (10576.840583ms)
+✖ normalized join approvals remain visible and reusable in Needs me at 390 (10360.811542ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21222.4595
+
+✖ failing tests:
+
+test at scripts/normalized-attention-browser-check.mjs:10:33
+✖ normalized join approvals remain visible and reusable in Needs me at 1280 (10576.840583ms)
+  page.waitForFunction: Timeout 10000ms exceeded.
+      at TestContext.<anonymous> (/Users/johnpotter/src/pr-needs-me-pending-badge-1102/scripts/normalized-attention-browser-check.mjs:31:13) {
+    name: 'TimeoutError',
+    log: []
+  }
+
+test at scripts/normalized-attention-browser-check.mjs:10:33
+✖ normalized join approvals remain visible and reusable in Needs me at 390 (10360.811542ms)
+  page.waitForFunction: Timeout 10000ms exceeded.
+      at TestContext.<anonymous> (/Users/johnpotter/src/pr-needs-me-pending-badge-1102/scripts/normalized-attention-browser-check.mjs:31:13) {
+    name: 'TimeoutError',
+    log: []
+  }

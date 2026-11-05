@@ -1,0 +1,38 @@
+{
+  "runtime": "cbc6fabe8",
+  "charterRed": "a97b15ee4",
+  "charterCure": "cdd841652",
+  "protocol": 14,
+  "reportVersion": 1,
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "changes": [
+    "Existing current command allowlist admits room.charter_updated; existing protected room/actor/owner context and original reducer/auth/CAS remain.",
+    "Existing recovery census independently scans text-result invariants and charter history before current room advancement.",
+    "Writer cap/order cure preserves legal sealed large atoms and original text validation order.",
+    "Writer schema cache location fallback rechecks exact entire owned DDL before refreshing rowids."
+  ],
+  "tests": {
+    "affectedNode": {
+      "pass": 26,
+      "fail": 0
+    },
+    "actualNative": {
+      "pass": 1,
+      "steps": 62,
+      "postMigrationEdit": true,
+      "mixedWarmAndCold": true,
+      "exactLatestRetry": true,
+      "pending503": true,
+      "fullOracle": true,
+      "finalColdReady": true
+    },
+    "genuinePrior12Fence": 2,
+    "genuinePrior13Fence": 2
+  },
+  "limits": [
+    "Original full audit and reportVersion1 remain mandatory; whole recovery is not yet bounded.",
+    "One legally sealed atom can exceed nominal4MiB; Node legal-row result does not imply Worker accepts oversized SQL rows.",
+    "Final Native charter source is small; separate owner text Native mixed warm/multistep qualification covers larger text history.",
+    "Not packaged/integrated/deployed/live proof; root owns release and final combined archive qualification."
+  ]
+}

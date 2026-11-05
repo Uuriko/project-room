@@ -1,0 +1,111 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":48,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8389},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":13,"rowsRead":47276},"verifies":{"ms":2,"rowsRead":21696},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":48,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":52,"storeInitializationMs":49}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":884},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":2,"sequences":6,"projectionBytes":1031}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":7,"storeInitializationMs":4}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":49,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8389},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":14,"rowsRead":47276},"verifies":{"ms":2,"rowsRead":21696},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":49,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":53,"storeInitializationMs":50}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":884},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":41,"sequences":123,"projectionBytes":6101}
+{"event":"room.store_initialized","initializationMs":5,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":8,"storeInitializationMs":5}
+{
+  "schema": "member2-native-mixed-maintenance-v1",
+  "pass": true,
+  "pin": "ff3350cb8d2be1d1c7278677211eeea3282b7c75",
+  "node": "v24.22.1",
+  "compatibilityDate": "2026-07-30",
+  "bundleSha256": "48285ec4bb95dc949dcc2892afdea5b8f30ba26336b8ebbd2500c5cff99c97d4",
+  "observations": [
+    {
+      "facts": {
+        "count": 1,
+        "result": {
+          "done": true,
+          "events": 3,
+          "rooms": 1,
+          "budgetExceeded": false,
+          "roomId": "z-legacy",
+          "appliedSeq": 3,
+          "replaySeq": 3,
+          "blocked": [],
+          "quarantined": [],
+          "failed": []
+        },
+        "parity": {
+          "ok": true,
+          "checked": 1,
+          "roomId": "z-legacy",
+          "projectionCount": 1,
+          "tableCount": 1,
+          "projectionLastSeq": 3,
+          "tableLastSeq": 3
+        },
+        "iterations": 1,
+        "rowsRead": 1088,
+        "nativeHeadReads": 0,
+        "nativeRecordReads": 0,
+        "selectedCandidates": 1,
+        "explicitRefusal": {
+          "status": 409,
+          "message": "Normalized messages require their independent current-record integrity audit, not legacy replay certification"
+        },
+        "oldWriterRefusal": "unsupported current room writer: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+        "unchanged": true,
+        "nativeCursors": 0
+      },
+      "cold": {
+        "count": 1,
+        "unchanged": true,
+        "nativeHeads": 1,
+        "nativeCursors": 0
+      }
+    },
+    {
+      "facts": {
+        "count": 40,
+        "result": {
+          "done": true,
+          "events": 3,
+          "rooms": 1,
+          "budgetExceeded": false,
+          "roomId": "z-legacy",
+          "appliedSeq": 3,
+          "replaySeq": 3,
+          "blocked": [],
+          "quarantined": [],
+          "failed": []
+        },
+        "parity": {
+          "ok": true,
+          "checked": 1,
+          "roomId": "z-legacy",
+          "projectionCount": 1,
+          "tableCount": 1,
+          "projectionLastSeq": 3,
+          "tableLastSeq": 3
+        },
+        "iterations": 1,
+        "rowsRead": 1322,
+        "nativeHeadReads": 0,
+        "nativeRecordReads": 0,
+        "selectedCandidates": 1,
+        "explicitRefusal": {
+          "status": 409,
+          "message": "Normalized messages require their independent current-record integrity audit, not legacy replay certification"
+        },
+        "oldWriterRefusal": "unsupported current room writer: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)",
+        "unchanged": true,
+        "nativeCursors": 0
+      },
+      "cold": {
+        "count": 40,
+        "unchanged": true,
+        "nativeHeads": 40,
+        "nativeCursors": 0
+      }
+    }
+  ],
+  "limits": "Private synthetic local data. SQL anti-join may scan excluded room IDs; zero JS hydration does not prove constant physical rows or time. No production/release qualification."
+}

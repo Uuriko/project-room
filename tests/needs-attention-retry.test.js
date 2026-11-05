@@ -190,7 +190,7 @@ function attentionEnvironment(t) {
 function attentionState({ owner = false } = {}) {
   return {
     room: { id: "room-1", ownerId: owner ? "admin-1" : "owner-1" },
-    members: { "admin-1": { id: "admin-1", active: true, permissions: ["manage_members", "accept_work"] } },
+    members: { "admin-1": { id: "admin-1", kind: "human", active: true, permissions: ["manage_members", "accept_work"] } },
   };
 }
 
@@ -202,7 +202,7 @@ function accessQueue(displayName = "Pending member") {
 function attentionClient({ read = async () => null, queue = async () => accessQueue() } = {}) {
   const calls = { rollup: [], queue: [] };
   const client = new Proxy({
-    session: { id: "sess-current", roomId: "room-1", member: { id: "admin-1", active: true, permissions: ["manage_members", "accept_work", "complete_work"] } },
+    session: { id: "sess-current", roomId: "room-1", member: { id: "admin-1", kind: "human", active: true, permissions: ["manage_members", "accept_work", "complete_work"] } },
     generation: 1,
     sequence: 1,
     ownsAccountSession: () => true,
@@ -269,14 +269,14 @@ for (const [label, provider] of [
   });
 }
 
-test("current active admin renders the queue when the owner-only reader returns null", async t => {
+test("current active admin renders the queue without calling the owner-only reader", async t => {
   const { section, timers } = attentionEnvironment(t);
   const state = attentionState();
   const { client, calls } = attentionClient();
   client.session.member.permissions = []; // Current state, not this snapshot, authorizes the reviewer.
   const card = createNeedsAttentionCard({ client, section, getState: () => state });
   await card.refresh();
-  assert.deepEqual(calls.rollup, [null]);
+  assert.deepEqual(calls.rollup, []);
   assert.equal(calls.queue.length, 1);
   assert.equal(section.hidden, false);
   assert.equal(section._elements["#attention-count"].textContent, "1");
@@ -294,7 +294,7 @@ for (const change of ["revoked", "inactive", "state removed"]) {
     for (const outcome of ["success", "failure"]) {
       test(`${change} authority clears the card and suppresses late ${stage} ${outcome}`, async t => {
         const { section, timers } = attentionEnvironment(t);
-        let state = attentionState();
+        let state = attentionState({ owner: true });
         let inFlight = false;
         const pending = deferredAttentionRead(), entered = deferredAttentionRead();
         const hold = () => { entered.resolve(); return pending.promise; };
@@ -480,7 +480,7 @@ for (const first of ["rollup", "queue"]) {
     const { section } = attentionEnvironment(t);
     const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
     const { client, calls } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
-    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState({ owner: true }) });
     const refresh = card.refresh();
     // Settle both even if the concurrency assertion fails on the old code.
     t.after(async () => { rollup.resolve(null); queue.resolve(accessQueue()); await refresh; });
@@ -503,7 +503,7 @@ for (const first of ["rollup", "queue"]) {
     const { section, timers } = attentionEnvironment(t);
     const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
     const { client } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
-    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState({ owner: true }) });
     const refresh = card.refresh();
     (first === "rollup" ? rollup : queue).reject(new Error("First read unavailable"));
     await refresh;

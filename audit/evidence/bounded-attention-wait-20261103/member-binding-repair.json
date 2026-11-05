@@ -1,0 +1,53 @@
+{
+  "sourceCommit": "4cbb5b6da",
+  "parent": "c3f6de2e2",
+  "pr": 5814,
+  "syntheticOnly": true,
+  "before": {
+    "tests": 1,
+    "pass": 0,
+    "fail": 1,
+    "reason": "Real holder-proof rebind returns new-seat attention from an old-seat pending wait instead of rejecting."
+  },
+  "after": {
+    "helperHttpCatalogTests": 23,
+    "pass": 23,
+    "fail": 0,
+    "nativeTests": 1,
+    "nativePass": 1,
+    "manifestTests": 8,
+    "manifestPass": 8,
+    "manifestDrift": 0,
+    "lintErrors": 0,
+    "lintWarnings": 0
+  },
+  "invariant": "Initial room member ID must match fresh authentication before every inbox probe and before any completion. Changed binding rejects409 attention_wait_binding_changed and releases the original pending key.",
+  "newRegression": "Real owner unlink and fresh holder proof relink to a different member, then addressed DM; old wait must reject, new wait succeeds for new seat, relink back proves original resource slot reclaimed.",
+  "independentReview": "inbox_oauth_friction_1103 original executable now returns typed409; source and real holder-proof regression reviewed without additional blocker.",
+  "unchangedLimits": [
+    "Immediate Native disconnect cancellation remains unqualified; finite timer reclamation tested.",
+    "No deployment, grants or schema changes."
+  ],
+  "logs": {
+    "before": {
+      "path": "/tmp/room-attention-binding-before-1103.log",
+      "sha256": "c647f59ba8da8503243503e5fe94eb765e12b58314966bb74d837c5777e2c063",
+      "bytes": 1394
+    },
+    "after": {
+      "path": "/tmp/room-attention-binding-after-1103.log",
+      "sha256": "e5852fa8e19ee3039aad5e90a5c712810de1cda17b9cb6ff19ba669527e88c8a",
+      "bytes": 10303
+    },
+    "native": {
+      "path": "/tmp/room-attention-binding-native-1103.log",
+      "sha256": "c64accd6dd9813159df9cc0769e239d6dcc281d8843dac7c4b4b9a084730bba4",
+      "bytes": 4509
+    },
+    "manifest": {
+      "path": "/tmp/room-attention-binding-manifest-1103.log",
+      "sha256": "a9bcf5c3a494fcdfa3de9fb6b1ea8050c4905e76359c189ad2e3bf8b840e2b66",
+      "bytes": 690
+    }
+  }
+}

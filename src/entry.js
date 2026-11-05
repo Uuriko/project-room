@@ -19,7 +19,17 @@ async function openWorkspace(options) {
       const session = await accountClient.restore();
       if (session?.authenticated && session.account.id === accountId) options = { accountClient, signedIn: true };
     }
-    const [workspace] = await Promise.all([import("./app.js"), import("./request-access.js")]);
+    // The callback has finished setting its Strict cookie. Start the small
+    // account restore alongside the workspace download, not after the entire
+    // application module graph. Reuse this client to avoid a duplicate read.
+    const googleReturn = !options && new URLSearchParams(location.search).get("google") === "signed-in";
+    const accountFlight = googleReturn ? import("./account-client.js").then(async ({ AccountClient }) => {
+      const accountClient = new AccountClient();
+      await accountClient.restore();
+      return accountClient;
+    }) : Promise.resolve(null);
+    const [workspace, , restoredAccount] = await Promise.all([import("./app.js"), import("./request-access.js"), accountFlight]);
+    if (restoredAccount) options = { accountClient: restoredAccount };
     dispose();
     await workspace.startApp(options);
     try { sessionStorage.removeItem(resumeKey); } catch { /* No stored continuation. */ }
@@ -53,6 +63,21 @@ function needsWorkspace() {
     return ["pr-pending-invite", "pr-pending-join", "project-room:oauth-return:v1", resumeKey]
       .some(key => sessionStorage.getItem(key));
   } catch { return false; }
+}
+
+// Register the push service worker on ordinary app load (R-25: the
+// push-only gating was unintended). Until now the sole registration lived
+// inside subscribe() in human-push.js, so a visitor who never entered the
+// push flow got no worker: no offline shell and no worker-managed upgrade
+// path. Registration alone never prompts and never subscribes — push
+// subscription still happens only in human-push.js, after the browser
+// permission grant in its existing user-gesture flow. Registering the same
+// script URL and scope again there returns the same registration.
+// Registration failure (unsupported browser, blocked worker) must never
+// break app load, so it is fire-and-forget with the rejection swallowed.
+if ("serviceWorker" in navigator) {
+  const worker = new URL("../push-sw.js", import.meta.url);
+  void navigator.serviceWorker.register(worker.href, { scope: new URL("./", worker).pathname }).catch(() => {});
 }
 
 // Complex entry journeys keep their existing ownership and restoration order.

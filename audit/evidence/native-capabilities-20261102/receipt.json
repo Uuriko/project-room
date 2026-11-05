@@ -1,0 +1,70 @@
+{
+  "source": "8c38bbaa7c379ae3718d193b731fa2a820d2ba52",
+  "base": "cd165979753e04db1a66c724dedce81f21adf418",
+  "node": "v24.22.1",
+  "nativeWorkerExecuted": false,
+  "results": {
+    "before": {
+      "tests": 2,
+      "pass": 1,
+      "fail": 1,
+      "exit": 1
+    },
+    "after": {
+      "tests": 6,
+      "pass": 6,
+      "skip": 0,
+      "exit": 0
+    }
+  },
+  "sha256": {
+    "server/current-room-repository.mjs": "ff1b915299e5c66b57d4752b4009810074fa8dedefb7dc0a6c98e3b7e28a3c98",
+    "server/store.mjs": "e681a8a56637dc3834dd7a5658ae4afa5a553d7844d6b6d824997c8aa741029b",
+    "tests/current-capabilities.test.mjs": "af956372aef255036707ea5e982e3fefbdbe9977f830ae2be3d82aefd7e51b8c",
+    "tests/agent-capabilities-http.test.js": "2c34aa146c5f904316731b9d1287c126204f2764389586f8c297ff8fb6f34ee1"
+  },
+  "logs": [
+    {
+      "file": "before.log.gz",
+      "original": "/tmp/native-capabilities-before-1102.log",
+      "exit": 1,
+      "bytes": 2700,
+      "sha256": "27246d3224e71bb382d9e9da5899bcf7eb8df59e6cbafa076d096ebfd106139c"
+    },
+    {
+      "file": "initial-after.log.gz",
+      "original": "/tmp/native-capabilities-after-1102.log",
+      "exit": 0,
+      "bytes": 5281,
+      "sha256": "b58610bda030e7530f955e8934d5ed4a140bd2be064ec7635c52e23a4f5df27a"
+    },
+    {
+      "file": "ordinary-steer-refusal.log.gz",
+      "original": "/tmp/native-capabilities-final-1102.log",
+      "exit": 1,
+      "bytes": 6661,
+      "sha256": "f6f98d3f932cfe4bac4b420adfa881b9dec2216a69ea9bda29a9a329bf855348"
+    },
+    {
+      "file": "final.log.gz",
+      "original": "/tmp/native-capabilities-final-v2-1102.log",
+      "exit": 0,
+      "bytes": 5283,
+      "sha256": "275c7ee53061305841e9bf7f5bee3c401258123f039af619e7701451423a15ab"
+    },
+    {
+      "file": "lint.log.gz",
+      "original": "/tmp/native-capabilities-lint-final-1102.log",
+      "exit": 0,
+      "bytes": 6290,
+      "sha256": "24729f798bcdf8209b3999b8e6fc53a2d830a73a9e44a2cdf03fb226e0e6d762"
+    },
+    {
+      "file": "secrets.log.gz",
+      "original": "/tmp/native-capabilities-secrets-final-1102.log",
+      "exit": 0,
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  ]
+}

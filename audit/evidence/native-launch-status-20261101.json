@@ -1,0 +1,68 @@
+{
+  "base": "0908cbcb76797601e878ee9f1f3b93bcb4afbfa1",
+  "runtimeSource": "f528a5da33a2dbc0dec5703f078c51f6e595d4b5",
+  "originalRed": "86ebf630c",
+  "scope": "Existing native child/status lifecycle only. No provider/model, grant changes, credential imports, automatic lock clearing, new execution system, installed app mutation or live Room.",
+  "failureChannel": {
+    "profile_lock_requires_reconciliation": 70,
+    "login_required": 71,
+    "invalid_runtime": 72
+  },
+  "behavior": [
+    "Only locally typed failures become native setup codes; provider error codes/raw error text are not used.",
+    "Existing private status record accepts only exact scalar string allowlist codes and retains them through stopped cleanup.",
+    "Released ownership never produces fresh readiness; replacement owner/stale live record cannot inherit previous failure.",
+    "Pre-status config failure uses closed wrapper exit code, mapped only from the actual owned child normal exit.",
+    "Swift keeps static code/message after cleanup; known failure is setup_failed, not confirmed_stop; nonzero unknown exits stay unconfirmed.",
+    "Successful new start/reconfiguration clears prior terminal reason; verified positive readiness clears recovered JS status reason."
+  ],
+  "checks": {
+    "node": {
+      "command": "node --test tests/codex-host-launch-failure.test.js tests/codex-host-status.test.js tests/codex-stdio.test.js",
+      "exitCode": 0,
+      "pass": 35,
+      "fail": 0
+    },
+    "swiftHelper": {
+      "compile": "/usr/bin/swiftc desktop/macos/Sources/ProjectRoomKit/LocalRoomHostFailure.swift desktop/macos/Tests/LocalRoomHostFailureCheck.swift -o /tmp/room-host-failure-check-1101",
+      "compileExitCode": 0,
+      "runExitCode": 0,
+      "scope": "Pure allowlist/owned-normal-exit mapping; not full native app build"
+    },
+    "lint": {
+      "command": "node scripts/lint.mjs",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 335
+    },
+    "fullNativeAcceptance": {
+      "status": "not_run_by_this_lane",
+      "command": "swift run --package-path desktop/macos LocalRoomHostAcceptance",
+      "owner": "root integration/native build",
+      "newCases": [
+        "profile lock terminal status",
+        "login terminal status",
+        "invalid config before status file",
+        "private diagnostic/unknown code exclusion",
+        "later start clears old failure",
+        "unknown nonzero exit not a confirmed stop"
+      ]
+    }
+  },
+  "logs": {
+    "/tmp/native-launch-0908-original-red.log": "d90886cbfa96de5394d08ddc411a859c604d3064d1d3bec15157788c18a35cc2",
+    "/tmp/native-launch-node-final.log": "14dcb973ef66c539ed5696a25cc125883ca2e267a31a29135af71abec9519712",
+    "/tmp/native-launch-swift-helper.log": "0394a103916d780af4e8786687d65b4d5daf38592850fbeb0cee9292bf69eada",
+    "/tmp/native-launch-lint.log": "001a94a0b8df310d9ff8ba06b499f46c27df767c207a3b8d4ff8ee7ac4177cbf"
+  },
+  "sourceSha256": {
+    "client/codex-host-status.mjs": "3c2f070606107c79b7dcffe02ba583032625ac26e24d7d25ce56dd9e430220f4",
+    "client/codex-stdio.mjs": "a1f171a7dfb97d2c3d9c61874ca25c1b21095236d9e30058749b6c883e630525",
+    "scripts/run-codex-room.mjs": "605a630f0c5d6043e59742962873fa2746ec925d5906f388ac8f837cb01d9ec6",
+    "desktop/macos/Sources/ProjectRoomKit/LocalRoomHost.swift": "9d6171bc1c2ed7cb0a11cd54552bc3396e8acdd14c0eeb135bdb7df488493303",
+    "desktop/macos/Sources/ProjectRoomKit/LocalRoomHostFailure.swift": "00048125a6471a040cf4af25edaaf4de9759c8947562036b92e5d6fd5e7de81b",
+    "desktop/macos/Sources/LocalRoomHostAcceptance/main.swift": "58790b8b01f6037126b30cd46593be0a1dde9eb6d2be0bc0ff393803470d0def",
+    "desktop/macos/Tests/LocalRoomHostFailureCheck.swift": "c8d7f0fc852060e79991a267717c72835e4fd81ece58fdf3d583b7953d6fae2b",
+    "tests/codex-host-launch-failure.test.js": "f2feede467f37f607c775254302f52872bae496867ae89ab5136dcff62cc2b27"
+  }
+}

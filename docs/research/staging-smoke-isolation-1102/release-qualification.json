@@ -1,0 +1,24 @@
+{
+  "source": "e2150938f",
+  "base": "b6917a237004f994f60731d3d0ab9f4130e4e27a",
+  "mainCIRun": 41381849413,
+  "mainUnit": {
+    "passed": 13960,
+    "failed": 1,
+    "skipped": 12,
+    "failure": "deployment entry-door expected vars omitted intentional ROOM_PATROL_ENABLED=0"
+  },
+  "causalLocalBefore": {
+    "passed": 2,
+    "failed": 1
+  },
+  "composedAfter": {
+    "passed": 9,
+    "failed": 0,
+    "skipped": 0
+  },
+  "helperChecks": 41,
+  "signingAndProductionSmoke": "unchanged",
+  "actualStagingWorkflow": "not yet run",
+  "node": "26.8.2"
+}

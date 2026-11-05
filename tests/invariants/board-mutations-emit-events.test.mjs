@@ -152,27 +152,31 @@ invariantSuite([
     })
     .build(),
 
-  // A vanished PR auto-deletes the board row on refresh: same removed
-  // receipt, so the silent GitHub-side deletion stays observable.
-  invariant("board-mutation-pr-vanished", "land-queue auto-delete on vanished PR appends a removed receipt")
+  // A 404 on a scheduled refresh is NOT a board mutation (RES-0131): the
+  // status also means the repo went private or the token lost access, so
+  // the refresh deletes nothing and appends no receipt — the row and its
+  // mirrored claim survive, and event-replay still reconstructs the board
+  // as it stands. (Before RES-0131 this invariant pinned the opposite:
+  // the refresh auto-deleted the row and appended a removed receipt,
+  // which destroyed established queue items on a transient 404.)
+  invariant("board-mutation-pr-vanished", "land-queue refresh on a 404 deletes nothing and appends no receipt")
     .given(async (f, ctx) => {
       configureBoard(f);
       ctx.item = await addItem(f);
+      ctx.before = roomSequence(f);
       return ctx;
     })
     .when(async (f, ctx) => {
       configureBoard(f, { notFound: true });
-      // The refresh throws pr_not_found after committing the delete; the
-      // refusal is the signal, the receipts are the assertion.
       await f.store.landQueue.refreshDue({ now: Date.now() + 3_600_000 });
       return ctx;
     })
     .then((f, ctx) => {
       const events = landEvents(f);
-      assert.deepEqual(events.map(e => e.data.changed), [["added"], ["removed"]]);
-      const [, removed] = events;
-      assert.equal(removed.data.itemId, ctx.item.itemId);
-      assert.equal(f.store.landQueue.list(ROOM, "owner").items.length, 0, "the row is gone");
+      assert.deepEqual(events.map(e => e.data.changed), [["added"]], "no removed receipt is appended");
+      assert.equal(roomSequence(f), ctx.before, "the 404 refresh commits no board event");
+      assert.equal(f.store.landQueue.list(ROOM, "owner").items.length, 1, "the row survives");
+      assert.ok(f.store.workClaims.get(ROOM, ctx.item.itemId), "the mirrored claim survives");
     })
     .build(),
 

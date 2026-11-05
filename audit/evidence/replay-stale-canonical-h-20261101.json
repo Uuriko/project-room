@@ -1,0 +1,1569 @@
+{
+  "runtimeSource": "e7f016c0f08267907392f56e692e9a1af57778b3",
+  "base": "6a5a5b425",
+  "originalReadOnlyPlanRed": "80356dc12",
+  "contract": {
+    "default": "exact current canonical checkpoint remains required; no silent downgrade",
+    "optional": "explicit current-write-proofs plus reviewed request-bound planHash; current complete membership/all existing row+metadata write proofs; stale historical checkpoint never compared",
+    "history": "unknown, certifiedfalse on plan/capture/qualification/publication",
+    "checkpoint": "exact old tuple preserved in immutable capturecounts_json through cleanup; legacy mutableformat row retired/null at normalized publication as before",
+    "limits": "not DBadmin replacing both data and proofs; no new historical replay or baseline adopted"
+  },
+  "sourceEvidence": [
+    {
+      "path": "server/write-integrity.mjs:1",
+      "finding": "Proofs track code-owned writes and explicitly exclude replacing both data/proofs."
+    },
+    {
+      "path": "server/write-integrity.mjs:14",
+      "finding": "Current metadata hash is foreground authority despite older room baseline."
+    },
+    {
+      "path": "server/write-integrity.mjs:64",
+      "finding": "Ordinary canonical writes validate persisted per-message entity_hash."
+    },
+    {
+      "path": "server/write-integrity.mjs:151",
+      "finding": "Comment explicitly states current metadata covers legitimate writes after older historical baseline."
+    },
+    {
+      "path": "server/message-replay-snapshot.mjs:17",
+      "finding": "Snapshot split SHA detects torn parts; no old global content proof binding or fixed metadata history."
+    },
+    {
+      "path": "server/store.mjs:1733",
+      "finding": "projection_checkpoints only room,sequence,projection; not independent canonical-content authority."
+    },
+    {
+      "path": "server/replay-cutover.mjs:617",
+      "finding": "Existing H snapshot readers verify protected originals or unchanged independent per-row write proofs."
+    }
+  ],
+  "checks": {
+    "node": {
+      "command": "node --test tests/replay-stale-canonical-h.test.mjs tests/replay-current-canonical-h.test.mjs tests/replay-current-h-messages.test.mjs",
+      "exitCode": 0,
+      "pass": 35,
+      "fail": 0
+    },
+    "worker": {
+      "command": "CANONICAL_SCALE=1 node --test cloudflare/stale-canonical-migration-worker.check.mjs",
+      "exitCode": 0,
+      "pass": 1,
+      "fail": 0,
+      "sizes": [
+        1000,
+        5000
+      ]
+    },
+    "lint": {
+      "command": "node scripts/lint.mjs",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 339
+    }
+  },
+  "costScope": "adapter SQL and separately raw runtime permit updates; capture24 intentionally failed size probes unknown; fault/state/audit fixture endpoints include diagnostic full censuses; old seed integrity work outside boundedunits; finite arrivals not sustainedcapacity",
+  "logs": {
+    "/tmp/replay-stale-valid-plan-original-red.log": "8203a4d4e8c5e5398638cab5cd4f92a8303d0df38f7e1e62bc3ddb131bb3c15a",
+    "/tmp/replay-stale-node-final.log": "f9443d961176cf0009c3bc42181ac7c89d987d22cb7fc0fe453231c7dd7fde6b",
+    "/tmp/replay-stale-worker-scale.log": "e782aa3664a998283de8f456b281980be8a2b16db61144a0b07411fa1554e246",
+    "/tmp/replay-stale-lint.log": "b3422aec9e3b6acb7c2c8d0b863545ea6fb3420934e2861d5ab2107f729ec32a"
+  },
+  "sourceSha256": {
+    "server/replay-canonical-plan.mjs": "8a286586c2f685c076d4af5acfb7a6005ef288c92f93eeed9f8e9a0612bf6d6c",
+    "server/replay-canonical-h.mjs": "5a650a24e2bef5fdfcb0253777a4c9e4de91293b8e0110a60d2eb5444abc033e",
+    "server/replay-cutover.mjs": "56bf57c48df560ee13318b903bff17564cf4dd3b11876f704919a177b912ceeb",
+    "server/current-room-repository.mjs": "d5bddbc7e474125db0cec4b3f69eee73c9342a2ee597e9c0681810ceeaa38b43",
+    "server/write-integrity.mjs": "5a801eeeeb34a6ca137281501745e3c6011460aee7ad3b3e68789a39a3c3a0b1",
+    "tests/replay-stale-canonical-h.test.mjs": "ed41bd8c3a6bc2f0535eba1212412d478c1ab93022e14398b817a0ac30c44db3",
+    "cloudflare/stale-canonical-migration-worker.check.mjs": "c2ad0a23d81cc587b73d3f62f624be5241ce3239bf467b3b825fa056d639c1cf",
+    "cloudflare/stale-canonical-migration-worker.test-fixture.mjs": "8b1c9a4d765e3752e1df3a98f43bb4165b2d2c10563c387ac517ef2eea2d7b0d"
+  },
+  "measurements": [
+    {
+      "count": 1000,
+      "plan": {
+        "version": 1,
+        "roomId": "commons",
+        "expectedHead": 1004,
+        "contentBasis": "current-write-proofs",
+        "metadataHash": "10738e700649a46b35f0604e376bc980d0542945bfda72c9654c4ebe3ae30c5a",
+        "historicalCheckpoint": {
+          "sequence": 1003,
+          "contentHash": "f0142df02b02a3d360d04ff002ff5b196f54e839ad60dc97871b138f127a4764"
+        },
+        "checkpointComparison": "unavailable-stale",
+        "historyProvenance": "unknown",
+        "certified": false,
+        "proofLimits": [
+          "Qualifies complete current membership and existing code-owned row and metadata write proofs.",
+          "The computed current digest is not compared with the stale historical checkpoint.",
+          "Does not defend against a database administrator replacing both data and write proofs.",
+          "Preserves the original historical checkpoint; never certifies or adopts old history."
+        ],
+        "planHash": "95af23f8b2bf17407df870dd68aec74b7a5af9eeb6f5b5a684855f2a02a34a81"
+      },
+      "capture": {
+        "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+        "targetHead": {
+          "room_id": "commons",
+          "sequence": 1004,
+          "event_id": "e3dbc7d4-d40b-4f22-ac39-fb9095365458",
+          "revision": 0,
+          "counts_json": "{\"messages\":0,\"workItems\":0,\"replyRequests\":0,\"members\":0,\"roundLimitPauses\":0,\"threadParticipants\":0,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":1,\"metadataProofs\":1}",
+          "format_version": 1,
+          "head_sha256": "adfbd2bae5289e5059a5a1e45f29f5af406f767630f12f464e8fc41f463a9fa5",
+          "receipt_id": "oa_current_c464e9c60637ea99eb2cce75f8c5b502e15a64e29c68d76df992633749c2b4f6",
+          "counts": {
+            "messages": 0,
+            "workItems": 0,
+            "replyRequests": 0,
+            "members": 0,
+            "roundLimitPauses": 0,
+            "threadParticipants": 0,
+            "historyFloors": 0,
+            "historyExclusions": 0,
+            "metadataRecords": 1,
+            "metadataProofs": 1
+          }
+        },
+        "bindingHash": "a705790f0d65f0af6ef2368bfbe4ec82e29a629465de4eb803ef58553b5c9bae",
+        "hashStateHash": "546d8f7d72f5773899ebed2587ac6a9b51b23cec146be52f25611865a38e73cf",
+        "sourceRoot": "55994772ffd40787ecad98426aadae4b58907eeadcc6aa32bb49c1e6a5abc0b9",
+        "codecStateHash": "f7e1e3e49e2179f66484fbe026f8f542844637f4c2001b54ca69ccfc9ba58a14",
+        "head": 1004,
+        "bytes": 920,
+        "phase": "captured",
+        "publication": "pending",
+        "certified": false,
+        "contentProof": {
+          "basis": "current-write-proofs",
+          "planHash": "95af23f8b2bf17407df870dd68aec74b7a5af9eeb6f5b5a684855f2a02a34a81",
+          "checkpointComparison": "unavailable-stale",
+          "historicalCheckpoint": {
+            "sequence": 1003,
+            "contentHash": "f0142df02b02a3d360d04ff002ff5b196f54e839ad60dc97871b138f127a4764"
+          }
+        },
+        "historyProvenance": "unknown",
+        "schemaDefinitionBindingBytes": 62839,
+        "fingerprint": "436d4fae098d109c0b870a3010e9430acee31bb213715f0ead82491a717ab8c1",
+        "duplicate": false
+      },
+      "stages": {
+        "capture": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "hash": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 61,
+            "rowsRead": 62,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 61,
+            "rowsRead": 62,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "restart-hash-retry": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "codec": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 107,
+            "rowsRead": 15641,
+            "rowsWritten": 67,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 107,
+            "rowsRead": 15641,
+            "rowsWritten": 67,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 82797
+        },
+        "work": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 40,
+            "rowsRead": 44,
+            "rowsWritten": 4,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 40,
+            "rowsRead": 44,
+            "rowsWritten": 4,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 86384
+        },
+        "messages": {
+          "calls": 1006,
+          "maxAdapter": {
+            "statements": 80,
+            "rowsRead": 949,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 80,
+            "rowsRead": 949,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 152346
+        },
+        "fault": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 64,
+            "rowsRead": 6371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 64,
+            "rowsRead": 6371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "arrival": {
+          "calls": 10,
+          "maxAdapter": {
+            "statements": 68,
+            "rowsRead": 2851,
+            "rowsWritten": 34,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 68,
+            "rowsRead": 2851,
+            "rowsWritten": 34,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "current": {
+          "calls": 2047,
+          "maxAdapter": {
+            "statements": 164,
+            "rowsRead": 16516,
+            "rowsWritten": 23,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 54,
+            "rowsRead": 16369,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 209345
+        },
+        "publication-fault": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 73,
+            "rowsRead": 18960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 73,
+            "rowsRead": 18960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "publication-fault-restart": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 15,
+            "rowsRead": 10151,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 15,
+            "rowsRead": 10151,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        }
+      },
+      "samples": [
+        {
+          "stage": "capture",
+          "result": {
+            "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+            "targetHead": {
+              "room_id": "commons",
+              "sequence": 1004,
+              "event_id": "e3dbc7d4-d40b-4f22-ac39-fb9095365458",
+              "revision": 0,
+              "counts_json": "{\"messages\":0,\"workItems\":0,\"replyRequests\":0,\"members\":0,\"roundLimitPauses\":0,\"threadParticipants\":0,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":1,\"metadataProofs\":1}",
+              "format_version": 1,
+              "head_sha256": "adfbd2bae5289e5059a5a1e45f29f5af406f767630f12f464e8fc41f463a9fa5",
+              "receipt_id": "oa_current_c464e9c60637ea99eb2cce75f8c5b502e15a64e29c68d76df992633749c2b4f6",
+              "counts": {
+                "messages": 0,
+                "workItems": 0,
+                "replyRequests": 0,
+                "members": 0,
+                "roundLimitPauses": 0,
+                "threadParticipants": 0,
+                "historyFloors": 0,
+                "historyExclusions": 0,
+                "metadataRecords": 1,
+                "metadataProofs": 1
+              }
+            },
+            "bindingHash": "a705790f0d65f0af6ef2368bfbe4ec82e29a629465de4eb803ef58553b5c9bae",
+            "hashStateHash": "546d8f7d72f5773899ebed2587ac6a9b51b23cec146be52f25611865a38e73cf",
+            "sourceRoot": "55994772ffd40787ecad98426aadae4b58907eeadcc6aa32bb49c1e6a5abc0b9",
+            "codecStateHash": "f7e1e3e49e2179f66484fbe026f8f542844637f4c2001b54ca69ccfc9ba58a14",
+            "head": 1004,
+            "bytes": 920,
+            "phase": "captured",
+            "publication": "pending",
+            "certified": false,
+            "contentProof": {
+              "basis": "current-write-proofs",
+              "planHash": "95af23f8b2bf17407df870dd68aec74b7a5af9eeb6f5b5a684855f2a02a34a81",
+              "checkpointComparison": "unavailable-stale",
+              "historicalCheckpoint": {
+                "sequence": 1003,
+                "contentHash": "f0142df02b02a3d360d04ff002ff5b196f54e839ad60dc97871b138f127a4764"
+              }
+            },
+            "historyProvenance": "unknown",
+            "schemaDefinitionBindingBytes": 62839,
+            "fingerprint": "436d4fae098d109c0b870a3010e9430acee31bb213715f0ead82491a717ab8c1",
+            "duplicate": false
+          },
+          "cost": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "sqlErrors": [
+            {
+              "sql": "ALTER TABLE agent_room_ownership ADD COLUMN request_id TEXT",
+              "message": "duplicate column name: request_id: SQLITE_ERROR"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            }
+          ],
+          "startup": {
+            "statements": 627,
+            "rowsRead": 115334,
+            "rowsWritten": 416,
+            "unknown": 1
+          }
+        },
+        {
+          "stage": "restart-hash-retry",
+          "result": {
+            "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+            "bindingHash": "a705790f0d65f0af6ef2368bfbe4ec82e29a629465de4eb803ef58553b5c9bae",
+            "hashStateHash": "9dd23073de5e399c128917de73fe16e9550f49bab928cc51a9afc1729234f112",
+            "sourceChunk": {
+              "offset": 0,
+              "length": 920,
+              "sha256": "10738e700649a46b35f0604e376bc980d0542945bfda72c9654c4ebe3ae30c5a"
+            },
+            "sourceRoot": "a53bfc3b0ea71404228c62f8a5f4ee9f14cfe6c77a42fb4a9963e2eb851389c5",
+            "head": 1004,
+            "bytes": 920,
+            "phase": "witness_verified",
+            "publication": "pending",
+            "certified": false,
+            "schemaDefinitionBindingBytes": 62839,
+            "fingerprint": "629cfc0d97e224d8a702f9f67e48c46ae009bc953952799f6dbc6d1028bdfa37",
+            "duplicate": true
+          },
+          "cost": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4315,
+            "rowsWritten": 4,
+            "unknown": 0
+          }
+        },
+        {
+          "stage": "fault",
+          "result": {
+            "fault": "synthetic interrupted receipt save",
+            "fired": true,
+            "unchanged": true
+          },
+          "cost": {
+            "statements": 64,
+            "rowsRead": 6371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 1,
+            "rowsWritten": 1,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4315,
+            "rowsWritten": 4,
+            "unknown": 0
+          }
+        },
+        {
+          "stage": "publication-fault",
+          "result": {
+            "fault": "synthetic interrupted receipt save",
+            "fired": true,
+            "unchanged": true
+          },
+          "cost": {
+            "statements": 73,
+            "rowsRead": 18960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 1,
+            "rowsWritten": 1,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 28,
+            "rowsRead": 4313,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        }
+      ],
+      "state": {
+        "result": {
+          "head": {
+            "room_id": "commons",
+            "format_version": 1,
+            "sequence": 1014,
+            "event_id": "d9009cdb-9863-43c5-a4f1-3f59fac5c915",
+            "revision": 1021,
+            "head_sha256": "07aa43fa8f52d637eb387e400ceb42a7d61689affe51a6b5f4ae24a312b72012",
+            "counts_json": "{\"messages\":1011,\"workItems\":0,\"replyRequests\":0,\"members\":1,\"roundLimitPauses\":0,\"threadParticipants\":3,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":1023,\"metadataProofs\":1024}",
+            "receipt_id": "oa_current_0eb2757bc246b9b62af4c3bf5f66ebe9d2a0613e503c1b7d51d52ed9af679cd7",
+            "counts": {
+              "messages": 1011,
+              "workItems": 0,
+              "replyRequests": 0,
+              "members": 1,
+              "roundLimitPauses": 0,
+              "threadParticipants": 3,
+              "historyFloors": 0,
+              "historyExclusions": 0,
+              "metadataRecords": 1023,
+              "metadataProofs": 1024
+            }
+          },
+          "sourceHead": 1014,
+          "projection": {
+            "normalizedCurrent": {
+              "version": 1,
+              "headRevision": 1021,
+              "headHash": "07aa43fa8f52d637eb387e400ceb42a7d61689affe51a6b5f4ae24a312b72012"
+            }
+          },
+          "permit": {
+            "singleton": 1,
+            "enabled": 0,
+            "room_id": null,
+            "receipt_id": null
+          },
+          "counts": {
+            "rooms": 1,
+            "events": 1014,
+            "messages": 1011,
+            "operator_actions": 6164,
+            "message_replay_units": 78,
+            "current_room_head": 1,
+            "current_room_records": 1023
+          }
+        },
+        "cost": {
+          "statements": 19,
+          "rowsRead": 9392,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "post": {
+        "result": {
+          "sequence": 1015,
+          "event": {
+            "id": "02530786-495c-451b-a2e7-647cde4c3221",
+            "idempotencyKey": "2801994c290e10e11370f00372c25a9bb73b23ccb8ff4c6032f8f820ec0fc3d9",
+            "roomId": "commons",
+            "type": "message.posted",
+            "actorId": "owner",
+            "at": "2026-11-01T20:43:12.149Z",
+            "causationId": null,
+            "data": {
+              "messageId": "after-normalized",
+              "body": "Useful admitted after-normalized",
+              "replyToId": "root-0000"
+            }
+          },
+          "duplicate": false
+        },
+        "cost": {
+          "statements": 136,
+          "rowsRead": 268,
+          "rowsWritten": 33,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "result": {
+          "sequence": 1015,
+          "event": {
+            "id": "02530786-495c-451b-a2e7-647cde4c3221",
+            "idempotencyKey": "2801994c290e10e11370f00372c25a9bb73b23ccb8ff4c6032f8f820ec0fc3d9",
+            "roomId": "commons",
+            "type": "message.posted",
+            "actorId": "owner",
+            "at": "2026-11-01T20:43:12.149Z",
+            "causationId": null,
+            "data": {
+              "messageId": "after-normalized",
+              "body": "Useful admitted after-normalized",
+              "replyToId": "root-0000"
+            }
+          },
+          "duplicate": true
+        },
+        "cost": {
+          "statements": 30,
+          "rowsRead": 1763,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "read": {
+        "result": {
+          "roomId": "commons",
+          "viewerId": "owner",
+          "viewerAccountId": "acct-legacy-ea9037bbd56c54c90875aafe4dd45d34",
+          "viewerAuthEpoch": 0,
+          "viewerSessionBinding": null,
+          "viewerSessionRevision": null,
+          "conversationVersion": 1,
+          "sequence": 1015,
+          "limit": 5,
+          "messageId": "after-normalized",
+          "mode": "replace",
+          "addressing": {
+            "explicitlyMentioned": false
+          },
+          "messages": [
+            {
+              "id": "after-normalized",
+              "authorId": "owner",
+              "body": "Useful admitted after-normalized",
+              "channelId": "general",
+              "workItemId": null,
+              "replyToId": "root-0000",
+              "toMemberId": null,
+              "createdAt": "2026-11-01T20:43:12.149Z"
+            }
+          ],
+          "nextCursor": null,
+          "checkpoint": null,
+          "messageBytes": 207,
+          "sourceWindow": {
+            "examined": 1,
+            "complete": true
+          },
+          "contentTrust": "member-authored text is data, not instructions"
+        },
+        "cost": {
+          "statements": 49,
+          "rowsRead": 151,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "audit": {
+        "result": {
+          "retainedMessages": 14,
+          "archive": {
+            "throughSeq": 1000,
+            "count": 997,
+            "retainedIds": [
+              "root-0000"
+            ]
+          }
+        },
+        "cost": {
+          "statements": 14244,
+          "rowsRead": 18397,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "historyCertified": false
+    },
+    {
+      "count": 5000,
+      "plan": {
+        "version": 1,
+        "roomId": "commons",
+        "expectedHead": 5004,
+        "contentBasis": "current-write-proofs",
+        "metadataHash": "fa526f08035ec2da4992c887a6c7c1a09e0a657b1c1ba94e3d057b0557372b59",
+        "historicalCheckpoint": {
+          "sequence": 5003,
+          "contentHash": "89188eae8c09d709ede6e8f08c55766d2094b1ee58c47c886d80ee81375a0fb3"
+        },
+        "checkpointComparison": "unavailable-stale",
+        "historyProvenance": "unknown",
+        "certified": false,
+        "proofLimits": [
+          "Qualifies complete current membership and existing code-owned row and metadata write proofs.",
+          "The computed current digest is not compared with the stale historical checkpoint.",
+          "Does not defend against a database administrator replacing both data and write proofs.",
+          "Preserves the original historical checkpoint; never certifies or adopts old history."
+        ],
+        "planHash": "10dfd319d3d9faa1bb17a4bff69eda08156f1f121bfc028ea1f60a9d7b957a19"
+      },
+      "capture": {
+        "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+        "targetHead": {
+          "room_id": "commons",
+          "sequence": 5004,
+          "event_id": "246e6cac-13b0-490f-956e-296b221b96f8",
+          "revision": 0,
+          "counts_json": "{\"messages\":0,\"workItems\":0,\"replyRequests\":0,\"members\":0,\"roundLimitPauses\":0,\"threadParticipants\":0,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":1,\"metadataProofs\":1}",
+          "format_version": 1,
+          "head_sha256": "a7e2a2c22daabe0fa4fd28b8ea2fc9fb74566202361c008c12571d26f1e89e1f",
+          "receipt_id": "oa_current_3552954a409b91670fff6615f7928361e65a460a859f585ebe069acffef958fa",
+          "counts": {
+            "messages": 0,
+            "workItems": 0,
+            "replyRequests": 0,
+            "members": 0,
+            "roundLimitPauses": 0,
+            "threadParticipants": 0,
+            "historyFloors": 0,
+            "historyExclusions": 0,
+            "metadataRecords": 1,
+            "metadataProofs": 1
+          }
+        },
+        "bindingHash": "66f4a5f25f1f3587e9ab35365dcf534382311f418ae09a8df50cb50d85b9b552",
+        "hashStateHash": "546d8f7d72f5773899ebed2587ac6a9b51b23cec146be52f25611865a38e73cf",
+        "sourceRoot": "55994772ffd40787ecad98426aadae4b58907eeadcc6aa32bb49c1e6a5abc0b9",
+        "codecStateHash": "f7e1e3e49e2179f66484fbe026f8f542844637f4c2001b54ca69ccfc9ba58a14",
+        "head": 5004,
+        "bytes": 921,
+        "phase": "captured",
+        "publication": "pending",
+        "certified": false,
+        "contentProof": {
+          "basis": "current-write-proofs",
+          "planHash": "10dfd319d3d9faa1bb17a4bff69eda08156f1f121bfc028ea1f60a9d7b957a19",
+          "checkpointComparison": "unavailable-stale",
+          "historicalCheckpoint": {
+            "sequence": 5003,
+            "contentHash": "89188eae8c09d709ede6e8f08c55766d2094b1ee58c47c886d80ee81375a0fb3"
+          }
+        },
+        "historyProvenance": "unknown",
+        "schemaDefinitionBindingBytes": 62839,
+        "fingerprint": "3c47638df2b0773cb38d9270c339d48a4854b254aeaac8762741d2ca62939762",
+        "duplicate": false
+      },
+      "stages": {
+        "capture": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "hash": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 61,
+            "rowsRead": 62,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 61,
+            "rowsRead": 62,
+            "rowsWritten": 21,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "restart-hash-retry": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "codec": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 107,
+            "rowsRead": 15641,
+            "rowsWritten": 67,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 107,
+            "rowsRead": 15641,
+            "rowsWritten": 67,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 82801
+        },
+        "work": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 40,
+            "rowsRead": 44,
+            "rowsWritten": 4,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 40,
+            "rowsRead": 44,
+            "rowsWritten": 4,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 86384
+        },
+        "messages": {
+          "calls": 5006,
+          "maxAdapter": {
+            "statements": 80,
+            "rowsRead": 949,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 80,
+            "rowsRead": 949,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 152347
+        },
+        "fault": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 64,
+            "rowsRead": 30371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 64,
+            "rowsRead": 30371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "arrival": {
+          "calls": 10,
+          "maxAdapter": {
+            "statements": 68,
+            "rowsRead": 6851,
+            "rowsWritten": 34,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 68,
+            "rowsRead": 6851,
+            "rowsWritten": 34,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "current": {
+          "calls": 10047,
+          "maxAdapter": {
+            "statements": 164,
+            "rowsRead": 16516,
+            "rowsWritten": 23,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 54,
+            "rowsRead": 16369,
+            "rowsWritten": 15,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 209353
+        },
+        "publication-fault": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 73,
+            "rowsRead": 90960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 73,
+            "rowsRead": 90960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        },
+        "publication-fault-restart": {
+          "calls": 1,
+          "maxAdapter": {
+            "statements": 15,
+            "rowsRead": 46151,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "firstAdapter": {
+            "statements": 15,
+            "rowsRead": 46151,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "maxDeclaredInput": 0
+        }
+      },
+      "samples": [
+        {
+          "stage": "capture",
+          "result": {
+            "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+            "targetHead": {
+              "room_id": "commons",
+              "sequence": 5004,
+              "event_id": "246e6cac-13b0-490f-956e-296b221b96f8",
+              "revision": 0,
+              "counts_json": "{\"messages\":0,\"workItems\":0,\"replyRequests\":0,\"members\":0,\"roundLimitPauses\":0,\"threadParticipants\":0,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":1,\"metadataProofs\":1}",
+              "format_version": 1,
+              "head_sha256": "a7e2a2c22daabe0fa4fd28b8ea2fc9fb74566202361c008c12571d26f1e89e1f",
+              "receipt_id": "oa_current_3552954a409b91670fff6615f7928361e65a460a859f585ebe069acffef958fa",
+              "counts": {
+                "messages": 0,
+                "workItems": 0,
+                "replyRequests": 0,
+                "members": 0,
+                "roundLimitPauses": 0,
+                "threadParticipants": 0,
+                "historyFloors": 0,
+                "historyExclusions": 0,
+                "metadataRecords": 1,
+                "metadataProofs": 1
+              }
+            },
+            "bindingHash": "66f4a5f25f1f3587e9ab35365dcf534382311f418ae09a8df50cb50d85b9b552",
+            "hashStateHash": "546d8f7d72f5773899ebed2587ac6a9b51b23cec146be52f25611865a38e73cf",
+            "sourceRoot": "55994772ffd40787ecad98426aadae4b58907eeadcc6aa32bb49c1e6a5abc0b9",
+            "codecStateHash": "f7e1e3e49e2179f66484fbe026f8f542844637f4c2001b54ca69ccfc9ba58a14",
+            "head": 5004,
+            "bytes": 921,
+            "phase": "captured",
+            "publication": "pending",
+            "certified": false,
+            "contentProof": {
+              "basis": "current-write-proofs",
+              "planHash": "10dfd319d3d9faa1bb17a4bff69eda08156f1f121bfc028ea1f60a9d7b957a19",
+              "checkpointComparison": "unavailable-stale",
+              "historicalCheckpoint": {
+                "sequence": 5003,
+                "contentHash": "89188eae8c09d709ede6e8f08c55766d2094b1ee58c47c886d80ee81375a0fb3"
+              }
+            },
+            "historyProvenance": "unknown",
+            "schemaDefinitionBindingBytes": 62839,
+            "fingerprint": "3c47638df2b0773cb38d9270c339d48a4854b254aeaac8762741d2ca62939762",
+            "duplicate": false
+          },
+          "cost": {
+            "statements": 53,
+            "rowsRead": 934,
+            "rowsWritten": 26,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "sqlErrors": [
+            {
+              "sql": "ALTER TABLE agent_room_ownership ADD COLUMN request_id TEXT",
+              "message": "duplicate column name: request_id: SQLITE_ERROR"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            },
+            {
+              "sql": "SELECT length(zeroblob(?)) AS n",
+              "message": "string or blob too big: SQLITE_TOOBIG"
+            }
+          ],
+          "startup": {
+            "statements": 627,
+            "rowsRead": 115334,
+            "rowsWritten": 416,
+            "unknown": 1
+          }
+        },
+        {
+          "stage": "restart-hash-retry",
+          "result": {
+            "generation": "0d27bad3ea7fceac02c83b9eba9dd0e41b4d61aea58feefff7e4e12d20377992",
+            "bindingHash": "66f4a5f25f1f3587e9ab35365dcf534382311f418ae09a8df50cb50d85b9b552",
+            "hashStateHash": "8f163f80e820e1ddb37bfcc064347ca771c3ca3135c4fe590e937df3687462d9",
+            "sourceChunk": {
+              "offset": 0,
+              "length": 921,
+              "sha256": "fa526f08035ec2da4992c887a6c7c1a09e0a657b1c1ba94e3d057b0557372b59"
+            },
+            "sourceRoot": "0df008533847f44b356ec837f0f1281bc2aa1885555d9563be5f0d6830cac89a",
+            "head": 5004,
+            "bytes": 921,
+            "phase": "witness_verified",
+            "publication": "pending",
+            "certified": false,
+            "schemaDefinitionBindingBytes": 62839,
+            "fingerprint": "629cfc0d97e224d8a702f9f67e48c46ae009bc953952799f6dbc6d1028bdfa37",
+            "duplicate": true
+          },
+          "cost": {
+            "statements": 4,
+            "rowsRead": 862,
+            "rowsWritten": 0,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4315,
+            "rowsWritten": 4,
+            "unknown": 0
+          }
+        },
+        {
+          "stage": "fault",
+          "result": {
+            "fault": "synthetic interrupted receipt save",
+            "fired": true,
+            "unchanged": true
+          },
+          "cost": {
+            "statements": 64,
+            "rowsRead": 30371,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 1,
+            "rowsWritten": 1,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4315,
+            "rowsWritten": 4,
+            "unknown": 0
+          }
+        },
+        {
+          "stage": "publication-fault",
+          "result": {
+            "fault": "synthetic interrupted receipt save",
+            "fired": true,
+            "unchanged": true
+          },
+          "cost": {
+            "statements": 73,
+            "rowsRead": 90960,
+            "rowsWritten": 8,
+            "unknown": 0
+          },
+          "rawRuntime": {
+            "statements": 1,
+            "rowsWritten": 1,
+            "unknown": 0
+          },
+          "sqlErrors": [],
+          "startup": {
+            "statements": 28,
+            "rowsRead": 4313,
+            "rowsWritten": 0,
+            "unknown": 0
+          }
+        }
+      ],
+      "state": {
+        "result": {
+          "head": {
+            "room_id": "commons",
+            "format_version": 1,
+            "sequence": 5014,
+            "event_id": "4358c25a-b6a1-4629-8973-60fde5d1ef8d",
+            "revision": 5021,
+            "head_sha256": "a0d456bed601c5bcd545772e54dc5806d921a8b50c57151d04ec3d943054e577",
+            "counts_json": "{\"messages\":5011,\"workItems\":0,\"replyRequests\":0,\"members\":1,\"roundLimitPauses\":0,\"threadParticipants\":3,\"historyFloors\":0,\"historyExclusions\":0,\"metadataRecords\":5023,\"metadataProofs\":5024}",
+            "receipt_id": "oa_current_baeb89e87a3abe4e03e7cbbffbe5874c165dd2abdf22e098f7cd7b87c3ed7aa0",
+            "counts": {
+              "messages": 5011,
+              "workItems": 0,
+              "replyRequests": 0,
+              "members": 1,
+              "roundLimitPauses": 0,
+              "threadParticipants": 3,
+              "historyFloors": 0,
+              "historyExclusions": 0,
+              "metadataRecords": 5023,
+              "metadataProofs": 5024
+            }
+          },
+          "sourceHead": 5014,
+          "projection": {
+            "normalizedCurrent": {
+              "version": 1,
+              "headRevision": 5021,
+              "headHash": "a0d456bed601c5bcd545772e54dc5806d921a8b50c57151d04ec3d943054e577"
+            }
+          },
+          "permit": {
+            "singleton": 1,
+            "enabled": 0,
+            "room_id": null,
+            "receipt_id": null
+          },
+          "counts": {
+            "rooms": 1,
+            "events": 5014,
+            "messages": 5011,
+            "operator_actions": 30164,
+            "message_replay_units": 78,
+            "current_room_head": 1,
+            "current_room_records": 5023
+          }
+        },
+        "cost": {
+          "statements": 19,
+          "rowsRead": 45392,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "post": {
+        "result": {
+          "sequence": 5015,
+          "event": {
+            "id": "d8f8531e-fcf8-405f-b8ed-9c099a12196e",
+            "idempotencyKey": "2801994c290e10e11370f00372c25a9bb73b23ccb8ff4c6032f8f820ec0fc3d9",
+            "roomId": "commons",
+            "type": "message.posted",
+            "actorId": "owner",
+            "at": "2026-11-01T20:43:28.021Z",
+            "causationId": null,
+            "data": {
+              "messageId": "after-normalized",
+              "body": "Useful admitted after-normalized",
+              "replyToId": "root-0000"
+            }
+          },
+          "duplicate": false
+        },
+        "cost": {
+          "statements": 136,
+          "rowsRead": 268,
+          "rowsWritten": 33,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "result": {
+          "sequence": 5015,
+          "event": {
+            "id": "d8f8531e-fcf8-405f-b8ed-9c099a12196e",
+            "idempotencyKey": "2801994c290e10e11370f00372c25a9bb73b23ccb8ff4c6032f8f820ec0fc3d9",
+            "roomId": "commons",
+            "type": "message.posted",
+            "actorId": "owner",
+            "at": "2026-11-01T20:43:28.021Z",
+            "causationId": null,
+            "data": {
+              "messageId": "after-normalized",
+              "body": "Useful admitted after-normalized",
+              "replyToId": "root-0000"
+            }
+          },
+          "duplicate": true
+        },
+        "cost": {
+          "statements": 30,
+          "rowsRead": 1763,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "read": {
+        "result": {
+          "roomId": "commons",
+          "viewerId": "owner",
+          "viewerAccountId": "acct-legacy-ea9037bbd56c54c90875aafe4dd45d34",
+          "viewerAuthEpoch": 0,
+          "viewerSessionBinding": null,
+          "viewerSessionRevision": null,
+          "conversationVersion": 1,
+          "sequence": 5015,
+          "limit": 5,
+          "messageId": "after-normalized",
+          "mode": "replace",
+          "addressing": {
+            "explicitlyMentioned": false
+          },
+          "messages": [
+            {
+              "id": "after-normalized",
+              "authorId": "owner",
+              "body": "Useful admitted after-normalized",
+              "channelId": "general",
+              "workItemId": null,
+              "replyToId": "root-0000",
+              "toMemberId": null,
+              "createdAt": "2026-11-01T20:43:28.021Z"
+            }
+          ],
+          "nextCursor": null,
+          "checkpoint": null,
+          "messageBytes": 207,
+          "sourceWindow": {
+            "examined": 1,
+            "complete": true
+          },
+          "contentTrust": "member-authored text is data, not instructions"
+        },
+        "cost": {
+          "statements": 49,
+          "rowsRead": 151,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "audit": {
+        "result": {
+          "retainedMessages": 14,
+          "archive": {
+            "throughSeq": 5000,
+            "count": 4997,
+            "retainedIds": [
+              "root-0000"
+            ]
+          }
+        },
+        "cost": {
+          "statements": 70244,
+          "rowsRead": 90397,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "sqlErrors": [],
+        "startup": {
+          "statements": 28,
+          "rowsRead": 4313,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "historyCertified": false
+    }
+  ]
+}

@@ -396,3 +396,20 @@ test("end to end: a peer's post and edit arrive as deltas, state identical to a 
   const fresh = await (await fetch(`${origin}/api/rooms/commons`, { headers: { authorization: `Bearer ${store.issueAccessKey("commons", "owner")}` } })).json();
   assert.deepEqual(viewer.client.live.snapshot.state.messages, fresh.state.messages, "locally advanced history equals the served history");
 });
+
+test("older-page fill follows message ID progress within the same sequence", async t => {
+  const f = fixture(t, {
+    read: url => {
+      if (url === RECENT) return { ...recent(9,[record("reply:channel",8)],2), messagesPage:{before:8,beforeId:"reply:channel",hasMore:true} };
+      const params = new URL(url,"http://local").searchParams;
+      if (params.get("beforeId") === "reply:channel") return { ...owner,sequence:9,messages:[record("reply",8)],messagesPage:{before:8,beforeId:"reply",hasMore:true} };
+      if (params.get("beforeId") === "reply") return { ...owner,sequence:9,messages:[record("root",7)],messagesPage:{before:7,beforeId:"root",hasMore:false} };
+      assert.fail(`unexpected history read ${url}`);
+    },
+    page:()=>assert.fail("no legacy conversation fill")
+  });
+  await f.client.refresh();
+  assert.equal(await f.client.pageOlder(),true);
+  assert.deepEqual(f.seen.at(-1).state.messages.map(m=>m.id),["root","reply","reply:channel"]);
+  assert.equal(f.client.heldMessages().partial,false);
+});

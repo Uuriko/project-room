@@ -1,0 +1,31 @@
+{
+  "beforeSource": "3b2b18f0aa00ebe93fa20a37371ee3cb1e1cee14",
+  "afterSource": "9650285770bf815c8c708f1e27001a8ae12f307f",
+  "runtimeChange": "one allowlist registration for server/mcp-tool-annotations.mjs and server/store-pages.mjs",
+  "node": "24.22.1",
+  "before": "existing server import closure test fails with both new modules missing",
+  "after": {
+    "tests": 5,
+    "pass": 5,
+    "fail": 0,
+    "skip": 0,
+    "includes": "actual isolated candidate archive cold verification and project preflight"
+  },
+  "command": "node --test --test-name-pattern=\"every module in the server import closure|uncommitted candidate packages cold|runtime preflight|project preflight\" tests/runtime-package.test.js",
+  "unchangedAcpEvidence": "d8974f9ef57596e97674ae6b3d3be9c76023be0e",
+  "logs": {
+    "closure-before.log.gz": {
+      "decodedBytes": 1224,
+      "decodedSha256": "3937669773b377ace90048a3b23e0f429602894ccbbfc5c5b43a318f9e1b5401"
+    },
+    "closure-after.log.gz": {
+      "decodedBytes": 609,
+      "decodedSha256": "1d42865bdfded772b945f5f9589b9d06dc8415a8666797f913b1774988683e13"
+    }
+  },
+  "limits": [
+    "not deployed or published",
+    "no full recovery suite rerun",
+    "no schema/key/grant/provider change"
+  ]
+}

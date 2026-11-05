@@ -1,0 +1,91 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":27593320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":39577632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":32,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":34694928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":32,"legacyColdStartMs":32,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ normalized current requests list does not report an existing incoming obligation as empty (51.550167ms)
+✖ normalized selected request is readable through the existing reader and supplies exact answer basis (38.861209ms)
+✖ normalized current request remains absent to nonparticipants (37.244042ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 230.393
+
+✖ failing tests:
+
+test at tests/current-reply-reader.test.mjs:16:1
+✖ normalized current requests list does not report an existing incoming obligation as empty (51.550167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   'question'
+  - ]
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-reply-reader-1101/tests/current-reply-reader.test.mjs:18:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'question' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/current-reply-reader.test.mjs:20:1
+✖ normalized selected request is readable through the existing reader and supplies exact answer basis (38.861209ms)
+  Error: Use an addressed current Room read
+      at fail (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:461:49)
+      at RoomStore._readProjection (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4109:40)
+      at RoomStore.room (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4104:53)
+      at file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:56:32
+      at run (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:699:22)
+      at Object.transaction (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:726:22)
+      at RoomStore.readTransaction (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4059:39)
+      at ReplyRequests.read (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:47:23)
+      at ReplyRequests.page (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:95:17)
+      at ReplyRequests.selected (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:86:17) {
+    status: 409,
+    code: 'current_room_context_required',
+    headers: null
+  }
+
+test at tests/current-reply-reader.test.mjs:25:1
+✖ normalized current request remains absent to nonparticipants (37.244042ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+  
+  Caught error:
+  
+  Error: Use an addressed current Room read
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-reply-reader-1101/tests/current-reply-reader.test.mjs:27:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: Use an addressed current Room read
+        at fail (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:461:49)
+        at RoomStore._readProjection (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4109:40)
+        at RoomStore.room (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4104:53)
+        at file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:56:32
+        at run (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:699:22)
+        at Object.transaction (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:726:22)
+        at RoomStore.readTransaction (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/store.mjs:4059:39)
+        at ReplyRequests.read (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:47:23)
+        at ReplyRequests.page (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:95:17)
+        at ReplyRequests.selected (file:///Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs:86:17),
+    operator: 'throws',
+    diff: 'simple'
+  }

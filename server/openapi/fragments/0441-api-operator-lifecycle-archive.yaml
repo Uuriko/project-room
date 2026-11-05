@@ -1,0 +1,52 @@
+  /api/operator/lifecycle-archive/plan:
+    post:
+      x-room-permission: operator
+      summary: Plan lifecycle archive of the approved legacy muse room
+      description: Operator-token only. Requires roomId and confirmRoomId both muse-room and a nonblank reason of at most 280 characters. Returns planHash binding current owner, head and projection. Does not revoke accounts, identities, credentials, grants or connections; does not delete history.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, confirmRoomId, reason]
+              properties:
+                roomId: { type: string, enum: [muse-room] }
+                confirmRoomId: { type: string, enum: [muse-room] }
+                reason: { type: string, minLength: 1, maxLength: 280 }
+      responses:
+        '200': { description: Reviewed archive basis and planHash }
+        '403': { description: Room outside the explicit retirement scope }
+        '404': { description: Operator authentication unavailable or rejected, or room missing }
+        '409': { description: Room already archived or owner authority requires reconciliation }
+        '422': { description: Malformed request or missing exact confirmation }
+  /api/operator/lifecycle-archive/execute:
+    post:
+      x-room-permission: operator
+      summary: Archive approved legacy muse room on its current owner's behalf
+      description: Requires the reviewed planHash, exact room confirmation and stable requestId. Appends the existing room.archived event using the actual source owner plus immutable explicit operator-on-owner-behalf audit provenance. Archive and audit commit together or roll back. Exact retries return the saved receipt. No owner transfer, credential mint, revocation or data deletion occurs. Ordinary coordination closes; authorized reads and owner export remain available. No room unarchive operation exists.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, confirmRoomId, reason, requestId, planHash]
+              properties:
+                roomId: { type: string, enum: [muse-room] }
+                confirmRoomId: { type: string, enum: [muse-room] }
+                reason: { type: string, minLength: 1, maxLength: 280 }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_-]{1,57}$' }
+                planHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: Atomic archive and operator audit receipt, or exact duplicate }
+        '403': { description: Room outside the explicit retirement scope }
+        '404': { description: Operator authentication unavailable or rejected, or room missing }
+        '409': { description: Changed plan, conflicting request or room already archived }
+        '422': { description: Invalid request or missing plan }

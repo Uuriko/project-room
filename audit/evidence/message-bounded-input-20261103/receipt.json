@@ -1,0 +1,116 @@
+{
+  "source": "5c24eb5e7",
+  "parent": "9e6beac42",
+  "base": "6dca37dad",
+  "runtimeTree": "pr-large-message-contract-1103",
+  "status": "qualified local synthetic; not deployed",
+  "limits": {
+    "utf16Body": 65536,
+    "sharedCanonicalBytes": 917504,
+    "metadataPerEntity": 131072,
+    "sharedMetadataBytes": 262144,
+    "historyEntries": 25,
+    "historyBodyUtf16": 20000,
+    "historyTotalUtf16Including64PerEntry": 32768
+  },
+  "logs": [
+    {
+      "path": "/tmp/current-large-message-before-1103.log",
+      "sha256": "6cd12c57e8069b9061a90434ef36430de6508dcf0d4c6dd499e6b13daceecb76",
+      "bytes": 25823,
+      "counts": {
+        "tests": 11,
+        "pass": 0,
+        "fail": 11
+      }
+    },
+    {
+      "path": "/tmp/current-large-message-final-composed-1103.log",
+      "sha256": "6eb83e09bbc753c60274fe6b8cbab55f19c6039253549aec09d35bb308a04653",
+      "bytes": 54793,
+      "counts": {
+        "tests": 53,
+        "pass": 53,
+        "fail": 0
+      }
+    },
+    {
+      "path": "/tmp/current-large-message-guard-1103.log",
+      "sha256": "515dbbc95d9a0bf65194b49b7b0b9fa9e6d59a72c0090f659a306b4d4a73478b",
+      "bytes": 9011,
+      "counts": {
+        "tests": 56,
+        "pass": 56,
+        "fail": 0
+      }
+    },
+    {
+      "path": "/tmp/current-large-message-final-native-1103.log",
+      "sha256": "990431030c2d2e669bdc6ad40448df8ab651b22855abd06c925efa996ac16c73",
+      "bytes": 77628,
+      "counts": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0
+      }
+    },
+    {
+      "path": "/tmp/current-large-message-lint-1103.log",
+      "sha256": "aaa37f67e0cfc75c45626712cc2c53d278755f0460024a8c5452650922a1bf58",
+      "bytes": 7000,
+      "counts": {}
+    },
+    {
+      "path": "/tmp/current-large-message-preflight-1103.log",
+      "sha256": "053cfaeb5c568b51202dfbaf4930d201a99d62e1e0e77e23ddb526430bbd76c7",
+      "bytes": 236,
+      "counts": {}
+    }
+  ],
+  "beforeControl": "Exact new 11-control file copied to detached 9e6beac42; unavailable new exported constant replaced ONLY with same local literal917504 for baseline load. 0 pass/11 fail: old128KiB reads and temporary producer cap.",
+  "native": {
+    "checks": 2,
+    "historyRows": [
+      1000,
+      5000
+    ],
+    "statements": [
+      119,
+      119
+    ],
+    "physicalReads": [
+      959,
+      959
+    ],
+    "writes": [
+      0,
+      0
+    ],
+    "unknown": [
+      0,
+      0
+    ],
+    "sqlTextBytes": [
+      14794,
+      14794
+    ],
+    "bindingBytes": [
+      4159,
+      4159
+    ],
+    "returnedSerializedJsonBytes": [
+      1166605,
+      1135420
+    ]
+  },
+  "privacyAndIntegrity": "Native nonparty404/prejoin404 plus scalar-body, entity_hash and missing independent witness refusal; Node full-edit fault rollback.",
+  "compatibility": "65537 units refused. Shared cumulative canonical pool applies across dependencies. Two old authorized-error assertions intentionally updated: selected conversation succeeds; oversized thread retains explicit413, with all deny and corruption checks unchanged. Existing neighboring inbox/post/ACP/history fixture files untouched.",
+  "census": "Read-only SQLite scalar page<=20, optional selected room, honest continuation. Size classification is NOT exactUTF16/history/hash/witness audit. No production reads performed.",
+  "rollback": "Automatic exact canonical-reader Git blob proof required; missing/changed refuses. Manual schema proof and authorization unchanged.",
+  "limitations": [
+    "Local Native timings are not production CPU/latency.",
+    "Returned JSON bytes include escaping and exceed raw proof-field reservation; no flat returned-byte claim.",
+    "Legacy above917504 or unsupported large metadata/history still refuses explicitly; never deleted/truncated.",
+    "Full recovery remains independently qualified by its existing suites; no whole-recovery boundedness claim."
+  ]
+}

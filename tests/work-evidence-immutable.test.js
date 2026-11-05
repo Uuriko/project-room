@@ -107,9 +107,11 @@ test("the audit replays the withdrawal instead of believing the projection", t =
   room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
   assert.doesNotThrow(() => auditRecovery(room.store));
 
-  const state = structuredClone(room.store.room("commons").state);
-  state.workItems[WORK_ITEM].receipt.nativeText.withdrawnBy = "reviewer";
-  room.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(room.store.storedProjection("commons", state));
+  // This is deliberate persisted corruption, not a code-owned write. Work
+  // payloads are normalized now: mutate that payload without updating digest.
+  const row = room.store.db.prepare("SELECT body FROM work_entities WHERE room_id='commons' AND work_id=?").get(WORK_ITEM);
+  const payload = JSON.parse(row.body); payload.receipt.nativeText.withdrawnBy = "reviewer";
+  room.store.db.prepare("UPDATE work_entities SET body=? WHERE room_id='commons' AND work_id=?").run(JSON.stringify(payload), WORK_ITEM);
   assert.throws(() => auditRecovery(room.store), "a withdrawal attributed to the wrong member is not a replay of the log");
 });
 

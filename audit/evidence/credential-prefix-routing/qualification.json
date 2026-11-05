@@ -1,0 +1,27 @@
+{
+  "base": "a392f675c1a9589559d1003ed614fcdc7fd873e2",
+  "original_source_deterministic": {
+    "tests": 13,
+    "pass": 4,
+    "fail": 9
+  },
+  "fixed_source_deterministic": {
+    "tests": 13,
+    "pass": 13,
+    "fail": 0
+  },
+  "composed_auth_and_coverage_controls": {
+    "tests": 109,
+    "pass": 109,
+    "fail": 0,
+    "command": "node --test --test-concurrency=2 tests/credential-prefix-routing.test.mjs tests/write-integrity.test.js tests/mcp-oauth-http.test.js tests/mcp-invite-oauth.test.js tests/agent-plugin-api-keys.test.js tests/integration-api-key-scope.test.js tests/account-sessions-http.test.js tests/session-expiry.test.js tests/credential-rate.test.js tests/coverage-thresholds.test.js"
+  },
+  "native": {
+    "tests": 1,
+    "pass": 1,
+    "command": "cd cloudflare && node --test credential-prefix-routing.check.mjs",
+    "cold_reopen": true,
+    "revocation_after_cold_reopen": true
+  },
+  "review": "Independent source review CLEAR; exact issued hash only selects existing validation path. No real credential rotation, principal/grant change or scope widening."
+}

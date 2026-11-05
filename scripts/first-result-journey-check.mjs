@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { ensureSidebarOpen } from "./room-chrome.mjs";
 // W4-50 L2: first-result onboarding. A newcomer joins from an invite link,
 // contributes to a help-wanted work item, and sees the outcome of their own
 // contribution - with no account, agent setup, or advanced configuration.
@@ -11,7 +11,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 
-test("first-result journey: join, offer help, contribute, see the outcome", { timeout: 90000 }, async t => {
+for (const touch of [false, true]) test(`first-result journey ${touch ? "phone" : "desktop"}: join, discover work, offer help, contribute, see the outcome`, { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => {
@@ -21,7 +21,8 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
+  const context = await browser.newContext({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+    isMobile: touch, hasTouch: touch, reducedMotion: "reduce" });
   const origin = `http://127.0.0.1:${server.address().port}`, errors = [];
   context.on("page", page => { page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message)); });
   const state = () => f.store.room("commons").state;
@@ -44,7 +45,16 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
   const member = Object.values(state().members).find(person => person.displayName === "Newcomer");
   assert.ok(member, "newcomer joined as a member");
 
-  // 2. Find the help-wanted ask on the work card and offer help.
+  // 2. Browse the room's active work without a search phrase or a work ID.
+  // Human conversations do not eagerly mount unrelated work cards.
+  assert.equal(await page.locator('#message-list [data-work-record-id]').count(), 0);
+  await ensureSidebarOpen(page);
+  await page.locator("#room-overview-open").click();
+  await page.getByRole("dialog", { name: /Overview/ }).getByRole("link", { name: "Welcome note for the board", exact: true }).click();
+  await page.locator("#room-overview-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.locator('#message-list [data-work-record-id]').count(), 1);
+  // Offer help from the selected work; discovery itself grants no assignment.
+  assert.equal(state().workItems["first-result"].accountableMemberId, "owner");
   await page.locator('[data-work-record-id="first-result"] .work-help > summary').click();
   await page.getByRole("button", { name: "Offer help", exact: true }).click();
   await page.locator('#action-fields textarea[name="plan"]').fill("I will draft the welcome in two lines.");
@@ -77,15 +87,19 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
     producerId: member.id, summary: "Two-line welcome drafted by our newest member.", nextAction: "Post it on the board." });
 
   // 6. The newcomer sees the outcome of their own contribution.
-  await clickChrome(page, "#topbar-search-toggle");
-  await page.locator("#message-search").fill("has:result");
+  await ensureSidebarOpen(page);
+  await page.locator("#room-overview-open").click();
+  await page.getByRole("button", { name: "Open the room's Results", exact: true }).click();
+  assert.equal(await page.locator("#main").evaluate(node => node.classList.contains("sidebar-open")), false,
+    "Results closes the navigation overlay so its controls are reachable");
+  assert.equal(await page.locator("#sidebar-toggle").getAttribute("aria-expanded"), "false");
   const row = page.locator('[data-result-work-id="first-result"]');
   await row.waitFor();
   assert.equal(await row.locator("p").textContent(), "Two-line welcome drafted by our newest member.");
-  await page.screenshot({ path: "test-results/first-result-journey.png", fullPage: true });
+  await page.screenshot({ path: `test-results/first-result-journey-${touch ? "phone" : "desktop"}.png`, fullPage: true });
 
   // The newcomer sees their own name credited as the producer of the outcome.
-  await page.locator("#clear-search").click();
+  await row.getByRole("button", { name: "Work details", exact: true }).click();
   await page.locator('[data-work-record-id="first-result"] .work-details > summary').click();
   const details = page.locator('[data-work-record-id="first-result"] .work-details');
   assert.match(await details.textContent(), /Newcomer/, "receipt credits the newcomer by name");

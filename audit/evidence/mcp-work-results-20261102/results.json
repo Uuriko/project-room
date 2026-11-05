@@ -1,0 +1,15 @@
+{
+  "base": "234d21402",
+  "fix": "Restore legacy paged results pointers/actions and explicit room-only scope; normalized listing declares same authority boundary",
+  "productionChanged": false,
+  "before": {
+    "tests": 14,
+    "pass": 12,
+    "fail": 2
+  },
+  "final": {
+    "tests": 30,
+    "pass": 30,
+    "fail": 0
+  }
+}

@@ -26,10 +26,125 @@ import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 // PR #3572) recorded as a reader — 55 files.
 // Amended 2026-10-22: server/receipt-cards.mjs reads a claim's linked work
 // item session for receipt cost (read only).
+// Amended 2026-10-30: server/snapshot-window.mjs redacts work item titles
+// from viewers who may not see them (#5355 privacy cure; read only).
+// Amended 2026-10-30: native MCP Events checks current work revision and
+// next-step ownership before delivery (read only).
+// Amended 2026-11-01: operator-message-authority.mjs bounds normalized
+// work_entities rows/bytes for conversion admission; no board-sync change.
+// Amended 2026-11-01: canonical plain-post admission inspects inline work
+// metadata for resumable sessions and declines canonical work references.
+// Historical-session operator reconciliation adds two explicit read/replay sites.
+// Amended 2026-11-02: 15 normalized serving, cutover, codec and recovery sites
+// classified individually below; canonical work is not replaced by board claims.
 const WORKITEMS_REFERENCE_SITES = [
-  "server/agent-fleet.mjs", "server/available-work.mjs", "server/claim-scopes.mjs", "server/content-trust.mjs", "server/inbox.mjs", "server/mcp-room-profile.mjs", "server/message-redaction.mjs", "server/messages-store.mjs", "server/needs-me.mjs", "server/notifications.mjs", "server/opportunities.mjs", "server/orient.mjs", "server/owner-attention.mjs", "server/owner-overview.mjs", "server/project-offers.mjs", "server/public-read-model.mjs", "server/public-work-reviews.mjs", "server/purge-registry.mjs", "server/receipt-cards.mjs", "server/recovery.mjs", "server/reminders.mjs", "server/reply-requests.mjs", "server/return-brief.mjs", "server/room-activation-pack.mjs", "server/room-context.mjs", "server/spend-allowance.mjs", "server/store.mjs", "server/text-results.mjs", "server/updates.mjs", "server/usage-summary.mjs", "server/work-context.mjs", "server/work-discussion.mjs", "server/work-help.mjs", "server/work-item-board.mjs", "server/work-repository.mjs", "server/work-wakes.mjs", "server/writer-fence.mjs",
-  "src/app.js", "src/board-ui.js", "src/board.js", "src/conversation.js", "src/events.js", "src/growth-emit.js", "src/help-offers.js", "src/human-experience.js", "src/message-reducers.js", "src/portable-work.js", "src/reminders.js", "src/reply-requests.js", "src/result-reader.js", "src/room-layout.js", "src/room-templates.js", "src/work-help.js", "src/work-item-session.js", "src/work-packet.js", "src/work-reducers.js", "src/work-selectors.js", "src/workflow.js",
+  "server/agent-fleet.mjs",
+  "server/agent-orientation.mjs",
+  "server/available-work.mjs",
+  "server/claim-scopes.mjs",
+  "server/content-trust.mjs",
+  "server/current-receipts.mjs",
+  "server/current-room-repository.mjs",
+  "server/current-search.mjs",
+  "server/current-work-capacity.mjs",
+  "server/current-work-list.mjs",
+  "server/current-work-privacy.mjs",
+  "server/current-work-snapshot.mjs",
+  "server/handoff-packet.mjs",
+  "server/inbox.mjs",
+  "server/legacy-session-replay.mjs",
+  "server/mcp-events-runtime.mjs",
+  "server/mcp-room-profile.mjs",
+  "server/message-authority.mjs",
+  "server/message-redaction.mjs",
+  "server/messages-store.mjs",
+  "server/needs-me.mjs",
+  "server/notifications.mjs",
+  "server/operator-legacy-session-repair.mjs",
+  "server/operator-message-authority.mjs",
+  "server/opportunities.mjs",
+  "server/orient.mjs",
+  "server/owner-attention.mjs",
+  "server/owner-overview.mjs",
+  "server/project-offers.mjs",
+  "server/public-read-model.mjs",
+  "server/public-work-reviews.mjs",
+  "server/purge-registry.mjs",
+  "server/receipt-cards.mjs",
+  "server/recovery-census-continuation.mjs",
+  "server/recovery-checkpoint-seed.mjs",
+  "server/recovery-reminder-consumption.mjs",
+  "server/recovery-reminder-continuation.mjs",
+  "server/recovery-replay-continuation.mjs",
+  "server/recovery-replay-step.mjs",
+  "server/recovery-reply-continuation.mjs",
+  "server/recovery-reply-rules.mjs",
+  "server/recovery-work-help.mjs",
+  "server/recovery.mjs",
+  "server/reminders.mjs",
+  "server/replay-cutover.mjs",
+  "server/replay-projection-codec.mjs",
+  "server/reply-requests.mjs",
+  "server/return-brief.mjs",
+  "server/room-activation-pack.mjs",
+  "server/room-context.mjs",
+  "server/snapshot-window.mjs",
+  "server/spend-allowance.mjs",
+  "server/store.mjs",
+  "server/text-results.mjs",
+  "server/updates.mjs",
+  "server/usage-summary.mjs",
+  "server/work-context.mjs",
+  "server/work-discussion.mjs",
+  "server/work-help.mjs",
+  "server/work-item-board.mjs",
+  "server/work-repository.mjs",
+  "server/work-wakes.mjs",
+  "server/write-integrity.mjs",
+  "server/writer-fence.mjs",
+  "src/app.js",
+  "src/board-ui.js",
+  "src/board.js",
+  "src/conversation.js",
+  "src/events.js",
+  "src/growth-emit.js",
+  "src/help-offers.js",
+  "src/human-experience.js",
+  "src/message-reducers.js",
+  "src/portable-work.js",
+  "src/reminders.js",
+  "src/reply-requests.js",
+  "src/result-reader.js",
+  "src/room-layout.js",
+  "src/room-templates.js",
+  "src/work-help.js",
+  "src/work-item-session.js",
+  "src/work-packet.js",
+  "src/work-reducers.js",
+  "src/work-selectors.js",
+  "src/workflow.js"
 ];
+
+// Each added reference is classified below and documented individually in the record.
+const NORMALIZED_WORKITEMS_ROLES = {
+  "server/current-room-repository.mjs": "writer-reader-audit",
+  "server/current-search.mjs": "reader",
+  "server/current-work-capacity.mjs": "constraint",
+  "server/current-work-list.mjs": "reader",
+  "server/current-work-privacy.mjs": "derived-policy",
+  "server/current-work-snapshot.mjs": "reader",
+  "server/recovery-census-continuation.mjs": "recovery",
+  "server/recovery-checkpoint-seed.mjs": "recovery",
+  "server/recovery-reminder-consumption.mjs": "recovery-oracle",
+  "server/recovery-reminder-continuation.mjs": "recovery",
+  "server/recovery-replay-continuation.mjs": "recovery",
+  "server/recovery-replay-step.mjs": "recovery-reducer",
+  "server/recovery-reply-continuation.mjs": "recovery",
+  "server/recovery-reply-rules.mjs": "shared-audit-rules",
+  "server/recovery-work-help.mjs": "recovery",
+  "server/replay-cutover.mjs": "migration",
+  "server/replay-projection-codec.mjs": "codec"
+};
 
 function referenceSites() {
   const found = [];
@@ -47,8 +162,16 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (59 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (85 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
+});
+
+test("step0 census: normalized references have explicit roles in the source record", () => {
+  const record = readFileSync(new URL("../docs/WORKITEMS-BOARD-STEP0.md", import.meta.url), "utf8");
+  for (const [site, role] of Object.entries(NORMALIZED_WORKITEMS_ROLES)) {
+    assert.ok(WORKITEMS_REFERENCE_SITES.includes(site), site);
+    assert.ok(record.includes(`| \`${site}\` | ${role} |`), `${site} must have a documented role`);
+  }
 });
 
 test("step0 census: the board write-path sync covers exactly 12 event types; the unsynced work events are named", () => {

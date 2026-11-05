@@ -229,6 +229,14 @@ test("syncMessageRows resolves touched messages without indexing a large state",
 // at or below rooms.projection.messagesArchive.throughSeq live only in the
 // messages table. Backfill pruning and parity must treat them as archived, not
 // as stale rows or mismatches.
+// Synthetic historical compaction still uses the trusted writer boundary.
+// The separate tampered-marker case deliberately bypasses it.
+function persistLegacyFixtureProjection(f,projection) {
+  f.store.transaction(()=>{
+    const encoded=f.store.storedProjection('commons',projection);
+    f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(encoded,'commons');
+  });
+}
 function archiveOldest(f, count) {
   const all = f.store.db.prepare("SELECT message_id, seq FROM messages WHERE room_id='commons' ORDER BY seq").all();
   const old = all.slice(0, count);
@@ -236,7 +244,7 @@ function archiveOldest(f, count) {
   const drop = new Set(old.map(row => row.message_id));
   projection.messages = projection.messages.filter(message => !drop.has(message.id));
   projection.messagesArchive = { throughSeq: old[old.length - 1].seq, count: old.length };
-  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  persistLegacyFixtureProjection(f,projection);
   return old;
 }
 
@@ -360,7 +368,7 @@ test("an archived pinned DM can be unpinned by its parties and not by anyone els
   const others = projection.messages.filter(m => m.id !== "old-dm" && f.store.db.prepare("SELECT seq FROM messages WHERE message_id=?").get(m.id).seq <= seq).map(m => m.id);
   projection.messages = projection.messages.filter(m => m.id !== "old-dm");
   projection.messagesArchive = { throughSeq: seq, count: 1, retainedIds: others };
-  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  persistLegacyFixtureProjection(f,projection);
   f.store.rooms?.clear?.();
   assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true);
   const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
@@ -802,7 +810,7 @@ test("an archived pinned DM can be unpinned by its parties and not by anyone els
   const others = projection.messages.filter(m => m.id !== "old-dm" && f.store.db.prepare("SELECT seq FROM messages WHERE message_id=?").get(m.id).seq <= seq).map(m => m.id);
   projection.messages = projection.messages.filter(m => m.id !== "old-dm");
   projection.messagesArchive = { throughSeq: seq, count: 1, retainedIds: others };
-  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  persistLegacyFixtureProjection(f,projection);
   f.store.rooms?.clear?.();
   assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true);
   const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };

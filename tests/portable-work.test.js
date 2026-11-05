@@ -4,12 +4,13 @@ import { rmSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { currentWorkRecord } from "../server/work-context.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { workPacket, packetMarkdown, returnReference, parseWorkReturn, nativeWorkDraft } from "../src/work-packet.js";
 
-function fixture(t) {
-  const f = createAcceptanceFixture();
+function fixture(t, options = {}) {
+  const f = createAcceptanceFixture(options);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   f.snapshot = () => f.store.snapshot(f.keys.owner, "commons");
   f.send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
@@ -196,6 +197,9 @@ test("progress export is opt-in, bounded, exact-version aware and excludes struc
   assert.equal(packet.progress.reportedProgress, "Restart sentinel");
   item.verification = { completionEventId: "current", evidenceVersion: "v2", result: "pass", summary: "Checked current parser" };
   assert.match(packetMarkdown(workPacket(state, item.id, { includeProgress: true })), /Checked current parser/);
+  const stableProgress = { includeProgress: true, packetId: "progress-parity", exportedAt: "2026-10-29T00:00:00.000Z" };
+  assert.deepEqual(workPacket({ room: state.room, workItems: { [item.id]: currentWorkRecord(item) }, messages: [] }, item.id, stableProgress),
+    workPacket(state, item.id, stableProgress), "selected current record preserves handoff, expired claim and exact-version review progress");
   item.handoff.doneSummary = "a".repeat(17000);
   assert.throws(() => workPacket(state, item.id, { includeProgress: true }), /too large/);
   assert.doesNotThrow(() => workPacket(state, item.id));
@@ -206,4 +210,35 @@ test("portable source omits a deleted message even if an old body remains in a s
   const f = fixture(t), state = structuredClone(f.snapshot().state);
   state.messages.find(message => message.id === "test-request").deletedAt = new Date().toISOString();
   assert.deepEqual(workPacket(state, "test-handoff", { includeSource: true }).sources, []);
+});
+
+test("SDK packet uses selected HTTP context with parity and no full-room read", async t => {
+  const f = fixture(t, { dmConsent: true }), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const paths = [], origin = `http://127.0.0.1:${server.address().port}`;
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: (url, options) => { paths.push(new URL(url).pathname + new URL(url).search); return fetch(url, options); } });
+  const stable = { packetId: "stable-packet", exportedAt: "2026-10-29T00:00:00.000Z" };
+  for (const accepted of [false, true]) {
+    if (accepted) f.accept();
+    for (const includeSource of [false, true]) for (const includeProgress of [false, true]) {
+      const options = { ...stable, includeSource, includeProgress };
+      const expected = workPacket(f.store.snapshot(f.keys.producer, "commons").state, "test-handoff", options);
+      paths.length = 0;
+      assert.deepEqual(await client.workPacket("test-handoff", options), expected);
+      assert.deepEqual(paths, [`/api/rooms/commons/work-context?workItemId=test-handoff${includeSource ? "&includeSource=true" : ""}`]);
+    }
+  }
+  f.send(T.MESSAGE_DELETED, { messageId: "test-request", expectedMessageRevision: 0 });
+  const deleted = await client.workPacket("test-handoff", { ...stable, includeSource: true });
+  assert.deepEqual(deleted.sources, []);
+  f.send(T.MESSAGE_POSTED, { messageId: "private-packet-source", toMemberId: "reviewer", body: "PRIVATE-PACKET-SENTINEL" }, "guest");
+  f.send(T.WORK_PROPOSED, { workItemId: "private-packet-work", title: "Private source task", definitionOfDone: "Read only permitted material",
+    accountableMemberId: "producer", mode: "read", sourceMessageId: "private-packet-source" });
+  const privatePacket = await client.workPacket("private-packet-work", { ...stable, includeSource: true, includeProgress: true });
+  assert.deepEqual(privatePacket.sources, []);
+  assert.equal(JSON.stringify(privatePacket).includes("PRIVATE-PACKET-SENTINEL"), false);
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(client.workPacket("test-handoff", { signal: controller.signal }));
 });

@@ -1,0 +1,71 @@
+  /api/operator/wakes/ordered-indexes/plan:
+    post:
+      x-room-permission: operator
+      summary: Plan explicit ordered access for the existing wake journals
+      description: >-
+        Operator-token management only. Body {reason, reinstall?}. Admits both journals
+        across all states before reading key text or creating indexes: at most
+        32768 total rows, 4 MiB key bytes including reserved overhead, and 64 MiB
+        stored variable bytes including reserved overhead. Writes an audit only.
+        Explicit reinstall:true is accepted only when all four indexes are absent
+        and the original immutable activation receipt verifies. The plan binds
+        that original receipt and repeats the same fixed admission; no threshold
+        is reset. No queue, permission, host configuration, constructor DDL or background
+        task is added. Above-budget databases are refused without installation.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string }
+                reinstall: { type: boolean, default: false }
+      responses:
+        '200': { description: Source-bound plan, exact index state, admitted limits and planHash }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Admission refused, read-only or conflicting source/index definition }
+        '422': { description: Invalid request }
+  /api/operator/wakes/ordered-indexes/execute:
+    post:
+      x-room-permission: operator
+      summary: Install and activate both exact wake indexes atomically
+      description: >-
+        Body {reason, planHash, requestId, reinstall?}. Fresh source/key admission and the
+        exact plan hash are verified in the writer transaction. CREATE INDEX
+        performs linear engine work within the admitted bound; it is not a
+        constant-cost operation. All four indexes and the immutable success receipt
+        commit atomically. Only their verified pair plus the original receipt
+        activates bounded reads. Exact retry returns that receipt; changed input
+        conflicts. Missing or conflicting indexes after activation refuse reads
+        without silently falling back or advancing a continuation. No reverse
+        operation is supplied. Explicit reinstall:true requires a distinct
+        requestId and fresh plan, appends a separate immutable repair receipt,
+        and preserves the original activation receipt and exact retry bytes.
+        Partial or corrupt pairs are refused. Stored wake rows and
+        acknowledgements are retained.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, planHash, requestId]
+              properties:
+                reason: { type: string }
+                reinstall: { type: boolean, default: false }
+                planHash: { type: string }
+                requestId: { type: string }
+      responses:
+        '200': { description: Verified installation receipt or exact duplicate }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Stale plan, admission refused, conflicting index or idempotency input }
+        '422': { description: Invalid request }
+        '503': { description: Original installation receipt or current index pair requires reconciliation }

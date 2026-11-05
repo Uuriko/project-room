@@ -1,0 +1,31 @@
+{
+  "source": "b337c5736",
+  "scopedHeartbeat": {
+    "runtime": "b68ae5b45",
+    "tests": 21,
+    "pass": 21,
+    "fail": 0,
+    "before": "5 of 6 scoped host MCP tests failed with current_room_context_required",
+    "guarantees": [
+      "protected selected member authority",
+      "existing host replacement refused",
+      "fresh namespaced host allowed",
+      "suspended membership refused despite retained identity link",
+      "whole-room read forbidden by regression"
+    ]
+  },
+  "needsMe": {
+    "source": "b337c5736",
+    "tests": 32,
+    "pass": 32,
+    "fail": 0,
+    "scope": "four assigned files; legacy cases explicitly historical; native end-to-end cases added"
+  },
+  "otherLaptop": {
+    "commit": "3bd4556b0ef525955c8bfed5ac9d33b5360ca6ea",
+    "testedSource": "89e1a58827483f7019085a39205eba62abcd15ba",
+    "logHashVerified": true,
+    "limits": "synthetic compact 50k; no physical bytes written or production performance claim"
+  },
+  "productionChanged": false
+}

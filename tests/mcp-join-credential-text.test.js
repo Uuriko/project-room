@@ -76,3 +76,59 @@ test("room_create keeps any credential it returns out of the text block", async 
   const tokens = [result.structuredContent?.mcpToken?.credential, result.structuredContent?.roomToken, result.structuredContent?.identitySecret].filter(Boolean);
   for (const token of tokens) assert.equal(text.includes(token), false, "every returned credential is withheld from text");
 });
+
+// KI-194: one cross-tool invariant, using credentials minted only in this
+// disposable fixture. Never include result bodies or credential values in
+// assertion diagnostics. Required fields make a missing mint fail, not pass
+// vacuously as a response with no secrets to inspect.
+test("credential-producing MCP tools and action wrappers keep credentials structured-only", async t => {
+  const { origin } = await serve(t);
+  const credentials = new Set();
+  const outputs = [];
+  const call = async (name, args, token, requiredPaths, wrapped = false) => {
+    const response = await rpc(origin, token, "tools/call", wrapped
+      ? { name: "room_run_action", arguments: { name, arguments: args } }
+      : { name, arguments: args });
+    assert.equal(response.status, 200, `${name}: HTTP success`);
+    assert.ok(!response.json.error, `${name}: RPC success`);
+    const result = response.json.result;
+    assert.ok(result && !result.isError, `${name}: tool success`);
+    for (const path of requiredPaths) {
+      const value = path.split(".").reduce((parent, key) => parent?.[key], result.structuredContent);
+      assert.ok(typeof value === "string" && value.length > 0, `${name}: required structured credential ${path}`);
+      credentials.add(value);
+    }
+    outputs.push({ name, content: result.content });
+    return result.structuredContent;
+  };
+  const founder = await call("room_identity_mint", { displayName: "Credential audit founder" }, undefined, ["secret", "privateKey"]);
+  const created = await call("room_create", { title: "Credential audit", purpose: "Test structured-only secrets" }, founder.secret, ["mcpToken.credential"]);
+  for (const wrapped of [false, true]) {
+    const invite = await call("room_create_agent_invite", { roomId: created.roomId, profile: "chat" }, founder.secret, ["code"], wrapped);
+    const guest = await call("room_identity_mint", { displayName: `Credential audit guest ${wrapped}` }, undefined, ["secret", "privateKey"]);
+    await call("room_join", { inviteCode: invite.code }, guest.secret, ["mcpToken.credential"], wrapped);
+  }
+  await call("room_create", { title: "Wrapped credential audit", purpose: "Test wrapper redaction" }, founder.secret, ["mcpToken.credential"], true);
+  let previousFence;
+  for (const [name, args] of [
+    ["heartbeat_set", { mode: "pull-only" }],
+    ["wake_register", { wakeUrl: "https://example.com/fixture-wake" }],
+    ["wake_clear", {}]
+  ]) {
+    for (const wrapped of [false, true]) {
+      const value = await call(name, { ...args, hostId: "credential-audit-host", listenerLease: true }, founder.secret, ["listener.fencingToken"], wrapped);
+      assert.equal(value.listener.acquired, true, `${name}: lease acquired`);
+      if (previousFence) assert.ok(value.listener.fencingToken === previousFence, `${name}: renewal preserves structured token`);
+      previousFence = value.listener.fencingToken;
+      assert.equal(value.host.mode, name === "wake_register" ? "wakeable" : "pull-only", `${name}: wake behavior preserved`);
+    }
+  }
+  for (const { name, content } of outputs) {
+    assert.ok(content?.some(part => part.type === "text"), `${name}: text output exists`);
+    const text = JSON.stringify(content);
+    for (const credential of credentials) {
+      assert.equal(text.includes(credential), false, `${name}: credential leaked into content`);
+      assert.equal(text.includes(JSON.stringify(credential).slice(1, -1)), false, `${name}: JSON-escaped credential leaked into content`);
+    }
+  }
+});

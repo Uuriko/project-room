@@ -1,0 +1,22 @@
+✔ same reducer common replay uses point reads and matches full 1000 message history (73.747709ms)
+ℹ {"messages":1000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer common replay uses point reads and matches full 5000 message history (395.869125ms)
+ℹ {"messages":5000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer long-chain and private request branches preserve context, channel copies and work transitions (23.923583ms)
+✔ same reducer refuses invalid parents, duplicates and idempotency conflicts without producing partial effects (0.659541ms)
+✔ unqualified event and stamped-name plans are explicitly incomplete rather than certified (0.066292ms)
+✔ scoped root-channel readers cannot bypass direct parent existence or channel gates (0.436041ms)
+✔ common replay does not accept asynchronous or malformed record readers (0.092209ms)
+✔ addressed scalar policy, member preference and thin receipt handlers preserve full reducer authority (3.557792ms)
+✔ Muse-only development access uses exact addressed owner and rejects ordinary-room input (0.403833ms)
+✔ independently folded insertion ordinals preserve source order rather than lexical SQL order (0.46525ms)
+✔ complete addressed work lifecycle preserves session usage, historical verification, owner gates and supersession (3.29375ms)
+✔ addressed lifecycle preserves authority, CAS, session and exact-version refusal without partial writes (4.3405ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 549.166583

@@ -73,10 +73,11 @@ test("the remote proof search matches the server proof search", () => {
 test("agent docs reach the documented post and close only when the packet says how", { timeout: 90000 }, async t => {
   const { origin, directory } = await serve(t);
   const outDir = join(directory, "out");
-  const packet = rewriteHosts(await (await fetch(`${origin}/llms.txt`)).text(), origin);
+  const packet = rewriteHosts(await (await fetch(`${origin}/llms-full.txt`)).text(), origin);
   const documentsBoard = packet.replaceAll("`", "").split("\n").some(line => line.includes("curl ") && line.includes("/work-claims") && line.includes('"done"'));
   const created = { rooms: [], identities: [] };
   const result = await runAgentDocs({ target: origin, outDir, created, round: "docs" });
+  assert.ok(result.steps.some(step=>step.step==="read-full-llms"&&step.status===200), "follow the short index to its documented full packet");
   assert.ok(result.firstPost, JSON.stringify(result.steps));
   assert.equal(result.closeReachable, documentsBoard);
   assert.equal(Boolean(result.firstClose), documentsBoard);

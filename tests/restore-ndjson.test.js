@@ -1,3 +1,4 @@
+import {restoreProgress} from '../server/restore-admission.mjs';
 // H2 backup/DR: whole-store NDJSON restore into an already-open store.
 // The Durable Object cannot accept a sqlite file, so restore must replay the
 // NDJSON export (server/room-export.mjs format) through the store's own db
@@ -12,10 +13,13 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonText } from "../server/room-export.mjs";
-import { replayNdjsonInto, operatorRestoreResponse, RESTORE_MAX_BYTES } from "../server/restore-ndjson.mjs";
+import { replayNdjsonInto, operatorRestoreResponse as beginOperatorRestoreResponse, RESTORE_MAX_BYTES } from "../server/restore-ndjson.mjs";
 import { withPublicWorkClaimWriter } from "../server/public-work-claim-fence.mjs";
 import { createWork } from "../server/work-claims.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import {completeOperatorRestore} from './helpers/complete-operator-restore.mjs';
+const operatorRestoreResponse = async (request,token,store,...rest) => completeOperatorRestore(await beginOperatorRestoreResponse(request,token,store,...rest),token,store);
+
 
 const OPERATOR_TOKEN = "operator-token-for-restore-tests";
 
@@ -403,10 +407,11 @@ test("operator restore endpoint: strict drift refusal is a legible 422, report o
   const refused = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, strictTarget);
   assert.equal(refused.status, 422, "the reconciliation refusal is operator-legible, not a generic 500");
   const refusedPayload = await refused.json();
-  assert.equal(refusedPayload.error.code, "restore_verification_failed");
+  assert.equal(refusedPayload.error.code, "restore_continuation_refused");
   assert.match(refusedPayload.error.message, /commons/);
   assert.match(refusedPayload.error.message, /displayName/);
-  assert.ok(!strictTarget.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "refused restore leaves the store empty");
+  assert.equal(restoreProgress(strictTarget.db).state,'pending','durable strict rejection retains the sealed target');
+  assert.throws(()=>strictTarget.room('commons'),error=>error.code==='restore_incomplete');
 
   const reportTarget = openStore(t, "restore-ndjson-drift-endpoint-report-");
   const headers = new Headers({ "content-type": "application/x-ndjson", authorization: `Bearer ${OPERATOR_TOKEN}` });

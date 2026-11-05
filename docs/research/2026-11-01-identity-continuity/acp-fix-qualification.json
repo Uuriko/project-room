@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "runtimeSource": "001adec71229d5789447c56f2d7c9ff3c1b31826",
+  "redSource": "7da187f89a44600b29d97ca0061d1cb3e34abfdd",
+  "allAcpPassed": 116,
+  "finalAffectedPassed": 26,
+  "schemaChanged": false,
+  "liveChanged": false,
+  "selectedNewTargetShare": "refused-before-write, incomplete request-bound scoped issuance/recovery contract",
+  "logs": [
+    {
+      "path": "/tmp/acp-saved-selection-all-final.log",
+      "sha256": "2747a0e257cb1b03c51ef69b194df5bb6fc55a9e33ccd5e4814c891f94fd0cd6"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-final-affected.log",
+      "sha256": "25f2b896bab5b834705273d377fc996884d67848cbf7d10778bb3ec0de9baf80"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-preflight-frozen.log",
+      "sha256": "5922017a4bcb3ab9cd0898ab9f6b2632d89714bac7a71b6c07de28ae5cff7923"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-lint-frozen.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-real-pack.log",
+      "sha256": "8bb4c9bcb87e4f874097bcc11235bd8e1e0a58b1e3a71e70d199660ccde165c1"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-cold-package.log",
+      "sha256": "0829d332ca19da2244b0ef0021f0ca19a7790d2de331ec95fc2a3d92586b37be"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-all-acp.log",
+      "sha256": "fa4d3917690ce3e997e1afd1c369d540085a5f111ab0fb8f81e7632a06a3b58b"
+    },
+    {
+      "path": "/tmp/acp-saved-selection-first-green.log",
+      "sha256": "337412e55e5885adabcd9b75a8a8f36126b696dbc2ff3ecd5deb00a2b2683d18"
+    }
+  ],
+  "composition": {
+    "main": "c52db58787467390042295b181b152ef3ba4de12",
+    "merge": "a4da3f539be8cc46bf037aedacc8467a1f181c5b",
+    "preservedMainSources": [
+      "room-acp/src/link.mjs",
+      "room-acp/src/agents.mjs",
+      "room-acp/src/args.mjs"
+    ],
+    "affectedPassed": 55,
+    "runtimeFilesPreflight": 667,
+    "packageSha256": "174f731afc8594438fbca9373289aedb0ad3b794ef75de9f342ed6fe14dc68e1",
+    "coldPackageInputs": 20,
+    "coldSameRoomIdentityCount": 1,
+    "hostModelQualified": false,
+    "logs": [
+      {
+        "path": "/tmp/acp-compose-affected.log",
+        "sha256": "b32d517eb8efa1b513521c5f62090a77878fc5c8a4ffc4f1bbdfd5434532f7d6"
+      },
+      {
+        "path": "/tmp/acp-compose-preflight.log",
+        "sha256": "898da225a68160c1a7033271d70cd1354e343f6e7d7e35c64e71b7ab0e76a382"
+      },
+      {
+        "path": "/tmp/acp-compose-pack.log",
+        "sha256": "8bb4c9bcb87e4f874097bcc11235bd8e1e0a58b1e3a71e70d199660ccde165c1"
+      },
+      {
+        "path": "/tmp/acp-compose-cold.log",
+        "sha256": "066f40c8b206bdbddb454e615c9f11c4d4962c1894a9bb5de63528d3a843a16d"
+      },
+      {
+        "path": "/tmp/acp-compose-eslint.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "/tmp/acp-compose-contract.log",
+        "sha256": "e9a11ccefff3ecc430ac3b0d5e38201b1c41dbeae665a94806ffaa4a5c8772b2"
+      },
+      {
+        "path": "/tmp/acp-compose-contract-final.log",
+        "sha256": "42d8edb43be901112caa1603f5e9e4e09fb2f1f22859ade7e41ff2f1a36f2f70"
+      }
+    ],
+    "ciContract": "passed CI=1; full Node suite skipped by contract runner",
+    "initialContractFailure": "two candidate documentation orphans, resolved by minimal INDEX links; no runtime failure"
+  }
+}

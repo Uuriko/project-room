@@ -1,0 +1,24 @@
+{
+  "sourceRevision": "0cf6fe9a5",
+  "baseRevision": "80b05fbf0",
+  "tested": "34 Node tests passed; normalized pending, denied, standing admission, fault rollback, cold exact retry, full recovery oracle",
+  "notClaimed": [
+    "Production deployment",
+    "Human account admission until member.added command context integrated",
+    "Manual identity approval until identity link port integrated"
+  ],
+  "logs": {
+    "red": {
+      "sha256": "0e3eb3cadf79596aec42977526974b653ba9341aed836c9c2c681373ca252573",
+      "path": "red.log.gz"
+    },
+    "green": {
+      "sha256": "e8643fe9a00243c3fc02f3450694debcfff57ab0eca59f8d0dc49e8e42a1388d",
+      "path": "green.log.gz"
+    },
+    "lint": {
+      "sha256": "146a09b69e612a34762a3db11a090f1e712b57561b108fe465f1957a03e57c53",
+      "path": "lint.log.gz"
+    }
+  }
+}

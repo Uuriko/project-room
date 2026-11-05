@@ -2,9 +2,10 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Public offers are owner-authored opt-in terms, not room projection exports.
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId, roomPolicy } from '../src/events.js';
+import { validId, roomPolicy, ownMember } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { currentInviteContext, isCurrentRoom, readCurrentWorkItem } from './current-room-repository.mjs';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_project_offer', message); };
@@ -77,21 +78,23 @@ function validateReview(state, terms, links) {
   const reviewers = links.reviewerMemberIds;
   check(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.length <= 10, 'Reviewers required');
   check(reviewers.every(id => !isGuestAgentMemberId(id)), 'Guest passes cannot approve work; choose a durable reviewer');
-  const members = reviewers.map(id => state.members[identifier(id)]);
+  const members = reviewers.map(id => ownMember(state.members, identifier(id)));
   check(members.every(member => member && member.active !== false), 'Reviewers must be active room members');
   const mode = terms.approvalPolicy.mode;
   const human = members.some(member => member.kind === 'human' && member.permissions?.includes('decide'));
   const agent = members.some(member => member.kind === 'agent' && member.permissions?.includes('verify'));
   check(mode === 'human' ? human : mode === 'agent' ? agent : human && agent, 'Reviewers lack the required review/decision standing');
-  const work = links.workItemId ? state.workItems[identifier(links.workItemId)] : null;
+  const workId = links.workItemId ? identifier(links.workItemId) : null;
+  const work = workId && Object.hasOwn(state.workItems, workId) ? state.workItems[workId] : null;
   if (links.workItemId) check(Boolean(work) && !['completed', 'superseded'].includes(work.state), 'Linked work must be available and non-terminal');
   if (roomPolicy(state).requireOwnerDecision || work?.ownerDecisionRequired) {
     check(mode !== 'agent', 'Room or work policy requires a human decision');
     const decider = work?.humanDecisionMakerId ?? state.room.ownerId;
-    check(reviewers.includes(decider) && state.members[decider]?.kind === 'human' && state.members[decider]?.permissions?.includes('decide'), 'Include the designated human decision-maker');
+    const member = ownMember(state.members, decider);
+    check(reviewers.includes(decider) && member?.kind === 'human' && member?.permissions?.includes('decide'), 'Include the designated human decision-maker');
   }
   if (work?.verifierMemberId) {
-    const verifier = state.members[work.verifierMemberId];
+    const verifier = ownMember(state.members, work.verifierMemberId);
     check(reviewers.includes(work.verifierMemberId) && verifier?.permissions?.includes('verify'), 'Include the designated work verifier');
     check(!work.independentVerificationRequired || work.verifierMemberId !== work.accountableMemberId, 'Independent reviewer required');
     check(verifier.kind !== 'agent' || mode !== 'human', 'Linked work requires agent review');
@@ -101,10 +104,23 @@ function validateReview(state, terms, links) {
 export class ProjectOffers {
   constructor(store) { this.store = store; this.db = store.db; }
   requireOwner(roomId, actorId) {
-    const { state } = this.store.room(roomId);
+    const { state } = currentInviteContext(this.store, roomId, { memberIds: [actorId] })?.room ?? this.store.room(roomId);
     if (state.room.ownerId !== actorId) fail(403, 'owner_only', 'Only the room owner may manage project offers');
     if (state.room.archivedAt) fail(409, 'room_archived', 'Archived rooms cannot publish offers');
     return state;
+  }
+  reviewState(roomId, actorId, links) {
+    const state = this.requireOwner(roomId, actorId);
+    if (!isCurrentRoom(this.db, roomId)) return state;
+    const reviewers = links.reviewerMemberIds;
+    check(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.length <= 10, 'Reviewers required');
+    for (const id of reviewers) identifier(id);
+    const workId = links.workItemId ? identifier(links.workItemId) : null;
+    const work = workId ? readCurrentWorkItem(this.db, roomId, workId) : null;
+    const ids = [...reviewers, work?.humanDecisionMakerId, work?.verifierMemberId].filter(Boolean);
+    const selected = currentInviteContext(this.store, roomId, { memberIds: ids }).room.state;
+    if (work) selected.workItems[workId] = work;
+    return selected;
   }
   record(row, privateView = false) {
     const terms = termsOf(JSON.parse(row.terms));
@@ -132,14 +148,14 @@ export class ProjectOffers {
     });
   }
   create(roomId, actorId, input) {
-    const state = this.requireOwner(roomId, actorId);
+    this.requireOwner(roomId, actorId);
     shape(input, ['requestId', 'offerId', 'terms', 'reviewerMemberIds'], ['workItemId']);
     identifier(input.offerId);
     const terms = termsOf(input.terms);
-    validateReview(state, terms, input);
+    validateReview(this.reviewState(roomId, actorId, input), terms, input);
     const reviewers = [...new Set(input.reviewerMemberIds)];
     return this.request(roomId, actorId, { action: 'create', ...input }, () => {
-      validateReview(this.requireOwner(roomId, actorId), terms, input);
+      validateReview(this.reviewState(roomId, actorId, input), terms, input);
       if (this.db.prepare('SELECT offer_id FROM project_offers WHERE offer_id=?').get(input.offerId)) fail(409, 'offer_exists', 'Offer ID already exists');
       if (this.db.prepare('SELECT count(*) AS n FROM project_offers WHERE room_id=?').get(roomId).n >= 100) fail(409, 'offer_limit', 'This room has reached its offer limit');
       const now = this.store.now();
@@ -161,7 +177,7 @@ export class ProjectOffers {
         const terms = JSON.parse(row.terms);
         check(Boolean(terms.repositoryUrl || terms.submissionUrl), 'Publishing requires a public repository or submission URL');
         const links = JSON.parse(row.private_links);
-        validateReview(this.requireOwner(roomId, actorId), JSON.parse(row.terms), links);
+        validateReview(this.reviewState(roomId, actorId, links), JSON.parse(row.terms), links);
       }
       this.db.prepare('UPDATE project_offers SET status=?, revision=revision+1, updated_at=? WHERE offer_id=?').run(action === 'publish' ? 'published' : 'withdrawn', this.store.now(), offerId);
       return this.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId), true);

@@ -121,6 +121,7 @@ export const webFetchSchema = `
     tags_json TEXT NOT NULL CHECK(json_valid(tags_json)),
     created_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS web_fetch_log_retention ON web_fetch_log(created_at, request_id);
   CREATE INDEX IF NOT EXISTS web_fetch_log_room_time ON web_fetch_log(room_id, created_at);
   CREATE INDEX IF NOT EXISTS web_fetch_log_member_time ON web_fetch_log(room_id, member_id, created_at);
   CREATE INDEX IF NOT EXISTS web_fetch_log_key_time ON web_fetch_log(credential_hash, created_at);

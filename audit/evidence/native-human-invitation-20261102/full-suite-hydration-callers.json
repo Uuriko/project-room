@@ -1,0 +1,257 @@
+{
+  "tests/account-deletion-link-guest.test.js:37:37)": [
+    "tests/account-deletion-link-guest.test.js:15:1"
+  ],
+  "tests/account-deletion-link-guest.test.js:81:37)": [
+    "tests/account-deletion-link-guest.test.js:57:1"
+  ],
+  "server/account-deletion.mjs:356:22)": [
+    "tests/account-deletion-redaction-scale.test.js:66:1",
+    "tests/account-deletion-redaction-scale.test.js:82:1"
+  ],
+  "tests/account-deletion-rooms.test.js:196:28)": [
+    "tests/account-deletion-rooms.test.js:184:1"
+  ],
+  "server/agent-identities.mjs:840:52": [
+    "tests/agent-identities.test.js:699:1",
+    "tests/agent-read-path.test.js:156:1",
+    "tests/agent-resume.test.js:184:1",
+    "tests/agent-resume.test.js:249:1",
+    "tests/agent-resume.test.js:399:1",
+    "tests/agent-wake-context-retry.test.js:56:3",
+    "tests/agent-wake-context-retry.test.js:56:3",
+    "tests/agent-wake-context-retry.test.js:56:3",
+    "tests/agent-wake-context-retry.test.js:56:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:75:3",
+    "tests/agent-wake-context-retry.test.js:89:1",
+    "tests/agent-wake-context-retry.test.js:103:1",
+    "tests/agent-wake-context-retry.test.js:116:3",
+    "tests/agent-wake-context-retry.test.js:116:3",
+    "tests/agent-wake-poll.test.js:546:1",
+    "tests/agent-wake.test.js:27:1",
+    "tests/agent-wake.test.js:36:1",
+    "tests/agent-wake.test.js:57:1",
+    "tests/agent-wake.test.js:71:1",
+    "tests/agent-wake.test.js:81:1",
+    "tests/agent-wake.test.js:92:1",
+    "tests/agent-wake.test.js:155:1",
+    "tests/agent-wake.test.js:187:1",
+    "tests/agent-wake.test.js:198:1",
+    "tests/agent-wake.test.js:209:1",
+    "tests/agent-work-claimable.test.js:53:3",
+    "tests/agent-work-claimable.test.js:53:3",
+    "tests/agent-work-claimable.test.js:53:3",
+    "tests/agent-work-claimable.test.js:53:3",
+    "tests/agent-work-claimable.test.js:53:3",
+    "tests/agent-work-selected-runs.test.js:28:1",
+    "tests/agent-work-selected-runs.test.js:44:1",
+    "tests/agent-work-selected-runs.test.js:58:1",
+    "tests/agent-work-selected-runs.test.js:67:1",
+    "tests/agent-work-view.test.js:9:1",
+    "tests/claude-channel.test.js:70:1",
+    "tests/claude-channel.test.js:113:1",
+    "tests/claude-channel.test.js:122:1",
+    "tests/claude-channel.test.js:133:1",
+    "tests/claude-channel.test.js:149:1",
+    "tests/claude-channel.test.js:163:1",
+    "tests/f12-board-mcp.test.js:310:1",
+    "tests/grok-host.test.js:691:1",
+    "tests/grok-host.test.js:716:1",
+    "tests/grok-host.test.js:745:1",
+    "tests/idle-inbox-hydration.test.js:7:1",
+    "tests/invitation-owner-admin.test.js:90:1",
+    "tests/mcp-core-profile.test.js:153:1",
+    "tests/mcp-core-profile.test.js:306:1",
+    "tests/mcp-core-profile.test.js:341:1",
+    "tests/mcp-core-profile.test.js:422:1",
+    "tests/mcp-core-profile.test.js:458:1",
+    "tests/mcp-core-profile.test.js:504:1",
+    "tests/mcp-core-profile.test.js:538:1",
+    "tests/mcp-core-profile.test.js:568:1",
+    "tests/mcp-listener-parity.test.js:84:1",
+    "tests/mcp-listener-parity.test.js:103:1",
+    "tests/mcp-scoped-key-ack-room.test.js:39:1",
+    "tests/mcp-scoped-key-ack-room.test.js:46:1",
+    "tests/mcp-scoped-key-ack-room.test.js:54:1",
+    "tests/mcp-scoped-key-host-guard.test.js:41:4",
+    "tests/mcp-scoped-key-host-guard.test.js:41:4",
+    "tests/mcp-scoped-key-host-guard.test.js:41:4",
+    "tests/mcp-scoped-key-host-guard.test.js:41:4",
+    "tests/mcp-scoped-key-host-guard.test.js:47:1",
+    "tests/mcp-scoped-key-host-guard.test.js:54:1",
+    "tests/mcp-scoped-key-webhooks.test.js:43:1",
+    "tests/mcp-scoped-key-webhooks.test.js:55:1",
+    "tests/mcp-scoped-key-webhooks.test.js:67:1",
+    "tests/mcp-untrusted-content.test.js:57:1",
+    "tests/mcp-untrusted-content.test.js:191:1",
+    "tests/mcp-untrusted-content.test.js:259:1",
+    "tests/needs-me-conversation-attention.test.js:45:1",
+    "tests/needs-me-conversation-attention.test.js:88:1",
+    "tests/needs-me-conversation-attention.test.js:139:1",
+    "tests/needs-me-delivered-review.test.js:45:1",
+    "tests/needs-me-delivered-review.test.js:58:1",
+    "tests/needs-me-delivered-review.test.js:76:1",
+    "tests/needs-me-delivered-review.test.js:91:1",
+    "tests/needs-me-digest-coverage.test.js:40:1",
+    "tests/needs-me-digest-coverage.test.js:63:1",
+    "tests/needs-me-digest-overflow.test.js:46:1",
+    "tests/needs-me-digest-overflow.test.js:70:1",
+    "tests/needs-me-digest-overflow.test.js:90:1",
+    "tests/needs-me-examined-bounds.test.js:68:1",
+    "tests/needs-me-examined-bounds.test.js:101:1",
+    "tests/needs-me-examined-bounds.test.js:124:1",
+    "tests/needs-me-fresh-start.test.js:9:1",
+    "tests/needs-me-mention-edits.test.js:32:1",
+    "tests/needs-me-mention-edits.test.js:40:1",
+    "tests/needs-me-mention-edits.test.js:68:1",
+    "tests/needs-me-mention-edits.test.js:77:1",
+    "tests/needs-me-my-claims.test.js:50:1",
+    "tests/needs-me-my-claims.test.js:76:1",
+    "tests/needs-me-my-claims.test.js:89:1",
+    "tests/needs-me-my-claims.test.js:107:1",
+    "tests/needs-me-my-claims.test.js:130:1",
+    "tests/needs-me-my-claims.test.js:164:1",
+    "tests/needs-me-my-claims.test.js:203:1",
+    "tests/needs-me-open-work.test.js:41:1",
+    "tests/needs-me-open-work.test.js:65:1",
+    "tests/needs-me-open-work.test.js:77:1",
+    "tests/needs-me-open-work.test.js:108:1",
+    "tests/needs-me-open-work.test.js:120:1",
+    "tests/needs-me-open-work.test.js:132:1",
+    "tests/needs-me-open-work.test.js:148:1",
+    "tests/needs-me-open-work.test.js:154:1",
+    "tests/needs-me-open-work.test.js:167:1",
+    "tests/needs-me-open-work.test.js:181:1",
+    "tests/needs-me-open-work.test.js:207:1",
+    "tests/needs-me-open-work.test.js:228:1",
+    "tests/needs-me-open-work.test.js:246:1",
+    "tests/needs-me-open-work.test.js:281:1",
+    "tests/needs-me-redelivery-review.test.js:46:1",
+    "tests/needs-me-scan-budgets.test.js:78:1",
+    "tests/needs-me-scan-budgets.test.js:117:1",
+    "tests/needs-me.test.js:13:1",
+    "tests/needs-me.test.js:88:1",
+    "tests/needs-me.test.js:112:1",
+    "tests/needs-me.test.js:139:1",
+    "tests/needs-me.test.js:176:1",
+    "tests/private-existence-boundary.test.js:80:1",
+    "tests/private-existence-boundary.test.js:91:1",
+    "tests/private-existence-boundary.test.js:101:1",
+    "tests/private-existence-boundary.test.js:109:1",
+    "tests/private-existence-boundary.test.js:124:1",
+    "tests/private-existence-boundary.test.js:161:1",
+    "tests/private-existence-boundary.test.js:177:1",
+    "tests/private-existence-boundary.test.js:194:1",
+    "tests/private-existence-boundary.test.js:221:1",
+    "tests/reply-agent.test.js:886:1",
+    "tests/reply-mention-notify.test.js:82:1",
+    "tests/reply-requests.test.js:549:1",
+    "tests/room-listen-lifetime.test.js:32:1",
+    "tests/room-listen-lifetime.test.js:69:1",
+    "tests/room-listen-resilience.test.js:83:1",
+    "tests/room-listen-resilience.test.js:109:1",
+    "tests/room-listen.test.js:59:1",
+    "tests/room-mcp-auth.test.js:71:1",
+    "tests/room-mcp-auth.test.js:286:1",
+    "tests/room-mcp-files.test.js:81:1",
+    "tests/room-mcp-files.test.js:170:1",
+    "tests/room-mcp-files.test.js:414:1",
+    "tests/room-mcp-files.test.js:474:1",
+    "tests/room-mcp-wake.test.js:255:1",
+    "tests/scoped-key-mcp-room-scope.test.js:57:1",
+    "tests/scoped-key-mcp-room-scope.test.js:75:1",
+    "tests/scoped-key-mcp-room-scope.test.js:90:1",
+    "tests/scoped-key-mcp-room-scope.test.js:108:1",
+    "tests/scoped-key-mcp-room-scope.test.js:120:1",
+    "tests/scoped-key-mcp-room-scope.test.js:131:1",
+    "tests/scoped-key-mcp-room-scope.test.js:146:1",
+    "tests/scoped-key-mcp-room-scope.test.js:164:1",
+    "tests/scoped-key-mcp-room-scope.test.js:177:1",
+    "tests/scoped-key-mcp-room-scope.test.js:217:1",
+    "tests/scoped-key-mcp-room-scope.test.js:228:1",
+    "tests/scoped-key-mcp-room-scope.test.js:237:1",
+    "tests/scoped-key-mcp-room-scope.test.js:249:1"
+  ],
+  "tests/agent-inviter-accountability.test.js:31:23)": [
+    "tests/agent-inviter-accountability.test.js:19:39"
+  ],
+  "server/share-links.mjs:298:83": [
+    "tests/agent-inviter-accountability.test.js:19:39"
+  ],
+  "tests/agent-invites.test.js:1195:22)": [
+    "tests/agent-invites.test.js:1182:1"
+  ],
+  "server/spend-grants.mjs:739:22)": [
+    "tests/bounty-mcp-idempotency.test.js:249:1",
+    "tests/bounty-mcp-idempotency.test.js:269:1",
+    "tests/spend-grants.test.js:671:1",
+    "tests/spend-pricing.test.js:119:1",
+    "tests/spend-pricing.test.js:208:1"
+  ],
+  "tests/canonical-work-dependencies.test.js:31:29)": [
+    "tests/canonical-work-dependencies.test.js:67:1",
+    "tests/canonical-work-dependencies.test.js:132:1"
+  ],
+  "tests/charter-audit-ownership.test.js:72:30)": [
+    "tests/charter-audit-ownership.test.js:66:1"
+  ],
+  "tests/charter-audit-ownership.test.js:86:31)": [
+    "tests/charter-audit-ownership.test.js:77:1"
+  ],
+  "tests/cold-start-friction.test.js:122:23)": [
+    "tests/cold-start-friction.test.js:116:1"
+  ],
+  "tests/public-work-mcp.test.js:82:44)": [
+    "tests/public-work-mcp.test.js:72:1"
+  ],
+  "tests/room-creation.test.js:31:25)": [
+    "tests/room-creation.test.js:24:1"
+  ],
+  "tests/room-lifecycle.test.js:252:24)": [
+    "tests/room-lifecycle.test.js:226:1"
+  ],
+  "tests/schema-migration-v33-v35.test.js:369:32)": [
+    "tests/schema-migration-v33-v35.test.js:385:1",
+    "tests/schema-migration-v33-v35.test.js:393:1"
+  ],
+  "tests/share-links-mail-unconfigured.test.js:45:26)": [
+    "tests/share-links-mail-unconfigured.test.js:53:1",
+    "tests/share-links-mail-unconfigured.test.js:60:1"
+  ],
+  "server/spend-allowance.mjs:105:24": [
+    "tests/spend-grant-races.test.js:112:1"
+  ],
+  "tests/spend-grants.test.js:112:10)": [
+    "tests/spend-grants.test.js:188:1",
+    "tests/spend-grants.test.js:219:1",
+    "tests/spend-grants.test.js:654:1"
+  ],
+  "tests/spend-grants.test.js:691:10)": [
+    "tests/spend-grants.test.js:678:1"
+  ],
+  "server/spend-grants.mjs:864:24": [
+    "tests/spend-grants.test.js:795:1"
+  ],
+  "server/spend-pricing.mjs:30:24": [
+    "tests/spend-pricing-routes.test.js:209:1"
+  ],
+  "tests/spend-pricing.test.js:73:30)": [
+    "tests/spend-pricing.test.js:75:1",
+    "tests/spend-pricing.test.js:103:1",
+    "tests/spend-pricing.test.js:237:1"
+  ],
+  "tests/spend-reaper-commit.test.js:143:10)": [
+    "tests/spend-reaper-commit.test.js:114:1"
+  ],
+  "server/squads.mjs:192:31": [
+    "tests/squads.test.js:260:1"
+  ]
+}

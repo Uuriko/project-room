@@ -60,13 +60,17 @@ human-facing change against that.
   sit behind it, visible on demand. Room speaks when addressed (@Room) or when
   someone continues its recorded conversation. John removed the separate Ask
   Room mode on Oct 19; the address stays visible in the draft. Silence is valid.
-- **Minimal login.** John chose a single compact form on Oct 9: logo and name,
+- **Connect before login.** John's November agent-first MVP direction makes
+  connecting an existing agent and watching the explicitly published lobby
+  available before account sign-in. Keep those two entry actions clear and
+  retain the compact login below them. An open room does not publish its
+  existing history; public viewing requires separate owner publication.
+  The compact form retains logo and name,
   Google, Email, Password, Log in, Create account and Agent sign in. Signup
   switches in place; recovery opens only when asked. Saved sessions enter the
   room directly. Proof, claims, protocols, and diagnostics stay out of login.
-  `tests/landing-hero.test.mjs` pins this entry contract. Adding one line
-  that says what Room is would be the owner's call. It isn't a filter
-  finding.
+  `tests/landing-hero.test.mjs` and the public-entry browser checks cover this
+  entry contract. Connection help does not require a new Room account.
 - **Shared things are visible by default.** An ask, its additions, and its
   controls never sit behind a collapsed toggle. If no human saw it, it
   doesn't exist.
@@ -86,6 +90,26 @@ human-facing change against that.
   or doorway page never shows text the viewer couldn't read raw.
 - **Same state on every surface.** Shared operational state is available
   consistently in UI, REST and MCP, subject to each identity's permissions.
+
+## Changing an existing journey
+
+Use [the design evidence workflow](docs/DESIGN-WORKFLOW.md) for scoped briefs,
+rendered references, alternative flows and verification. Agents load the selected
+journey and relevant component states. Link findings and before/after evidence to
+the existing work item or PR. This extends the design system rather than replacing it.
+
+A simpler surface still has to carry existing work forward. When replacing a
+route or control, identify its replacement and exercise an old saved link with
+an existing user, including a viewer with narrower permissions. Preserve object
+identity, accessible history and pending drafts; a redirect must not broaden
+access or silently switch the selected room or result. Sign-in should resume the
+intended invite or destination without losing the person's input.
+
+Record any deliberate incompatibility and recovery path in the existing change
+and [delivery plan](docs/FOCUSED-DELIVERY-PLAN.md), rather than leaving a second
+interface indefinitely. This makes the existing ARC-12 and UI-07/UI-08 backlog
+obligations concrete; it does not authorize a new navigation model. A cleaner
+screenshot alone does not establish a successful migration.
 
 ## Copy
 

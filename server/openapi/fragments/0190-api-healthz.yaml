@@ -9,7 +9,7 @@
         Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
+        '200': { description: "Liveness; same payload and bounded job-health classification as /api/health" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.

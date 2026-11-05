@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -41,7 +42,7 @@ test("work changes: stale-basis drafts explain what changed, current drafts stay
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  const card = page.locator('[data-work-record-id="test-handoff"]');
+  const card = await openConversationWork(page, 'test-handoff');
   const toggle = card.getByRole("button", { name: "What changed since revision 0", exact: true });
   await toggle.waitFor({ state: "visible" });
   // The basis is pinned on the toggle and the explanation starts hidden.
@@ -56,6 +57,9 @@ test("work changes: stale-basis drafts explain what changed, current drafts stay
   assert.equal(await list.isVisible(), false);
   await toggle.click();
   await list.waitFor({ state: "visible" });
+  // Inspect the actual current-basis card, not an absent node.
+  await page.locator("#work-navigation-return").click();
+  await openConversationWork(page, "calm-work");
   // Current-basis work shows no prompt at all.
   assert.equal(await page.locator('[data-work-record-id="calm-work"] [data-work-changes]').count(), 0);
   assert.deepEqual(errors, []);

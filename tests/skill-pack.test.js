@@ -1,5 +1,5 @@
 // Skill-pack validation: the installable onboarding skill stays machine-readable,
-// complete (identity -> join -> first claim -> first PR), and safe to hand to a
+// complete (identity -> join -> conversation -> optional work), and safe to hand to a
 // fresh agent (no outbound hosts besides the room origin, no secret literals).
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,19 +28,17 @@ test("frontmatter carries the OpenClaw installable-skill fields", () => {
   assert.ok(frontmatter().includes("openclaw:"), "openclaw metadata block is required");
 });
 
-test("covers the full onboarding path: identity, join, orient, claim, first PR", () => {
-  for (const section of ["Mint your identity", "Start your own room", "join the open collaboration room",
-    "Orient yourself", "Claim your first task", "Ship your first PR"]) {
+test("onboarding reuses an identity and defaults to the public lobby", () => {
+  for (const section of ["Resume an existing connection", "Mint your identity (only if none is saved)", "Optional: create your own project when asked", "join the open collaboration room", "Start a useful conversation", "Claim your first task", "Optional: contribute to Project Room itself"]) {
     assert.ok(body.includes(section), `missing section: ${section}`);
   }
-  assert.ok(body.includes("work-sessions"), "claim section must name the work-sessions endpoint");
-  // Shipped prompt contract: repo contributors must reach the current Room
-  // board, even when generic enrollment and Work Item sections remain intact.
-  const contribution = body.slice(body.indexOf("## 5. Ship your first PR"));
-  assert.match(contribution, /docs\/ROOM-COORDINATION\.md/, "PR section must link the current contributor guide");
-  assert.match(contribution, /\/api\/rooms\/muse-room\/work-claims/, "PR section must name the operational board");
-  assert.doesNotMatch(contribution, /issues\/(?:11|1160|266)(?:\/|\b)|lease: lease=|```room-claim/,
-    "PR section must not send agents to the frozen issue-board claim protocol");
+  assert.match(body, /With no supplied destination or saved membership, join `project-room-lobby`/);
+  assert.match(body, /No invitation or Room signup is needed/);
+  assert.match(body, /existing room does not need to be recreated/i);
+  assert.match(body, /room_join {}/);
+  assert.match(body, /work-sessions/);
+  assert.match(body, /Public contributors do not need a maintainer room or production access/);
+  assert.doesNotMatch(body, /issues\/(?:11|1160|266)(?:\/|\b)|lease: lease=|```room-claim/);
 });
 
 test("curl examples only touch the room origin", () => {

@@ -180,3 +180,31 @@ test("GET /api/health/jobs on Node includes the jobs list once the scheduler is 
   assert.deepEqual(body.jobs.map(j => j.name), JOBS.map(j => j.name));
   assert.ok(body.jobs.some(j => j.enabled && typeof j.lastRunAt === "string"));
 });
+
+test("public Node health keeps new error prose in operator diagnostics only", async t => {
+  const store = storeFor(t);
+  landQueueRow(store, Date.now());
+  const privateText = "Private Person private@example.invalid /Users/private-person/project unknownprosevalue aa/bb@db.invalid";
+  store.landQueue.refreshDue = async () => { throw Object.assign(Error(privateText), { failureDetail: { code: "fetch_failed", errorClass: "network" } }); };
+  const scheduler = wireNodeJobs(store, { env: {}, tickMs: 0 });
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { scheduler.stop(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const logs = [];
+  const warn = console.warn;
+  try { console.warn = line => logs.push(line); await scheduler.runOnce(); }
+  finally { console.warn = warn; }
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const response = await fetch(`${origin}/api/health/jobs`);
+  assert.equal(response.status, 200, "Node continues to report facts without grading the response");
+  const body = await response.json();
+  const row = body.jobs.find(job => job.name === "land-queue");
+  assert.equal(row.lastError, "Job failed");
+  assert.equal(row.lastErrorCode, "fetch_failed");
+  assert.equal(row.lastErrorClass, "network");
+  assert.equal(row.consecutiveFailures, 1);
+  assert.equal(typeof row.lastErrorAt, "string");
+  assert.equal(Object.hasOwn(body, "status"), false);
+  assert.doesNotMatch(JSON.stringify(body), /Private Person|private@example|private-person|unknownprosevalue|aa\/bb/);
+  assert.ok(logs.some(line => line.includes(privateText)), "operator-only console diagnostics remain available");
+});

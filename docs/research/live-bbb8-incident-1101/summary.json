@@ -1,0 +1,35 @@
+{
+  "source": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+  "workerBuildId": "2026-11-01T23:47:00.477Z",
+  "observationSeconds": 45.86,
+  "envelopes": 69,
+  "outcomes": {
+    "ok": 65,
+    "exception": 1,
+    "canceled": 3
+  },
+  "responseStatus": {
+    "503": 23,
+    "None": 4,
+    "200": 42
+  },
+  "exceptionEnvelopes": 10,
+  "logEvents": {
+    "room.readiness_probe": 4,
+    "room.do_request": 14,
+    "room.cold_start": 2,
+    "room.do_initialized": 1
+  },
+  "rawTailSaved": false,
+  "newMutations": 0,
+  "deploys": 0,
+  "resets": 0,
+  "allObservationChildrenCleaned": true,
+  "probeResult": "perimeter403, not service readiness; not retried",
+  "limits": [
+    "No raw exception text retained; unclassified exceptions cannot establish cause",
+    "Missing completion logs do not establish where a request waited",
+    "14 observed DO request200 logs do not certify saved identity or pending write outcome",
+    "Clock values are elapsed/IO observations, not CPU"
+  ]
+}

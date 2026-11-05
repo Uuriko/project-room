@@ -275,3 +275,99 @@ test("request-scoped overlap reuse preserves results and new requests observe ch
   assert.deepEqual(fresh.symbols, ["beta"]);
   assert.equal(assessOverlap({ subject: { ...claims[0], files: [] }, others: claims, graph, overlapContext }), null);
 });
+
+test("retained Graphify callable aliases preserve canonical names and callers", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: "b.js", kind: "file" }
+  ], edges: [{ source: 2, target: 1, relation: "calls" }] });
+  assert.equal(graph.files["a.js"].symbols[0].kind, "function");
+  const exact = mapQuery(graph, ".helper");
+  const alias = mapQuery(graph, "helper");
+  assert.equal(alias.found, true);
+  assert.equal(alias.symbol, ".helper");
+  assert.equal(alias.matchedBy, "callable-alias");
+  assert.equal(alias.ambiguous, false);
+  assert.deepEqual(alias.definitions, exact.definitions);
+  assert.deepEqual(alias.callers, exact.callers);
+  assert.equal(mapPath(graph, "b.js", "helper").found, true);
+  assert.equal(mapPath(graph, "b.js", "a.js#helper").found, true);
+});
+
+test("exact names win over callable aliases and noncallables gain no alias", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: "helper", kind: "symbol" },
+    { id: 3, file: "c.js", label: ".value", kind: "symbol" }
+  ], edges: [] });
+  const exact = mapQuery(graph, "helper");
+  assert.equal(exact.symbol, "helper");
+  assert.deepEqual(exact.definitions.map(x => x.file), ["b.js"]);
+  assert.equal(exact.matchedBy, undefined);
+  assert.equal(mapQuery(graph, "value").found, false);
+  assert.equal(mapQuery(graph, ".value").found, true);
+});
+
+test("ambiguous callable aliases return definitions but require file qualification for paths", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: ".helper()", _callable: true }
+  ], edges: [] });
+  const alias = mapQuery(graph, "helper");
+  assert.equal(alias.found, true);
+  assert.equal(alias.ambiguous, true);
+  assert.deepEqual(alias.definitions.map(x => x.file), ["a.js", "b.js"]);
+  const path = mapPath(graph, "a.js", "helper");
+  assert.equal(path.found, false);
+  assert.equal(path.ambiguous, true);
+  assert.equal(path.reason, "ambiguous_symbol");
+  assert.equal(mapPath(graph, "a.js", "a.js#helper").found, true);
+  // Preserve existing exact-name path selection semantics.
+  assert.equal(mapPath(graph, "a.js", ".helper").found, true);
+});
+
+test("truncated misses explain missing coverage without changing stored graph limits", () => {
+  const graph = graphFromGraphify({ truncated: true, nodes: Array.from({ length: 200 }, (_, i) =>
+    ({ id: i, file: "large.js", label: `.f${i}()`, _callable: true })), edges: [] });
+  const before = JSON.stringify(graph);
+  assert.equal(graph.files["large.js"].symbols.length, 200);
+  assert.equal(mapQuery(graph, "f199").found, true);
+  for (const result of [mapQuery(graph, "f200"), mapExplain(graph, "f200"), mapPath(graph, "large.js", "f200")]) {
+    assert.equal(result.found, false);
+    assert.equal(result.coverageIncomplete, true);
+    assert.match(result.coverageNote, /narrower source scope/);
+  }
+  assert.equal(JSON.stringify(graph), before);
+  const complete = graphFromGraphify({ nodes: [], edges: [] });
+  assert.equal(mapQuery(complete, "missing").coverageIncomplete, undefined);
+});
+
+
+test("Graphify retains definitions after200 while file packets remain bounded", () => {
+  const nodes = Array.from({length: 250}, (_, i) => ({id: i, file: "server/store.mjs", label: `.f${i}()`, _callable: true}));
+  nodes.push({id: "history", file: "server/store.mjs", label: ".workItemHistory()", _callable: true});
+  nodes.push({id: "duplicate", file: "server/store.mjs", label: ".f0()", _callable: true});
+  nodes.push({id: "caller", file: "client.js", label: ".caller()", _callable: true});
+  const graph = graphFromGraphify({nodes, edges: [
+    {source: "caller", target: "history", relation: "calls"},
+    {source: "duplicate", target: "caller", relation: "calls"}]});
+  assert.equal(graph.files["server/store.mjs"].symbols.length, 251);
+  assert.equal(graph.truncated, false);
+  const hit = mapQuery(graph, "workItemHistory");
+  assert.equal(hit.found, true); assert.equal(hit.callers[0].file, "client.js");
+  assert.equal(mapQuery(graph, "caller").callers[0].file, "server/store.mjs");
+  assert.equal(mapPath(graph, "client.js", "workItemHistory").found, true);
+  for (const result of [mapQuery(graph, "server/store.mjs"), mapExplain(graph, "server/store.mjs")]) {
+    assert.equal(result.symbols.length, 200); assert.equal(result.symbolCount, 251);
+    assert.equal(result.symbolsReturned, 200); assert.equal(result.truncated, true);
+  }
+});
+
+test("single-file Graphify definitions retain the global20k input bound", () => {
+  const graph = graphFromGraphify({nodes: Array.from({length: 20001}, (_, i) =>
+    ({id: i, file: "one.js", label: `f${i}`, type: "function"})), edges: []});
+  assert.equal(graph.files["one.js"].symbols.length, 20000);
+  assert.equal(graph.truncated, true);
+  assert.equal(mapQuery(graph, "f19999").found, true);
+  assert.equal(mapQuery(graph, "f20000").found, false);
+});

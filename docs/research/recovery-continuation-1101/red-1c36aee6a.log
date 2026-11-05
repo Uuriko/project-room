@@ -1,0 +1,79 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":27901336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":37220688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":49223912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":37,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":36,"heapBytes":39914856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":37,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ bounded finalization makes durable keyset progress across an external verification-budget process exit (634.242584ms)
+ℹ {"pin":"1c36aee6a","budgetUnit":"returned canonical target rows","budget":128,"first":{"phase":"verification-budget-exit","verifiedRows":128,"prefix":[{"table":"accounts","rowSha256":"b525133e20f1e39faff1b2163cb0ff0413f54d6e4f3501801a3b67d9eaa6c03e"},{"table":"credentials","rowSha256":"2b295d3e7ece5562df7cc358fa6e1b60c0655bd510108869c0104b4cf3ffbeec"},{"table":"current_room_head","rowSha256":"2892f55eebd8a0f6777eeebb63745d4983fd2f65b9718a95b4d6330b129ab259"},{"table":"current_room_record_proofs","rowSha256":"f4808ff2c15bff3ffad95e3d2ea0cc77cab2eccd86f7071a020d296c326da4a2"},{"table":"current_room_record_proofs","rowSha256":"305643cf3af114edb3652cac9b2f7ba8850b1b57c9165a846f5fb16db816f25b"}],"admission":{"state":"pending","restore_id":"restore_069100ac-232f-47ac-b14e-77959a154cc3"},"events":602,"operatorActions":12},"second":{"phase":"verification-budget-exit","verifiedRows":128,"prefix":[{"table":"accounts","rowSha256":"b525133e20f1e39faff1b2163cb0ff0413f54d6e4f3501801a3b67d9eaa6c03e"},{"table":"credentials","rowSha256":"2b295d3e7ece5562df7cc358fa6e1b60c0655bd510108869c0104b4cf3ffbeec"},{"table":"current_room_head","rowSha256":"2892f55eebd8a0f6777eeebb63745d4983fd2f65b9718a95b4d6330b129ab259"},{"table":"current_room_record_proofs","rowSha256":"f4808ff2c15bff3ffad95e3d2ea0cc77cab2eccd86f7071a020d296c326da4a2"},{"table":"current_room_record_proofs","rowSha256":"305643cf3af114edb3652cac9b2f7ba8850b1b57c9165a846f5fb16db816f25b"}],"admission":{"state":"pending","restore_id":"restore_069100ac-232f-47ac-b14e-77959a154cc3"},"events":602,"operatorActions":12},"normalReadRefused":true}
+✖ final recovery digest does not materialize an entire unbounded payload table in one call (220.494292ms)
+ℹ {"pin":"1c36aee6a","completeAuditPassed":true,"largestBulk":[{"sql":"SELECT * FROM current_room_records","rows":1206,"textBytes":223275},{"sql":"SELECT * FROM current_room_record_proofs","rows":1206,"textBytes":221534},{"sql":"SELECT * FROM events","rows":602,"textBytes":189426},{"sql":"SELECT * FROM messages","rows":600,"textBytes":224560},{"sql":"SELECT * FROM operator_actions","rows":12,"textBytes":146578}]}
+✖ a preopened same-floor SQL writer cannot mutate imported authority while final coverage is checkpointed (484.099083ms)
+ℹ {"pin":"1c36aee6a","preopenedSameFloor":true,"phase":"interrupted coverage","pending":true,"before":{"revoked":0},"after":{"revoked":1},"refused":false}
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1448.557208
+
+✖ failing tests:
+
+test at tests/recovery-finalization-continuation-contract.test.mjs:14:1
+✖ bounded finalization makes durable keyset progress across an external verification-budget process exit (634.242584ms)
+  AssertionError [ERR_ASSERTION]: a new recovery process must resume after durable checked coverage, rather than repeat exactly the same prefix forever
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-recovery-continuation-contract-1101/tests/recovery-finalization-continuation-contract.test.mjs:15:952)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ { table: 'accounts', rowSha256: 'b525133e20f1e39faff1b2163cb0ff0413f54d6e4f3501801a3b67d9eaa6c03e' }, { table: 'credentials', rowSha256: '2b295d3e7ece5562df7cc358fa6e1b60c0655bd510108869c0104b4cf3ffbeec' }, { table: 'current_room_head', rowSha256: '2892f55eebd8a0f6777eeebb63745d4983fd2f65b9718a95b4d6330b129ab259' }, { table: 'current_room_record_proofs', rowSha256: 'f4808ff2c15bff3ffad95e3d2ea0cc77cab2eccd86f7071a020d296c326da4a2' }, { table: 'current_room_record_proofs', rowSha256: '305643cf3af114edb3652cac9b2f7ba8850b1b57c9165a846f5fb16db816f25b' } ],
+    expected: [ { table: 'accounts', rowSha256: 'b525133e20f1e39faff1b2163cb0ff0413f54d6e4f3501801a3b67d9eaa6c03e' }, { table: 'credentials', rowSha256: '2b295d3e7ece5562df7cc358fa6e1b60c0655bd510108869c0104b4cf3ffbeec' }, { table: 'current_room_head', rowSha256: '2892f55eebd8a0f6777eeebb63745d4983fd2f65b9718a95b4d6330b129ab259' }, { table: 'current_room_record_proofs', rowSha256: 'f4808ff2c15bff3ffad95e3d2ea0cc77cab2eccd86f7071a020d296c326da4a2' }, { table: 'current_room_record_proofs', rowSha256: '305643cf3af114edb3652cac9b2f7ba8850b1b57c9165a846f5fb16db816f25b' } ],
+    operator: 'notDeepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/recovery-finalization-continuation-contract.test.mjs:17:1
+✖ final recovery digest does not materialize an entire unbounded payload table in one call (220.494292ms)
+  AssertionError [ERR_ASSERTION]: complete recovery must page target digest work; current audit uses whole-table .all()
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-recovery-continuation-contract-1101/tests/recovery-finalization-continuation-contract.test.mjs:18:786)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/recovery-finalization-continuation-contract.test.mjs:21:1
+✖ a preopened same-floor SQL writer cannot mutate imported authority while final coverage is checkpointed (484.099083ms)
+  AssertionError [ERR_ASSERTION]: a durable coverage checkpoint requires a SQL-level frozen target, not only HTTP/Store method refusal
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-recovery-continuation-contract-1101/tests/recovery-finalization-continuation-contract.test.mjs:22:912)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

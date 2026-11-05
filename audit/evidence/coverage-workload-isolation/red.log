@@ -1,0 +1,30 @@
+✖ collector isolates expensive files and retains real coverage from every discovered batch (95.517709ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 140.039542
+
+✖ failing tests:
+
+test at tests/coverage-thresholds.test.js:381:1
+✖ collector isolates expensive files and retains real coverage from every discovered batch (95.517709ms)
+  AssertionError [ERR_ASSERTION]: each expensive file must run alone in a separate completed runner
+  
+  1 !== 3
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/coverage-isolation-a392/tests/coverage-thresholds.test.js:387:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

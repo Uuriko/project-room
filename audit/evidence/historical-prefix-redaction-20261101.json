@@ -1,0 +1,110 @@
+{
+  "date": "2026-11-01",
+  "runtimeCommit": "68221f018",
+  "base": "06af4213d",
+  "chain": [
+    "f9d39d817879e421e1c68846414fcf388893123e",
+    "2e40ddce9",
+    "68221f018"
+  ],
+  "status": "locally tested; requires root composition/review; not deployed",
+  "native": {
+    "head": 17,
+    "prefix": 14,
+    "receipts": [
+      {
+        "id": "prefix-one",
+        "cost": {
+          "statements": 289,
+          "rowsRead": 5886,
+          "rowsWritten": 100,
+          "unknown": 0
+        },
+        "clockMs": 23,
+        "retry": {
+          "statements": 111,
+          "rowsRead": 1595,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "id": "prefix-two",
+        "cost": {
+          "statements": 338,
+          "rowsRead": 5444,
+          "rowsWritten": 45,
+          "unknown": 0
+        },
+        "clockMs": 12,
+        "retry": {
+          "statements": 111,
+          "rowsRead": 1595,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "id": "prefix-private",
+        "cost": {
+          "statements": 379,
+          "rowsRead": 5767,
+          "rowsWritten": 44,
+          "unknown": 0
+        },
+        "clockMs": 15,
+        "retry": {
+          "statements": 111,
+          "rowsRead": 1595,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      }
+    ],
+    "proofRows": [
+      {
+        "action": "historical_replay_erased",
+        "n": 3,
+        "bytes": 2628
+      },
+      {
+        "action": "historical_replay_privacy_basis",
+        "n": 1,
+        "bytes": 2320
+      }
+    ],
+    "sourceBytes": 129440,
+    "steps": 58,
+    "fullOracle": true,
+    "coldReady": true,
+    "originalReceiptsExact": true,
+    "sourceLimit": 262144,
+    "metadataLimit": 131072,
+    "wholePurgeBounded": false
+  },
+  "bounds": {
+    "originalEventLimit": 64,
+    "originalSourceAndOutputBytes": 262144,
+    "descriptorBytes": 65536,
+    "aggregatePrivacyInputBytes": 131072,
+    "perEventBytes": 32768,
+    "maximumCombinedReaderInputBytes": 393216
+  },
+  "logs": {
+    "baseline06afRed": "/tmp/historical-redaction-baseline06af-red.log",
+    "old16KiBEventRed": "/tmp/historical-redaction-escaped16-causal-red.log",
+    "node": "/tmp/historical-redaction-node-final.log",
+    "focused15": "/tmp/historical-redaction-controls-final.log",
+    "native": "/tmp/historical-redaction-native-final.log",
+    "lint": "/tmp/historical-redaction-lint-final.log",
+    "secret": "/tmp/historical-redaction-secret-final.log"
+  },
+  "limitations": [
+    "whole privacy purge remains atomic and variable cost, not proven bounded",
+    "Native counters cover adapter statements; raw runtime permit SQL excluded",
+    "clock timings are elapsed samples, not CPU",
+    "pairing must integrate384KiB reservation into recovery/seeder without raising4MiB cap",
+    "native-work-5 composition/old-runtime/restore qualification belongs root",
+    "no account deletion or live schema45 authorization"
+  ]
+}

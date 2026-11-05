@@ -22,6 +22,14 @@ export const attachmentSchema = attachmentSchemaV28
   .replace("state='staged' AND bytes", "state IN ('staged','committed') AND bytes")
   .replace("state!='staged' AND bytes", "state NOT IN ('staged','committed') AND bytes");
 
+// Optional optimization: installed only by the bounded operator action, never
+// by ensureAttachmentSchema or its startup stamp.
+export const attachmentLiveIndexSql = "CREATE INDEX room_attachments_live ON room_attachments(room_id,state) WHERE state IN ('staged','committed')";
+export function attachmentLiveIndexState(db) {
+  const row = db.prepare("SELECT type,CASE WHEN length(CAST(sql AS BLOB))<=? THEN sql ELSE NULL END AS sql FROM sqlite_master WHERE name='room_attachments_live' LIMIT 1").get(attachmentLiveIndexSql.length);
+  return !row ? 'absent' : row.type === 'index' && row.sql === attachmentLiveIndexSql ? 'installed' : 'conflict';
+}
+
 export function ensureAttachmentSchema(db) {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='room_attachments'").get();
   if (!row) { db.exec(attachmentSchema); return "created"; }
@@ -37,6 +45,8 @@ export function ensureAttachmentSchema(db) {
 }
 
 export function verifyAttachmentSchema(db) {
+  if (attachmentLiveIndexState(db) === 'conflict')
+    throw new Error("Optional attachment live index requires operator reconciliation");
   if (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='room_attachments'").get()?.sql !== attachmentSchema.split(';')[0])
     throw new Error("Attachment schema requires operator reconciliation");
   if (db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='room_attachments_owner'").get()?.sql !== attachmentSchema.split(';')[1].trim())

@@ -1,0 +1,44 @@
+✔ an overlapping claim succeeds and records who else holds the paths (4.213584ms)
+✔ other repositories and released claims do not overlap (2.376709ms)
+✔ overlaps are deterministic on replay (5.3425ms)
+✔ shared retained checkpoint default preserves original null timestamp and no-op semantics (0.588667ms)
+✔ restore-only sealed scan partitions journals, auxiliary maps and event log across cold cursors (18.574125ms)
+✔ legal checkpoint beyond cutover4MiB and individual128KiB limits remains byte framed (107.364458ms)
+✔ sealed source framing cannot be used by old cutover scanner or escape source bounds (0.310042ms)
+✔ malformed checkpoint framing and malformed complete leaves cannot grant completion (0.324083ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":29948928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ shared overlap predicate preserves exact path grammar, repository, lease and first10/16 warning semantics (6.524083ms)
+✔ scoped claim dependency is internal and rejects malformed warning values (0.249417ms)
+✔ ordered scratch sees pending and persisted heads, excludes parts, expires and rolls back (153.959875ms)
+✔ same reducer common replay uses point reads and matches full 1000 message history (100.752666ms)
+ℹ {"messages":1000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer common replay uses point reads and matches full 5000 message history (423.654792ms)
+ℹ {"messages":5000,"maxPointReads":8,"physicalSQLiteCostMeasured":false,"checkpointAndGlobalPlansComplete":false}
+✔ same reducer long-chain and private request branches preserve context, channel copies and work transitions (24.159334ms)
+✔ same reducer refuses invalid parents, duplicates and idempotency conflicts without producing partial effects (0.677958ms)
+✔ unqualified event and stamped-name plans are explicitly incomplete rather than certified (0.068791ms)
+✔ scoped root-channel readers cannot bypass direct parent existence or channel gates (0.408208ms)
+✔ common replay does not accept asynchronous or malformed record readers (0.088292ms)
+✔ addressed scalar policy, member preference and thin receipt handlers preserve full reducer authority (3.696083ms)
+✔ Muse-only development access uses exact addressed owner and rejects ordinary-room input (0.417125ms)
+✔ independently folded insertion ordinals preserve source order rather than lexical SQL order (0.475583ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":47,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":36764728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":47,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":33068352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ legal long fingerprint survives bounded scratch parts, unicode boundaries and cold adapter (27.254125ms)
+✔ missing, reordered, mutated and ambiguous base64 parts fail closed (7.055541ms)
+✔ insufficient transaction row admission leaves old working head and all parts unchanged (5.13675ms)
+✔ source scalar admission and exact part index are enforced (1.0315ms)
+✔ existing guarded SQLite scratch atomically checkpoints large replay value and survives cold reopen (75.173375ms)
+✔ actual process exit preserves reducer patch parts and exact independently folded cursor together (1075.807459ms)
+✔ declared entity bytes are admitted before allocating or fetching any large body part (2.529167ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1359.169833

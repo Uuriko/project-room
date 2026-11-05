@@ -7,8 +7,19 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
+import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, observedPresenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
+
+test("connection observations do not imply an agent is listening", () => {
+  const coverage = { execution: "not-evaluated" };
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: true }), "Connected");
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: false, presence: { status: "online", basis: "host" } }), "Recent host signal");
+  assert.equal(observedPresenceLabel("listening", { coverage, watching: false }), "No live signal");
+  assert.equal(observedPresenceLabel("listening", { watching: false, presence: { status: "online", basis: "host" } }), "Recent host signal");
+  assert.equal(observedPresenceLabel("unknown", { coverage }), "No live signal");
+  assert.equal(observedPresenceLabel("listening", null), "No live signal");
+  assert.equal(observedPresenceLabel("working", { coverage }), "Working");
+});
 
 function room(t) {
   const directory = mkdtempSync(join(tmpdir(), "conversation-")), filename = join(directory, "room.sqlite");
@@ -346,12 +357,29 @@ test("People rail derives presence, one-line status, and Done chips from room wo
   assert.equal(memberStatus(codex, ctx), "Assigned: Build the first executable Room slice");
   assert.equal(memberStatus(potter, ctx), "Review the Project Room v0 contract");
   assert.equal(memberStatus(instinct, ctx), "Agent");
+  assert.equal(memberDoneChip(codex, ctx), null, "a result awaiting its required decision is not Done");
+  Object.assign(workItems.review.receipt, { evidenceVersion: "v1", producerAttribution: "reported", producerId: "codex" });
+  workItems.review.verification = { verifierId: "instinct", result: "pass", independenceConfirmed: true, completionEventId: "evt-done", evidenceVersion: "v1" };
+  workItems.review.decision = { decision: "approved", completionEventId: "evt-done", evidenceVersion: "v1" };
   assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
   assert.equal(memberDoneChip(codex, ctx)?.workItemId, "work-spec-review");
   assert.match(memberDoneChip(codex, ctx)?.title, /consistency corrections/);
   assert.equal(memberDoneChip(instinct, ctx), null);
   assert.equal(memberDoneChip(potter, ctx), null);
   assert.equal(memberDoneChip(revoked, { workItems }), null);
+  // Retained historical receipts must not make rejected/reworking output Done.
+  const current = { ...structuredClone(workItems.review), id: "new-result", updatedAt: "2026-09-06T09:30:00.000Z" };
+  workItems.current = current;
+  for (const phase of ["blocked", "accepted", "working"]) {
+    current.state = phase;
+    current.verification = { result: "fail", completionEventId: "evt-done", evidenceVersion: "v1" };
+    current.decision = null;
+    assert.equal(memberDoneChip(codex, ctx), null, `${phase} must not fall back to an older Done receipt`);
+  }
+  current.state = "completed";
+  current.verification = workItems.review.verification;
+  current.decision = workItems.review.decision;
+  assert.equal(memberDoneChip(codex, ctx)?.workItemId, "new-result");
 });
 
 test("timeline window renders the newest messages and widens a page at a time", async () => {

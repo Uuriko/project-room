@@ -258,3 +258,84 @@ test('the room-coord CLI drives the same verbs and refuses malformed input befor
   assert.throws(() => parseArgs(['claim', 'x', '--files']), coded('usage_error'));
   assert.deepEqual(parseArgs(['claim', 'x', '--note=a=b', '--allow-overlap']).options, { note: 'a=b', 'allow-overlap': true });
 });
+
+test('incomplete claim coverage never certifies absence of conflicts', () => {
+  for (const paging of [
+    { hasMore: true, nextCursor: 'cap-or-cycle' },
+    { hasMore: true, nextCursor: null },
+    { hasMore: false, nextCursor: 'contradictory' },
+    { nextCursor: 'missing-flag' },
+    { hasMore: 'false' }
+  ]) assert.throws(() => guardConflicts({ claims: [], ...paging }, ['server/a.mjs']), coded('claims_incomplete'));
+  for (const complete of [[], { claims: [] }, { claims: [], hasMore: false, nextCursor: null }])
+    assert.deepEqual(guardConflicts(complete, ['server/a.mjs']), []);
+});
+
+test('incomplete preflight refuses before a real claim write', async t => {
+  const { owner } = await fixture(t);
+  let writes = 0;
+  const client = {
+    workClaims: async () => ({ claims: [], hasMore: true, nextCursor: 'later' }),
+    workClaim: (...args) => { writes += 1; return owner.workClaim(...args); },
+    workClaimGet: (...args) => owner.workClaimGet(...args),
+    releaseWorkItem: (...args) => owner.releaseWorkItem(...args)
+  };
+  await assert.rejects(claimAndVerify(client, 'partial-preflight', { memberId: 'owner', files: ['server/a.mjs'] }), coded('claims_incomplete'));
+  assert.equal(writes, 0);
+  await assert.rejects(owner.workClaimGet('partial-preflight'), error => error.status === 404);
+});
+
+test('incomplete post-write verification releases and reads back the real claim', async t => {
+  const { owner } = await fixture(t);
+  let reads = 0;
+  const client = {
+    workClaims: async () => ++reads === 1 ? owner.workClaims() : { claims: [], hasMore: true, nextCursor: 'later' },
+    workClaim: (...args) => owner.workClaim(...args),
+    workClaimGet: (...args) => owner.workClaimGet(...args),
+    releaseWorkItem: (...args) => owner.releaseWorkItem(...args)
+  };
+  await assert.rejects(claimAndVerify(client, 'partial-postflight', { memberId: 'owner', files: ['server/a.mjs'] }),
+    error => coded('claims_incomplete')(error) && error.details.released === true && error.details.reconciliationRequired === false);
+  assert.equal((await owner.workClaimGet('partial-postflight')).state, 'unclaimed');
+  assert.equal(reads, 2);
+});
+
+test('uncertain post-write release requires reconciliation and never reports success', async t => {
+  const { owner } = await fixture(t);
+  let reads = 0;
+  const client = {
+    workClaims: async () => ++reads === 1 ? owner.workClaims() : { claims: [], hasMore: true, nextCursor: 'cycle' },
+    workClaim: (...args) => owner.workClaim(...args),
+    workClaimGet: (...args) => owner.workClaimGet(...args),
+    releaseWorkItem: async () => { throw new Error('offline'); }
+  };
+  await assert.rejects(claimAndVerify(client, 'partial-held', { memberId: 'owner', files: ['server/a.mjs'] }),
+    error => coded('claims_incomplete')(error) && error.details.released === false && error.details.reconciliationRequired === true);
+  assert.equal((await owner.workClaimGet('partial-held')).state, 'claimed');
+});
+
+test('coordination status retains partial coverage instead of implying an empty board', async () => {
+  const status = await coordStatus({ workClaims: async () => ({ claims: [], hasMore: true, nextCursor: 'later' }) });
+  assert.equal(status.hasMore, true);
+  assert.equal(status.nextCursor, 'later');
+  assert.deepEqual(status.live, []);
+  assert.match(digest({ status }), /Claim coverage incomplete/);
+  assert.match(digest({ status }), /0 live observed/);
+});
+
+
+test('a different claim round cannot confirm post-write cleanup', async () => {
+  let reads = 0, gets = 0;
+  const original = { id: 'round', state: 'claimed', owner: 'me', files: ['server/a.mjs'], claimedAt: '2026-10-28T01:00:00Z', history: [] };
+  const client = {
+    workClaims: async () => ++reads === 1 ? { claims: [] } : { claims: [], hasMore: true, nextCursor: 'later' },
+    workClaim: async () => {},
+    workClaimGet: async () => ++gets === 1 ? original : { ...original, state: 'unclaimed', owner: null, claimedAt: '2026-10-28T02:00:00Z', history: [{}, {}, {}] },
+    releaseWorkItem: async (_id, options) => {
+      assert.equal(options.expectedClaimedAt, original.claimedAt);
+      assert.equal(options.expectedHistoryLength, 0);
+    }
+  };
+  await assert.rejects(claimAndVerify(client, 'round', { memberId: 'me', files: original.files }),
+    error => coded('claims_incomplete')(error) && !error.details.released && error.details.reconciliationRequired);
+});

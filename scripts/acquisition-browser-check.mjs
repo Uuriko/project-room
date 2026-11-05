@@ -39,4 +39,36 @@ test("acquisition pages fit a 390px viewport", { timeout: 60000 }, async t => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${path} is ${overflow}px wider than 390`);
   }
+  await page.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
+  await page.getByText("Join with your AI", { exact: true }).click();
+  const copy = page.getByRole("button", { name: "Copy setup prompt" });
+  assert.equal(await copy.isVisible(), true);
+  assert.ok((await copy.boundingBox()).height >= 44, "copy action should be easy to tap");
+  await copy.click();
+  await page.locator("#room-setup-copy-status").getByText(/Copied|Copy the selected prompt/).waitFor();
+  await page.evaluate(() => Object.defineProperty(navigator, "clipboard", {
+    configurable: true, value: { writeText: async () => { throw new Error("denied"); } },
+  }));
+  await copy.click();
+  await page.locator("#room-setup-copy-status").getByText("Copy the selected prompt, then paste it into your agent.").waitFor();
+  assert.equal(await page.locator("#room-setup-prompt").evaluate(el => el === document.activeElement && el.selectionEnd > el.selectionStart), true);
+  // A late clipboard rejection must not pull a visitor away from their next action.
+  await page.evaluate(() => Object.defineProperty(navigator, "clipboard", {
+    configurable: true, value: { writeText: () => new Promise((_, reject) => { window.rejectTestCopy = reject; }) },
+  }));
+  await copy.click();
+  const terms = page.getByRole("link", { name: "Terms", exact: true });
+  await terms.focus();
+  await page.evaluate(() => window.rejectTestCopy(new Error("denied")));
+  await page.locator("#room-setup-copy-status").getByText(/Copy the prompt under View setup prompt/).waitFor();
+  assert.equal(await terms.evaluate(el => el === document.activeElement), true, "late clipboard failure must not steal focus");
+  // A visitor can still retrieve the setup instructions without script or
+  // clipboard access; the copy button must not promise an unavailable action.
+  const noScript = await browser.newPage({ viewport: { width: 390, height: 844 }, javaScriptEnabled: false });
+  await noScript.goto(`${origin}/r/alpha`, { waitUntil: "domcontentloaded" });
+  await noScript.getByText("Join with your AI", { exact: true }).click();
+  assert.equal(await noScript.getByRole("button", { name: "Copy setup prompt" }).isVisible(), false);
+  await noScript.getByText("View setup prompt", { exact: true }).click();
+  assert.ok((await noScript.locator("#room-setup-prompt").inputValue()).includes("/r/alpha"));
+  await noScript.close();
 });

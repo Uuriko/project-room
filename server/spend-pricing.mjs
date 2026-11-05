@@ -1,3 +1,4 @@
+import {spendAuthorityRoom} from './spend-allowance.mjs';
 import { canAdministerRoom } from '../src/room-administration.js';
 // Spend-pricing kill switch: the administrator-only emergency lever for the
 // priced-tool gate (promised to Dot's QA lane, room seq 2748).
@@ -26,8 +27,8 @@ const refuse = (status, code, message) => { throw new SpendPricingError(status, 
 // behaviour (priced tools either charge or forward free).
 export function readSpendPricing(store, token, roomId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
-    store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const auth=store.authenticate(token, roomId, expectedSessionBinding);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id]);
     const stored = room.state.room.spendPricing ?? null;
     return {
       roomId,
@@ -48,7 +49,7 @@ export function setSpendPricing(store, token, roomId, request, expectedSessionBi
   // learns nothing about accepted fields from a malformed write.
   store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = spendAuthorityRoom(store,roomId,[auth.member.id]);
     if (!canAdministerRoom(room.state, auth.member.id)) refuse(403, "owner_required", "A room administrator can set spend pricing");
   });
   if (!request || Array.isArray(request) || typeof request !== "object")

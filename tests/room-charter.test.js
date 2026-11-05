@@ -43,7 +43,7 @@ test("charter preserves exact versions, clearing and old receipt retries without
   try { assert.equal(reopened.charter(f.keys.owner, "commons").revision, 3); assert.equal(reopened.command(f.keys.owner, "commons", original).duplicate, true); auditRecovery(reopened); } finally { reopened.close(); }
 });
 
-test("only active human owner updates; invalid and stale instructions leave no writes", async t => {
+test("only active owner updates; invalid and stale instructions leave no writes", async t => {
   const f = await setup(t), before = auditRecovery(f.store).dataSha256;
   for (const actor of ["guest", "producer", "reviewer"]) assert.throws(() => f.send(data(), undefined, actor), { code: "command_rejected" });
   for (const patch of [{ purpose: "" }, { purpose: " " }, { purpose: "a".repeat(1001) }, { purpose: "\uD800" }, { outputs: {} }, { purpose: null }, { expectedRevision: null }, { expectedRevision: Number.MAX_SAFE_INTEGER }, { extra: "not allowed" }]) {
@@ -68,7 +68,7 @@ test("charter reads bind identity, selectors, exact version and containing horiz
     await assert.rejects(client.charter(), e => ["invalid_response", "identity_mismatch"].includes(e.code));
   }
   for (const change of [v => { v.charter.revision = v.charter.charter.revision = 999; }, v => { v.state.room.charter.purpose = "Different"; }, v => { delete v.charter; }]) {
-    const client = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => { const response = await fetch(url, options); if (!url.endsWith("/commons")) return response; const v = await response.json(); change(v); return Response.json(v); } });
+    const client = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => { const response = await fetch(url, options); if (new URL(url).search !== "?view=orientation") return response; const v = await response.json(); change(v); return Response.json(v); } });
     await assert.rejects(client.orient(), { code: "invalid_response" });
   }
   const context = await f.client.workContext("test-handoff");
@@ -78,10 +78,10 @@ test("charter reads bind identity, selectors, exact version and containing horiz
   assert.throws(() => validateCharterContext({ authority: "context_only", revision: 0, eventId: null, charter: undefined }));
 });
 
-test("older service without charter metadata is unavailable, distinct from a confirmed unset charter", async t => {
+test("orientation requires explicit charter metadata, distinct from a confirmed unset charter", async t => {
   const f = await setup(t); assert.equal((await f.client.orient()).charter.revision, 0);
-  const old = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => { const response = await fetch(url, options); if (!url.endsWith("/commons")) return response; const v = await response.json(); delete v.charter; return Response.json(v); } });
-  assert.equal((await old.orient()).charter, null);
+  const old = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => { const response = await fetch(url, options); if (new URL(url).search !== "?view=orientation") return response; const v = await response.json(); delete v.charter; return Response.json(v); } });
+  await assert.rejects(old.orient(), { code: "invalid_response" });
 });
 
 test("historical charter reads remain bounded beyond the recent event tail and legacy checkpoints stay absent", async t => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { seedHistoricalNeedsMeRoom } from "./helpers/historical-needs-me-room.mjs";
 import { attachmentLimits } from "../server/attachment-schema.mjs";
 
 // Test-audit authoring gate:
@@ -20,21 +21,22 @@ import { attachmentLimits } from "../server/attachment-schema.mjs";
 
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-attach-quota-"));
-  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => Date.now() });
+  const clock = { now: Date.now() };
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock.now });
   const rooms = new AgentRooms(store);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, rooms };
+  return { store, rooms, clock };
 }
 
 const tinyFile = () => Buffer.from("x").toString("base64");
 
 test("room records quota ignores discarded rows: stage→discard loop cannot brick uploads", async t => {
-  const { store, rooms } = serve(t);
+  const { store } = serve(t);
   const owner = store.identities.create("Quota owner");
-  const created = rooms.create(owner.secret, {
+  seedHistoricalNeedsMeRoom(store, owner, {
     roomId: "quota-den", title: "Quota den", purpose: "quota ratchet", kind: "personal", displayName: "Quota owner"
   });
-  const roomId = created.roomId;
+  const roomId = "quota-den";
 
   // Seed discarded rows to just under the cap via SQL (fast), then run a
   // short LIVE stage→discard loop (15 cycles crosses the 4096 cap on pre-fix). On pre-fix code the loop crosses the
@@ -47,7 +49,7 @@ test("room records quota ignores discarded rows: stage→discard loop cannot bri
   ) VALUES(?,?,?,'q.txt','text/plain',1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',NULL,'discarded',?,?,NULL)`);
   store.transaction(() => {
     for (let i = 0; i < seedCount; i += 1) {
-      insert.run(roomId, `seed-${i}`, created.ownerMemberId, now, now + 86400000);
+      insert.run(roomId, `seed-${i}`, owner.identityId, now, now + 86400000);
     }
   });
 
@@ -69,15 +71,15 @@ test("room records quota ignores discarded rows: stage→discard loop cannot bri
 });
 
 test("room records quota ignores expired rows", async t => {
-  const { store, rooms } = serve(t);
+  const { store, clock } = serve(t);
   const owner = store.identities.create("Quota owner");
-  const created = rooms.create(owner.secret, {
+  seedHistoricalNeedsMeRoom(store, owner, {
     roomId: "quota-den", title: "Quota den", purpose: "quota ratchet", kind: "personal", displayName: "Quota owner"
   });
-  const roomId = created.roomId;
+  const roomId = "quota-den";
 
   // Seed EXPIRED rows to one under the cap via SQL, then force one
-  // staged row to expire via a backdated expires_at. That brings the
+  // staged row to expire via the controlled production clock. That brings the
   // expired-row total to exactly recordsPerRoom (4096) before e-final:
   // if expired rows were counted (bare COUNT(*), or a mutant counting
   // expired but not discarded), e-final would hit 409 attachment_quota.
@@ -91,15 +93,14 @@ test("room records quota ignores expired rows", async t => {
   ) VALUES(?,?,?,'e.txt','text/plain',1,'${sha64}',NULL,'expired',?,?,NULL)`);
   store.transaction(() => {
     for (let i = 0; i < seedCount; i += 1) {
-      insert.run(roomId, `seed-${i}`, created.ownerMemberId, now, now + 86400000);
+      insert.run(roomId, `seed-${i}`, owner.identityId, now, now + 86400000);
     }
   });
   store.roomAttachments.stage(owner.secret, roomId, {
     id: "e-expiry", filename: "e.txt", mediaType: "text/plain", data: tinyFile()
   });
-  store.db.prepare("UPDATE room_attachments SET expires_at=0 WHERE room_id=? AND id=?")
-    .run(roomId, "e-expiry");
-  // Touch the room so expire() flips staged→expired.
+  clock.now += attachmentLimits.lifetimeMs + 1;
+  // Legacy list retains its existing expire-on-read behavior.
   store.roomAttachments.list(owner.secret, roomId);
   // Preconditions: the flip really happened and expired rows are at
   // the cap, otherwise this test would again pass vacuously.
@@ -117,12 +118,12 @@ test("room records quota ignores expired rows", async t => {
 });
 
 test("room records quota still caps live rows", async t => {
-  const { store, rooms } = serve(t);
+  const { store } = serve(t);
   const owner = store.identities.create("Quota owner");
-  const created = rooms.create(owner.secret, {
+  seedHistoricalNeedsMeRoom(store, owner, {
     roomId: "quota-den", title: "Quota den", purpose: "quota ratchet", kind: "personal", displayName: "Quota owner"
   });
-  const roomId = created.roomId;
+  const roomId = "quota-den";
 
   // Seed recordsPerRoom live (staged) rows directly. The production path
   // under test is stage()'s quota check counting live rows; the seed is
@@ -133,7 +134,7 @@ test("room records quota still caps live rows", async t => {
   ) VALUES(?,?,?,'l.txt','text/plain',1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?,'staged',?,?,NULL)`);
   store.transaction(() => {
     for (let i = 0; i < attachmentLimits.recordsPerRoom; i += 1) {
-      insert.run(roomId, `seed-${i}`, created.ownerMemberId, Buffer.from("x"), now, now + 86400000);
+      insert.run(roomId, `seed-${i}`, owner.identityId, Buffer.from("x"), now, now + 86400000);
     }
   });
 
@@ -177,4 +178,47 @@ test("inbox records quota ignores discarded rows", async t => {
     id: "iq-final", filename: "final.txt", mediaType: "text/plain", data: tinyFile()
   });
   assert.equal(after.status, "staged");
+});
+
+// Current rooms use only real production writers. Reads refuse expired bytes
+// without a hidden write; an explicit expiry or successful stage reclaims them.
+test("normalized staging quotas expire under the guarded writer, without read-time mutation", t => {
+  const { store, rooms, clock } = serve(t);
+  const owner = store.identities.create("Current quota owner");
+  const {roomId} = rooms.create(owner.secret, {roomId:"current-quota",title:"Quota",purpose:"Current quota",kind:"personal",displayName:"Owner",starter:false});
+  store.room = () => { throw Error("legacy room hydration"); };
+  const files = store.roomAttachments, upload = id => files.stage(owner.secret,roomId,{id,filename:"q.txt",mediaType:"text/plain",data:tinyFile()});
+  for(let i=0;i<attachmentLimits.stagedPerMember;i++)upload(`live-${i}`);
+  assert.throws(()=>upload("over"),e=>e.code==="attachment_quota"&&e.detail.quota.limit==="staged_files");
+  assert.throws(()=>store.db.prepare("UPDATE room_attachments SET state='expired',bytes=NULL WHERE room_id=?").run(roomId),/unsupported current room writer/);
+  clock.now += attachmentLimits.lifetimeMs + 1;
+  assert.throws(()=>files.get(owner.secret,roomId,"live-0"),e=>e.status===410&&e.code==="attachment_unavailable");
+  assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE room_id=? AND state='staged' AND bytes IS NOT NULL").get(roomId).n,attachmentLimits.stagedPerMember);
+  assert.equal(upload("after").status,"staged");
+  assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE room_id=? AND state='expired' AND bytes IS NULL").get(roomId).n,attachmentLimits.stagedPerMember);
+  assert.equal(files.discard(owner.secret,roomId,"after").status,"discarded");
+  assert.equal(upload("again").status,"staged");
+  assert.equal(store.db.prepare("SELECT enabled FROM current_room_writer_permit").get().enabled,0);
+});
+
+test("normalized records quota counts live committed rows and ignores real discarded history",t=>{
+ const {store,rooms}=serve(t),owner=store.identities.create("Current records owner");
+ const {roomId}=rooms.create(owner.secret,{roomId:"current-records",title:"Records",purpose:"Records quota",kind:"personal",displayName:"Owner",starter:false});
+ store.command(owner.secret,roomId,{id:"quota-message",type:"message.posted",data:{messageId:"quota-message",body:"Committed records"}});
+ store.room=()=>{throw Error("legacy room hydration");};
+ const files=store.roomAttachments,upload=id=>files.stage(owner.secret,roomId,{id,filename:"q.txt",mediaType:"text/plain",data:tinyFile()});
+ // Every historical row was created and terminated by the public writer;
+ // no raw SQL fixtures or temporarily opened permits can bypass admission.
+ for(let i=0;i<attachmentLimits.recordsPerRoom;i++){
+  const id=`discard-${i}`;upload(id);files.discard(owner.secret,roomId,id);
+ }
+ assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE state='discarded'").get().n,attachmentLimits.recordsPerRoom);
+ for(let i=0;i<attachmentLimits.recordsPerRoom;i++){
+  const id=`live-${i}`;upload(id);files.commit(owner.secret,roomId,{id,messageId:"quota-message"});
+ }
+ assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE state='committed'").get().n,attachmentLimits.recordsPerRoom);
+ assert.throws(()=>upload("over"),e=>e.code==="attachment_quota"&&e.detail.quota.limit==="room_files");
+ assert.equal(files.discard(owner.secret,roomId,"live-0").status,"deleted");
+ assert.equal(upload("reclaimed").status,"staged");
+ assert.equal(store.db.prepare("SELECT enabled FROM current_room_writer_permit").get().enabled,0);
 });

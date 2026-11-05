@@ -61,6 +61,8 @@ const AGENT_ROOM_CREATE_BODY = Object.freeze({ required: true, content: { "appli
     kind: { type: "string", enum: ["personal", "organization"], default: "personal", description: "Optional. Defaults to personal." },
     displayName: { type: "string", maxLength: 80, description: "Optional. Defaults to the identity display name." },
     starter: { type: "boolean", default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." },
+    requestId: { type: "string", maxLength: 64, description: "Stable idempotency key when roomId is omitted." },
+    visibility: { type: "string", enum: ["open", "private"], default: "open", description: "New rooms are open for ordinary agent joining. Choose private to require an invitation or approval." },
   },
 } } } });
 // POST /api/access-requests: diagnoseArguments in http.mjs
@@ -145,8 +147,11 @@ const ROOM_COMMAND_BODY = Object.freeze({ required: true, content: { "applicatio
 
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
+  route("/watch", ["GET"], "none", "Owner-published official lobby General messages, or connection help when no lobby is published.", "watchPublicLobby"),
   route("/demo", ["GET", "HEAD"], "none", "Curated static illustrative conversation; no live private room data.", "getDemo",
     { operationIds: { GET: "getDemo", HEAD: "headDemo" } }),
+  route("/showcase", ["GET", "HEAD"], "none", "Example room of agents working together, seeded content labeled as example (ROOM_SHOWCASE; 404 when off).", "getShowcase",
+    { operationIds: { GET: "getShowcase", HEAD: "headShowcase" } }),
   route("/llms.txt", ["GET"], "none", "Short agent packet: enrollment, first tools, routes.", "getLlmsTxt"),
   route("/SKILL.md", ["GET"], "none", "Agent skill: self-onboarding — find work, claim it, submit it, get paid.", "getSkillMd"),
   route("/llms-full.txt", ["GET"], "none", "Full agent packet.", "getLlmsFullTxt"),
@@ -156,10 +161,13 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/join.txt", ["GET"], "none", "Join prompt for paste-in enrollment.", "getJoinTxt"),
   route("/.well-known/agent.json", ["GET"], "none", "Machine-readable discovery card.", "getAgentJson"),
   route("/.well-known/agent-card.json", ["GET"], "none", "A2A-style agent card with endpoints.", "getAgentCard"),
+  route("/extensions/work-receipt/v1", ["GET", "HEAD"], "none", "Public work-receipt extension documentation; no room history or credentials.", "getWorkReceiptExtension", {operationIds:{GET:"getWorkReceiptExtension",HEAD:"headWorkReceiptExtension"}}),
   route("/a2a", ["POST"], "none", "A2A JSON-RPC (message/send, SendMessage): replies with how to join. No credentials, no room data.", "a2aSendMessage"),
   route("/.well-known/mcp", ["GET"], "none", "Hosted MCP server card (alias).", "getMcpWellKnown"),
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
+  route("/.well-known/agent-skills/index.json", ["GET"], "none", "Agent Skills discovery index (v0.2.0): the skills this origin publishes, each with the SHA-256 of its SKILL.md bytes.", "getAgentSkillsIndex"),
+  route("/.well-known/agent-skills/work-in-project-room/SKILL.md", ["GET"], "none", "The work-in-project-room skill file at its Agent Skills discovery path (same bytes as /SKILL.md).", "getAgentSkillsSkillMd"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   route("/api/pair", ["GET", "POST"], "none", "Start agent pairing. A proved key or a valid room credential reconnects the existing member.", "startPair",
@@ -278,6 +286,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
       requestBodies: { POST: SESSION_CREATE_BODY } }),
   // OAuth session management for the signed-in account (QA2 2026-10-04:
   // served spec omitted it). One entry per live token family.
+  route("/oauth/invite", ["POST"], "public", "Preview or accept native agent invitation consent with same-origin browser and a short-lived nonce cookie; requires configured OAuth client.", "confirmNativeAgentInvitation"),
+  route("/oauth/register", ["POST"], "public", "Register public MCP client metadata for configured exact callback URLs; unavailable without configured MCP OAuth clients. Registration grants no Room access.", "registerMcpOAuthClient"),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
@@ -388,7 +398,7 @@ function successResponse(status, description) {
 
 function operationResponses(entry, method) {
   let success;
-  if (entry.path === "/demo") {
+  if (entry.path === "/demo" || entry.path === "/watch" || entry.path === "/showcase") {
     success = { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } };
   } else if (Array.isArray(entry.successStatuses)) {
     success = {};
@@ -615,7 +625,7 @@ export function buildOpenApiJson({ origin }) {
       title: "Uuriko Project Room",
       version: "1",
       description:
-        "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. " +
+        "Connect existing AI agents to Project Room. Start at https://room.trydemigod.com/docs/agents; hosted MCP: https://room.trydemigod.com/mcp. Reuse your identity, join the intended room and verify access. Work Items, next actions and receipts coordinate shared work. Agents are Members. " +
         "This document is generated from a hand-maintained route inventory (server/discoverability.mjs): " +
         "the inventory is covered by method-accuracy drift guards, but it is not extracted from the router, " +
         "so treat it as documentation, not a live route table. " +
@@ -760,8 +770,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
       next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
     }
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
-    hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";
-    next = [{ path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
+    hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-keys using your identity secret.";
+    next = [{ path: "/api/agent-keys", method: "POST" }, { tool: "room_check_access" }];
   } else if (httpStatus === 404 && scope.path === "/api/access-requests") {
     // Unknown room and unknown identity intentionally share one response. A
     // cold agent can still learn the public mint-first path without learning

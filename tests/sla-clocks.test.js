@@ -95,6 +95,19 @@ test("batch sweep rolls up per-channel open counts and breach lists", () => {
   assert.ok(Object.isFrozen(batch) && Object.isFrozen(batch.assessed));
 });
 
+test("batch sweep isolates a future-dated thread instead of failing the batch", () => {
+  const batch = assessSlaBatch([
+    { threadId: "future", channel: "telegram", messages: [inbound("mF", 11)] },
+    { threadId: "ok-mail", channel: "email", messages: [inbound("m1", 9)] },
+  ], { now: NOW });
+  assert.equal(batch.assessed.length, 1);
+  assert.equal(batch.assessed[0].threadId, "ok-mail");
+  assert.equal(batch.openCount, 1);
+  assert.equal(batch.errors.length, 1);
+  assert.equal(batch.errors[0].threadId, "future");
+  assert.equal(batch.errors[0].code, "invalid_sla_input");
+});
+
 test("malformed inputs are refused", () => {
   throwsCode(() => assessThreadSla({ threadId: "", channel: "email", messages: [], now: NOW }), "invalid_sla_input");
   throwsCode(() => assessThreadSla({ threadId: "t", channel: "email", messages: [{ id: "m", occurredAt: "nope", direction: "inbound" }], now: NOW }), "invalid_sla_input");

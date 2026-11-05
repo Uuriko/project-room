@@ -1,3 +1,4 @@
+import { captureDesignEvidence } from "./visual-regression-helper.mjs";
 // Auth journeys from the live auth audit (2026-10-09), run against a local
 // server with captured mail. Each passing path stays guarded here. A path that
 // is still broken on main is a node:test todo entry: it runs and reports but
@@ -14,6 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
+import { uiText } from "../src/strings.js";
 
 // The secret-scan allowlist already covers this synthetic fixture password.
 const PASSWORD = "synthetic-email-password";
@@ -103,10 +105,14 @@ test("signup, then verify by the emailed code; a wrong code is reported once", {
   const f = await setup(t);
   const page = await f.open(DESK);
   const email = "journey-verify@example.invalid";
+  await page.goto(f.origin);
+  await page.locator('#auth-signin-ui [data-password-mode="signup"]').first().click();
+    await captureDesignEvidence(page, { id: "signup", title: "Create account form", fixture: "acceptance fixture + synthetic email", testName: t.name, component: "page" });
   assert.equal(await signUp(page, f.origin, email), 202);
   await page.locator("#main").waitFor({ state: "visible" });
   const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
   assert.ok(mail?.code, "signup sends a verification code");
+    await captureDesignEvidence(page, { id: "first-room", title: "First account room after signup", fixture: "actual signup + synthetic verification email", testName: t.name, component: "page" });
   await clickChrome(page, "#account-settings-button");
   const code = page.getByLabel("Verification code");
   await code.waitFor();
@@ -114,6 +120,7 @@ test("signup, then verify by the emailed code; a wrong code is reported once", {
   await page.getByRole("button", { name: "Verify email" }).click();
   await page.getByText("That code is not valid").first().waitFor();
   assert.equal(await visibleCount(page, "That code is not valid"), 1, "the wrong-code error is shown once");
+    await captureDesignEvidence(page, { id: "verification-error", title: "Verification code error", fixture: "synthetic incorrect verification code", testName: t.name, component: "form error" });
   await code.fill(mail.code);
   const verified = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/email/verify");
   await page.getByRole("button", { name: "Verify email" }).click();
@@ -357,4 +364,65 @@ test("an incoming room link owns navigation while its workspace module downloads
   await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
   assert.equal(await page.locator("#session-menu-button").isEnabled(), true);
   assert.match(page.url(), /#room\/commons$/);
+});
+
+test('account session survives nine hours and expires at the server deadline', { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open();
+  assert.equal(await signUp(page, f.origin, 'session-lifetime@example.invalid'), 202);
+  await page.locator('#main').waitFor({state:'visible'});
+  const cookie = (await page.context().cookies()).find(c => c.name === 'account_session');
+  assert.ok(cookie?.httpOnly);
+  const remaining = cookie.expires * 1000 - Date.now();
+  assert.ok(remaining > 29 * 86400000 && remaining <= 30 * 86400000, `cookie remaining ${remaining}`);
+  f.store.now = () => Date.now() + 9 * 3600000;
+  await page.reload();
+  await page.locator('#main').waitFor({state:'visible'});
+  assert.equal((await f.session(page)).authenticated, true);
+  f.store.now = () => Date.now() + 31 * 86400000;
+  await page.reload();
+  await page.locator('#auth-panel').waitFor({state:'visible'});
+  assert.equal((await f.session(page)).authenticated, false);
+});
+
+test('refresh after expiry ends at actionable sign-in', {timeout:60000}, async t => {
+  const f=await setup(t),page=await f.open();
+  assert.equal(await signUp(page,f.origin,'reconnect-expiry@example.invalid'),202);
+  await page.locator('#main').waitFor({state:'visible'});
+  f.store.now=()=>Date.now()+31*86400000;
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await page.locator('#auth-panel').waitFor({state:'visible'});
+  const initial=(await page.locator('#auth-error').innerText()).trim();
+  const reconnect=page.getByRole('button',{name:'Reconnect',exact:true});
+  assert.equal(initial,uiText("room.session_changed_reconnect"));
+  assert.equal(await reconnect.isVisible(),true);
+  assert.equal(await reconnect.isEnabled(),true);
+  await page.waitForFunction(()=>document.activeElement?.id==='auth-reconnect');
+  await reconnect.click();
+  await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('sign in required'),null,{timeout:10000});
+  assert.equal((await f.session(page)).authenticated,false);
+  await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').waitFor({state:'visible'});
+});
+
+test('account confirmation capacity error keeps the open room and draft', {timeout:60000}, async t => {
+  const f=await setup(t),page=await f.open();
+  assert.equal(await signUp(page,f.origin,'confirm-capacity@example.invalid'),202);
+  await page.locator('#main').waitFor({state:'visible'});
+  const draft='Synthetic unsent draft';await page.locator('#message-input').fill(draft);
+  let injected;const seen=new Promise(resolve=>{injected=resolve;});
+  const handler=route=>{
+    if(route.request().method()==='GET'&&route.request().headers()['x-session-binding']){
+      injected();return route.fulfill({status:409,json:{error:{code:'pilot_limit',message:'Storage capacity'}}});
+    }
+    return route.continue();
+  };
+  await page.route('**/api/account-session',handler);
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await seen;
+  await page.waitForFunction(()=>document.querySelector('#account-status').textContent.includes('Couldn’t confirm account'));
+  assert.equal(await page.locator('#main').isVisible(),true);
+  assert.equal(await page.locator('#auth-panel').isVisible(),false);
+  assert.equal(await page.locator('#message-input').inputValue(),draft);
+  await page.unroute('**/api/account-session',handler);
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await page.waitForFunction(()=>document.querySelector('#account-status').textContent==='');
+  assert.equal(await page.locator('#message-input').inputValue(),draft);
 });

@@ -3,7 +3,7 @@
 // room post is a real message.posted command on a real room store.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,6 +126,53 @@ test("a healthy room passes ready, anonymous tools/list, and llms.txt without a 
   assert.equal(mcp[0].method, "POST");
   assert.equal(mcp[0].authorization, null);
   assert.deepEqual(await probeMessages(room.origin, room.token), []);
+});
+
+test("OAuth initialization challenges while the external public-discovery probe stays healthy", async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("ops"));
+  const scheduler = wireNodeJobs(store, { env: {}, tickMs: 0 });
+  await scheduler.runOnce();
+  const origin = "https://room.example";
+  const server = createRoomServer({ store, origin, mcpOAuthClients: [{
+    clientId: "probe-contract-client", name: "Probe contract client",
+    redirectUris: ["https://client.example/callback"]
+  }] });
+  const local = await listen(server);
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await close(server); store.close();
+  });
+  // Real HTTP handlers with the configured canonical Host, without public DNS.
+  const bridge = (input, options = {}) => new Promise((resolve, reject) => {
+    const url = new URL(input);
+    assert.equal(url.origin, origin);
+    const request = httpRequest(local + url.pathname + url.search, {
+      method: options.method ?? "GET", signal: options.signal,
+      headers: { ...options.headers, host: "room.example" }
+    }, response => {
+      const chunks = [];
+      response.on("data", chunk => chunks.push(chunk));
+      response.on("end", () => resolve(new Response(Buffer.concat(chunks), {
+        status: response.statusCode, headers: response.headers
+      })));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end(options.body);
+  });
+  const challenge = await bridge(origin + "/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "initialize-probe", method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "probe", version: "1" } } })
+  });
+  assert.equal(challenge.status, 401);
+  assert.equal(challenge.headers.get("www-authenticate"),
+    `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`);
+  const result = await runExternalProbe({ PROBE_ORIGIN: origin, PROBE_STATE: memoryKv() }, bridge);
+  assert.equal(result.ok, true, JSON.stringify(result.checks));
+  assert.equal(result.checks.find(check => check.id === "mcp").status, 200);
+  assert.deepEqual(result.alerts, []);
 });
 
 test("the worker alerts on the second consecutive failure and not on the first", async t => {

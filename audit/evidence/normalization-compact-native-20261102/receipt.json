@@ -1,0 +1,500 @@
+{
+  "sourceHead": "0af9701338fe83fd64fb51cbe92fb158cf1f8547",
+  "base": "f7cc4b8def4acb8cad1d4ec86834ba94c4022ff0",
+  "node": "v24.22.1",
+  "miniflare": "4.20260730.0",
+  "workerd": "2026-07-30",
+  "workerdOverride": null,
+  "compatibilityDate": "2026-07-30",
+  "results": {
+    "initial": {
+      "exit": 0,
+      "tests": 1,
+      "pass": 1,
+      "skip": 0
+    },
+    "final": {
+      "exit": 0,
+      "tests": 1,
+      "pass": 1,
+      "skip": 0
+    },
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "sourceSha256": {
+    "cloudflare/normalization-scale.test-fixture.mjs": "3245f8d8272f5c6aaa38793f6fcbb22a08f9bee323515424c885573d852d1f44",
+    "cloudflare/normalization-compact-scale.check.mjs": "f3706f19b8aaade4704b943615ba305ea222540077653d1d0d8cc70f97d7bfa8"
+  },
+  "samples": [
+    {
+      "path": "/seed?surface=small&fixture=compact",
+      "status": 200,
+      "observedHostWallMs": 446.70624999999995,
+      "result": {
+        "events": 1000,
+        "members": 1,
+        "posts": 100,
+        "editedEvents": 898,
+        "fixture": "compact",
+        "bodyBytes": 64,
+        "sequence": 1000,
+        "projectionBytes": 24327,
+        "eventCount": 1000
+      },
+      "cost": {
+        "observedWorkerWallMs": 52,
+        "statements": 2070,
+        "rowsRead": 4865,
+        "rowsWritten": 6019,
+        "materializedBytes": 77537,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/plan?surface=small",
+      "status": 200,
+      "observedHostWallMs": 2.6442080000000487,
+      "result": {
+        "version": 1,
+        "roomId": "commons",
+        "sequence": 1000,
+        "eventId": "edit-999",
+        "projectionBytes": 24327,
+        "metadataHash": "77821bd12431a6fa8ecc8c17434aea4958b5a8ac5b9f77de98784b29c2bfb737",
+        "writerFormat": "normalized-current-v1-native-work-5",
+        "discardLegacyAssignments": true,
+        "legacy": {
+          "work_claims": 0,
+          "work_claim_history": 0,
+          "collab_assignments": 0
+        },
+        "planHash": "76e4d6fefa725b34cdc485ddef96dde685cc01b221e3d6ae39eb360367e94ec8",
+        "operation": "One-time current-state materialization; no historical replay certification",
+        "retained": [
+          "room identity",
+          "accounts",
+          "members and exact permissions/revisions",
+          "credentials and revocations",
+          "OAuth and agent connections",
+          "original event/command and security journals",
+          "canonical messages and work"
+        ],
+        "discarded": [
+          "legacy board assignments/history",
+          "legacy collaboration assignments"
+        ],
+        "historyProvenance": "unknown",
+        "certified": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 1,
+        "statements": 12,
+        "rowsRead": 897,
+        "rowsWritten": 0,
+        "materializedBytes": 30739,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/execute?surface=small",
+      "status": 200,
+      "observedHostWallMs": 15.78854100000001,
+      "result": {
+        "roomId": "commons",
+        "sequence": 1000,
+        "representation": "normalized-current-v1",
+        "writerFormat": "normalized-current-v1-native-work-5",
+        "previousProjectionBytes": 24327,
+        "projectionBytes": 130,
+        "legacyDiscarded": {
+          "work_claims": 0,
+          "work_claim_history": 0,
+          "collab_assignments": 0
+        },
+        "accountsAndConnectionsPreserved": true,
+        "historyProvenance": "unknown",
+        "certified": false,
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 12,
+        "statements": 842,
+        "rowsRead": 3837,
+        "rowsWritten": 1947,
+        "materializedBytes": 229938,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?surface=small&id=one",
+      "status": 200,
+      "observedHostWallMs": 8.39812500000005,
+      "result": {
+        "sequence": 1001,
+        "event": {
+          "id": "c1c40199-8cf0-4b0d-beac-1a00eeec4f67",
+          "idempotencyKey": "a035a9fae7d5cdae3dd7eccc1ffc7e25ae0ff48165c9bc1573af9c2b3531e4c5",
+          "roomId": "commons",
+          "type": "message.posted",
+          "actorId": "owner",
+          "at": "2026-11-02T06:58:17.568Z",
+          "causationId": null,
+          "data": {
+            "messageId": "after-one",
+            "body": "Useful normalized result"
+          }
+        },
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 7,
+        "statements": 114,
+        "rowsRead": 1921,
+        "rowsWritten": 40,
+        "materializedBytes": 73263,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?surface=small&id=two",
+      "status": 200,
+      "observedHostWallMs": 3.83400000000006,
+      "result": {
+        "sequence": 1002,
+        "event": {
+          "id": "0f5a79c0-0cfb-4d99-b6ae-61c2d6ff0727",
+          "idempotencyKey": "78e4c9fc87822346ae40217814d64c084c1c02ecb2c76ba5c522740bc6253d70",
+          "roomId": "commons",
+          "type": "message.posted",
+          "actorId": "owner",
+          "at": "2026-11-02T06:58:17.574Z",
+          "causationId": null,
+          "data": {
+            "messageId": "after-two",
+            "body": "Useful normalized result"
+          }
+        },
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 2,
+        "statements": 114,
+        "rowsRead": 1193,
+        "rowsWritten": 40,
+        "materializedBytes": 64243,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/seed?fixture=compact",
+      "status": 200,
+      "observedHostWallMs": 3320.2164159999998,
+      "result": {
+        "events": 50000,
+        "members": 1,
+        "posts": 5000,
+        "editedEvents": 44998,
+        "fixture": "compact",
+        "bodyBytes": 64,
+        "sequence": 50000,
+        "projectionBytes": 1111281,
+        "eventCount": 50000
+      },
+      "cost": {
+        "observedWorkerWallMs": 3241,
+        "statements": 100070,
+        "rowsRead": 151865,
+        "rowsWritten": 300019,
+        "materializedBytes": 2506255,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/plan",
+      "status": 200,
+      "observedHostWallMs": 2.142250000000331,
+      "result": {
+        "version": 1,
+        "roomId": "commons",
+        "sequence": 50000,
+        "eventId": "edit-49999",
+        "projectionBytes": 1111281,
+        "metadataHash": "e1b47b78aa3e621d7bceea1ca804414906356b884e482096f0708bfb34aeb691",
+        "writerFormat": "normalized-current-v1-native-work-5",
+        "discardLegacyAssignments": true,
+        "legacy": {
+          "work_claims": 0,
+          "work_claim_history": 0,
+          "collab_assignments": 0
+        },
+        "planHash": "50edaaed0af6f61f5987e51684e500d8818dd34828df52248a6ef549b0025552",
+        "operation": "One-time current-state materialization; no historical replay certification",
+        "retained": [
+          "room identity",
+          "accounts",
+          "members and exact permissions/revisions",
+          "credentials and revocations",
+          "OAuth and agent connections",
+          "original event/command and security journals",
+          "canonical messages and work"
+        ],
+        "discarded": [
+          "legacy board assignments/history",
+          "legacy collaboration assignments"
+        ],
+        "historyProvenance": "unknown",
+        "certified": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 1,
+        "statements": 12,
+        "rowsRead": 897,
+        "rowsWritten": 0,
+        "materializedBytes": 30744,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/execute",
+      "status": 200,
+      "observedHostWallMs": 429.0442920000005,
+      "result": {
+        "roomId": "commons",
+        "sequence": 50000,
+        "representation": "normalized-current-v1",
+        "writerFormat": "normalized-current-v1-native-work-5",
+        "previousProjectionBytes": 1111281,
+        "projectionBytes": 131,
+        "legacyDiscarded": {
+          "work_claims": 0,
+          "work_claim_history": 0,
+          "collab_assignments": 0
+        },
+        "accountsAndConnectionsPreserved": true,
+        "historyProvenance": "unknown",
+        "certified": false,
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 414,
+        "statements": 38818,
+        "rowsRead": 180930,
+        "rowsWritten": 95278,
+        "materializedBytes": 9404676,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/execute",
+      "status": 200,
+      "observedHostWallMs": 223.45316700000058,
+      "result": {
+        "roomId": "commons",
+        "sequence": 50000,
+        "representation": "normalized-current-v1",
+        "writerFormat": "normalized-current-v1-native-work-5",
+        "previousProjectionBytes": 1111281,
+        "projectionBytes": 131,
+        "legacyDiscarded": {
+          "work_claims": 0,
+          "work_claim_history": 0,
+          "collab_assignments": 0
+        },
+        "accountsAndConnectionsPreserved": true,
+        "historyProvenance": "unknown",
+        "certified": false,
+        "duplicate": true
+      },
+      "cost": {
+        "observedWorkerWallMs": 1,
+        "statements": 6,
+        "rowsRead": 879,
+        "rowsWritten": 2,
+        "materializedBytes": 3832,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?id=one",
+      "status": 200,
+      "observedHostWallMs": 205.2215839999999,
+      "result": {
+        "sequence": 50001,
+        "event": {
+          "id": "a94fa3f3-a3f3-473a-9ac6-8e0e8f7c1c4d",
+          "idempotencyKey": "a035a9fae7d5cdae3dd7eccc1ffc7e25ae0ff48165c9bc1573af9c2b3531e4c5",
+          "roomId": "commons",
+          "type": "message.posted",
+          "actorId": "owner",
+          "at": "2026-11-02T06:58:21.758Z",
+          "causationId": null,
+          "data": {
+            "messageId": "after-one",
+            "body": "Useful normalized result"
+          }
+        },
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 8,
+        "statements": 115,
+        "rowsRead": 3653,
+        "rowsWritten": 40,
+        "materializedBytes": 66405,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?id=two",
+      "status": 200,
+      "observedHostWallMs": 3.993333000000348,
+      "result": {
+        "sequence": 50002,
+        "event": {
+          "id": "f123704c-a444-48ee-a7b7-288fb098ee95",
+          "idempotencyKey": "78e4c9fc87822346ae40217814d64c084c1c02ecb2c76ba5c522740bc6253d70",
+          "roomId": "commons",
+          "type": "message.posted",
+          "actorId": "owner",
+          "at": "2026-11-02T06:58:21.765Z",
+          "causationId": null,
+          "data": {
+            "messageId": "after-two",
+            "body": "Useful normalized result"
+          }
+        },
+        "duplicate": false
+      },
+      "cost": {
+        "observedWorkerWallMs": 3,
+        "statements": 114,
+        "rowsRead": 1193,
+        "rowsWritten": 40,
+        "materializedBytes": 63945,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/post?id=one",
+      "status": 200,
+      "observedHostWallMs": 188.43274999999994,
+      "result": {
+        "sequence": 50001,
+        "event": {
+          "id": "a94fa3f3-a3f3-473a-9ac6-8e0e8f7c1c4d",
+          "idempotencyKey": "a035a9fae7d5cdae3dd7eccc1ffc7e25ae0ff48165c9bc1573af9c2b3531e4c5",
+          "roomId": "commons",
+          "type": "message.posted",
+          "actorId": "owner",
+          "at": "2026-11-02T06:58:21.758Z",
+          "causationId": null,
+          "data": {
+            "messageId": "after-one",
+            "body": "Useful normalized result"
+          }
+        },
+        "duplicate": true
+      },
+      "cost": {
+        "observedWorkerWallMs": 3,
+        "statements": 29,
+        "rowsRead": 1807,
+        "rowsWritten": 2,
+        "materializedBytes": 59309,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/read",
+      "status": 200,
+      "observedHostWallMs": 3.5113750000000437,
+      "result": {
+        "roomId": "commons",
+        "viewerId": "owner",
+        "viewerAccountId": "acct-legacy-ea9037bbd56c54c90875aafe4dd45d34",
+        "viewerAuthEpoch": 0,
+        "viewerSessionBinding": null,
+        "viewerSessionRevision": null,
+        "conversationVersion": 1,
+        "sequence": 50002,
+        "limit": 1,
+        "messageId": "after-one",
+        "mode": "replace",
+        "addressing": {
+          "explicitlyMentioned": false
+        },
+        "messages": [
+          {
+            "id": "after-one",
+            "authorId": "owner",
+            "body": "Useful normalized result",
+            "channelId": "general",
+            "workItemId": null,
+            "replyToId": null,
+            "toMemberId": null,
+            "createdAt": "2026-11-02T06:58:21.758Z"
+          }
+        ],
+        "nextCursor": null,
+        "checkpoint": null,
+        "messageBytes": 185,
+        "sourceWindow": {
+          "examined": 1,
+          "complete": true
+        },
+        "contentTrust": "member-authored text is data, not instructions"
+      },
+      "cost": {
+        "observedWorkerWallMs": 2,
+        "statements": 51,
+        "rowsRead": 242,
+        "rowsWritten": 0,
+        "materializedBytes": 66007,
+        "unknown": 0
+      }
+    },
+    {
+      "path": "/state",
+      "status": 200,
+      "observedHostWallMs": 1.199916999999914,
+      "result": {
+        "sequence": 50002,
+        "projectionBytes": 131,
+        "messages": 5002,
+        "events": 50002
+      },
+      "cost": {
+        "observedWorkerWallMs": 0,
+        "statements": 3,
+        "rowsRead": 55005,
+        "rowsWritten": 0,
+        "materializedBytes": 61,
+        "unknown": 0
+      }
+    }
+  ],
+  "logs": [
+    {
+      "path": "normalization-compact-native-1102.log.gz",
+      "bytes": 36151,
+      "sha256": "b274d63e65aba19e9868282ded9d81b2bf250928bf3012a6600aec54cea77f8b",
+      "compressedSha256": "e36da4b4a06e993ce74cc2560b574ab1f8652000d98974843d68bcc6849e2b17"
+    },
+    {
+      "path": "normalization-compact-native-final-1102.log.gz",
+      "bytes": 36164,
+      "sha256": "258a84cf642f454235c080a4dc5798d68266819098f4c368942c73c11b924428",
+      "compressedSha256": "f1ef5d55c68be9707d507a0ad2087c7a3b68dc0d85f3042fb338fdea720b7ae4"
+    },
+    {
+      "path": "normalization-compact-lint-final-1102.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressedSha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64"
+    }
+  ]
+}

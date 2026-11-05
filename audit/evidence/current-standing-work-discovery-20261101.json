@@ -1,0 +1,119 @@
+{
+  "baseline": "3f1e947c7",
+  "status": "offline candidate",
+  "change": "Same needs_me contract now seeks exact addressed role/request source streams before residual shared workflow/history/privacy evaluation. Existing all/results source behavior retained.",
+  "node": {
+    "tests": 21,
+    "pass": 21,
+    "fail": 0,
+    "skip": 0,
+    "log": "/tmp/current-work-discovery-neighborhood-1101.log"
+  },
+  "actualWorker": {
+    "tests": 1,
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "log": "/tmp/current-work-discovery-worker-1101.log",
+    "samples": [
+      {
+        "name": "before",
+        "messages": 1000,
+        "tasks": 500,
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 170498,
+        "returnedSqlTextBytes": 70315073,
+        "statements": 42513,
+        "elapsedMs": 765.6375420000002,
+        "cpuMeasured": false,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ],
+        "complete": true
+      },
+      {
+        "name": "before",
+        "messages": 5000,
+        "tasks": 500,
+        "calls": 500,
+        "responseBytes": 966070,
+        "physicalRowsRead": 170498,
+        "returnedSqlTextBytes": 62772125,
+        "statements": 42513,
+        "elapsedMs": 701.296542,
+        "cpuMeasured": false,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ],
+        "complete": true
+      },
+      {
+        "name": "after",
+        "messages": 1000,
+        "tasks": 500,
+        "calls": 1,
+        "responseBytes": 1685,
+        "physicalRowsRead": 344,
+        "returnedSqlTextBytes": 156889,
+        "statements": 86,
+        "elapsedMs": 3.5999999999994543,
+        "cpuMeasured": false,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ],
+        "complete": true
+      },
+      {
+        "name": "after",
+        "messages": 5000,
+        "tasks": 500,
+        "calls": 1,
+        "responseBytes": 1685,
+        "physicalRowsRead": 344,
+        "returnedSqlTextBytes": 141803,
+        "statements": 86,
+        "elapsedMs": 2.621041999999761,
+        "cpuMeasured": false,
+        "taskIds": [
+          "zz-late-owned"
+        ],
+        "requestIds": [
+          "zz-late-request"
+        ],
+        "complete": true
+      }
+    ]
+  },
+  "causalRed": {
+    "log": "/tmp/current-work-discovery-before-corrected-1101.log",
+    "scope": "Original3f1 listing implementation against legal corrected fixture, with unused new derived index present; not a baseline physical-cost claim. ActualWorker archives exact3f1 separately.",
+    "initialFixtureCorrection": "Initial request events omitted requestPolicyVersion1; corrected before final baseline and passing proof."
+  },
+  "controls": [
+    "full shared workflow oracle verifies accountable/verifier/decision-maker/triage and deduplication",
+    "empty residual source page retains continuation",
+    "server-only cursor key with actual credential-holder decryption attempt",
+    "different credential/head/filter/cold restart refusals",
+    "new owner fallback index exact equal-size DDL substitution refusal",
+    "role-holder task access preserved; private request bodies absent",
+    "production export/restore exact six-index inventory"
+  ],
+  "limits": [
+    "Sparse addressed fixture is not all attention distributions or a solo/team productivity benchmark.",
+    "All/results global enumeration remains unchanged.",
+    "100-member authority and composed overview budget remain open separate defects.",
+    "Current normalized handoff writer still unsupported; reader roles qualified from valid recorded lifecycle history.",
+    "Source-role indexes trust prospective write guards; selected payloads use existing exact proofs; independent full recovery census remains required.",
+    "No schema45 deployment or activation."
+  ]
+}

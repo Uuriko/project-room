@@ -7,8 +7,10 @@
 //    crawlers and answer engines can quote the root page) and an
 //    enable-JavaScript message.
 // 2. Link-preview crawlers get OG/Twitter metadata.
-// 3. The landing hero has no entry links or invite pitch (the definition
-//    is prose only).
+// 3. The landing hero carries exactly one visible path in: a join link to
+//    /join (L2-H1-1, 2026-10-29: a cold no-JS / slow / crawler arrival was
+//    offered no visible path in at all — the hero's only control was the
+//    hidden load-failure retry). No other entry links or actions.
 // 4. The hero says plainly that the live room needs JavaScript, via <noscript>.
 // 5. Real browser acceptance owns removal on boot and visible sign-in actions.
 //
@@ -25,15 +27,22 @@ const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url
 
 test("the no-JS shell is the wordmark, the definition block and the enable message", () => {
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
-  assert.match(hero, /PROJECT ROOM/);
-  assert.match(hero, /Project Room is a shared room where people and AI agents work together\./, "citable definition from /about");
-  assert.match(hero, /every finished result ends in a receipt/, "receipt outcome stated");
-  assert.match(hero, /public when the room's owner chooses to publish it/, "receipts are public only by the owner's choice (#3594)");
-  assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
-  assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
+  assert.match(hero, /Project Room/);
+  assert.match(hero, /connects the AI agents you already use/);
+  assert.match(hero, /href="\/docs\/agents\/paste"/,'existing-agent connection is available without JavaScript');
+  assert.match(hero, /href="\/watch"/,'public viewing is available without account sign-in');
+  assert.match(hero, /host may ask you to approve/,'host consent is explained honestly');
+  assert.doesNotMatch(hero, /every finished result ends in a receipt|one HTTP call enrolls an agent/,'do not promise universal results or host setup');
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
-  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
-  assert.ok(!/<a[ >]|<button[ >]/.test(hero), "no extra entry links or actions");
+  const recovery = hero.match(/<div id="entry-load-recovery" hidden>[\s\S]*?<\/div>/)?.[0];
+  assert.ok(recovery, 'load recovery stays hidden unless JavaScript detects a failure');
+  assert.match(recovery, /id="entry-load-retry"/, 'failed JavaScript loading has an explicit retry');
+  const visibleHero = hero.replace(recovery, '');
+  // L2-H1-1: the visible hero must offer a working path in without JavaScript.
+  // The recovery block was stripped above, so a match here is outside the
+  // hidden retry and therefore visible in the static markup.
+  assert.ok(!/<button[ >]/.test(visibleHero), "retry stays inside hidden recovery; visible entry works through links");
+
 });
 
 test("the root carries SoftwareApplication JSON-LD and a claim-shaped description", () => {
@@ -48,8 +57,8 @@ test("the root carries SoftwareApplication JSON-LD and a claim-shaped descriptio
 test("link-preview metadata is present", () => {
   // Landed on main alongside this work (canonical + og:image); the contract
   // is that crawlers get a complete preview card, whatever the exact copy.
-  assert.match(html, /<meta property="og:title" content="Project Room"/, "og:title");
-  assert.match(html, /<meta property="og:description" content="Project Room/, "og:description");
+  assert.match(html, /<meta property="og:title" content="Project Room[^\"]+"/, "og:title");
+  assert.match(html, /<meta property="og:description" content="Connect the AI agents/, "og:description");
   assert.match(html, /<meta property="og:url" content="https:\/\/room\.trydemigod\.com\/"/, "og:url");
   assert.match(html, /<meta property="og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/, "og:image");
   assert.match(html, /<meta name="twitter:card" content="summary_large_image"/, "twitter:card");
@@ -64,4 +73,5 @@ test("the hero keeps its styles and semantics CSP-clean", () => {
   assert.match(hero, /aria-label="Project Room"/, "landmark label");
   const css = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
   assert.match(css, /\.static-hero \{/, "hero styles live in the external stylesheet");
+  assert.match(css, /\.static-hero-links a \{/, "the join link is styled by the external stylesheet, not inline or unstyled");
 });

@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 // Shared by live commands and retained-history auditing under writer14.
 // Selection coordinates a contribution; it is never an execution or payment grant.
 import { validateHelp, workHelpContext } from "./work-help.js";
@@ -66,6 +67,16 @@ function records(state) {
   check(rows.length <= MAX_HELP_OFFERS, "Offer history capacity exceeded");
   const identities = new Set(), selected = new Set();
   return rows.map(([key, offer]) => {
+    validateHelpOfferRecord(state,key,offer);
+    const identity = helpOfferIdentity(offer);
+    check(!identities.has(identity), "Duplicate offer for this request version"); identities.add(identity);
+    if (offer.status === "selected") { check(!selected.has(offer.workItemId), "Multiple selected helpers"); selected.add(offer.workItemId); }
+    return offer;
+  });
+}
+// Exact single-record facts; the caller still owns complete global identity
+// and selected-work census, never a client-supplied local projection.
+export function validateHelpOfferRecord(state,key,offer) {
     validateHelpOffer(offer);
     check(id(key) && key === offer.id && own(state.workItems, offer.workItemId), "Invalid offer reference");
     const item = state.workItems[offer.workItemId], help = validateHelp(item.helpWanted);
@@ -76,19 +87,17 @@ function records(state) {
     if (help.revision === offer.invitation.revision) check(Object.keys(help).every(key => help[key] === offer.invitation[key]), "Invitation facts changed without a revision");
     if (["declined", "released"].includes(offer.status)) check([offer.accountableMemberId, state.room.ownerId,
       ...(offer.status === "released" ? [offer.offererId] : [])].includes(offer.updatedById));
-    const identity = JSON.stringify([offer.workItemId, offer.invitation.eventId, offer.offererId]);
-    check(!identities.has(identity), "Duplicate offer for this request version"); identities.add(identity);
-    if (offer.status === "selected") { check(!selected.has(offer.workItemId), "Multiple selected helpers"); selected.add(offer.workItemId); }
-    return offer;
-  });
+  return offer;
 }
+export const helpOfferIdentity=offer=>JSON.stringify([offer.workItemId,offer.invitation.eventId,offer.offererId]);
+
 function participant(state, memberId) {
   if (!id(memberId) || !own(state.members, memberId)) return null;
   const member = state.members[memberId];
   check(member?.id === memberId && ["human", "agent"].includes(member.kind) && typeof member.active === "boolean" && rev(member.revision));
   return member;
 }
-function current(state, offer, now) {
+export function helpOfferIsCurrent(state, offer, now) {
   const help = workHelpContext(state, offer.workItemId, offer.offererId, now), person = participant(state, offer.offererId);
   return help.status === "open" && help.canOffer && help.eventId === offer.invitation.eventId
     && help.revision === offer.invitation.revision && person?.revision === offer.offererRevision;
@@ -101,16 +110,25 @@ export function helpOfferAvailability(state, workItemId, viewerId, now) {
 function availability(state, workItemId, viewerId, now, rows) {
   const help = workHelpContext(state, workItemId, viewerId, now);
   const prior = rows.find(offer => offer.workItemId === workItemId && offer.invitation.eventId === help.eventId && offer.offererId === viewerId);
-  const pending = rows.filter(offer => offer.status === "offered" && current(state, offer, now));
+  const pending = rows.filter(offer => offer.status === "offered" && helpOfferIsCurrent(state, offer, now));
   const forWork = pending.filter(offer => offer.workItemId === workItemId).length;
   const forViewer = pending.filter(offer => offer.offererId === viewerId).length;
   const selectedOfferId = selection(rows, workItemId);
-  const reason = !help.canOffer ? "invitation_unavailable" : prior ? "already_offered" : selectedOfferId ? "helper_selected"
-    : rows.length >= MAX_HELP_OFFERS ? "history_full"
+  return helpOfferAvailabilityFromCounts(state,workItemId,viewerId,now,{retained:rows.length,existingOfferId:prior?.id??null,selectedOfferId,pendingForWork:forWork,pendingForViewer:forViewer});
+}
+
+// Counts come from a complete validated row census in the original reader or
+// the frozen recovery expansion. They are not a new action/grant interface.
+export function helpOfferAvailabilityFromCounts(state,workItemId,viewerId,now,facts) {
+  const {retained,existingOfferId,selectedOfferId,pendingForWork:forWork,pendingForViewer:forViewer}=facts;
+  check([retained,forWork,forViewer].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=MAX_HELP_OFFERS));
+  const help=workHelpContext(state,workItemId,viewerId,now);
+  const reason = !help.canOffer ? "invitation_unavailable" : existingOfferId ? "already_offered" : selectedOfferId ? "helper_selected"
+    : retained >= MAX_HELP_OFFERS ? "history_full"
       : forWork >= MAX_PENDING_HELP_OFFERS ? "work_offer_limit" : forViewer >= MAX_PENDING_HELP_OFFERS ? "member_offer_limit" : null;
   return { authority: "coordination_only", externalExecution: false, workItemId, evaluatedAt: now,
     helpRevision: help.revision, helpEventId: help.eventId, canOffer: reason === null, reason,
-    existingOfferId: prior?.id ?? null, selectedOfferId, pendingForWork: forWork, pendingForViewer: forViewer };
+    existingOfferId: existingOfferId, selectedOfferId, pendingForWork: forWork, pendingForViewer: forViewer };
 }
 
 export function helpOfferContext(state, offerId, viewerId, now) {
@@ -118,12 +136,15 @@ export function helpOfferContext(state, offerId, viewerId, now) {
   check(offer, "Unknown help offer");
   return offerContext(state, offer, viewerId, now, rows);
 }
-function offerContext(state, offer, viewerId, now, rows) {
+function offerContext(state,offer,viewerId,now,rows) {
+  return helpOfferContextFromSelection(state,offer,viewerId,now,selection(rows,offer.workItemId));
+}
+export function helpOfferContextFromSelection(state,offer,viewerId,now,selectedOfferId) {
   const viewer = participant(state, viewerId), active = viewer?.active === true;
   const accountable = active && viewerId === offer.accountableMemberId;
   const moderator = active && viewerId === state.room.ownerId && viewer.kind === "human";
   const helper = active && viewerId === offer.offererId;
-  const applicable = current(state, offer, now), selectedOfferId = selection(rows, offer.workItemId);
+  const applicable = helpOfferIsCurrent(state, offer, now);
   const help = workHelpContext(state, offer.workItemId, viewerId, now);
   return { authority: "coordination_only", externalExecution: false, evaluatedAt: now, offer: structuredClone(offer),
     invitationCurrent: applicable, selectedOfferId,
@@ -148,16 +169,29 @@ export function workOffersContext(state, workItemId, viewerId, now) {
 
 // Pure transition. The service/reducer must own atomicity, actor authentication,
 // stable operation receipts and history audit before these events are enabled.
-export function helpOfferFromEvent(state, incoming) {
+export function helpOfferFromEvent(state,incoming) {
+  check(id(incoming?.id)&&id(incoming.actorId)&&instant(incoming.at)&&id(incoming.roomId)&&incoming.roomId===state.room.id);
+  const d=validateHelpOfferData(incoming.type,incoming.data),rows=records(state);
+  // Preserve original item/actor checks before availability/context work.
+  const item=own(state.workItems,d.workItemId)&&state.workItems[d.workItemId];
+  check(item&&item.id===d.workItemId&&item.revision===d.expectedRevision,uiText("currentRoom.staleWorkRevision"));
+  const actor=participant(state,incoming.actorId);check(actor?.active===true,uiText("currentRoom.memberAccessUnavailable"));
+  return helpOfferFromQualifiedFacts(state,incoming,{prior:rows.find(row=>row.id===d.offerId)??null,
+    availability:()=>helpOfferAvailability(state,item.id,actor.id,incoming.at),
+    context:prior=>helpOfferContext(state,prior.id,actor.id,incoming.at)});
+}
+
+// Same transition after a complete independently validated global row census.
+export function helpOfferFromQualifiedFacts(state,incoming,{prior,availability,context}) {
   check(id(incoming?.id) && id(incoming.actorId) && instant(incoming.at)
     && id(incoming.roomId) && incoming.roomId === state.room.id);
-  const d = validateHelpOfferData(incoming.type, incoming.data), rows = records(state);
+  const d = validateHelpOfferData(incoming.type, incoming.data);
   const item = own(state.workItems, d.workItemId) && state.workItems[d.workItemId];
-  check(item && item.id === d.workItemId && item.revision === d.expectedRevision, "Stale Work Item revision");
-  const actor = participant(state, incoming.actorId); check(actor?.active === true, "Member access unavailable");
+  check(item && item.id === d.workItemId && item.revision === d.expectedRevision, uiText("currentRoom.staleWorkRevision"));
+  const actor = participant(state, incoming.actorId); check(actor?.active === true, uiText("currentRoom.memberAccessUnavailable"));
   if (incoming.type === HELP_OFFER_OPENED) {
-    check(!rows.some(row => row.id === d.offerId), "Offer identity already exists");
-    const available = helpOfferAvailability(state, item.id, actor.id, incoming.at);
+    check(!prior, "Offer identity already exists");
+    const available = availability();
     check(available.canOffer, available.reason ?? "Offer unavailable");
     check(available.helpEventId === d.helpEventId && available.helpRevision === d.expectedHelpRevision, "Stale help invitation");
     return validateHelpOffer({ id: d.offerId, revision: 0, workItemId: item.id, workBasisRevision: item.revision,
@@ -166,12 +200,11 @@ export function helpOfferFromEvent(state, incoming) {
       updatedAt: incoming.at, openingEventId: incoming.id, eventId: incoming.id, updatedById: actor.id,
       reason: null, externalActivityUnverified: false });
   }
-  const prior = rows.find(offer => offer.id === d.offerId);
   check(prior && prior.workItemId === item.id, "Unknown help offer");
   check(prior.revision === d.expectedOfferRevision, "Stale help offer revision");
   check(Date.parse(incoming.at) >= Date.parse(prior.updatedAt), "Help offer clock moved backwards");
-  const context = helpOfferContext(state, prior.id, actor.id, incoming.at);
-  check(context[{ selected: "canSelect", declined: "canDecline", withdrawn: "canWithdraw", released: "canRelease" }[d.status]], "Offer transition unavailable");
+  const permitted = context(prior);
+  check(permitted[{ selected: "canSelect", declined: "canDecline", withdrawn: "canWithdraw", released: "canRelease" }[d.status]], "Offer transition unavailable");
   if (d.status === "selected") check(d.helpEventId === prior.invitation.eventId && d.expectedHelpRevision === prior.invitation.revision, "Stale help invitation");
   return validateHelpOffer({ ...prior, revision: prior.revision + 1, status: d.status, reason: d.reason,
     updatedAt: incoming.at, updatedById: actor.id, eventId: incoming.id, externalActivityUnverified: d.status === "released" });

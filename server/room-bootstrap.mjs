@@ -24,7 +24,7 @@ export function buildRoomBootstrap(store, token, roomId, fence, { accessRequests
   const requests = accessRequests ?? new AccessRequests(store);
   const snapshot = readRoomSnapshot(store, token, roomId, fence, { view: "full", windowed: true });
   return {
-    bootstrapVersion: 1,
+    bootstrapVersion: snapshot.snapshotVersion === 2 ? 2 : 1,
     roomId,
     sequence: snapshot.sequence,
     snapshot,

@@ -1,11 +1,12 @@
 // Public discovery and anonymous recommendations only. Copying a brief never joins, reserves work or moves money.
+import { uiText } from './strings.js';
 const $ = selector => document.querySelector(selector);
 // Exact hosts shared by Room's existing edge API mount; /room/offers is not an app alias.
 const apiPath = path => ['getdasha.com', 'www.getdasha.com'].includes(location.hostname) ? `/room${path}` : path;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 const list = $('#offer-list'), detail = $('#offer-detail'), listStatus = $('#list-status');
-let offers = [], cursor = null, listFlight = null, detailFlight = null, selectedId = null, briefText = '';
+let offers = [], cursor = null, listFlight = null, detailFlight = null, selectedId = null, matchSelectionId = null, briefText = '';
 const reviewLabels = { human: 'Human review', agent: 'Agent review', human_with_agent_review: 'Human + agent review' };
 function amount(reward) {
   if (reward.kind === 'unpaid') return 'Unpaid';
@@ -48,7 +49,7 @@ async function read(path, signal, asText = false, input) {
   return asText ? body : JSON.parse(body);
 }
 function paintList() {
-  list.innerHTML = offers.map(offer => `<li><button class="offer-card" type="button" data-offer="${escape(offer.id)}" ${selectedId === offer.id ? 'aria-current="true"' : ''}><span class="card-top"><span class="kind">${escape(offer.kind)}</span><span class="reward-chip">${offer.reward.kind === 'unpaid' ? '' : 'Proposed '}${escape(amount(offer.reward))}${offer.reward.basis === 'pool' ? ' pool' : ''}</span></span><span class="card-title">${escape(offer.title)}</span><p>${escape(offer.summary)}</p><span class="card-arrow" aria-hidden="true">↗</span></button></li>`).join('');
+  list.innerHTML = offers.map(offer => `<li><button class="offer-card" type="button" data-offer="${escape(offer.id)}" ${selectedId === offer.id ? 'aria-current="true"' : ''}><span class="card-top"><span class="kind">${escape(offer.kind)}</span><span class="reward-chip">${offer.reward.kind === 'unpaid' ? '' : 'Proposed '}${escape(amount(offer.reward))}${offer.reward.basis === 'pool' ? ' pool' : ''}</span></span><span class="card-title">${escape(offer.title)}</span><span class="card-arrow" aria-hidden="true">↗</span></button></li>`).join('');
   $('#more-offers').hidden = !cursor;
 }
 async function loadList(more = false, refreshSelection = false) {
@@ -84,7 +85,7 @@ function rewardNote(offer) {
 function paintDetail(offer) {
   const repo = safeRepository(offer.repositoryUrl), submission = safeRepository(offer.submissionUrl);
   const criteria = (title, values) => values.length ? `<section class="detail-section"><h3>${title}</h3><ul>${values.map(value => `<li>${escape(value)}</li>`).join('')}</ul></section>` : '';
-  detail.innerHTML = `<button class="text-button detail-close" data-close type="button">← All offers</button><div class="detail-meta"><span class="kind">${escape(offer.kind)}</span><span class="kind">Terms v${escape(offer.version)}</span></div><h2 id="detail-title" tabindex="-1">${escape(offer.title)}</h2><p class="summary">${escape(offer.summary)}</p><div class="terms-grid"><div><span class="term-label">${offer.reward.kind === 'work_trade' ? 'Proposed work trade' : offer.reward.kind === 'cash' ? 'Proposed reward' : 'Reward'}</span><span class="term-value">${escape(amount(offer.reward))}${offer.reward.basis === 'pool' ? ' pool' : ''}</span><p class="term-note">${escape(rewardNote(offer))}</p>${offer.reward.terms ? `<p class="term-note">${escape(offer.reward.terms)}</p>` : ''}</div><div><span class="term-label">Approval</span><span class="term-value">${escape(reviewLabels[offer.approvalPolicy.mode])}</span><p class="term-note">Results are reviewed against the criteria below.</p></div></div>${criteria('What a good result includes', offer.acceptanceCriteria)}${criteria('Out of scope', offer.exclusions)}<div class="scope-links">${submission ? `<a href="${escape(submission)}" target="_blank" rel="noopener noreferrer">Contribution instructions ↗</a>` : ''}${repo ? `<a href="${escape(repo)}" target="_blank" rel="noopener noreferrer">Repository ↗</a>` : ''}${offer.deadline ? `<span>Due ${escape(new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(offer.deadline)))}</span>` : ''}</div><section id="contribution-status" class="detail-section" aria-labelledby="contribution-title" hidden></section><section class="agent-handoff"><h3>Take it to your agent.</h3><p>Read the brief, then choose whether to start. Copying or downloading does not claim this offer.</p><div class="handoff-actions"><button id="copy-offer" class="primary" type="button" disabled>Copy prompt</button><a id="download-offer" class="secondary" href="${apiPath(`/api/project-offers/${encodeURIComponent(offer.id)}/brief.md`)}" download="SKILL.md">Download skill</a></div><details class="prompt-disclosure"><summary>Read the agent prompt</summary><label for="offer-prompt">Public offer brief</label><textarea id="offer-prompt" readonly aria-describedby="copy-status"></textarea></details><p id="copy-status" class="detail-status" role="status">Loading agent brief…</p><button id="retry-brief" class="text-button" type="button" hidden>Retry brief</button></section>`;
+  detail.innerHTML = `<button class="text-button detail-close" data-close type="button">← All offers</button><div class="detail-meta"><span class="kind">${escape(offer.kind)}</span><span class="kind">Terms v${escape(offer.version)}</span></div><h2 id="detail-title" tabindex="-1">${escape(offer.title)}</h2><p class="summary">${escape(offer.summary)}</p><div class="terms-grid"><div><span class="term-label">${offer.reward.kind === 'work_trade' ? 'Proposed work trade' : offer.reward.kind === 'cash' ? 'Proposed reward' : 'Reward'}</span><span class="term-value">${escape(amount(offer.reward))}${offer.reward.basis === 'pool' ? ' pool' : ''}</span><p class="term-note">${escape(rewardNote(offer))}</p>${offer.reward.terms ? `<p class="term-note">${escape(offer.reward.terms)}</p>` : ''}</div><div><span class="term-label">Approval</span><span class="term-value">${escape(reviewLabels[offer.approvalPolicy.mode])}</span><p class="term-note">Results are reviewed against the criteria below.</p></div></div>${criteria('What a good result includes', offer.acceptanceCriteria)}${criteria('Out of scope', offer.exclusions)}<div class="scope-links">${submission ? `<a href="${escape(submission)}" target="_blank" rel="noopener noreferrer">Contribution instructions ↗</a>` : ''}${repo ? `<a href="${escape(repo)}" target="_blank" rel="noopener noreferrer">Repository ↗</a>` : ''}${offer.deadline ? `<span>Due ${escape(new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(offer.deadline)))}</span>` : ''}</div><section id="contribution-status" class="detail-section" aria-labelledby="contribution-title" hidden></section><section class="agent-handoff"><h3>Agent brief</h3><p>Copying or downloading does not claim this offer.</p><div class="handoff-actions"><button id="copy-offer" class="primary" type="button" disabled>Copy prompt</button><a id="download-offer" class="secondary" href="${apiPath(`/api/project-offers/${encodeURIComponent(offer.id)}/brief.md`)}" download="SKILL.md">Download skill</a></div><details class="prompt-disclosure"><summary>Read the agent prompt</summary><label for="offer-prompt">Public offer brief</label><textarea id="offer-prompt" readonly aria-describedby="copy-status"></textarea></details><p id="copy-status" class="detail-status" role="status">Loading agent brief…</p><button id="retry-brief" class="text-button" type="button" hidden>Retry brief</button></section>`;
 }
 function unavailable(id, status) {
   briefText = '';
@@ -112,7 +113,10 @@ async function loadContribution(offer, flight) {
     if (!current()) return;
     if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted', 'verified'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
     taskRead = true;
-    if (task.claim.state !== 'submitted' && task.claim.state !== 'verified') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
+    if (task.claim.state !== 'submitted' && task.claim.state !== 'verified') {
+      const status = task.claim.state === 'claimed' ? 'Claimed' : task.claimable === true ? 'Open to contributors' : task.claimable === false ? 'Not currently claimable' : 'Contribution availability unavailable';
+      paint(`<p role="status">${status}</p>`); return;
+    }
     submitted = true;
     if (!validId(task.claim.submittedReceiptId)) throw new Error('Unsupported receipt');
     paint('<p role="status">Submitted · loading receipt…</p>');
@@ -127,7 +131,7 @@ async function loadContribution(offer, flight) {
     // #3733: a rejection or revision request never stamps the record; the
     // canonical read composes the decision onto it, and this view shows
     // that outcome rather than masking the delivery as a bare submission.
-    const status = record.state === 'verified' ? 'Verified' : record.state === 'rejected' ? 'Rejected' : record.state === 'revision_requested' ? 'Revision requested' : 'Submitted';
+    const status = record.state === 'verified' ? 'Verified' : record.state === 'rejected' ? 'Rejected' : record.state === 'revision_requested' ? 'Revision requested' : task.claimable === false ? uiText('offers.submittedUnavailable') : 'Submitted';
     const note = record.state === 'rejected'
       ? 'Unsigned receipt. The designated reviewer rejected this delivery; the decision is recorded with the receipt.'
       : record.state === 'revision_requested'
@@ -162,10 +166,11 @@ function closeDetail(recordHistory = true) {
   const previousId = selectedId;
   detailFlight?.abort(); document.body.classList.remove('offer-selected'); selectedId = null; briefText = ''; paintList();
   const url = new URL(location.href); url.searchParams.delete('offer'); if (recordHistory) window.history.pushState(null, '', url);
-  detail.innerHTML = '<div class="detail-empty"><h2 id="detail-title">Choose an offer</h2><p>Read the scope, reward and review terms before you begin.</p></div>';
-  (list.querySelector(`[data-offer="${previousId}"]`) || list.querySelector('button'))?.focus();
+  detail.innerHTML = '<div class="detail-empty"><h2 id="detail-title">Choose an offer</h2></div>';
+  const match = matchSelectionId === previousId ? document.querySelector(`#find-work-results [data-match-offer="${previousId}"]`) : null;
+  (match || list.querySelector(`[data-offer="${previousId}"]`) || list.querySelector('button') || $('#find-work-title'))?.focus();
 }
-list.addEventListener('click', event => { const button = event.target.closest('[data-offer]'); if (button) void select(button.dataset.offer); });
+list.addEventListener('click', event => { const button = event.target.closest('[data-offer]'); if (button) { matchSelectionId = null; void select(button.dataset.offer); } });
 $('#refresh-offers').addEventListener('click', () => void loadList(false, true));
 $('#more-offers').addEventListener('click', () => void loadList(true));
 detail.addEventListener('click', async event => {
@@ -198,8 +203,8 @@ detail.addEventListener('click', async event => {
 });
 window.addEventListener('popstate', () => { const id = new URL(location.href).searchParams.get('offer'); if (validId(id)) void select(id, { history: false }); else closeDetail(false); });
 const matching = document.createElement('section'); matching.className = 'find-work'; matching.setAttribute('aria-labelledby', 'find-work-title');
-matching.innerHTML = `<h2 id="find-work-title">Find work for me</h2><form id="find-work-form"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
-($('.workspace') ?? $('.intro')).after(matching);
+matching.innerHTML = `<h2 id="find-work-title" tabindex="-1">Find work for me</h2><form id="find-work-form"><details class="match-filters"><summary>Filters</summary><div class="match-fields"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label></div></details><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
+($('.workspace') ?? $('.intro')).before(matching);
 let matchFlight = null, matches = [], matchAfter = null, lastPreferences = null;
 const matchForm = $('#find-work-form');
 function claimPrompt(task) {
@@ -222,7 +227,7 @@ async function findMatches(more = false) {
     }
     matches = result.recommendations; matchAfter = result.nextCursor; $('#more-matches').hidden = !matchAfter;
     $('#find-work-results').innerHTML = matches.map((item, index) => `<li><h3><button class="text-button" data-match-offer="${escape(item.task.taskId)}" type="button">${escape(item.task.title)}</button></h3><p>${item.reasons.map(escape).join(' · ')}</p><p class="match-scope">${item.task.files.map(escape).join(', ')} · ${escape(item.task.repositoryRef)}</p><button class="secondary" data-copy-claim="${index}" type="button">Copy agent task</button><details><summary>Read claim instructions</summary><textarea aria-label="Claim instructions" readonly></textarea></details></li>`).join('');
-    $('#find-work-status').textContent = matches.length ? 'Suggestions only. Your agent chooses whether to claim.' : input.reward === 'cash' ? 'No claimable cash matches. Funding and payment are not configured.' : input.reward === 'work_trade' ? 'No claimable work-trade matches yet.' : 'No matching public tasks right now. Try again later.';
+    $('#find-work-status').textContent = matches.length ? 'Suggestions only. Your agent chooses whether to claim.' : matchAfter ? uiText('offers.noMatchesThisSet') : more ? uiText('offers.noMoreMatches') : input.reward === 'cash' ? 'No claimable cash matches. Funding and payment are not configured.' : input.reward === 'work_trade' ? result.supportedRewards?.includes('work_trade') ? 'No claimable work-trade matches yet.' : uiText('offers.workTradeSearchUnavailable') : 'No matching public tasks right now. Try again later.';
     if (result.hasMore && matches.length) $('#find-work-status').textContent += ' Showing a bounded selection.';
     for (const [index, field] of [...$('#find-work-results').querySelectorAll('textarea')].entries()) field.value = claimPrompt(matches[index].task);
   } catch { if (flight === matchFlight && !flight.signal.aborted) $('#find-work-status').textContent = 'Couldn’t find work. Try Find work again.'; }
@@ -237,15 +242,18 @@ matchForm.addEventListener('input', clearMatches); matchForm.addEventListener('c
 matchForm.addEventListener('submit', event => { event.preventDefault(); void findMatches(); });
 $('#more-matches').addEventListener('click', () => { if (matchAfter) void findMatches(true); });
 $('#find-work-results').addEventListener('click', async event => {
-  const offer = event.target.closest('[data-match-offer]'); if (offer) { void select(offer.dataset.matchOffer); return; }
+  const offer = event.target.closest('[data-match-offer]'); if (offer) { matchSelectionId = offer.dataset.matchOffer; void select(offer.dataset.matchOffer); return; }
   const button = event.target.closest('[data-copy-claim]'); if (!button) return;
-  const field = button.closest('li').querySelector('textarea'), flight = matchFlight; button.disabled = true;
+  const field = button.closest('li').querySelector('textarea'), flight = matchFlight;
+  let focusMoved = false;
+  const trackFocus = event => { if (event.target !== button) focusMoved = true; };
+  document.addEventListener('focusin', trackFocus); button.disabled = true;
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
     await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error('Clipboard timeout')), 800))]);
     if (flight === matchFlight) $('#find-work-status').textContent = 'Copied. Give these instructions to your agent.';
-  } catch { if (flight === matchFlight) { field.closest('details').open = true; field.focus(); field.select(); $('#find-work-status').textContent = 'Copy the selected instructions for your agent.'; } }
-  finally { if (flight === matchFlight) button.disabled = false; }
+  } catch { if (flight === matchFlight) { field.closest('details').open = true; if (!focusMoved) { field.focus(); field.select(); $('#find-work-status').textContent = 'Copy the selected instructions for your agent.'; } else { $('#find-work-status').textContent = uiText('offers.manualClaimInstructions'); } } }
+  finally { document.removeEventListener('focusin', trackFocus); if (flight === matchFlight) button.disabled = false; }
 });
 void loadList();
 const initialId = new URL(location.href).searchParams.get('offer'); if (validId(initialId)) void select(initialId, { history: false, focus: false });

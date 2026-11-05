@@ -1,0 +1,9 @@
+# Shared-budget stale-job deployment convergence
+
+Source `ca67862fabe5afec263183ef25ea779a1df77960`, base `2b37bbdc3ea2dc2100b7691a0f7f061f77e04791`. Only the existing production smoke CLI and focused tests change. No production calls.
+
+The old CLI waits for source propagation, then immediately grades jobs. A real local HTTP regression reproduces failure while both serving doors pass every version/readiness/page/signed-card check: the first optional integrity-job view is valid stale, and the next is healthy. Original script exits1 (`job_stale`, empty diagnostics); the cure waits one10-second poll within the existing20-second test source deadline and exits0. The production default wait remains unchanged.
+
+A single deadline is established before version propagation. Both doors re-read complete health/jobs and readiness each round; only coherent optional stale-job observations may wait. Required backup must be healthy already. Missing/malformed/inconsistent/failing/unsupported views and serving readiness regressions stop convergence. No stale snapshot is accepted as passing, and late healthy retry responses cannot pass after the remaining deadline. Existing3-pair GitHub transition rereads and final health/signed-card criteria remain. Stale/failing diagnostics contain fixed names/status/reason and bounded age values only; unknown names become `job`, with no response error text.
+
+Final executable checks:110pass/0fail/0skip, including actual CLI over local HTTP, persistent stale expiry, consumed source budget, required-backup controls, readiness regression, age/type consistency, safe diagnostics and late completion. ESLint0errors/0warnings; secret scan1717files/0findings. Commands and full log digests are in qualification.json; logs are gzip. No total-suite, CI/deployment or live recovery claim.

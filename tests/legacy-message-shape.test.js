@@ -38,7 +38,13 @@ const stored = store => JSON.parse(store.db.prepare("SELECT projection FROM room
 function rewriteProjection(store, edit) {
   const projection = stored(store);
   edit(projection.messages);
-  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  // Stage an old reducer shape through a registered writer. A raw overwrite
+  // of a current-schema proof would instead represent corruption, which the
+  // shape upgrader is required to refuse.
+  store.transaction(() => {
+    const encoded = store.storedProjection("commons", projection);
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(encoded);
+  });
   store._projectionCache?.clear?.();
 }
 const legacy = messages => {

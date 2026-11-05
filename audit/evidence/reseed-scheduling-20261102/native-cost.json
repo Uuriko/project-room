@@ -1,0 +1,211 @@
+{
+  "baselinePin": "89816a27e",
+  "results": [
+    {
+      "kind": "baseline",
+      "anchored": false,
+      "count": 0,
+      "pending": false,
+      "cost": {
+        "statements": 8,
+        "rowsRead": 891,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 559,
+        "bindBytes": 268,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "baseline",
+      "anchored": false,
+      "count": 1000,
+      "pending": false,
+      "cost": {
+        "statements": 8,
+        "rowsRead": 4887,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 559,
+        "bindBytes": 268,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "baseline",
+      "anchored": false,
+      "count": 5000,
+      "pending": false,
+      "cost": {
+        "statements": 8,
+        "rowsRead": 20887,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 559,
+        "bindBytes": 268,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "baseline",
+      "anchored": true,
+      "count": 0,
+      "pending": true,
+      "cost": {
+        "statements": 7,
+        "rowsRead": 907,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 16,
+        "returnedBytes": 4303,
+        "sqlBytes": 1230,
+        "bindBytes": 128,
+        "candidates": 3
+      }
+    },
+    {
+      "kind": "baseline",
+      "anchored": true,
+      "count": 1000,
+      "pending": true,
+      "cost": {
+        "statements": 7,
+        "rowsRead": 5907,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 1016,
+        "returnedBytes": 369083,
+        "sqlBytes": 1230,
+        "bindBytes": 128,
+        "candidates": 1003
+      }
+    },
+    {
+      "kind": "baseline",
+      "anchored": true,
+      "count": 5000,
+      "pending": true,
+      "cost": {
+        "statements": 7,
+        "rowsRead": 25907,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 5016,
+        "returnedBytes": 1837083,
+        "sqlBytes": 1230,
+        "bindBytes": 128,
+        "candidates": 5003
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": false,
+      "count": 0,
+      "pending": false,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 891,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": false,
+      "count": 1000,
+      "pending": false,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 891,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": false,
+      "count": 5000,
+      "pending": false,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 891,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 11,
+        "returnedBytes": 3017,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": true,
+      "count": 0,
+      "pending": true,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 890,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 12,
+        "returnedBytes": 3018,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": true,
+      "count": 1000,
+      "pending": true,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 890,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 12,
+        "returnedBytes": 3018,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    },
+    {
+      "kind": "candidate",
+      "anchored": true,
+      "count": 5000,
+      "pending": true,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 890,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedRows": 12,
+        "returnedBytes": 3018,
+        "sqlBytes": 466,
+        "bindBytes": 139,
+        "candidates": 0
+      }
+    }
+  ],
+  "scope": "per-request scheduling signal only; adapter physical rows and returned cell bytes, not raw SQL outsideadapter or CPU",
+  "actualScheduledGlobalZeroScanStillUnbounded": true
+}

@@ -1,0 +1,34 @@
+{
+  "source": "988a8c2368346eb87faf5ed214b6f7638847a718",
+  "change": "cc4834811",
+  "scope": "Test and documentation only; no runtime change",
+  "before": {
+    "selected": 1,
+    "pass": 0,
+    "fail": 1,
+    "reason": "66-file reference inventory lacks 15 actual normalized/recovery modules"
+  },
+  "after": {
+    "tests": 7,
+    "pass": 7,
+    "fail": 0,
+    "skip": 0,
+    "eslint": 0
+  },
+  "sourceRolesReviewed": 15,
+  "actualReferenceSites": 81,
+  "preserved": "Existing sync-type, field-fate and divergence assertions unchanged; normalized work remains canonical, legacy sync and reconciliation gates documented separately",
+  "limitations": "Source census and Node characterization; no production, migration or whole-recovery performance qualification",
+  "logs": {
+    "before": {
+      "sha256": "bdd060952a8e5fa125b600fef5c1937204cbf42625ee6b6beee24a4494f925c0",
+      "encoding": "zlib-base64",
+      "data": "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"
+    },
+    "after": {
+      "sha256": "75cf64a9ce76b28de4f3c3e1305d3f46b85dd79942e6dbf1c9883688498924b2",
+      "encoding": "zlib-base64",
+      "data": "eJzdVM1uEzEQvvMUo72QSk20f2F3U4kDcOHABZA4Vo53kph4bWN704YKiQOPwJEX4XX6JIydpJA0oCJEhbjZ8/fNzPfZVwmuUPlkklituxHXsj13nlmfnCZcar58hR1TXnAXQno6dThs0aBqQ9pp0vaWeaHVCwooq9NEKI9zK/ya4pHN0VKMWTCH5L9KHF9QvXDq6J5lpwR74V4ia5NJ+oEiZT8X6sbfHPpnqDjeuNND9wqtmIkNVIjIDwMIni9d3+0CDiqECNPHUQh6gcw8WftQLq+avCoexXC9TXT4rg/tbG7G6rfIwya2KWSLqw3HDw+u9vfsvLZ4LpTwgknxHtskbG5729unxDnj66fEy6tAy858J27CLMhcb6n+ZMakw1uN/BnhRfN7hN/i84Dv6pd838o+pPuWnO5Md7FPd5GmaVnm5f3SHZo4Qncw/yN01/8L3fU+3VVV1VmT3zPd9XG663+G7v/ldZfp/mfeFHXTjO+b7r/wuq+/fAbn0aTAUbneTeBC2+Vzj50DizO0YaShEx5BqNCytmsQDoxQClsY1BnMhER3AoOsGdFW6mrcuZMjdZW23Wa474UdLNgKAS+NFFx4sJpKERD4BYLTveVIwVxbQkpHeVqkZX68ekiYakaBF6Q1HBrmF+DWigPXJANHGIx7uYYsh7h68GuD7iwm9ipEUmNh9o3bAbMIinUYodNxneUHg80YETsBBh27FDQaFTfa9JLMLVAP3UO3bYk0Ba3VxkW0TVHSpWwJRbWwRNxzEUMrsdLU9KCqRtlPYDlHQ0jDae+HveKSiZArNT2s4NQkADaVGBG2D8GCCFKgt3gG06CYm4S4vmix1LXCS081gu5gMM5HRTrOm+xoGwuU5g2pjioFINNPicnXzC3j/qQgdsMqKInif2BJ0ZYtSGRW0ZhlPSrz4nDBLWXbedDJhFQQuRlw3RmJAW74eDfDCXk1ydz9UD+s/Prj52h5NsopwjBho5gUF1FlPs5WP2p2ovr0FWgmor6KZ9dT5w7SeDHM7ewzJuTWyhk1JyV1s7m7pTDm5uZ1q7fH3ad4Ts+qGKejpqzz8YNvC3jbbA=="
+    }
+  }
+}

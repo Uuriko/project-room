@@ -1,0 +1,104 @@
+{
+  "date": "2026-11-01",
+  "base": "890cd5ecf",
+  "runtime": "842fd6d4d",
+  "sourceChain": [
+    "4719eaf2c",
+    "3228a1b8c",
+    "5ce84d8eb",
+    "a88092666",
+    "842fd6d4d"
+  ],
+  "pairedStitchOriginal": "af7178d58",
+  "protocol": 13,
+  "reportVersion": 1,
+  "node": {
+    "tests": 26,
+    "passed": 26,
+    "skipped": 0
+  },
+  "packageImportClosure": {
+    "tests": 1,
+    "passed": 1
+  },
+  "native": {
+    "events": 90,
+    "sourceBytes": 429565,
+    "receipts": [
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 138,
+          "rowsRead": 38994,
+          "rowsWritten": 15,
+          "unknown": 0
+        },
+        "clockMs": 16,
+        "bytes": 148201
+      },
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 219,
+          "rowsRead": 31209,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "clockMs": 7,
+        "bytes": 141504
+      },
+      {
+        "surface": "target",
+        "cost": {
+          "statements": 95,
+          "rowsRead": 23436,
+          "rowsWritten": 4,
+          "unknown": 0
+        },
+        "clockMs": 15,
+        "bytes": 119320
+      },
+      {
+        "surface": "corrupt",
+        "cost": {
+          "statements": 73,
+          "rowsRead": 7869,
+          "rowsWritten": 0,
+          "unknown": 0
+        },
+        "clockMs": 13,
+        "bytes": null
+      }
+    ],
+    "withdrawn": true,
+    "fullOracleStillRequired": true
+  },
+  "logs": {
+    "node": "/tmp/recovery-text-node-final.log",
+    "nativeMixedWarmCold": "/tmp/recovery-text-native-warm-final.log",
+    "nativeEarlierAllCold": "/tmp/recovery-text-native-final.log",
+    "cacheBefore": "/tmp/recovery-text-cache-causal-red.log",
+    "legalAtomBefore": "/tmp/recovery-text-cap-causal-red.log",
+    "largeAtomAfter": "/tmp/recovery-text-large-source.log",
+    "lint": "/tmp/recovery-text-lint-final.log",
+    "package": "/tmp/recovery-text-package-closure.log"
+  },
+  "scope": {
+    "nominalQuantumBytes": 4194304,
+    "atomsPerStep": 32,
+    "singleLegalSealedAtomException": true,
+    "strict4MiBWholeCall": false,
+    "normalizedRoomsOnly": true,
+    "legacyFullOracleRequired": true,
+    "allRoomsFullOracleRequired": true,
+    "liveDeployed": false
+  },
+  "limitations": [
+    "module bytes are conservative payload charges, not all control/schema SQL bytes",
+    "Native costs cover adapter statements, not all raw runtime permit SQL",
+    "elapsed samples are not CPU",
+    "guard reinstall can force additional cold exact catalog query; prior ordinary cached cost is not every restore step cost",
+    "whole recovery and original final oracle remain unbounded in outstanding subsystems",
+    "root/pairing compose charter protocol14 separately"
+  ]
+}

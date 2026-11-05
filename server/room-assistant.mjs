@@ -1,17 +1,17 @@
+import {roomAssistantSchema,terminalExpression,verifyRoomAssistantIndexes} from './room-assistant-schema.mjs';
+import {isCurrentRoom,withCurrentReadContext,readCurrentRecord,currentRoomAuthority,chargeCurrentReadBudget} from './current-room-repository.mjs';
 import { canAdministerRoom } from '../src/room-administration.js';
+import { addressesAssistant } from '../src/conversation-intent.js';
 import { enforceAutonomyTierForAction, getTier } from './autonomy-tiers.mjs';
 import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
-import { messageRepository, messageThreadRoot } from './message-repository.mjs';
+import { messageRepository, messageThreadRoot, selectedMessageRecord } from './message-repository.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
 import { createHash } from 'node:crypto';
 
 // Coordination records reserve one publisher. A host claim is an observation,
 // not a hosted execution service, and never grants that host additional rights.
-export const roomAssistantSchema = `
-CREATE TABLE IF NOT EXISTS room_assistant_config (room_id TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(room_id,run_id));
-CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
+export {roomAssistantSchema} from './room-assistant-schema.mjs';
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const terminal = new Set(['done', 'cancelled', 'failed']);
 // A host that has not reported within this window is treated as silent: the
@@ -65,15 +65,26 @@ const visibleRun = (run, state, actor, floor, records) => {
   if (messageVisibleToViewer(opening, actor.id, floor)) return run;
   return controlsDeletedSource(run, opening, actor, state, floor) ? deletedControl(run) : null;
 };
+// Query the actual optional table. SQLite resolves its current schema on every
+// call; only its exact missing-table error means the feature is not installed.
+// No schema epoch or cached table-presence decision survives DDL or restore.
+function optionalAssistantRead(table, read) {
+  try { return read(); } catch (error) {
+    if (error?.message === `no such table: ${table}`
+      || error?.message === `no such table: ${table}: SQLITE_ERROR`) return undefined;
+    throw error;
+  }
+}
+
 // Called only after a validated message edit, inside the command transaction.
 // The run revision fences both publication and acknowledgements: an ID still
 // refers to the same message after editing, but no longer to the same input.
 export function invalidateEditedAssistantInput(db, roomId, messageId, at) {
-  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'").get()) return;
-  const rows = db.prepare(`SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs
+  const rows = optionalAssistantRead('room_assistant_runs', () => db.prepare(`SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs
     WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')
     AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry
-      WHERE json_extract(entry.value,'$.sourceMessageId')=?)`).all(roomId, messageId);
+      WHERE json_extract(entry.value,'$.sourceMessageId')=?)`).all(roomId, messageId));
+  if (!rows) return;
   for (const row of rows) {
     const run = JSON.parse(row.value);
     for (const input of run.inputs) if (input.sourceMessageId === messageId) input.status = 'pending';
@@ -85,26 +96,48 @@ export function invalidateEditedAssistantInput(db, roomId, messageId, at) {
   }
 }
 
+function withAssistantRead(store,roomId,operation){return isCurrentRoom(store.db,roomId)?withCurrentReadContext(store.db,roomId,()=>{verifyRoomAssistantIndexes(store.db);return operation();},{maxRecords:512}):operation();}
+function assistantState(store,roomId,actorId,config,proposed){
+ if(!isCurrentRoom(store.db,roomId))return store.room(roomId).state;
+ const authority=currentRoomAuthority(store.db,roomId,{memberId:actorId}),room=readCurrentRecord(store.db,roomId,'metadata','room'),members={...authority.members};
+ for(const id of new Set([config.coordinatorMemberId,proposed]))if(typeof id==='string'&&validId(id)&&!Object.hasOwn(members,id)){const member=readCurrentRecord(store.db,roomId,'members',id);if(member!==undefined){if(member.id!==id)fail('assistant_context_changed','Assistant member authority changed');Object.defineProperty(members,id,{value:member,enumerable:true});}}
+ return{room,members};
+}
+function assistantMessages(store,roomId,state){if(!isCurrentRoom(store.db,roomId))return messageRepository(store,roomId,state);const selected=new Map();return{get(id){if(!selected.has(id))selected.set(id,selectedMessageRecord(store,roomId,id));return selected.get(id);}};}
+function admitAssistantRow(store,roomId,table,where,args,columns=['value']){
+ if(isCurrentRoom(store.db,roomId)){const scalar=store.db.prepare(`SELECT ${columns.map(c=>`coalesce(length(CAST(${c} AS BLOB)),0)`).join('+')} bytes FROM ${table} WHERE ${where}`).get(...args);if(!scalar)return undefined;withCurrentReadContext(store.db,roomId,b=>chargeCurrentReadBudget(b,scalar.bytes+1024));}
+ return store.db.prepare(`SELECT ${columns.join(',')} FROM ${table} WHERE ${where}`).get(...args);
+}
+function nativeAssistantRuns(store,roomId,{pendingOnly=false,limit=100}={}){return withCurrentReadContext(store.db,roomId,b=>{
+ // Exact owned additive indexes keep terminal history outside active selection.
+ verifyRoomAssistantIndexes(store.db);
+ const result=[];
+ for(const terminal of pendingOnly?[0]:[0,1]){
+  const rows=store.db.prepare(`SELECT CAST(rowid AS TEXT) cursor,length(CAST(run_id AS BLOB)) idBytes,length(CAST(value AS BLOB)) bytes FROM room_assistant_runs INDEXED BY room_assistant_status WHERE room_id=? AND (${terminalExpression})=? ORDER BY rowid DESC LIMIT ?`).all(roomId,terminal,limit-result.length);
+  for(const row of rows){if(!Number.isSafeInteger(row.bytes)||row.bytes<2||!Number.isSafeInteger(row.idBytes)||row.idBytes<1||row.idBytes>128)fail('assistant_context_changed','Assistant run representation requires reconciliation');chargeCurrentReadBudget(b,row.bytes+row.idBytes+64);const value=store.db.prepare('SELECT run_id,value FROM room_assistant_runs WHERE rowid=CAST(? AS INTEGER)').get(row.cursor);result.push(value);}
+  if(result.length===limit)break;
+ }
+ return result;
+});}
+
 export class RoomAssistant {
   constructor(store) { this.store = store; }
   init() { this.store.db.exec(roomAssistantSchema); }
   config(roomId) {
-    const row = this.store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
+    const row = admitAssistantRow(this.store,roomId,'room_assistant_config','room_id=?',[roomId]);
     return row ? JSON.parse(row.value) : { name: 'Room', coordinatorMemberId: null, revision: 0 };
   }
   list(roomId, authorize) {
-    return this.store.readTransaction(() => {
+    return this.store.readTransaction(() => withAssistantRead(this.store,roomId,() => {
       const auth = authorize();
       // Fresh installations have no configuration; reads must not mutate storage.
       if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get())
         return { contractVersion: 1, roomId, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
-      const state = this.store.room(roomId).state;
-      const records = messageRepository(this.store, roomId, state);
-      const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
+      const config=this.config(roomId),state=assistantState(this.store,roomId,auth.member.id,config),records=assistantMessages(this.store,roomId,state),coordinator=state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       // Keep unfinished requests discoverable by their host and controllers;
       // newer terminal history must not push pending work out of this window.
-      const runs = this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId)
+      const runs = (isCurrentRoom(this.store.db,roomId)?nativeAssistantRuns(this.store,roomId):this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId))
         .map(row => visibleRun(JSON.parse(row.value), state, auth.member, floor, records)).filter(Boolean)
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
@@ -114,7 +147,7 @@ export class RoomAssistant {
       const connected = coordinator?.active && coordinator.permissions.includes('accept_work');
       const paused = connected && Boolean(this.store.wakeQueue?.pauseStatus?.(roomId, coordinator.id));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs };
-    });
+    }));
   }
   // postToken is the caller's credential, threaded from the route or MCP.
   // submit and publish post messages as that caller inside the run transaction.
@@ -126,19 +159,17 @@ export class RoomAssistant {
       if (input[key] !== undefined && !validId(input[key])) fail('invalid_assistant_action', `Invalid ${key}`, 422);
     if (Object.hasOwn(input, 'expectedAttemptId') && input.expectedAttemptId !== null && !validId(input.expectedAttemptId))
       fail('invalid_assistant_action', 'Invalid expectedAttemptId', 422);
-    return this.store.transaction(() => {
-      const auth = authorize(), state = this.store.room(roomId).state, actor = auth.member;
-      const records = messageRepository(this.store, roomId, state);
+    return this.store.transaction(() => withAssistantRead(this.store,roomId,() => {
+      const auth=authorize(),actor=auth.member,config=this.config(roomId),state=assistantState(this.store,roomId,actor.id,config,input.coordinatorMemberId),records=assistantMessages(this.store,roomId,state);
       if (isGuestAgentMemberId(actor.id) || actor.permissions?.some(p => p.startsWith('guest:')))
         fail('assistant_denied', 'Guests cannot coordinate shared work', 403);
       if (state.room.archivedAt) fail('assistant_archived', 'This room is archived');
       this.init();
-      const config = this.config(roomId);
       const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
       const isHuman = actor.kind === 'human';
       const floor = historyFloor(this.store.db, state, roomId, actor.id);
       const canonical = JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b))));
-      const old = input.action !== 'draft' && this.store.db.prepare('SELECT input,result FROM room_assistant_ops WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actor.id, input.requestId);
+      const old = input.action !== 'draft' && admitAssistantRow(this.store,roomId,'room_assistant_ops','room_id=? AND actor_id=? AND request_id=?',[roomId,actor.id,input.requestId],['input','result']);
       if (old) {
         if (old.input !== canonical) fail('assistant_retry_conflict', 'Retry ID already records different input');
         const response = JSON.parse(old.result);
@@ -180,7 +211,7 @@ export class RoomAssistant {
         for (const id of input.fileIds) this.store.roomAttachments.commit(postToken, roomId, { id, messageId: sourceMessageId });
         result = this.apply(roomId, { ...input.intent,
           requestId: `submit-${createHash('sha256').update(input.requestId).digest('hex')}`,
-          ...(input.intent.action === 'invoke' ? { runId: `run-${sourceMessageId}` } : {}), sourceMessageId
+          ...(input.intent.action === 'invoke' ? { runId: assistantRunId(sourceMessageId) } : {}), sourceMessageId
         }, authorize, postToken).result;
       } else if (input.action === 'configure') {
         if (!isAdmin) fail('assistant_denied', 'A room administrator configures its assistant', 403);
@@ -190,9 +221,11 @@ export class RoomAssistant {
           || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !state.members[input.coordinatorMemberId]?.active || !state.members[input.coordinatorMemberId]?.permissions.includes('accept_work')))
           fail('invalid_assistant_config', 'Choose a name and an active room agent, or disconnect', 422);
         result = { name: input.name.trim(), coordinatorMemberId: input.coordinatorMemberId, revision: config.revision + 1 };
+        const nativePending=result.coordinatorMemberId!==config.coordinatorMemberId&&isCurrentRoom(this.store.db,roomId)?nativeAssistantRuns(this.store,roomId,{pendingOnly:true,limit:101}):null;
+        if(nativePending?.length>100)fail('assistant_pending_capacity','Finish or cancel pending assistant requests before changing its coordinator; selected run actions remain available');
         this.store.db.prepare('INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value').run(roomId, JSON.stringify(result));
         if (result.coordinatorMemberId !== config.coordinatorMemberId) {
-          for (const row of this.store.db.prepare('SELECT run_id,value FROM room_assistant_runs WHERE room_id=?').all(roomId)) {
+          for (const row of nativePending??this.store.db.prepare('SELECT run_id,value FROM room_assistant_runs WHERE room_id=?').all(roomId)) {
             const pending = JSON.parse(row.value);
             if (terminal.has(pending.status)) continue;
             if (!pending.attemptId) pending.coordinatorMemberId = result.coordinatorMemberId;
@@ -204,7 +237,7 @@ export class RoomAssistant {
         }
       } else {
         if (!validId(input.runId)) fail('invalid_assistant_action', 'Choose a run ID', 422);
-        const row = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? AND run_id=?').get(roomId, input.runId);
+        const row = admitAssistantRow(this.store,roomId,'room_assistant_runs','room_id=? AND run_id=?',[roomId,input.runId]);
         let run = row && JSON.parse(row.value);
         if (input.action === 'invoke') {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
@@ -214,8 +247,19 @@ export class RoomAssistant {
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
-          if (run || this.store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, input.sourceMessageId)) fail('assistant_run_exists', 'This message already has a shared request');
-          run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
+          const existing = run || admitAssistantRow(this.store,roomId,'room_assistant_runs',"room_id=? AND json_extract(value,'$.sourceMessageId')=?",[roomId,input.sourceMessageId]);
+          if (existing) {
+            const prior = run ?? JSON.parse(existing.value);
+            // The server derives this same run from a plain addressed post
+            // (see invokeFromPlainPost): a submit whose client intent lagged
+            // that derivation replays the identical request, so an exact
+            // match is a receipt, not a conflict. Anything else stays refused.
+            const replayed = prior.id === input.runId && prior.initiatorId === actor.id && prior.attemptId == null
+              && prior.inputs.length === 1 && prior.inputs[0].memberId === actor.id && prior.inputs[0].sourceMessageId === input.sourceMessageId;
+            if (!replayed) fail('assistant_run_exists', 'This message already has a shared request');
+            run = prior;
+          }
+          if (!run) run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
             coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
             createdAt: this.store.now(), updatedAt: this.store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: input.sourceMessageId, status: 'pending' }], activity: [] };
         } else {
@@ -379,6 +423,51 @@ export class RoomAssistant {
       const response = { contractVersion: 1, roomId, action: input.action, result, ...(receipt ? { receipt } : {}) };
       if (input.action !== 'draft') this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
       return response;
-    });
+    }));
   }
+}
+
+
+// fo-qa-c10-202610280645: a valid 128-character source messageId composed as
+// `run-${messageId}` is 132 characters, past the 128-character room ID cap, so
+// later assistant actions would reject the run and its producer could never
+// claim it. Both run-deriving paths (atomic submit and plain-post derivation)
+// share one deterministic bounded helper: `run-${id}` when it fits, otherwise
+// a 60-hex-digit digest of the source id, so the same source id always maps to
+// the same run id on either path.
+export function assistantRunId(sourceMessageId) {
+  const composed = `run-${sourceMessageId}`;
+  if (composed.length <= 128) return composed;
+  return `run-${createHash('sha256').update(sourceMessageId).digest('hex').slice(0, 60)}`;
+}
+
+// fo-qa-c10-202610280645: the client routes an ask only from its assistant
+// projection, and that projection can lag the configure write, so the first
+// ask in a freshly configured room rides the plain message path and no run
+// starts. The server owns the configuration, so after a plain shared post it
+// derives the same invoke the client would have sent with a fresh read.
+// Reply-based continuations stay client-routed. Eligible posts and their run
+// commit in the same command transaction. Storage failures must propagate so
+// an acknowledged ask cannot lose its dispatch; the same command can retry.
+export function invokeFromPlainPost(store, roomId, state, actor, data, messageId) {
+  const configRow = optionalAssistantRead('room_assistant_config', () => store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId));
+  if (!configRow) return;
+  const config = JSON.parse(configRow.value);
+  if (!config.coordinatorMemberId) return;
+  const coordinator = state.members[config.coordinatorMemberId];
+  if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) return;
+  if (actor.kind !== 'human' || isGuestAgentMemberId(actor.id)) return;
+  const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
+  if (!isAdmin && !actor.permissions?.includes('steer')) return;
+  if (data?.toMemberId || data?.replyToId || typeof data?.body !== 'string' || typeof data?.messageId !== 'string' || !validId(data.messageId)) return;
+  if (!addressesAssistant(data.body, config.name || 'Room')) return;
+  if (store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, messageId)) return;
+  const run = { id: assistantRunId(messageId), sourceMessageId: messageId, initiatorId: actor.id,
+    coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
+    createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
+  // Explicit invokes may already own this derived ID for another source.
+  // Refuse the whole ask instead of acknowledging a message without dispatch.
+  if (store.db.prepare('SELECT 1 FROM room_assistant_runs WHERE room_id=? AND run_id=?').get(roomId, run.id))
+    fail('assistant_run_exists', 'This request ID already belongs to another message');
+  store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?)').run(roomId, run.id, JSON.stringify(run));
 }

@@ -1,0 +1,10 @@
+✔ queryFor: each filter issues its documented updates query (0.259541ms)
+✔ validBasis: accepts ub1_ plus 64 lowercase hex chars, nothing else (0.102667ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.60675

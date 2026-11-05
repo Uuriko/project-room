@@ -16,6 +16,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText } from "../server/room-export.mjs";
 import { writeKvBackup } from "./room-backup.mjs";
+import {verifiedOperatorRestore} from "./helpers/verified-operator-restore.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const require = createRequire(join(here, "package.json"));
@@ -44,12 +45,12 @@ async function boot(bindings) {
     kvNamespaces: ["ROOM_BACKUPS_KV"],
     bindings: { ROOM_ORIGIN: origin, ...bindings }
   });
-  const call = (path, { method = "GET", token, body } = {}) => mf.dispatchFetch(origin + path, {
+  const call = (path, { method = "GET", token, body, json = false } = {}) => mf.dispatchFetch(origin + path, {
     method,
     headers: {
       "CF-Connecting-IP": "192.0.2.10",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(body ? { "Content-Type": path.endsWith("restore") ? "application/x-ndjson" : "application/json" } : {})
+      ...(body ? { "Content-Type": !json && path.endsWith("restore") ? "application/x-ndjson" : "application/json" } : {})
     },
     ...(body ? { body } : {})
   });
@@ -99,8 +100,12 @@ test("the restore token opens both restore doors and not the export door", { tim
       const closed = await bodyBoot.call("/api/operator/export", { token: RESTORE_TOKEN });
       assert.equal(closed.status, 404);
       const restored = await bodyBoot.call("/api/operator/restore", { method: "POST", token: RESTORE_TOKEN, body: text });
-      const result = await restored.json();
-      assert.equal(restored.status, 200, JSON.stringify(result));
+      assert.equal(restored.status,202);
+      const pending=await restored.clone().json();assert.equal(pending.verified,false);assert.equal(pending.pending,true);
+      const wrong=await bodyBoot.call('/api/operator/restore',{method:'POST',token:EXPORT_TOKEN,json:true,body:JSON.stringify({restoreId:pending.restoreId,sourceSeal:pending.sourceSeal,expectedRevision:pending.revision,requestId:'wrong-export-token'})});
+      assert.equal(wrong.status,401);
+      assert.equal((await bodyBoot.call('/api/ready')).status,503,'pending recovery is not ordinary readiness');
+      const {body:result}=await verifiedOperatorRestore(restored,input=>bodyBoot.call('/api/operator/restore',{method:'POST',token:RESTORE_TOKEN,body:JSON.stringify(input),json:true}));
       assert.equal(result.ok, true);
       assert.equal(result.verified, true);
     } finally {
@@ -113,9 +118,9 @@ test("the restore token opens both restore doors and not the export door", { tim
       const key = "room-backups/2026-10-15.ndjson";
       await writeKvBackup(kv, key, exportNdjsonStream(seed.db), { partBytes: 16384 });
       const restored = await kvBoot.call("/api/operator/restore-from-backup", { method: "POST", token: RESTORE_TOKEN, body: JSON.stringify({ key }) });
-      const result = await restored.json();
-      assert.equal(restored.status, 200, JSON.stringify(result));
+      const {body:result}=await verifiedOperatorRestore(restored,input=>kvBoot.call('/api/operator/restore',{method:'POST',token:RESTORE_TOKEN,body:JSON.stringify(input),json:true}));
       assert.equal(result.verified, true);
+      assert.equal(result.source,'kv-backup');assert.equal(result.key,key);assert.ok(result.bytes>0);
     } finally {
       await kvBoot.mf.dispose();
     }

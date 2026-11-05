@@ -25,7 +25,11 @@ function transport(fn = () => undefined) {
     calls.push({ url: String(url), options });
     const override = await fn(String(url), options, calls.length);
     if (override instanceof Response) return override;
-    const value = override ?? (String(url).includes('/needs-me') ? page() : String(url).includes('/reply-requests') ? {
+    const value = override ?? (String(url).includes('/needs-me') ? page() : String(url).endsWith('/agent-work') ? {
+      contractVersion: 1, roomId: 'commons', viewerId: 'worker', ownerId: 'owner', executionGranted: false,
+      member: { id: 'worker', kind: 'agent', active: true, revision: 1, permissions: [], delegatedAdmin: false },
+      evaluatedThrough: 10, observedAt: 10, requests: [], runs: {},
+    } : String(url).includes('/reply-requests') ? {
       contractVersion: 1, roomId: 'commons', viewerId: 'worker', viewerAccountId: null, viewerAuthEpoch: null,
       evaluatedThrough: 10, scope: { membership: 'room', targetedMessages: 'participants-only', externalExecution: false, acknowledges: false },
       selection: { direction: 'incoming', status: 'open' }, requests: [],
@@ -193,11 +197,18 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
     const response = await fetch(url, options); baselineRequests++; baselineBytes += Buffer.byteLength(await response.clone().text()); return response;
   } });
   await baselineClient.roomContext();
+  const roomContextBytes = baselineBytes;
+  baselineBytes = 0; baselineRequests = 0;
+  const baseline = await baselineClient.snapshot();
+  assert.ok(baseline.state.messages.some(message => message.body.includes('private-body-sentinel')));
   const first = await resumeAgent({ connection: config });
-  assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, []);
+  assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, [{source:'attention',code:'page_limit'}]);
   assert.ok(first.obligations.some(x => x.id === 'task'));
   assert.equal(JSON.stringify(first).includes('private-body-sentinel'), false);
-  assert.equal(first.metrics.requests, 4);
+  assert.equal(first.metrics.attentionPages,2);assert.equal(first.metrics.requests,5);
+  const enumeration={requests:first.metrics.requests,responseBytes:first.metrics.responseBytes,resumeCalls:1};
+  const finishAttention=async initial=>{let current=initial,n=0;while(current.observedThroughBySource.attention?.hasMore){assert.ok(n++<20,'finite fixture attention continuation completes');current=await resumeAgent({connection:config,sinceVersion:initial.contextVersion,attentionCursor:current.observedThroughBySource.attention.cursor});enumeration.requests+=current.metrics.requests;enumeration.responseBytes+=current.metrics.responseBytes;enumeration.resumeCalls++;assert.ok(current.incompleteSources.every(source=>source.source==='attention'&&source.code==='page_limit'));}assert.deepEqual(current.incompleteSources,[]);return current;};
+  const completed=await finishAttention(first);assert.equal(completed.observedThroughBySource.attention.hasMore,false);
   const rpc = async (method, params) => {
     const response = await fetch(origin + '/room/mcp?profile=full', { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${worker.secret}` },
@@ -212,7 +223,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const transported = await rpc('tools/call', { name: hint.tool, arguments: hint.arguments });
   assert.equal(transported.error, undefined); assert.notEqual(transported.result.isError, true);
   assert.equal(transported.result.structuredContent.work.id, 'task');
-  const repeat = await resumeAgent({ connection: config, sinceVersion: first.contextVersion, attentionCursor: first.observedThroughBySource.attention.cursor });
+  const repeat = await resumeAgent({ connection: config, sinceVersion: first.contextVersion, attentionCursor: completed.observedThroughBySource.attention.cursor });
   assert.ok(Buffer.byteLength(JSON.stringify(repeat)) < Buffer.byteLength(JSON.stringify(first)));
   assert.ok(first.metrics.responseBytes < baselineBytes);
   const mismatch = await resumeAgent({ connection: { ...config, memberId: owner.identityId } });
@@ -220,7 +231,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const aliasIdentity = store.identities.create('Alias');
   linkWithProof(store, owner.secret, 'commons', aliasIdentity, { memberId: 'custom-linked-member', displayName: 'Alias', permissions: [] });
   const alias = await resumeAgent({ connection: { ...config, token: aliasIdentity.secret, memberId: 'custom-linked-member' } });
-  assert.equal(alias.connection.status, 'credential_accepted'); assert.deepEqual(alias.incompleteSources, []);
+  assert.equal(alias.connection.status, 'credential_accepted'); assert.ok(alias.incompleteSources.every(source=>source.source==='attention'&&source.code==='page_limit'));
   assert.equal(alias.authoritySummary.id, 'custom-linked-member');
   let revoked = false;
   const ended = await resumeAgent({ connection: config, fetchImpl: async (url, options) => {
@@ -232,7 +243,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   } });
   assert.equal(ended.connection.status, 'unconfirmed');
   assert.deepEqual(ended.attention, []); assert.deepEqual(ended.obligations, []); assert.deepEqual(ended.observedThroughBySource, {});
-  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, first: first.metrics, repeat: repeat.metrics }));
+  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, roomContextBytes, firstUsefulDiscovery:first.metrics, completeAttentionEnumeration:enumeration, repeat:repeat.metrics }));
 });
 
 // Contract: current open addressed requests survive an advanced observation cursor.
@@ -254,6 +265,14 @@ test('reply-only resume retains old open requests independently of delta observa
   const initial = await resumeAgent({ connection: config });
   const unified = await resumeAgent({ connection: config });
   assert.deepEqual(unified.openRequests?.map(request => request.id), ['old-open'], 'default startup retains outstanding requests');
+  // Audit D: open requests and their runs come from the one combined /agent-work read,
+  // not separate reply-requests and request-runs round trips.
+  const paths = [];
+  const combined = await resumeAgent({ connection: config, fetchImpl: async (url, options) => { paths.push(new URL(url).pathname); return fetch(url, options); } });
+  assert.deepEqual(combined.openRequests.map(request => request.id), ['old-open']);
+  assert.equal(combined.pendingReconciliations.status, 'observed');
+  assert.equal(paths.filter(path => path.endsWith('/agent-work')).length, 1);
+  assert.equal(paths.filter(path => path.endsWith('/reply-requests') || path.endsWith('/request-runs')).length, 0);
   assert.ok(unified.obligations.some(work => work.id === 'reply-work'), 'work remains in the same startup packet');
   const fromBeginning = await resumeAgent({ connection: config, focus: 'replies' });
   assert.deepEqual(fromBeginning.openRequests.map(request => request.id), ['old-open']);
@@ -275,9 +294,8 @@ test('reply-only resume retains old open requests independently of delta observa
       assert.equal(init.method, 'GET', 'recovery is read-only');
       assert.notEqual(new URL(url).pathname, '/api/rooms/commons', 'resume never downloads the full room snapshot');
       const response = await fetch(url, init);
-      if (!String(url).endsWith('/request-runs')) return response;
+      if (!String(url).endsWith('/agent-work')) return response;
       const value = await response.json(); value.runs['old-open'].state = state;
-      value.runs['unrelated-request'] = { state: 'needs_attention', updatedAt: 1 };
       return Response.json(value);
     } });
     assert.deepEqual(snapshot.pendingReconciliations.items.map(item => item.requestMessageId),
@@ -285,21 +303,38 @@ test('reply-only resume retains old open requests independently of delta observa
   }
   for (const failure of ['unavailable', 'wrong-viewer', 'malformed']) {
     const snapshot = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
-      if (!String(url).endsWith('/request-runs')) return fetch(url, init);
+      const fallback = failure.startsWith('fallback-');
+      if (fallback && String(url).endsWith('/agent-work')) return Response.json({ error: { code: 'not_found', message: 'old server' } }, { status: 404 });
+      if (fallback && new URL(url).pathname.endsWith('/request-runs')) {
+        const value = await (await fetch(url, init)).json();
+        if (failure === 'fallback-missing-runs') delete value.runs; else value.runs['old-open'] = { state: 'bogus', updatedAt: 1 };
+        return Response.json(value);
+      }
+      if (!String(url).endsWith('/agent-work')) return fetch(url, init);
       if (failure === 'unavailable') return Response.json({}, { status: 503 });
+      if (failure === 'unauthorized') return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
+      if (failure === 'forbidden') return Response.json({ error: { code: 'forbidden' } }, { status: 403 });
+      if (failure === 'throttled') return Response.json({ error: { code: 'rate_limited' } }, { status: 429, headers: { 'retry-after': '1' } });
       const value = await (await fetch(url, init)).json();
       if (failure === 'wrong-viewer') value.viewerId = owner.identityId;
       else value.runs['old-open'].updatedAt = 'invalid';
       return Response.json(value);
     } });
     assert.equal(snapshot.connection.status, 'credential_accepted');
-    assert.deepEqual(snapshot.pendingReconciliations, { status: 'unavailable' });
+    // One combined read: a failed or invalid /agent-work answer withholds both the
+    // open requests and their runs rather than reporting requests without runs.
+    assert.deepEqual(snapshot.openRequests, []);
+    assert.equal(snapshot.pendingReconciliations.status, 'unavailable', failure);
+    assert.equal(snapshot.pendingReconciliations.items, undefined, 'withheld runs are not observed-empty');
+    assert.equal(snapshot.observedThroughBySource.openRequests, undefined, failure);
+    assert.ok(snapshot.incompleteSources.some(source => source.source === 'openRequests'));
     assert.ok(snapshot.incompleteSources.some(source => source.source === 'pendingReconciliations'));
+    if (failure === 'throttled') assert.equal(snapshot.pendingReconciliations.httpStatus, 429);
   }
   assert.deepEqual((resumed.openRequests ?? []).map(request => request.id), ['old-open']);
   assert.equal(resumed.attention.some(item => item.id === 'old-open'), false);
   assert.deepEqual(resumed.incompleteSources, []);
-  assert.equal(resumed.metrics.requests, 5);
+  assert.equal(resumed.metrics.requests, 4, 'requests and runs share one /agent-work read');
   assert.deepEqual(resumed.obligations, []); assert.deepEqual(resumed.ownClaims, []);
   assert.equal(Object.hasOwn(resumed.openRequests[0], 'answerBasis'), false);
   assert.equal(JSON.stringify(resumed).includes('private-question-sentinel'), false);
@@ -311,21 +346,21 @@ test('reply-only resume retains old open requests independently of delta observa
   const capped = await resumeAgent({ ...options, maxPages: 1, fetchImpl: async (url, init) => {
     const response = await fetch(url, init);
     if (!String(url).includes('/needs-me')) return response;
-    const value = await response.json(); value.hasMore = true;
+    const value = await response.json(); value.hasMore = true; value.complete = false; value.status = 'incomplete';
     return Response.json(value);
   } });
   assert.deepEqual(capped.openRequests.map(request => request.id), ['old-open']);
   assert.equal(capped.observedThroughBySource.attention.hasMore, true);
   assert.ok(capped.incompleteSources.some(source => source.source === 'attention' && source.code === 'page_limit'));
   const partial = await resumeAgent({ ...options, fetchImpl: async (url, init) =>
-    String(url).includes('/reply-requests') ? Response.json({}, { status: 503 }) : fetch(url, init) });
+    String(url).endsWith('/agent-work') ? Response.json({}, { status: 503 }) : fetch(url, init) });
   assert.equal(partial.connection.status, 'credential_accepted');
   assert.deepEqual(partial.openRequests, []);
   assert.ok(partial.incompleteSources.some(source => source.source === 'openRequests'));
   assert.equal(partial.observedThroughBySource.openRequests, undefined);
   const mismatched = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
     const response = await fetch(url, init);
-    if (!String(url).includes('/reply-requests')) return response;
+    if (!String(url).endsWith('/agent-work')) return response;
     const value = await response.json(); value.viewerId = owner.identityId;
     return Response.json(value);
   } });
@@ -344,7 +379,7 @@ test('reply-only resume retains old open requests independently of delta observa
   } });
   assert.deepEqual(idle.openRequests, []);
   assert.equal(idleRunReads, 0, 'no run metadata can contribute when the incoming open list is empty');
-  assert.deepEqual(idle.pendingReconciliations, { status: 'observed', source: 'open_requests', localJournalRead: false, items: [] });
+  assert.deepEqual(idle.pendingReconciliations, { status: 'observed', source: 'agent_work', localJournalRead: false, items: [] });
   assert.equal(idle.metrics.requests, 4);
 
   // A different current request ensures final revocation discards gathered refs.
@@ -353,7 +388,7 @@ test('reply-only resume retains old open requests independently of delta observa
   let revoked = false;
   const ended = await resumeAgent({ ...options, fetchImpl: async (url, init) => {
     const response = await fetch(url, init);
-    if (String(url).includes('/reply-requests') && !revoked) {
+    if (String(url).endsWith('/agent-work') && !revoked) {
       await response.clone().text(); store.identities.unlink(owner.secret, 'commons', worker.identityId); revoked = true;
     }
     return response;
@@ -362,4 +397,111 @@ test('reply-only resume retains old open requests independently of delta observa
   assert.deepEqual(ended.openRequests, []); assert.deepEqual(ended.optionalConversations, []);
   assert.deepEqual(ended.pendingReconciliations, { status: 'not_read' });
   assert.deepEqual(ended.nextReads, []); assert.deepEqual(ended.observedThroughBySource, {});
+});
+
+test('failed or old-server agent-work reads withhold requests and runs as unavailable, never observed-empty', async t => {
+  const store = new RoomStore(':memory:');
+  const owner = store.identities.create('Owen'), worker = store.identities.create('Worker');
+  new AgentRooms(store).create(owner.secret, { roomId: 'commons', title: 'Replies', purpose: 'Reply fixture', kind: 'personal' });
+  linkWithProof(store, owner.secret, 'commons', worker, { memberId: 'reply-worker', displayName: 'Worker', permissions: [] });
+  store.dmConsents.request('commons', owner.identityId, 'reply-worker', 'Fixture');
+  store.dmConsents.decide('commons', 'reply-worker', owner.identityId, 'approve');
+  store.command(owner.secret, 'commons', { id: 'old-open', type: 'message.posted', data: {
+    messageId: 'old-open', body: 'private-question-sentinel', toMemberId: 'reply-worker', requestKind: 'reply' } });
+  store.command(owner.secret, 'commons', { id: 'reply-work', type: 'work.proposed', data: { workItemId: 'reply-work', title: 'Private work', definitionOfDone: 'Review', accountableMemberId: 'reply-worker', mode: 'read' } });
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const config = { origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'reply-worker', token: worker.secret };
+  for (const failure of ['unauthorized', 'forbidden', 'throttled', 'fallback-malformed-runs', 'fallback-missing-runs']) {
+    const snapshot = await resumeAgent({ connection: config, focus: 'replies', fetchImpl: async (url, init) => {
+      const fallback = failure.startsWith('fallback-');
+      if (fallback && String(url).endsWith('/agent-work')) return Response.json({ error: { code: 'not_found', message: 'old server' } }, { status: 404 });
+      if (fallback && new URL(url).pathname.endsWith('/request-runs')) {
+        const value = await (await fetch(url, init)).json();
+        if (failure === 'fallback-missing-runs') delete value.runs; else value.runs['old-open'] = { state: 'bogus', updatedAt: 1 };
+        return Response.json(value);
+      }
+      if (!String(url).endsWith('/agent-work')) return fetch(url, init);
+      if (failure === 'unavailable') return Response.json({}, { status: 503 });
+      if (failure === 'unauthorized') return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
+      if (failure === 'forbidden') return Response.json({ error: { code: 'forbidden' } }, { status: 403 });
+      if (failure === 'throttled') return Response.json({ error: { code: 'rate_limited' } }, { status: 429, headers: { 'retry-after': '1' } });
+      const value = await (await fetch(url, init)).json();
+      if (failure === 'wrong-viewer') value.viewerId = owner.identityId;
+      else value.runs['old-open'].updatedAt = 'invalid';
+      return Response.json(value);
+    } });
+    assert.equal(snapshot.connection.status, 'credential_accepted');
+    // One combined read: a failed or invalid /agent-work answer withholds both the
+    // open requests and their runs rather than reporting requests without runs.
+    assert.deepEqual(snapshot.openRequests, []);
+    assert.equal(snapshot.pendingReconciliations.status, 'unavailable', failure);
+    assert.equal(snapshot.pendingReconciliations.items, undefined, 'withheld runs are not observed-empty');
+    assert.equal(snapshot.observedThroughBySource.openRequests, undefined, failure);
+    assert.ok(snapshot.incompleteSources.some(source => source.source === 'openRequests'));
+    assert.ok(snapshot.incompleteSources.some(source => source.source === 'pendingReconciliations'));
+    if (failure === 'throttled') {
+      assert.equal(snapshot.pendingReconciliations.httpStatus, 429);
+      const throttled = snapshot.incompleteSources.find(source => source.source === 'openRequests');
+      assert.equal(throttled.retryAfterMs, 1000, 'Retry-After survives into the incomplete source');
+    }
+  }
+  // blockedBy reasons from the server are bounded: at most 8, each at most 80 characters.
+  const bounded = await resumeAgent({ connection: config, focus: 'replies', fetchImpl: async (url, init) => {
+    if (!String(url).endsWith('/agent-work')) return fetch(url, init);
+    const value = await (await fetch(url, init)).json();
+    value.blockedBy = { 'old-open': Array.from({ length: 12 }, (_, i) => `${i}-${'x'.repeat(200)}`) };
+    return Response.json(value);
+  } });
+  const request = bounded.openRequests.find(item => item.id === 'old-open');
+  assert.equal(request.blockedBy.length, 8);
+  assert.ok(request.blockedBy.every(reason => reason.length <= 80));
+  assert.equal(request.blockedBy[0], `0-${'x'.repeat(78)}`);
+});
+
+test('resume preserves native opaque continuation and maps actual work revision pointers to selected work', async () => {
+  const cursor = { rooms: { commons: 10 }, native: { commons: 'opaque.native.position' } };
+  const f = transport(url => url.includes('/needs-me') ? page({ cursor, hasMore: true,
+    items: [{ kind: 'work', roomId: 'commons', id: 'standing-task', seq: 7 }] }) : undefined);
+  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl, maxPages: 2 });
+  assert.deepEqual(result.observedThroughBySource.attention.cursor, cursor);
+  assert.equal(result.observedThroughBySource.attention.hasMore, true);
+  assert.deepEqual(result.attention[0], { kind: 'work', roomId: 'commons', id: 'standing-task', seq: 7,
+    nextRead: { tool: 'room_read_work', arguments: { roomId: 'commons', workItemId: 'standing-task' } } });
+  const second = f.calls.filter(call => call.url.includes('/needs-me'))[1];
+  assert.deepEqual(JSON.parse(new URL(second.url).searchParams.get('since')), cursor);
+});
+
+test('native continuation keeps exact room/type/token/aggregate limits without admitting unknown cursor keys', async () => {
+  const cases = [null, [], { commons: '' }, { commons: 3 }, { commons: 'x'.repeat(12289) }, { commons: '🙂'.repeat(3073) },
+    Object.fromEntries(Array.from({ length: 41 }, (_, i) => ['room-' + i, 'opaque'])),
+    { commons: 'x'.repeat(12288), other: 'y'.repeat(5000) }, { 'invalid room': 'opaque' }];
+  for (const native of cases) {
+    const f = transport(url => url.includes('/needs-me') ? page({ cursor: { rooms: { commons: 10 }, native } }) : undefined);
+    const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+    assert.equal(result.observedThroughBySource.attention, undefined);
+    assert.ok(result.incompleteSources.some(source => source.source === 'attention' && source.code === 'invalid_response'));
+  }
+});
+
+test('native continuation accepts exact byte and room-count boundaries as opaque values', async () => {
+  for (const native of [{}, { commons: 'x'.repeat(12288) }, { commons: '🙂'.repeat(3072) },
+    Object.fromEntries(Array.from({ length: 40 }, (_, i) => ['room-' + i, 'opaque']))]) {
+    const cursor = { rooms: { commons: 10 }, native };
+    const f = transport(url => url.includes('/needs-me') ? page({ cursor }) : undefined);
+    const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+    assert.deepEqual(result.observedThroughBySource.attention.cursor, cursor);
+  }
+});
+
+test('compact resume retains validated native coverage without claiming global attention completeness', async () => {
+  const row = complete => ({ roomId: 'commons', available: true, mode: 'native_bounded',
+    conversation: { complete, examined: 1, direction: 'recent', range: { recentEventWindow: 500 } },
+    standingWorkAndRequests: { complete: false }, omitted: ['ambient bond and peer routing presentation', 'legacy board presentation'], globalAttentionComplete: false });
+  let pages = 0;
+  const f = transport(url => url.includes('/needs-me') ? page({ contractVersion: 2, nativeCoverage: [row(++pages > 1)], hasMore: pages === 1 }) : undefined);
+  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+  assert.equal(result.observedThroughBySource.attention.hasMore, false);
+  assert.deepEqual(result.observedThroughBySource.attention.nativeCoverage, [row(true)]);
+  assert.equal(result.observedThroughBySource.attention.nativeCoverage[0].globalAttentionComplete, false);
 });

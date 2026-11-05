@@ -126,7 +126,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code);
       if (uncertain && owns()) {
         accountClient.invalidate(generation, session);
-        await onSignInUncertain?.();
+        await onSignInUncertain?.({ preserveScopedBackup: true });
       }
       throw error;
     }
@@ -231,12 +231,44 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     await onSignedIn(session);
   }
 
+  // A failed submit repaints the surface (innerHTML), which drops keyboard
+  // focus to <body>. Put it back on the field to retry, not the page top.
+  const focusWithin = () => {
+    const node = surface();
+    const active = typeof document === "undefined" ? null : document.activeElement;
+    return !!(node && active && active !== document.body && node.contains(active));
+  };
+  function restoreFocusAfterFailure() {
+    if (focusWithin()) return;
+    const retry = surface()?.querySelector('[name="password"]');
+    if (retry && retry.getClientRects?.().length) { retry.focus(); return; }
+    focusView();
+  }
   async function withBusy(fn) {
     if (busy) return;
+    const hadFocus = focusWithin();
+    const submittedSurface = surface();
+    const doc = globalThis.document;
+    let focusMovedOutside = false;
+    const trackFocus = event => {
+      if (event.target !== doc.body && !submittedSurface?.contains(event.target)) focusMovedOutside = true;
+    };
+    const canRestoreFocus = () => hadFocus && !focusMovedOutside
+      && surface() === submittedSurface && submittedSurface?.isConnected
+      && !submittedSurface.closest("[hidden], [inert]") && submittedSurface.getClientRects().length > 0
+      && (doc.activeElement === doc.body || submittedSurface.contains(doc.activeElement));
+    doc?.addEventListener?.("focusin", trackFocus);
+    let failed = false;
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
-    catch (error) { setStatus(failureText(error), true); }
-    finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
+    catch (error) { failed = true; setStatus(failureText(error), true); }
+    finally {
+      busy = false; onBusyChange?.(false); paintBusySurface();
+      doc?.removeEventListener?.("focusin", trackFocus);
+      // Repainting only explains lost focus in this still-active surface.
+      // A late rejection must not reclaim focus after navigation or dismissal.
+      if (failed && canRestoreFocus()) restoreFocusAfterFailure();
+    }
   }
 
   async function redeem(email, code) {
@@ -515,16 +547,18 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     render();
     setStatus(uiText("signin.copy.034"));
     // The host makes redemption failures visible even before email entry opens.
-    let linkFailure = null;
+    let linkFailure = null, handledMagicSignIn = false;
     await withBusy(async () => {
       try {
         await redeem(email, code);
+        handledMagicSignIn = true;
       } catch (error) {
         linkFailure = failureText(error);
         throw error;
       }
     });
     if (linkFailure) onMagicLinkFailure?.(linkFailure);
+    if (handledMagicSignIn) return { handledMagicSignIn: true };
   }
 
   const onInput = event => {

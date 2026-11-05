@@ -1,0 +1,35 @@
+{
+  "source": "9c95524ac8e631ca53cfc8717004e64803fd5fb1",
+  "node": "v24.22.1",
+  "qualificationRuntimeOverlay": {
+    "restore-admission.mjs": "bddc89e3e255acf0bbaf1629518727559299b41e065d2a06363843c6b12bd728",
+    "restore-ndjson.mjs": "ce00454974963ffd5bd53db6f86981571a090829309ee942da356374a1d21ab1",
+    "restore-result-envelope.mjs": "6d72a8746271e9c18566a498f6efb05291a7f62b58ad5d22a346d618d63574b0"
+  },
+  "before": {
+    "selectedTests": 3,
+    "pass": 0,
+    "fail": 3
+  },
+  "after": {
+    "tests": 12,
+    "pass": 12,
+    "fail": 0,
+    "skip": 0,
+    "durationMs": 10269.290917
+  },
+  "logs": {
+    "before": {
+      "sha256": "4f7920b87bbc1f5f1fb7d953384afb9d691800218ff1966fb923593823d0643b",
+      "bytes": 8889
+    },
+    "after": {
+      "sha256": "3ae3471a4803d7bc2ac91e4b397032c87ceeb64095c5e572e1a6c1b1973c96a5",
+      "bytes": 22611
+    },
+    "lint": {
+      "sha256": "d32192d059fd26e946f8d5990c0f1e4d76e8247735c2a9add174e32f530fb62d",
+      "bytes": 404
+    }
+  }
+}

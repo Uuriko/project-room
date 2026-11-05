@@ -1,0 +1,30 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":29315472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":34027104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ genuine625 cold operator refuses newer native format before coverage progress (507.057875ms)
+ℹ {"oldPin":"625b4f3d0","exit":77,"beforeRevision":1,"afterRevision":2,"lastOutput":"{\"status\":202,\"result\":{\"ok\":true,\"verified\":false,\"pending\":true,\"restoreId\":\"restore_4130f172-6b8a-4acb-a35d-48a87d11fc8a\",\"sourceSeal\":\"fb533ebbb35e31e2d624dbe61f614729ed6a0526f368f6f2f49a76baf25a3a2e\",\"revision\":2,\"phase\":\"coverage\",\"progress\":{\"tableIndex\":69,\"tables\":221,\"rows\":128,\"bytes\":23761},\"note\":\"Coverage is incomplete recovery; the independent full audit still must pass before admission\"},\"steps\":[{\"status\":202,\"elapsedMs\":21.414,\"rows\":128,\"metrics\":{\"payloadRows\":128,\"payloadTextBlobBytes\":23454,\"metadataRows\":2310,\"metadataTextBlobBytes\":859242}}],\"metrics\":{\"inputBytes\":190,\"payloadRows\":128,\"payloadTextBlobBytes\":23454,\"metadataRows\":2310,\"metadataTextBlobBytes\":859242},\"elapsedMs\":28.494,\"clockOnly\":true}"}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 609.90025
+
+✖ failing tests:
+
+test at tests/restore-durable-coverage.test.mjs:77:1
+✖ genuine625 cold operator refuses newer native format before coverage progress (507.057875ms)
+  AssertionError [ERR_ASSERTION]: old625 must refuse constructor/operator before returning successful coverage
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-restore-native-format-qualification-1101/tests/restore-durable-coverage.test.mjs:78:1084)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 77,
+    expected: 77,
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

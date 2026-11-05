@@ -54,7 +54,13 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /demo": [undefined, 200],
+  "GET /watch": [undefined, 200],
+  "GET /extensions/work-receipt/v1": [undefined, 200],
+  "HEAD /extensions/work-receipt/v1": [undefined, 200],
   "HEAD /demo": [undefined, 200],
+  // ROOM_SHOWCASE is off by default, so an anonymous probe gets 404.
+  "GET /showcase": [undefined, 404],
+  "HEAD /showcase": [undefined, 404],
   "GET /download": [undefined, 200],
   "HEAD /download": [undefined, 200],
   // Native login starts/callbacks require PKCE query shape. The exchange is
@@ -102,6 +108,10 @@ const PROBES = {
   "POST /mcp": [{}, 200],
   "GET /room/mcp": [undefined, 200],
   "POST /room/mcp": [{}, 200],
+  // Native connection is disabled when no deployment OAuth client is configured.
+  "POST /oauth/invite": [{}, 404],
+  // Registration is public metadata only and unavailable without configured MCP clients.
+  "POST /oauth/register": [{}, 404],
   "POST /a2a": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],
@@ -157,6 +167,7 @@ const PROBES = {
   // honest zeros on an empty store.
   "GET /api/public/front-door": [undefined, 200],
   "HEAD /api/public/front-door": [undefined, 200],
+  "GET /api/public/git-remote": [undefined, 404],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
@@ -189,7 +200,8 @@ const PROBES = {
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
-  "POST /api/share-links/preview": [{ linkToken: token() }, 410],
+  // Anonymous preview of an unknown well-formed token: truthful 404 link_not_found (pack 4).
+  "POST /api/share-links/preview": [{ linkToken: token() }, 404],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   // The v0 guest-agent-links exchange was removed (#3216): its routes are
   // not open, not declared, and answer plain 404 — pinned by

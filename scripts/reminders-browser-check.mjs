@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human tasks against isolated synthetic data; no real user research.
 import test from "node:test";
@@ -15,7 +16,8 @@ for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
   test(`private reminders ${label}: schedule, due clock, privacy, recovery after resolution, keyboard and reflow`, { timeout: 90000 }, async t => {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
-    let browser, at = Date.now(); f.store.now = () => at;
+    // The second 01:00 hour exposes parsing that silently selects the past first occurrence.
+    let browser, at = Date.parse("2026-11-01T09:03:20Z"); f.store.now = () => at;
     t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -28,7 +30,7 @@ for (const mobile of [false, true]) {
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/reminders")) writes.push(request.postDataJSON()); });
     await page.clock.install({ time: at });
     await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" });
-    const card = page.locator('[data-work-record-id="test-handoff"]');
+    const card = await openConversationWork(page, 'test-handoff');
     const open = async () => {
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
       await card.getByRole("button", { name: "Remind me", exact: true }).click();
@@ -43,7 +45,7 @@ for (const mobile of [false, true]) {
     const dueAt = Math.ceil((at + 120000) / 60000) * 60000;
     const local = await page.evaluate(value => { const d = new Date(value), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }, dueAt);
     await page.locator("#reminder-custom").fill(local);
-    assert.match(await page.locator("#reminder-preview").textContent(), /UTC[+−]\d{2}:\d{2}/);
+    assert.match(await page.locator("#reminder-preview").textContent(), /UTC−08:00/);
     await capture("schedule");
     await page.locator("#reminder-save").click(); await page.locator("#reminder-dialog").waitFor({ state: "hidden" });
     assert.equal(f.store.reminders.list(f.keys.owner, "commons").reminders[0].dueAt, dueAt);

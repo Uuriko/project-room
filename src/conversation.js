@@ -1,5 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
 import { uiText } from "./strings.js";
+import { terminalWork } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -119,6 +120,25 @@ export function presenceLabel(presence) {
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
 
+// A stream or recent host report alone does not prove a host is processing.
+export function observedPresenceLabel(presence, observation) {
+  if (presence === 'listening') {
+    if (observation?.watching === true) return uiText('people.streamConnected');
+    if (observation?.presence?.status === 'online' && observation.presence?.basis === 'host') return uiText('people.recentHostSignal');
+    return presenceLabel('unknown');
+  }
+  return presenceLabel(presence);
+}
+
+// #5382: when an agent is not listening, say its mentions are queued (not
+// lost): the server holds them until the agent's bridge reconnects.
+export function queuedNote(member, presence) {
+  const n = Number(member?.queuedWakes);
+  if (member?.kind !== "agent" || !Number.isSafeInteger(n) || n <= 0) return "";
+  if (presence === "listening" || presence === "working") return "";
+  return uiText("people.queued_until_reconnect", { count: n });
+}
+
 // Presence is derived from room work + recent chat. No extra people-data store.
 // #660: when the member carries a server-provided `state` (from the presence
 // API), it wins — the server is authoritative. Otherwise fall back to the
@@ -169,13 +189,13 @@ export function memberRowName(member, status) {
   return [name, kind, state].filter(Boolean).join(", ");
 }
 
-// Compact Done receipt for an agent who posted completion. Not chat spam.
+// A Done chip requires the latest result to satisfy its current review gates.
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;
   const done = workList(workItems)
     .filter(item => item.receipt?.eventId && (item.accountableMemberId === member.id || item.receipt.producerId === member.id))
     .sort(byLatest)[0];
-  if (!done) return null;
+  if (!done || done.state !== "completed" || !terminalWork(done)) return null;
   const title = String(done.receipt.summary || done.title || "").trim();
   return { label: "Done", title, workItemId: done.id };
 }
@@ -452,6 +472,19 @@ export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext
 export function channelDraftKey(channelId = "general") {
   return channelId === "general" ? null : JSON.stringify(["channel", channelId]);
 }
+export function directDraftKey(memberId) { return JSON.stringify(["direct", memberId]); }
+export function directDraftPeer(key) {
+  try {
+    const value = JSON.parse(key);
+    return Array.isArray(value) && value.length === 2 && value[0] === "direct"
+      && typeof value[1] === "string" && value[1] ? value[1] : null;
+  } catch { return null; }
+}
+export function directMessagePeer(message, viewerId) {
+  if (!message?.toMemberId || !viewerId) return null;
+  if (message.authorId === viewerId) return message.toMemberId;
+  return message.toMemberId === viewerId ? message.authorId : null;
+}
 function isChannelDraftKey(key) {
   try { const value = JSON.parse(key); return Array.isArray(value) && value.length === 2 && value[0] === "channel" && typeof value[1] === "string"; }
   catch { return false; }
@@ -459,7 +492,7 @@ function isChannelDraftKey(key) {
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: directDraftPeer(threadId) ?? "", replyToId: isChannelDraftKey(threadId) || directDraftPeer(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }
@@ -473,7 +506,7 @@ export function draftRecoveryScope(identity) {
   if (!identity?.account?.id || !Number.isInteger(identity.account.authEpoch)
     || !identity.roomId || !identity.member?.id || !identity.sessionBinding) return null;
   return JSON.stringify([identity.roomId, identity.account.id, identity.account.authEpoch,
-    identity.member.id, identity.sessionBinding]);
+    identity.member.id, identity.draftRecoveryLineage || identity.sessionBinding]);
 }
 
 // Only references and recovery state persist. File bytes never enter browser storage.
@@ -497,6 +530,24 @@ function recoveredFiles(files) {
 export class DraftRecovery {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
   clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  // An authenticated account is not enough to restore a room draft, but it
+  // can rule one out before another account is shown its room list.
+  reconcileAccount(identity) {
+    try {
+      // Version 1 cannot be scoped to the current account and must not linger.
+      this.storage?.removeItem('project-room:drafts:v1');
+      const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem('project-room:drafts:v2');
+      if (!raw) return;
+      if (raw.length > 500000) throw new Error('size');
+      const saved = JSON.parse(raw), scope = JSON.parse(saved.scope);
+      const lineage = identity?.draftRecoveryLineage || identity?.sessionBinding;
+      if (!identity?.authenticated || !identity.account?.id || !Number.isInteger(identity.account.authEpoch)
+          || !Array.isArray(scope) || scope.length !== 5 || scope[1] !== identity.account.id
+          || scope[2] !== identity.account.authEpoch || scope[4] !== lineage
+          || !Number.isFinite(saved.expires) || saved.expires <= this.now()
+          || saved.expires > this.now() + 12 * 60 * 60 * 1000) this.clear();
+    } catch { this.clear(); }
+  }
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
@@ -567,15 +618,25 @@ export class DraftRecovery {
           assistantDraft = { action: input.action, runId: input.runId, sourceMessageId: source.id,
             expectedRevision: input.expectedRevision, ...(input.action === 'contribute' ? { conflict: input.conflict } : {}) };
         }
+        const directPeer = directDraftPeer(id);
+        if (directPeer && d.toMemberId !== directPeer) continue;
         const channelRoot = id === null || isChannelDraftKey(id);
-        const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
-        if (isChannelDraftKey(id) && id !== draftId) continue;
+        const draftId = channelRoot ? (d.toMemberId ? directDraftKey(d.toMemberId) : channelDraftKey(channelId ?? "general")) : id;
+        if (isChannelDraftKey(id) && id !== channelDraftKey(channelId ?? "general")) continue;
         if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
-        if (!channelRoot && !assistantDraft && !index.threads.has(id)) continue;
+        if (!channelRoot && !directPeer && !assistantDraft && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
-        if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !assistantDraft && index.rootById.get(d.replyToId) !== id
+        if (d.toMemberId && (!Object.hasOwn(state.members ?? {}, d.toMemberId) || !state.members[d.toMemberId] || state.members[d.toMemberId].active === false || state.members[d.toMemberId].identityRevoked === true)) continue;
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !directPeer && !assistantDraft && index.rootById.get(d.replyToId) !== id
           || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
+        // A private draft may only reply within its own pair. Public messages
+        // and another pair must not become reply targets after recovery.
+        const recoveredPeer = directDraftPeer(draftId);
+        if (recoveredPeer && d.replyToId !== null) {
+          const reply = index.byId.get(d.replyToId);
+          if (!reply?.toMemberId || reply.deletedAt
+            || reply.authorId !== recoveredPeer && reply.toMemberId !== recoveredPeer) continue;
+        }
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
         // Older saved commands without a messageId keep their original payload.
@@ -591,6 +652,15 @@ export class DraftRecovery {
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // An empty selected conversation has no draft entry. Recover navigation
+      // only for a current member; never revive a rejected private payload.
+      const selectedPeer = directDraftPeer(saved.activeKey);
+      if (activeKey === null && selectedPeer && !saved.entries.some(([id]) => id === saved.activeKey)
+        && Object.hasOwn(state.members ?? {}, selectedPeer) && state.members[selectedPeer]
+        && state.members[selectedPeer].active !== false && state.members[selectedPeer].identityRevoked !== true) {
+        drafts.save(saved.activeKey, { body: "", toMemberId: selectedPeer, replyToId: null, channelId: "general", pending: null });
+        activeKey = saved.activeKey;
+      }
       // Keep empty-thread navigation separate from recoverable draft text.
       // Never turn a rejected private draft into a fresh public reply.
       if (activeKey === null && typeof saved.threadId === "string"
@@ -607,7 +677,8 @@ export class DraftRecovery {
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
       return { drafts, activeKey, channelId: selected?.channelId ?? "general",
-        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
+        directMemberId: directDraftPeer(activeKey),
+        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) || directDraftPeer(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
 }
