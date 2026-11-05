@@ -3854,7 +3854,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           catch { reject(422, "invalid_cursor", "since must be a sequence number or a cursor object"); }
         }
         const roomId = url.searchParams.has("roomId") ? url.searchParams.get("roomId") : undefined;
-        return json(res, 200, collectNeedsMe(store, secret, { since, roomId }), req.method === "HEAD");
+        const claimSecRaw = url.searchParams.get("claimSec");
+        const claimSec = claimSecRaw == null || claimSecRaw === "" ? undefined : Number(claimSecRaw);
+        return json(res, 200, collectNeedsMe(store, secret, { since, roomId, claimSec }), req.method === "HEAD");
       }
       if (url.pathname === "/api/needs-me") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
