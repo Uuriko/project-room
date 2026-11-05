@@ -1443,6 +1443,18 @@ export function publishCurrentCandidate(store,head,{generation,qualificationRece
 export function admitCurrentCandidateBudget(db,b) { admitCurrentSchema(db,b); return b; }
 
 // Selected work context never opens the legacy room or unrelated work bodies.
+// Wake policy needs only the room record, the actor and target member records
+// and, for a work wake, that one item. Bounded like any selected read; no
+// messages, roster census or unrelated work bodies.
+export function readCurrentWakePolicyState(store,roomId,memberIds,workItemId=null) {
+  const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);if(!room)corrupt('missing wake policy room authority');
+  const members=Object.create(null);
+  for(const id of new Set(memberIds.filter(id=>typeof id==='string'))){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
+  const workItems=Object.create(null);
+  if(typeof workItemId==='string'){const item=readCurrentWorkItem(db,roomId,workItemId,b);if(item)workItems[workItemId]=item;}
+  return {room,members,workItems};
+}
 export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{includeOffers=false}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
   if(includeOffers)refuse('Cross-work offers require an indexed selected dependency context');
