@@ -261,3 +261,22 @@ test('open-ask head start: revoked credentials and restarted stores refuse its c
  assert.throws(()=>store.replyRequests.list(key,'commons',again.nextRead.arguments),e=>e.status===401,'revoked credential cannot continue');
  assert.throws(()=>store.replyRequests.list(key,'commons',{limit:1}),e=>e.status===401,'revoked credential cannot start');
 });
+test('sent open asks lead page one too, in both and outgoing directions, and closed ones stay in the scan',t=>{
+ const {store,keys}=fixture(t,(_events,add)=>{
+  for(let i=0;i<40;i++)add('message.posted',{messageId:`a-noise-${String(i).padStart(2,'0')}`,toMemberId:'other',requestKind:'reply',requestPolicyVersion:1,body:'Private'});
+  add('message.posted',{messageId:'z-my-ask',toMemberId:'owner',requestKind:'reply',requestPolicyVersion:1,body:'Mine'},'reader');
+ });
+ store.room=()=>{throw Error('whole-room hydration forbidden');};
+ for(const direction of ['outgoing','both']){
+  const first=store.replyRequests.list(keys.reader,'commons',{direction,limit:20});
+  const ids=first.requests.map(r=>r.id).sort();
+  assert.ok(ids.includes('z-my-ask'),`${direction}: my sent ask on page one (${ids})`);
+  if(direction==='both')assert.ok(ids.includes('question'),'both: the incoming ask too');
+  assert.equal(JSON.stringify(first).includes('a-noise-'),false);
+  let args=first.nextRead?.arguments,later=[],pages=0;
+  while(args){const read=store.replyRequests.list(keys.reader,'commons',args);later.push(...read.requests.map(r=>r.id));args=read.nextRead?.arguments;assert.ok(++pages<60);}
+  assert.equal(later.filter(id=>ids.includes(id)).length,0,`${direction}: no repeats`);
+ }
+ const other=store.replyRequests.list(keys.other,'commons',{direction:'outgoing',limit:20});
+ assert.equal(other.requests.some(r=>r.id==='z-my-ask'),false,'another member never sees my sent ask');
+});

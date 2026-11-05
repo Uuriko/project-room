@@ -161,6 +161,7 @@ const scopeTools = {
 // Keep this separate from membership checks: OAuth consent cannot widen them.
 const compositeReadScopes = {
   room_read_inbox: ['chat:read', 'work:read'],
+  room_needs_me: ['chat:read', 'work:read'], // conversation plus standing work and requests, this grant's room only
   room_wait_for_attention: ['chat:read', 'work:read'],
   room_list_work: ['chat:read', 'work:read'], // needs_me includes reply requests
   room_read_request: ['rooms:read', 'chat:read', 'work:read'], // preparation includes work and charter

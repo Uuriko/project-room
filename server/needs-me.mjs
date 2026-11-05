@@ -1056,7 +1056,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null, freshWindow = NEEDS_ME_FRESH_WINDOW } = {}) {
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null, freshWindow = NEEDS_ME_FRESH_WINDOW, oauthIdentity = null } = {}) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -1067,6 +1067,13 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const row = store.identities.get(record.identityId);
     if (!row) fail(401, "unauthenticated", "Unknown or revoked identity credential");
     identity = { identityId: row.identityId, displayName: row.displayName };
+  } else if (typeof secret === "string" && /^(oat|iat)_/.test(secret)) {
+    // OAuth grant: the hosted door already verified the principal and pinned
+    // roomId to the grant's room. Read only that room; per-room reads still
+    // authenticate the token itself.
+    if (!oauthIdentity?.identityId || typeof scopedRoom !== "string") fail(401, "unauthenticated", "OAuth grant needs-me requires the grant's room");
+    identity = { identityId: oauthIdentity.identityId, displayName: oauthIdentity.displayName };
+    allowedRooms = [scopedRoom];
   } else {
     identity = store.identities.resolveGlobalIdentitySecret(secret);
   }

@@ -37,15 +37,16 @@ test("full joining packet explains the wait and the non-mint alternatives", () =
 test("short packet points at the budget before a group joins", () => {
   assert.ok(/budget/i.test(short), "short packet mentions budget");
   assert.ok(
-    short.includes("Minting is budgeted per address, per network and globally over a rolling 24 hours — see the full packet before a group joins from one network."),
+    short.includes("Minting is budgeted over a rolling 24 hours: 8 mints per minute per address, 20 per day per address, 80 per day per network, 200 per day network-wide — see the full packet before a group joins from one network."),
     "short packet carries the pointer sentence verbatim"
   );
 });
 
 test("served guide sources carry the group-joining budget note", () => {
   assert.ok(guideIndex.includes("Joining as a group? Read this first."), "guide group-joining heading");
-  assert.ok(guideIndex.includes("80 per day from one network"), "guide names the 80/network figure");
-  assert.ok(guideIndex.includes("200 per day in total"), "guide names the global figure");
+  assert.ok(guideIndex.includes("80 per day per network"), "guide names the 80/network figure");
+  assert.ok(guideIndex.includes("200 per day network-wide"), "guide names the global figure");
+  assert.ok(guideIndex.includes("8 mints per minute per address"), "guide names the per-minute figure");
   assert.ok(
     guidePaste.includes("If the agent reports a 429 identity-mint budget, that is a shared 24-hour network budget, not a connection failure — see the guide's group-joining note."),
     "paste page carries the budget sentence verbatim"

@@ -20,26 +20,33 @@ function fixture(t,count=36,extend=()=>{}){
  return {store,keys,events};
 }
 test('normalized events traverse excluded source windows and redact current bodies without room hydration',t=>{
- const {store,keys}=fixture(t);let after=0,emptyMore=false;const all=[];
+ const {store,keys}=fixture(t);let after=0;const all=[];
  for(let n=0;n<30;n++){
   const page=store.eventsAfter(keys.reader,'commons',after,100);
-  assert.ok(page.next>=after);emptyMore ||= page.events.length===0&&page.hasMore;
+  assert.ok(page.next>=after);
   assert.doesNotThrow(()=>store.redactionMessages('commons',page));
   all.push(...page.events);if(!page.hasMore)break;assert.ok(page.next>after);after=page.next;
  }
- assert.ok(emptyMore,'private backlog must yield an honest empty-more source window');
+ // W3200 R-07: a read now scans past excluded source windows within one call
+ // (bounded by the source-byte ledger and the shared read budget), so an
+ // empty-more page is possible but no longer required for this small backlog;
+ // that honesty case is covered deterministically in
+ // tests/w3200-r07-r08-event-window.test.mjs (large invisible backlog).
  assert.equal(all.filter(x=>x.event.type==='message.posted').length,1);
  assert.equal(all.find(x=>x.event.data?.messageId==='public').event.data.body,'CURRENT-PUBLIC');
  assert.equal(JSON.stringify(all).includes('PRIVATE-'),false);
 });
 
-test('filters examine bounded unfiltered windows, including an empty-more match gap',t=>{
+test('filters scan past unfiltered source gaps to the match in a bounded number of calls',t=>{
  const {store,keys}=fixture(t);let after=0,pages=0;const rows=[];
  for(;pages<30;pages++){
   const page=store.eventsAfter(keys.reader,'commons',after,100,{types:['message.edited'],actor:'owner'});
-  assert.ok(page.next-after<=16);rows.push(...page.events);if(!page.hasMore)break;after=page.next;
+  assert.ok(page.next>=after);rows.push(...page.events);if(!page.hasMore)break;assert.ok(page.next>after);after=page.next;
  }
- assert.ok(pages>1);assert.equal(rows.length,1);assert.equal(rows[0].event.data.body,'CURRENT-PUBLIC');
+ // W3200 R-07: filters are still applied after candidate admission (no JSON
+ // predicate before LIMIT), but one call scans forward over the match gap
+ // instead of returning one 16-sequence window per call (was 3+ pages here).
+ assert.ok(pages<=2);assert.equal(rows.length,1);assert.equal(rows[0].event.data.body,'CURRENT-PUBLIC');
  assert.throws(()=>store.eventsAfter(keys.reader,'commons',0,101),e=>e.code==='invalid_cursor');
  assert.throws(()=>store.eventsAfter(keys.reader,'commons',999,10),e=>e.code==='cursor_ahead');
  assert.throws(()=>store.redactionMessages('commons'),e=>e.code==='current_room_context_unavailable');
@@ -127,12 +134,15 @@ test('consent moderation and peer identity privacy preserve their distinct audie
 
 test('a late formal request is reached past hidden empty windows without acknowledging it',t=>{
  const {store,keys}=fixture(t,60,(_events,add)=>add('message.posted',{messageId:'late-request',toMemberId:'reader',body:'Useful request',requestKind:'reply',requestPolicyVersion:1}));
- const before=store.db.prepare('SELECT * FROM mention_states').all();let after=0,request=null,empty=0;
+ const before=store.db.prepare('SELECT * FROM mention_states').all();let after=0,request=null;
  for(let n=0;n<20;n++){
-  const page=store.eventsAfter(keys.reader,'commons',after,100);if(!page.events.length&&page.hasMore)empty++;
+  const page=store.eventsAfter(keys.reader,'commons',after,100);
   request??=page.events.find(x=>x.event.data?.messageId==='late-request');if(!page.hasMore)break;after=page.next;
  }
- assert.ok(empty>1);assert.equal(request.event.data.requestKind,'reply');assert.equal(request.event.data.body,'Useful request');
+ // W3200 R-07: the request is still reached past the hidden backlog without
+ // being acknowledged; the scan now crosses the backlog within a call rather
+ // than yielding multiple empty pages first.
+ assert.equal(request.event.data.requestKind,'reply');assert.equal(request.event.data.body,'Useful request');
  assert.deepEqual(store.db.prepare('SELECT * FROM mention_states').all(),before);
 });
 

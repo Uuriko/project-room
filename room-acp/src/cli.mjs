@@ -9,6 +9,13 @@ import { importIdentity, importCredential } from "./import-identity.mjs";
 import { loadConnection, forgetConnection, publicView } from "./credentials.mjs";
 import { redact } from "./redact.mjs";
 import { run, selectAgent } from "./run.mjs";
+import { nodeSatisfies, unsupportedNodeMessage } from "./node-version.mjs";
+
+// Commands that connect: they probe or redeem an invitation, import a
+// credential, or open the bridge. The Node gate runs before any of that —
+// a mid-join failure on an old Node can burn a single-use invite. Local-only
+// commands (status, logout, help) stay usable on any Node.
+const CONNECT_COMMANDS = new Set(["join", "run", "import-credential", "import-identity"]);
 
 export async function doctor(options, { print = console.log, env = process.env } = {}) {
   const list = candidates({ agent: options.agent, agentCmd: options.agentCmd, env });
@@ -33,6 +40,14 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { print(`room-acp: ${error.message}\n\n${USAGE}`); return 2; }
   if (options.help || options.command === "help") { print(USAGE); return 0; }
+  // Preflight Node gate: before selectAgent probes, before join touches the
+  // invitation, before any network call. io.nodeVersion is the test seam;
+  // production always reads process.version.
+  const nodeVersion = io.nodeVersion ?? process.version;
+  if (CONNECT_COMMANDS.has(options.command) && !nodeSatisfies(nodeVersion)) {
+    print(unsupportedNodeMessage(nodeVersion));
+    return 1;
+  }
   if (options.command === "doctor") return doctor(options, io);
   const env = io.env ?? process.env;
   let candidate = null;

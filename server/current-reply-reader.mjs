@@ -84,24 +84,32 @@ export function readCurrentReplies(store,token,roomId,mode,args,shape){
   if(mode==='list'){
    const saved=args.cursor==null?null:decodeBound(crypto,args.cursor,binding);
    if(saved&&typeof saved.after!=='string')fail('invalid_reply_cursor','Invalid request source continuation');
-   // "What do I owe" fast path: the first incoming+open page reads the
-   // existing open-request index, so an open ask is never behind empty pages.
+   // Open-ask fast path: the first open page (incoming, outgoing or both)
+   // reads existing indexes, so an open ask is never behind empty pages.
    // It is discovery, not a census: every hit is proof-read and bound, and the
    // witnessed scan still runs to completion as before, skipping only the hits
    // already returned (kept as hashes inside the opaque cursor).
    const seen=new Set(saved?.seen??[]),found=[];
    if(saved?.seen!==undefined&&(!Array.isArray(saved.seen)||saved.seen.length>50||!saved.seen.every(v=>typeof v==='string')))fail('invalid_reply_cursor','Invalid request source continuation');
-   if(!saved&&direction==='incoming'&&status==='open'){
-    const rows=db.prepare("SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=? ORDER BY record_key LIMIT ?").all(roomId,auth.member.id,Math.min(limit,WINDOW));
-    chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
-    for(const {record_key:id} of rows){
-     // Same headroom rule as the scan below; an unread hit is simply found by the scan.
-     if(remainingCurrentReadBytes(b)<=144*1024+384*(found.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(found.length+WINDOW))break;
-     const r=readCurrentRecord(db,roomId,'replyRequests',id,b);
-     if(r?.id!==id||r.status!=='open'||r.recipientId!==auth.member.id)throw Error('current_room_corrupt: open request index binding differs');
-     if(!validId(r.requesterId)||r.requesterId===r.recipientId||r.revision!==0||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();
-     requests.set(r.id,r);seen.add(seenKey(id));
-     if(messageInHistory({id:r.id,createdAt:r.createdAt},floor))found.push(r);
+   if(!saved&&status==='open'){
+    // Incoming hits come from the open-request index; outgoing hits from the
+    // requester party index filtered to open (B9). Same binding checks either way.
+    const sources=[];
+    if(direction!=='outgoing')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_inbox_open_requests WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.status')='open' AND json_extract(payload,'$.recipientId')=? ORDER BY record_key LIMIT ?",'recipientId']);
+    if(direction!=='incoming')sources.push(["SELECT record_key FROM current_room_records INDEXED BY current_request_party_requester WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.requesterId')=? AND json_extract(payload,'$.status')='open' ORDER BY record_key LIMIT ?",'requesterId']);
+    for(const [sql,role] of sources){
+     const rows=db.prepare(sql).all(roomId,auth.member.id,Math.min(limit,WINDOW));
+     chargeCurrentReadBudget(b,rows.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),rows.length);
+     for(const {record_key:id} of rows){
+      if(found.length>=limit)break;
+      // Same headroom rule as the scan below; an unread hit is simply found by the scan.
+      if(remainingCurrentReadBytes(b)<=144*1024+384*(found.length+WINDOW)||(b.maxRecords??200)-b.records<=100+3*(found.length+WINDOW))break;
+      const r=readCurrentRecord(db,roomId,'replyRequests',id,b);
+      if(r?.id!==id||r.status!=='open'||r[role]!==auth.member.id)throw Error('current_room_corrupt: open request index binding differs');
+      if(!validId(r.requesterId)||!validId(r.recipientId)||r.requesterId===r.recipientId||r.revision!==0||typeof r.createdAt!=='string'||!Number.isFinite(Date.parse(r.createdAt)))changed();
+      requests.set(r.id,r);seen.add(seenKey(id));
+      if(messageInHistory({id:r.id,createdAt:r.createdAt},floor))found.push(r);
+     }
     }
    }
    // Refill a few witnessed source windows while there is space. The ceiling
