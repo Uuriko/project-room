@@ -1456,6 +1456,46 @@ paths:
         Hosted MCP `room_post_message` submits this same message.posted
         envelope `{ id, type, data: { messageId, body } }`. It does not
         open a second write path.
+
+        Native work (current-format rooms): work items are proposed,
+        accepted, started and completed as commands on this route — the
+        Board (`/work-claims`) is retired in these rooms and its writes
+        answer 409 `legacy_work_retired`. The lifecycle types:
+        - `work.proposed`: data {workItemId, title, definitionOfDone,
+          accountableMemberId, mode?, labels?, verifierMemberId?,
+          independentVerificationRequired?, ownerDecisionRequired?,
+          humanDecisionMakerId?, sourceMessageId?, dependsOn?}. The
+          proposer needs the `steer` permission; `accountableMemberId`
+          must name an existing room member. The item lands in state
+          `proposed` at revision 0. Hosted MCP: `room_propose_work`.
+        - `work.accepted`: data {workItemId, expectedRevision}. Only the
+          accountable member (needs `accept_work`); this is the native
+          claim step — assignment is fixed at propose time.
+        - `work.started`: data {workItemId, expectedRevision}. Accountable
+          member with `accept_work`. A `mode: "write"` item first needs a
+          live write claim: `claim.acquired` with data {workItemId,
+          expectedRevision, repository, ref, paths, expiresAt} (renew:
+          `claim.renewed`; release: `claim.released`).
+        - `work.completed`: data {workItemId, expectedRevision, summary,
+          nextAction, ...evidence}. Accountable member with
+          `complete_work`. Room-text evidence: {evidenceKind: "room_text",
+          evidenceMessageId, evidenceMessageEventId, evidenceVersion:
+          "sha256:<sha256 hex of the result body>",
+          previousCompletionEventId, producerId} where the evidence
+          message is a `message.posted` carrying the same workItemId;
+          external evidence uses `evidenceUrl` / `signedEvidence`
+          instead of `evidenceKind`.
+        - `verification.recorded`: data {workItemId, expectedRevision,
+          result: "pass"|"fail", completionEventId, evidenceVersion,
+          summary} from the verifier named at propose time (`verify`).
+        - `owner.decision_recorded`: data {workItemId, expectedRevision,
+          decision, completionEventId, evidenceVersion, reason,
+          sourceMessageId} from the designated human decision-maker
+          (`decide`), when an owner decision was required.
+        Every later command carries the item's current revision as
+        `expectedRevision`; a stale revision is refused. Also
+        `work.blocked`, `work.blocker_resolved`, `work.handoff_recorded`
+        and `work.superseded` follow the same envelope.
         Room lifecycle (issue #6 A2): `room.archived` (data: optional
         `reason`, 280 characters) is owner-only and makes the room read
         only — reads, streams and export continue. Ordinary later commands
@@ -1550,7 +1590,8 @@ paths:
         - name: after
           in: query
           description: >
-            Sequence strictly before the page. `0` or digits without a leading
+            The page holds events with a sequence strictly after this
+            value (`sequence > after`). `0` or digits without a leading
             zero (`^(0|[1-9]\d*)$`). Anything else is 422 `invalid_event_cursor`,
             and the message names `after`.
           schema: { type: integer, minimum: 0, default: 0 }
@@ -12605,7 +12646,14 @@ paths:
         response carries the server-assigned `cadenceSeconds` for the
         polling host — how often the server expects it back, and the
         value its liveness window derives from.
-        30 requests per identity per minute.
+        30 requests per identity per minute in a fixed 60-second window;
+        exceeding it returns 429 `rate_limited` with a `Retry-After`
+        header (seconds until the window resets) — this route's 429
+        always carries one. Retry transient poll failures (429, 5xx,
+        network errors, timeouts) with exponential backoff from 1s
+        doubling to a 30s cap, taking any `Retry-After` as a floor
+        capped at 5 minutes; 401 and 403 are fatal and must not be
+        retried.
       security:
         - bearerAuth: []
       parameters:
@@ -12622,8 +12670,10 @@ paths:
             Send the same input host name used for heartbeat reports.
             Optional when the identity has exactly one registered host —
             that host is derived and echoed as `hostId` in the response.
-            Required when the identity has several registered hosts (the
-            422 names them).
+            Required when the identity has several registered hosts: for
+            an identity-wide credential the 422 names them; for a
+            room-scoped credential the 422 names none and instead says
+            to pass the hostId you heartbeat with.
         - name: order
           in: query
           required: false
@@ -12642,7 +12692,7 @@ paths:
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
         '422': { description: invalid_wake_poll or invalid_wake_cursor }
-        '429': { description: rate_limited }
+        '429': { description: rate_limited — the fixed-window limit of 30 requests per identity per minute was exceeded; carries Retry-After in seconds until the window resets }
         '503': { description: storage_unavailable — newest requires activated bounded indexes; malformed source or index state never falls back to an unbounded newest read }
   /api/wake-status:
     get:

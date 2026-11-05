@@ -137,6 +137,15 @@ function recordHandoff(state, incoming) {
       if (url.protocol !== "https:" || url.username || url.password) throw new Error();
     } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
   }
+  // Optional recipient: triage goes to that member instead of the Room owner,
+  // so an agent-to-agent handoff does not land on the owner's needs-me.
+  // Events without the field reduce exactly as before.
+  const toMemberId = incoming.data.toMemberId;
+  if (toMemberId !== undefined) {
+    if (typeof toMemberId !== "string" || toMemberId === incoming.actorId) throw new Error("toMemberId must name another room member");
+    requireMember(state, toMemberId);
+    if (state.members[toMemberId]?.active === false) throw new Error("toMemberId must name an active room member");
+  }
   // A handoff never advances or closes the state; review and decision gates stay untouched.
   if (item.handoff) {
     item.handoffHistory = item.handoffHistory || [];
@@ -147,7 +156,7 @@ function recordHandoff(state, incoming) {
     open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
     // An open handoff is triage work addressed to the Room owner, so needs-me
     // views and attention inboxes can surface it to a named member.
-    triageMemberId: state.room.ownerId,
+    triageMemberId: toMemberId ?? state.room.ownerId,
     doneSummary: incoming.data.doneSummary,
     evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
     nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,

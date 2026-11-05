@@ -1634,7 +1634,7 @@ export class AgentPluginStore {
         SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
             signature=?, payload_json=?, claim_expires_at=NULL, updated_at=?
         WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
-        .run(attempts, result.error, now + backoffDelayMs(attempts), signature,
+        .run(attempts, result.error, now + Math.max(backoffDelayMs(attempts), Number(result.retryAfterMs) || 0), signature,
           JSON.stringify(envelope), now, row.delivery_id, claimExpiresAt).changes;
       return changed ? "retried" : "skipped";
     });

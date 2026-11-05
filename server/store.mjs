@@ -781,7 +781,7 @@ const shapes = {
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
   [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer attempt evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
-  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
+  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll toMemberId`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt pullRequests blocks`,
   [T.CLAIM_RELEASED]: work,
@@ -3691,6 +3691,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Work history and text-result provenance select one work item's events;
     // without this they scan and JSON-parse every event in the room.
     this.db.exec("CREATE INDEX IF NOT EXISTS events_room_work ON events(room_id, json_extract(body, '$.data.workItemId'), sequence)");
+    // Presence: when each member last acted in the room, one index probe per
+    // member instead of scanning the log (see lastActedAt).
+    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_actor ON events(room_id, json_extract(body, '$.actorId'), sequence)");
+  }
+  // When this member last appended anything to the room (ISO), or null. Uses
+  // only the actor index; where an open deferred it, answers null rather than scan.
+  lastActedAt(roomId, memberId) {
+    if (this._actorIndexReady !== true) {
+      this._actorIndexReady = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='events_room_actor'").get()) || undefined;
+      if (!this._actorIndexReady) return null;
+    }
+    let row;
+    try {
+      this._lastActedStatement ??= this.db.prepare("SELECT json_extract(body,'$.at') AS at FROM events INDEXED BY events_room_actor WHERE room_id=? AND json_extract(body,'$.actorId')=? ORDER BY sequence DESC LIMIT 1");
+      row = this._lastActedStatement.get(roomId, memberId);
+    } catch {
+      // The index went away after it was observed: re-check next time, never scan.
+      this._actorIndexReady = undefined; this._lastActedStatement = undefined;
+      return null;
+    }
+    return typeof row?.at === "string" ? row.at : null;
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
@@ -5812,7 +5833,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const link=m.kind==='agent'?this.db.prepare('SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=?').get(roomId,m.id):null;
         const host=link?this.agentHeartbeats.statusWindow(link.identity_id):null,observed=host&&host.status!=='unregistered'&&Number.isFinite(host.lastSeenAt)&&host.lastSeenAt<=this.now();
         const isWatching=watching.has(m.id),liveHost=observed&&host.status==='online';
-        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
+        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,lastActedAt:this.lastActedAt(roomId,m.id),statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
           state:isWatching||liveHost?'listening':'unknown',isOwner:m.id===ownerId,scopes:[...m.permissions],ownerIdentityId:link?.identity_id??null,coverage:{execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'}};
       }).sort((a,b)=>a.memberId.localeCompare(b.memberId,'en'));
     },{maxRecords:512});
