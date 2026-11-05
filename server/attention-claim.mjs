@@ -53,7 +53,8 @@ function withImmediate(db, fn, run) {
 export function filterClaimedNeedsMe(db, { items, memberByRoom, claimSec, now = Date.now(), run = null } = {}) {
   const leaseSec = clampClaimSec(claimSec);
   if (!leaseSec || !Array.isArray(items) || items.length === 0) {
-    return { items: items ?? [], leased: 0, suppressed: 0, leaseSec: 0 };
+    // Copy so callers that replace `items` cannot clear through this alias.
+    return { items: Array.isArray(items) ? items.slice() : [], leased: 0, suppressed: 0, leaseSec: 0 };
   }
   ensureNeedsMeClaims(db);
   const expiresAt = now + leaseSec * 1000;

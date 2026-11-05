@@ -61,3 +61,15 @@ test("items without a member mapping pass through", () => {
   assert.equal(out.leased, 0);
   assert.equal(out.items.length, 1);
 });
+
+test("claimSec 0 return is alias-safe under clear-then-push", () => {
+  const database = db();
+  const items = [{ roomId: "r1", kind: "mention", id: "m", seq: 1 }];
+  const out = filterClaimedNeedsMe(database, {
+    items, memberByRoom: new Map([["r1", "m1"]]), claimSec: 0, now: 1,
+  });
+  items.length = 0;
+  items.push(...out.items);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, "m");
+});
