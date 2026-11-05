@@ -139,6 +139,14 @@
     },
     {
       "method": "GET",
+      "path": "/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/ard.json"
+    },
+    {
+      "method": "GET",
       "path": "/agent.json"
     },
     {
@@ -3998,6 +4006,14 @@
     {
       "method": "HEAD",
       "path": "/agent-card.json"
+    },
+    {
+      "method": "GET",
+      "path": "/ard.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/ard.json"
     },
     {
       "method": "GET",
