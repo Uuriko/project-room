@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import {
   changedFiles,
   parseGitPathList,
   SMOKE_TESTS,
+  TREE_GUARDS,
 } from "../scripts/verify-affected.mjs";
 
 const repo = {
@@ -156,4 +157,15 @@ test("unmapped code, global files and empty diffs fall back to the smoke set", (
   assert.deepEqual(smoke(["package.json"]).smokeReasons, ["global file changed"]);
   assert.deepEqual(smoke([]).smokeReasons, ["no changes"]);
   assert.deepEqual(smoke(["server/core.mjs"]).smokeReasons, [], "mapped code needs no smoke set");
+});
+
+test("tree guards ride every non-empty diff, even past the budget, and never an empty one", () => {
+  const guards = ["tests/lazy.test.js", "tests/docs.test.js", "tests/not-discovered.test.js"];
+  const timings = { "tests/core.test.js": 1000, "tests/feature.test.js": 1000, "tests/lazy.test.js": 1000 };
+  const run = changed => selectTests({ changed, tests, reverse, read, timings, budgetMs: 2500, guards });
+  const picked = run(["server/core.mjs"]);
+  assert.deepEqual(picked.selected.filter(s => s.via === "tree guard").map(s => s.test), ["tests/lazy.test.js", "tests/docs.test.js"]);
+  assert.equal(picked.skipped.some(s => s.test === "tests/lazy.test.js"), false, "a guard is not also reported skipped");
+  assert.equal(run([]).selected.some(s => s.via === "tree guard"), false);
+  assert.deepEqual(TREE_GUARDS.filter(test => !existsSync(test)), [], "every default guard exists");
 });
