@@ -151,3 +151,31 @@ test('examined bounds: the byte budget stops a scan of very large events before 
   assert.equal(page.scan.exhausted, true, 'the read names a budget as the reason it stopped');
   assert.equal(page.hasMore, true, 'a byte-exhausted read signals continuation, never completeness');
 });
+
+test('examined bounds: a room-scoped page with hasMore keeps that roomId in nextRead so continuation stays in the room', t => {
+  const roomId = 'scoped-continuation';
+  const { store, bob, owner, post } = setup(t, roomId);
+  const maya = addMaya(store, owner, roomId);
+  post(maya.secret, 'maya-post', { body: 'Maya original post' });
+  for (let i = 0; i < 3200; i++) post(i % 2 ? owner.secret : bob.secret, `plain-${i}`, { body: `plain post ${i}` });
+  let page = collectNeedsMe(store, maya.secret, { roomId, since: { rooms: { [roomId]: 0 }, land: {}, landIds: {} } });
+  assert.equal(page.hasMore, true, 'fixture must produce a partial scoped page');
+  for (let n = 0; page.hasMore && n < 40; n++) {
+    assert.equal(page.nextRead.tool, 'room_needs_me');
+    assert.equal(page.nextRead.arguments.roomId, roomId, 'a scoped continuation names the same room');
+    assert.ok(page.items.every(item => !item.roomId || item.roomId === roomId), 'scoped pages carry only that room');
+    page = collectNeedsMe(store, maya.secret, page.nextRead.arguments);
+  }
+  assert.equal(page.hasMore, false, 'the scoped chain completes');
+  assert.equal(page.nextRead, undefined);
+});
+
+test('examined bounds: an unscoped continuation carries no roomId', t => {
+  const roomId = 'unscoped-continuation';
+  const { store, bob, owner, post } = setup(t, roomId);
+  const maya = addMaya(store, owner, roomId);
+  for (let i = 0; i < 3200; i++) post(i % 2 ? owner.secret : bob.secret, `u-${i}`, { body: `plain post ${i}` });
+  const page = collectNeedsMe(store, maya.secret, { since: { rooms: { [roomId]: 0 }, land: {}, landIds: {} } });
+  assert.equal(page.hasMore, true);
+  assert.equal('roomId' in page.nextRead.arguments, false);
+});

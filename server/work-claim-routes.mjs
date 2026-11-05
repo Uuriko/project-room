@@ -351,6 +351,18 @@ const refuseSweep = () => refuseBoardAction(
   "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
   "Ask the room owner or a claim manager to sweep the Board.");
 
+// FUNNEL-FIXES C2: the gate refusal every non-writer receives on every POST
+// work-claims route, whatever id they supplied. The next[] names all three
+// lawful legs (contribute invite · permission request with the tokens named
+// and the 7-day undecided expiry · public-work match) so the refusal is
+// self-correcting in one step, and the body is byte-identical across id
+// kinds by construction — it is built from constants only.
+const WORK_CLAIMS_GATE_NEXT = Object.freeze([
+  Object.freeze({ action: "ask-owner-for-contribute-invite", command: "Ask the room owner for a contribute invite." }),
+  Object.freeze({ action: "request-permissions", permissions: Object.freeze(["accept_work", "complete_work"]), expiresUndecidedAfterDays: 7, command: "Request the accept_work and complete_work permissions through the access-request path; requests expire undecided after 7 days." }),
+  Object.freeze({ action: "public-work", method: "POST", endpoint: "/api/public-work/match", command: "Take public work instead: POST /api/public-work/match with your saved identity needs no room profile." }),
+]);
+
 function refuseWorkClaims() {
   const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
   const hint = "Ask the room owner for a contribute invite.";
@@ -360,7 +372,7 @@ function refuseWorkClaims() {
   error.body = {
     error: { code: "work_claims_not_permitted", message },
     hint,
-    next: [{ command: hint }],
+    next: WORK_CLAIMS_GATE_NEXT.map(step => ({ ...step })),
   };
   throw error;
 }
@@ -904,6 +916,61 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // FUNNEL-FIXES C2 — gate before load (normative ordering: the gate or
+  // authority determination precedes the linked-item block below AND body-
+  // shape validation; shape errors are returned only to callers who pass).
+  // Before this block, the claim/renew/update branches loaded the target
+  // first, so a non-writer could distinguish a real claim id (409 naming
+  // the holder) from a work-item or invented id (404) — a live existence/
+  // state/holder oracle. Now: writer-gated routes refuse non-writers with
+  // the one gate body for every id; authority-gated routes collapse to one
+  // generic work_not_owner for callers with no authority over the id,
+  // whether or not it exists. Internal reads used to compute a per-item
+  // authority never shape a response for a caller who fails it. The Room
+  // Guide starter fence above runs first for that one server identity, as
+  // before (its starter distinction is an accepted, identity-scoped
+  // residual). create/sweep/config carry no claim id and keep their
+  // existing in-branch gates.
+  if (req.method === "POST") {
+    const gateAccess = resolveWorkClaimAccess(store, roomId, auth);
+    const gateCaller = auth.member.id;
+    const gateItem = typeof workClaimId === "string" ? registry.get(roomId, workClaimId) : null;
+    const hasAuthority = item => Boolean(item)
+      && (item.owner === gateCaller || item.delegate === gateCaller || mayManageAnyClaim(gateAccess));
+    if (workClaimRoute === "approval") {
+      // Flag check relocated before the linked-item block (it was the
+      // branch's first line, i.e. after the block — a residual oracle).
+      if (!approvalHoldEnabled()) reject(404, "not_found", "Approval holds are not enabled on this server");
+      const approvalAuthority = Boolean(gateItem) && (gateItem.owner === gateCaller || gateItem.delegate === gateCaller
+        || (gateItem.approvalHold?.status === "pending" && gateItem.approvalHold?.approverId === gateCaller));
+      if (!approvalAuthority) reject(403, "work_not_owner", `Approval for work "${workClaimId}" can be requested only by its holder or delegate, or decided only by its named approver`);
+    } else if (workClaimRoute === "delegate") {
+      if (!claimDelegateEnabled()) reject(404, "not_found", "Claim delegation is not enabled on this server");
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}"'s delegate can be set only by its holder or a claim manager`);
+    } else if (workClaimRoute === "release") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}" can be released only by its holder or a claim manager`);
+    } else if (workClaimRoute === "reassign") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}" can be reassigned only by its holder or a claim manager`);
+    } else if (workClaimRoute === "premise-invalid") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}"'s premise can be flagged only by its holder or a claim manager`);
+    } else if (workClaimRoute === "claim" || workClaimRoute === "renew" || workClaimRoute === "close" || workClaimRoute === "cancel") {
+      if (!mayWriteWorkClaims(gateAccess)) refuseWorkClaims();
+    } else if (workClaimRoute === "update") {
+      // Coarse gate: writers and reviewers both have lawful update paths
+      // (the delivered->done verify / send-back transitions); the per-item
+      // owner/reviewer logic in the branch is unchanged.
+      if (!mayWriteWorkClaims(gateAccess) && !mayReviewWorkClaims(gateAccess)) refuseWorkClaims();
+    } else if (workClaimRoute === "review") {
+      // Sub-branch-aware, mirroring the branch's own discrimination: a
+      // verdict-shaped body needs the review predicate; any other body is
+      // a note and needs the attest predicate.
+      const gateData = body(req);
+      const verdictShaped = gateData && typeof gateData === "object" && !Array.isArray(gateData)
+        && ("verdict" in gateData || "summary" in gateData || "url" in gateData);
+      if (verdictShaped) { if (!mayReviewWorkClaims(gateAccess)) refuseWorkClaims(); }
+      else if (!mayAttestWorkClaims(gateAccess)) refuseAttest();
+    }
+  }
   // An item-backed card is a view of canonical work acceptance. Its
   // board bundle/verdict cannot replace signed evidence or designated roles.
   // Both human and agent callers use the existing command endpoint instead.
@@ -1277,7 +1344,52 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
-    const item = load(claimIdOf(reject, workClaimId));
+    // FUNNEL-FIXES C2 step 1A: the writer gate has already run (pre-block),
+    // so a miss here is owed an actionable answer. When the id names a
+    // native work item in this room, the 404 says so — kind, the item's
+    // state, its accountable member, and next[] to the work-context read
+    // (plus the correct verb for its state: a proposed item's next step is
+    // acceptance by its accountable member). That caller is a Board writer
+    // in this room and can already read all of it via the room's open work
+    // list. A pure garbage id keeps the plain 404 with the re-read-the-
+    // board next (docs/ERROR-TAXONOMY.md:72-76). Non-writers never reach
+    // this code, so neither shape leaks existence to them.
+    const claimId = claimIdOf(reject, workClaimId);
+    const item = registry.get(roomId, claimId);
+    if (!item) {
+      const boardPath = `/api/rooms/${encodeURIComponent(roomId)}/work-claims`;
+      let canonical = null;
+      if (store.db) { try { canonical = readWorkItem(store.db, roomId, claimId); } catch { canonical = null; } }
+      if (canonical) {
+        const contextPath = `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(claimId)}`;
+        const message = `No work claim "${claimId}" in this room — "${claimId}" is a native work item (${canonical.state}), not a Board claim`;
+        const error = new ServiceError(404, "work_claim_not_found", message);
+        error.body = {
+          error: { code: "work_claim_not_found", message },
+          kind: "work_item_not_board_claim",
+          workItemId: claimId,
+          workItemState: canonical.state,
+          accountableMemberId: canonical.accountableMemberId ?? null,
+          hint: "Work items are not Board claims. Read the item's work context for its next step, or re-read the Board for claimable claim ids.",
+          next: [
+            { action: "read-work-context", method: "GET", path: contextPath },
+            ...(canonical.state === "proposed"
+              ? [{ action: "accept-work-item", path: contextPath, command: `This work item is proposed: its accountable member (${canonical.accountableMemberId ?? "unassigned"}) accepts it through the work-context flow — POST ${contextPath} names the accept step. It has no Board claim to take.` }]
+              : [{ action: "act-on-work-item", path: contextPath, command: "Act on this work item through its work-context flow; it is not claimed through the Board claim route." }]),
+            { action: "re-read-board", method: "GET", path: boardPath },
+          ],
+        };
+        throw error;
+      }
+      const message = `No work claim "${claimId}" in this room`;
+      const error = new ServiceError(404, "work_claim_not_found", message);
+      error.body = {
+        error: { code: "work_claim_not_found", message },
+        hint: "Re-read the work-claims board for the current ids; never guess.",
+        next: [{ action: "re-read-board", method: "GET", path: boardPath }],
+      };
+      throw error;
+    }
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
@@ -1300,7 +1412,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(409, "work_claim_conflict",
         ownerHeldCopy(item) ?? `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
-    requireWriter();
+    // The writer gate already ran before the linked-item block (C2); the
+    // state answers above are post-gate answers for entitled callers.
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
@@ -1775,6 +1888,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "approval" && req.method === "POST") {
+    // The flag check and the union-authority collapse already ran before
+    // the linked-item block (C2); this check is the branch-local backstop.
     if (!approvalHoldEnabled()) reject(404, "not_found", "Approval holds are not enabled on this server");
     const data = body(req);
     if (!shape(data, { required: ["action"], optional: ["approver", "step", "note"] })) invalidInput(reject, "{action: request|approve|deny, approver?, step?, note?}");
@@ -1798,6 +1913,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, next);
   }
   if (workClaimRoute === "delegate" && req.method === "POST") {
+    // The flag check and the authority collapse already ran before the
+    // linked-item block (C2); this check is the branch-local backstop.
     if (!claimDelegateEnabled()) reject(404, "not_found", "Claim delegation is not enabled on this server");
     const data = body(req);
     if (!shape(data, { required: ["delegate"], optional: ["note"] })) invalidInput(reject, "{delegate: memberId|null, note?}");
@@ -1839,7 +1956,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         : `Work "${item.id}" is not claimed — claim it first, then renew`);
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
-    requireWriter();
+    // The writer gate already ran before the linked-item block (C2): a
+    // non-writer's renew refusal is the gate 403 in every case, including
+    // the non-holder case that used to surface work_not_owner above.
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);

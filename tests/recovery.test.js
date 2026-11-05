@@ -216,7 +216,7 @@ test("online capture preserves all application tables, identity boundaries and e
       expectedSessionRevision: slot.sessionRevision, expectedSessionBinding: slot.sessionBinding });
     assert.equal(retryJoin.duplicate, true); assert.equal(retryJoin.session.member.id, f.guest.session.member.id);
     assert.equal(recovered.shareLinks.list(f.keys.owner, "commons", null).links[0].joins, 1);
-    assert.throws(() => recovered.shareLinks.preview(f.linkToken), { code: "link_unavailable" });
+    assert.throws(() => recovered.shareLinks.preview(f.linkToken), { code: "link_cancelled" });
     const accepted = recovered.acceptInvitation(f.target.token, f.pending.token, { redemptionId: randomUUID(), expectedRevision: 0,
       expectedSessionBinding: f.target.session.sessionBinding });
     assert.equal(accepted.duplicate, false); assert.equal(accepted.session.member.id, "pending-human");

@@ -169,8 +169,11 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
   const foreign = (await peer.say('Someone else checked in')).event.data.messageId;
   const privateProgress = (await owner.say('Private update', { toMemberId: 'reviewer' })).event.data.messageId;
   const before = stripTrust(await owner.workClaimGet('renewed'));
+  // FUNNEL-FIXES C2: the peer holds no work profile, so renew refuses at
+  // the gate (work_claims_not_permitted) before any holder answer — a
+  // non-writer no longer learns who holds the claim (was work_not_owner).
   await assert.rejects(peer.renewWorkItem('renewed', { progressMessageId: foreign }),
-    error => error.status === 403 && error.code === 'work_not_owner');
+    error => error.status === 403 && error.code === 'work_claims_not_permitted');
   assert.deepEqual(stripTrust(await owner.workClaimGet('renewed')), before);
   for (const [progressMessageId, code] of [[foreign, 'claim_renewal_source_foreign'],
     [privateProgress, 'claim_renewal_source_required'], ['missing', 'claim_renewal_source_required']]) {

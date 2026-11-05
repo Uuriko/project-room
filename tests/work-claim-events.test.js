@@ -75,7 +75,9 @@ test('a refused claim change appends no event', async t => {
   const { owner, peer } = await fixture(t);
   await owner.workClaim('held', { files: ['docs/x.md'] });
   const before = (await claimEvents(owner)).length;
-  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
+  // FUNNEL-FIXES C2: the peer (verify-only) may not write claims, so the
+  // claim refuses at the gate (403) rather than the post-load 409.
+  await assert.rejects(peer.claimWorkItem('held'), error => error.status === 403);
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
   await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here', ...roundOf(await owner.workClaimGet('held')) }), error => error.status === 422);
   assert.equal((await claimEvents(owner)).length, before);
