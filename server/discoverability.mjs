@@ -299,6 +299,7 @@ route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "De
       requestBodies: { POST: SESSION_CREATE_BODY } }),
   // OAuth session management for the signed-in account (QA2 2026-10-04:
   // served spec omitted it). One entry per live token family.
+  route("/oauth/authorize", ["GET", "POST"], "account-session", "OAuth 2.0 authorization-code consent: GET renders the consent screen (or 302 to login); POST records allow/deny and 302s to the registered redirect_uri with a code or access_denied. PKCE S256 mandatory.", "oauthAuthorize", { operationIds: { GET: "getOauthAuthorize", POST: "postOauthAuthorize" } }),
   route("/oauth/invite", ["POST"], "public", "Preview or accept native agent invitation consent with same-origin browser and a short-lived nonce cookie; requires configured OAuth client.", "confirmNativeAgentInvitation"),
   route("/oauth/register", ["POST"], "public", "Register public MCP client metadata for configured exact callback URLs; unavailable without configured MCP OAuth clients. Registration grants no Room access.", "registerMcpOAuthClient"),
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
