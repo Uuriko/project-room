@@ -147,6 +147,71 @@ test("6. member contract preserved on native rooms", async t => {
   assert.deepEqual(byOwner.json.receipts.map(r => r.receiptId), ["rc_verified-task"]);
 });
 
+test("8. B7: room with 100 work items still serves its receipts (windowed projection)", async t => {
+  const f = baseStore(t);
+  // 97 merely-proposed items plus 3 terminal completions = 100 work items.
+  // On the pre-cure head the projector enumerated all summaries in one
+  // 256 KiB read context and both routes returned 409
+  // current_room_context_unavailable at this size.
+  const completedIds = ["bulk-005", "bulk-077", "bulk-099"];
+  for (let i = 0; i < 100; i++) {
+    const workId = `bulk-${String(i).padStart(3, "0")}`;
+    if (completedIds.includes(workId)) continue;
+    f.cmd("owner", `propose-${workId}`, "work.proposed", { workItemId: workId, title: `Title ${workId}`,
+      definitionOfDone: "Saved result", accountableMemberId: "worker",
+      independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
+  }
+  for (const workId of completedIds) {
+    completeNative(f.cmd, f.item, { workId, title: `Title ${workId}`,
+      summary: `Done ${workId}`, independentVerificationRequired: false });
+  }
+  const origin = await serve(t, f.s);
+  const list = await getJson(origin, "/api/rooms/commons/receipts?limit=50", f.keys.worker);
+  assert.equal(list.res.status, 200, JSON.stringify(list.json));
+  assert.deepEqual(new Set(list.json.receipts.map(r => r.receiptId)),
+    new Set(completedIds.map(id => `rc_${id}`)), JSON.stringify(list.json.receipts));
+  const single = await getJson(origin, "/api/rooms/commons/receipts/rc_bulk-077", f.keys.worker);
+  assert.equal(single.res.status, 200, JSON.stringify(single.json));
+  assert.equal(single.json.receipt?.receiptId, "rc_bulk-077");
+  assert.equal(single.json.receipt?.workItemId, "bulk-077");
+});
+
+test("9. owner-decision item is a receipt only with a current approved decision bound to its receipt", async t => {
+  const f = baseStore(t);
+  f.cmd("owner", "propose-decision-task", "work.proposed", { workItemId: "decision-task", title: "Decision gated work",
+    definitionOfDone: "Saved result", accountableMemberId: "worker",
+    humanDecisionMakerId: "owner", independentVerificationRequired: false, ownerDecisionRequired: true, mode: "read" });
+  f.cmd("worker", "accept-decision-task", "work.accepted", { workItemId: "decision-task", expectedRevision: 0 });
+  const body = "Result body for decision-task";
+  const post = f.cmd("worker", "result-decision-task", "message.posted", { messageId: "result-decision-task", body, workItemId: "decision-task" });
+  const completion = f.cmd("worker", "complete-decision-task", "work.completed", { workItemId: "decision-task",
+    expectedRevision: f.item("decision-task").revision, evidenceKind: "room_text",
+    evidenceMessageId: "result-decision-task", evidenceMessageEventId: post.event.id,
+    evidenceVersion: textVersion(body), producerId: "worker", previousCompletionEventId: null,
+    summary: "Decision gated summary", nextAction: "Owner decision" });
+  const origin = await serve(t, f.s);
+  // Completed, but no owner decision yet: not a receipt.
+  const before = await getJson(origin, "/api/rooms/commons/receipts", f.keys.worker);
+  assert.equal(before.res.status, 200, JSON.stringify(before.json));
+  assert.deepEqual(before.json.receipts, [], JSON.stringify(before.json.receipts));
+  const beforeSingle = await getJson(origin, "/api/rooms/commons/receipts/rc_decision-task", f.keys.worker);
+  assert.equal(beforeSingle.res.status, 404);
+  assert.equal(beforeSingle.json?.error?.code, "receipt_not_found");
+  // Owner approves the exact current receipt: now it is a receipt.
+  f.cmd("owner", "rationale-decision-task", "message.posted", { messageId: "rationale-decision-task",
+    body: "I reviewed the exact result" });
+  f.cmd("owner", "decide-decision-task", "owner.decision_recorded", { workItemId: "decision-task",
+    expectedRevision: f.item("decision-task").revision, decision: "approved",
+    completionEventId: completion.event.id, evidenceVersion: f.item("decision-task").receipt.evidenceVersion,
+    reason: "Result accepted", sourceMessageId: "rationale-decision-task" });
+  const after = await getJson(origin, "/api/rooms/commons/receipts", f.keys.worker);
+  assert.equal(after.res.status, 200, JSON.stringify(after.json));
+  assert.deepEqual(after.json.receipts.map(r => r.receiptId), ["rc_decision-task"]);
+  const afterSingle = await getJson(origin, "/api/rooms/commons/receipts/rc_decision-task", f.keys.worker);
+  assert.equal(afterSingle.res.status, 200, JSON.stringify(afterSingle.json));
+  assert.equal(afterSingle.json.receipt?.receiptId, "rc_decision-task");
+});
+
 test("7. no Board pollution: native completions write no work_claims rows", async t => {
   const f = verifiedFixture(t);
   completeNative(f.cmd, f.item, { workId: "launch-note-v2", title: "Launch note",

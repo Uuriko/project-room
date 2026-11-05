@@ -67,7 +67,7 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
-import { currentReceiptClaims, currentRoomReceiptState } from "./current-receipts.mjs";
+import { currentReceiptClaim, currentReceiptClaims, currentRoomReceiptState } from "./current-receipts.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
 import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
@@ -1142,7 +1142,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!member || member.active === false) {
       reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     }
-    const item = (currentReceiptClaims(store, roomId) ?? registry.list(roomId))
+    // B7: on current rooms the named receipt is an addressed read of
+    // that one work item, not a full-room enumeration (which 409s in
+    // mature rooms); legacy rooms keep the registry find unchanged.
+    const nativeClaim = currentReceiptClaim(store, roomId, workClaimId);
+    const item = nativeClaim !== null ? nativeClaim : registry.list(roomId)
       .find(entry => entry.state === "done" && `rc_${entry.id}` === workClaimId);
     if (!item) reject(404, "receipt_not_found", `No receipt "${workClaimId}" in this room`);
     return json(res, 200, stampReceipts({

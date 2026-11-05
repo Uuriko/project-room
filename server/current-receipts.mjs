@@ -24,10 +24,20 @@ import { WORK_STATES } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { boardClaimId } from "./work-item-board.mjs";
 import {
-  chargeCurrentReadBudget, isCurrentRoom, readCurrentRecord, readCurrentWorkItem, withCurrentReadContext,
+  chargeCurrentReadBudget, isCurrentRoom, readCurrentRecord, readCurrentWorkItem,
+  remainingCurrentReadBytes, withCurrentReadContext,
 } from "./current-room-repository.mjs";
 
-const WORK_KEY_PAGE = 64;
+// One window of work keys per read context (B7 cure). A single context
+// charges ~43.6 KiB of schema/head admission before the first record,
+// then ~2.4 KiB per thin summary (flat 1024 + payload + transition
+// receipt) and ~4.2 KiB more per full terminal item, against the
+// platform's 256 KiB MAX_INPUT — so one context for a whole room
+// exhausts at ~90 items no matter how few receipts exist. Sixteen keys
+// per window keeps even an all-terminal window (~150 KiB measured
+// shape) inside the budget, and the per-item reserve check below
+// defers an item to the next window before the budget can throw.
+const WORK_KEY_PAGE = 16;
 
 // The completion (or verification) event's recorded time. The events
 // table is the room's own log; a missing row falls back to the item's
@@ -96,37 +106,114 @@ export function currentRoomReceiptState(store, roomId) {
 
 // The room's native receipts as claim-shaped items, or null when the
 // room is not a current-format room (the caller then uses the legacy
-// Board registry exactly as before). Enumeration is bounded: work
-// keys page through the current_work_summary_keys proof index (as
-// readCurrentOverviewWindow does), thin summaries pre-filter
+// Board registry exactly as before). Enumeration is windowed (B7):
+// work keys page through the current_work_summary_keys proof index
+// (as readCurrentOverviewWindow does) in WORK_KEY_PAGE windows, each
+// window inside its OWN withCurrentReadContext, so the 256 KiB read
+// budget is per-window, never per-room. Thin summaries pre-filter
 // terminality, and only terminal candidates pay a full
 // readCurrentWorkItem, whose result is re-checked before mapping.
+// Before examining an item past a window's first, its scalar payload
+// sizes are compared with the window's remaining budget; an item
+// that might not fit is deferred whole to the next window (where it
+// is that window's first item and is always examined), so the budget
+// is never thrown mid-room and no item is skipped.
 export function currentReceiptClaims(store, roomId) {
   const db = store?.db;
   if (!db || !isCurrentRoom(db, roomId)) return null;
-  return withCurrentReadContext(db, roomId, budget => {
-    const ids = [];
-    let after = "";
-    for (;;) {
+  const claims = [];
+  let after = "";
+  for (;;) {
+    const window = withCurrentReadContext(db, roomId, budget => {
       const rows = db.prepare(
         "SELECT record_key FROM current_room_record_proofs INDEXED BY current_work_summary_keys"
         + " WHERE room_id=? AND domain='workSummary' AND present=1 AND record_key>?"
         + " ORDER BY record_key LIMIT ?",
       ).all(roomId, after, WORK_KEY_PAGE);
       chargeCurrentReadBudget(budget, rows.reduce((n, row) => n + Buffer.byteLength(row.record_key) + 32, 0), rows.length);
-      if (rows.length === 0) break;
-      ids.push(...rows.map(row => row.record_key));
-      after = rows[rows.length - 1].record_key;
-      if (rows.length < WORK_KEY_PAGE) break;
+      const found = [];
+      let examined = 0;
+      let examinedAfter = after;
+      for (const row of rows) {
+        const id = row.record_key;
+        if (examined > 0) {
+          const thinScalar = db.prepare("SELECT payload_bytes FROM current_room_records WHERE room_id=? AND domain='workSummary' AND record_key=?").get(roomId, id);
+          const refScalar = db.prepare("SELECT payload_bytes FROM current_room_records WHERE room_id=? AND domain='workItems' AND record_key=?").get(roomId, id);
+          const bodyScalar = db.prepare("SELECT length(CAST(body AS BLOB)) AS bytes FROM work_entities WHERE room_id=? AND work_id=?").get(roomId, id);
+          const estimate = (thinScalar?.payload_bytes ?? 0) + (refScalar?.payload_bytes ?? 0)
+            + (bodyScalar?.bytes ?? 0) + 16384;
+          if (remainingCurrentReadBytes(budget) < estimate) break;
+        }
+        const thin = readCurrentRecord(db, roomId, "workSummary", id, budget)?.work;
+        examined += 1;
+        examinedAfter = id;
+        if (!isTerminalCompletion(thin)) continue;
+        const item = readCurrentWorkItem(db, roomId, id, budget);
+        if (!isTerminalCompletion(item)) continue;
+        found.push(claimShapeOf(db, roomId, item));
+      }
+      return { found, fetched: rows.length, examined, examinedAfter };
+    }, { maxRecords: 1024 });
+    claims.push(...window.found);
+    if (window.fetched === 0 || window.examined === 0) break;
+    after = window.examinedAfter;
+    if (window.examined === window.fetched && window.fetched < WORK_KEY_PAGE) break;
+  }
+  return claims;
+}
+
+// boardClaimId's "_e" encoding is reversible (see work-item-board.mjs);
+// pass-through board-safe ids are the work item id itself. The "_h"
+// hash fallback is not reversible; its caller treats it as underivable.
+const workItemIdForClaimId = claimId => {
+  if (!claimId.startsWith("_e")) return claimId;
+  const encoded = claimId.slice(2);
+  let decoded = "";
+  for (let i = 0; i < encoded.length;) {
+    if (encoded[i] !== "_") { decoded += encoded[i]; i += 1; continue; }
+    if (encoded.startsWith("__", i)) { decoded += "_"; i += 2; continue; }
+    if (encoded.startsWith("_p", i)) { decoded += "."; i += 2; continue; }
+    if (encoded.startsWith("_c", i)) { decoded += ":"; i += 2; continue; }
+    if (encoded.startsWith("_x", i)) {
+      const end = encoded.indexOf("_", i + 2);
+      if (end < 0) return null;
+      const codePoint = Number.parseInt(encoded.slice(i + 2, end), 16);
+      if (!Number.isFinite(codePoint)) return null;
+      decoded += String.fromCodePoint(codePoint);
+      i = end + 1;
+      continue;
     }
-    const claims = [];
-    for (const id of ids) {
-      const thin = readCurrentRecord(db, roomId, "workSummary", id, budget)?.work;
-      if (!isTerminalCompletion(thin)) continue;
-      const item = readCurrentWorkItem(db, roomId, id, budget);
-      if (!isTerminalCompletion(item)) continue;
-      claims.push(claimShapeOf(db, roomId, item));
-    }
-    return claims;
-  }, { maxRecords: 1024 });
+    return null;
+  }
+  return decoded;
+};
+
+// One named native receipt as a claim-shaped item, by addressed read:
+// the single-receipt route names one work item, so it must not
+// enumerate the room (B7: at ~90+ items the enumeration's 409 made
+// even a known receipt unreachable). Returns null for non-current
+// rooms (caller uses the legacy registry), the claim for a terminal
+// completion, or undefined when the named item is not a receipt.
+// Only ids whose work item cannot be derived from the claim id (the
+// irreversible "_h" boardClaimId fallback) fall back to the windowed
+// enumeration above, which is itself budget-bounded per window.
+export function currentReceiptClaim(store, roomId, workClaimId) {
+  const db = store?.db;
+  if (!db || !isCurrentRoom(db, roomId)) return null;
+  const claimId = typeof workClaimId === "string" && workClaimId.startsWith("rc_")
+    ? workClaimId.slice(3) : workClaimId;
+  if (typeof claimId !== "string" || !claimId) return undefined;
+  const candidate = claimId.startsWith("_h") ? null : workItemIdForClaimId(claimId);
+  if (candidate && boardClaimId(candidate) === claimId) {
+    const addressed = withCurrentReadContext(db, roomId, budget => {
+      const thin = readCurrentRecord(db, roomId, "workSummary", candidate, budget)?.work;
+      if (!isTerminalCompletion(thin)) return undefined;
+      const item = readCurrentWorkItem(db, roomId, candidate, budget);
+      if (!isTerminalCompletion(item)) return undefined;
+      const mapped = claimShapeOf(db, roomId, item);
+      return mapped.id === claimId ? mapped : undefined;
+    }, { maxRecords: 1024 });
+    return addressed;
+  }
+  return currentReceiptClaims(store, roomId)?.find(claim => claim.id === claimId);
 }
