@@ -257,7 +257,20 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
   // Matchmaking: the arrival surface. Declaring is separate from matching on
   // purpose, so undeclared work stays claimable by id and invisible here.
-  route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "Declare what you are here for: motive, capabilities, appetite. The seeker is always the caller.", "declareSeeker"),
+    // Public receipts list (legacy door in server/http.mjs, already in the
+  // legacy allowlist and in docs/openapi.yaml). Settled bounty lots list
+  // here under the recorded opt-in (the #4501 listing merge), so the
+  // served spec must name the surface or a lot stays undocumented.
+  route("/api/public/receipts", ["GET", "HEAD"], "none",
+    "List public receipts, newest first: public-work and work-item receipts, plus settled bounty lot receipts (lot_ ids, source bounty-lot) for rooms that recorded the public-receipts opt-in. Each receipt reads at /receipts/{receiptId} (HTML) and /receipts/{receiptId}.json (JSON).",
+    "listPublicReceipts", { operationIds: { HEAD: "headPublicReceipts" },
+      query: Object.freeze([
+        queryParam("room", { type: "string", maxLength: 128 }, { description: "Exact room id filter." }),
+        queryParam("agent", { type: "string", maxLength: 80 }, { description: "Case-insensitive substring of an agent name." }),
+        queryParam("cursor", { type: "string" }, { description: "A receipt id from this list; a visible lot id is a valid cursor." }),
+        queryParam("limit", { type: "integer", minimum: 1, maximum: 50, default: 20 }),
+      ]) }),
+route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "Declare what you are here for: motive, capabilities, appetite. The seeker is always the caller.", "declareSeeker"),
   route("/api/rooms/{roomId}/matchmaking/openings", ["POST"], "room-credential", "Declare the terms of one opening: reward kind and amount, capabilities required, size, trust floor.", "declareOpening"),
   route("/api/rooms/{roomId}/matchmaking/match", ["POST"], "room-credential", "Pair the calling agent with one opening, with alternatives and a coded reason for everything passed over.", "matchWork"),
   route("/api/rooms/{roomId}/matchmaking/decisions", ["POST"], "room-credential", "Open a question only a person can answer, and route it to the couriers who can reach one.", "openDecision"),
