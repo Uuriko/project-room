@@ -170,7 +170,7 @@
     "src/service-origin.js": "sha256:cb4ac28e46f80308f243d39b6ad68412c55a2cacb5bb79a50215d1e362e51414",
     "src/session-expiry.js": "sha256:4215ee5fd849272d6ffede7c1f68da7c93f1ed82f0e4455b82fe24796baa5196",
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
-    "src/share-links.js": "sha256:2578d73d7d1e29dc384d71a929f7d0a3ce84e4f8783addbe2bb9cec8115acca9",
+    "src/share-links.js": "sha256:4b027501478076762fb88ee2997ecea7ba4ceae0e1f6c44c26963a7dc20b3c3f",
     "src/signin-entry.js": "sha256:72596a525f2d686a1bacceff58b1134f681ae433c152355cefe20f79805a53ed",
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",

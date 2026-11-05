@@ -900,7 +900,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         $("#join-link-retry").textContent = "Review browser session";
       }
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
-      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
+      // The client drops a lost anonymous session (cookie gone), so a missing
+      // session is still a guest browser; only a signed-in account is not.
+      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated !== true;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
       $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Log out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";

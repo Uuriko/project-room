@@ -749,3 +749,41 @@ for (const code of ["link_cancelled", "link_expired", "link_full", "link_authori
     } finally { dom.uninstall(); }
   });
 }
+
+test("a lost guest whose client session was cleared still gets Start a new guest", async () => {
+  const dom = guestJoinDom();
+  const accountClient = {
+    session: { authenticated: false, account: null }, async restore() { return this.session; },
+    async logout() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink() {
+      this.session = null; // AccountClient invalidates the anonymous session after cookie loss.
+      throw Object.assign(new Error("Return to your original browser session. No additional guest was created."), { code: "join_session_lost", status: 409 });
+    }
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, async openRoom() {} });
+    await ui.open({ token: "n".repeat(43) });
+    dom.node("#join-link-name").value = "Jill";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(dom.node("#join-link-signout").hidden, false);
+    assert.match(dom.node("#join-link-signout").textContent, /Start a new guest/);
+  } finally { dom.uninstall(); }
+});
+
+test("a signed-in account on a lost join is not offered a new guest", async () => {
+  const dom = guestJoinDom();
+  const accountClient = {
+    session: { authenticated: true, account: { id: "acct" } }, async restore() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink() { throw Object.assign(new Error("lost"), { code: "join_session_lost", status: 409 }); }
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null, async openRoom() {} });
+    await ui.open({ token: "m".repeat(43) });
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(dom.node("#join-link-signout").hidden, true);
+  } finally { dom.uninstall(); }
+});
