@@ -223,7 +223,11 @@ export function parseNeedsMeSince(since) {
       || (floor !== null && (!Number.isSafeInteger(floor) || floor < 0))) {
       fail(422, "invalid_cursor", "Invalid continuation cursor");
     }
-    return { provided: true, number: floor, rooms, land, landIds, roomAfter, native };
+    // held: per-room cap carried across a paged walk while leased-elsewhere
+    // items were suppressed on an earlier page (see the lease hold below).
+    const held = integerMap(wrapped ? since.held ?? {} : {});
+    if (!held || Object.keys(held).length > 40) fail(422, "invalid_cursor", "Invalid continuation cursor");
+    return { provided: true, number: floor, rooms, land, landIds, roomAfter, native, held };
   }
   fail(422, "invalid_cursor", "since must be a sequence number or a cursor object");
 }
@@ -1275,6 +1279,12 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   // where this read started when a land item was suppressed. Replaying the
   // cursor after the lease lapses then returns the item if it is still open
   // (the first handler crashed); a handled item is retired as usual.
+  //
+  // A paged native walk sets rooms[roomId] only on its final page, so a hold
+  // from an earlier page would be lost. Each page folds its suppressed items
+  // into cursor.held[roomId] (the lowest cap seen in this walk) and the cap
+  // rides the cursor until the room's walk ends, then applies to rooms[].
+  const holds = { ...(parsed.held ?? {}) };
   for (const held of claim.suppressedItems ?? []) {
     if (held.kind === "land_queue") {
       if (held.roomId in landStart) {
@@ -1284,10 +1294,16 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
       }
       continue;
     }
-    if (Number.isFinite(held.seq) && Number.isFinite(rooms[held.roomId])) {
-      rooms[held.roomId] = Math.min(rooms[held.roomId], held.seq - 1);
-    }
+    if (Number.isFinite(held.seq)) holds[held.roomId] = Math.min(holds[held.roomId] ?? Infinity, held.seq - 1);
   }
+  for (const [heldRoom, cap] of Object.entries(holds)) {
+    if (Number.isFinite(rooms[heldRoom])) rooms[heldRoom] = Math.min(rooms[heldRoom], cap);
+    // Keep the cap while this room's native walk continues; once it is done
+    // the clamped rooms[] cursor carries it and replay re-suppresses or
+    // re-delivers the item.
+    if (native[heldRoom] === undefined) delete holds[heldRoom];
+  }
+  if (Object.keys(holds).length) cursor.held = holds;
   // L1: returning a direct_ask from needs-me is delivery for poll agents.
   // Gate on claimSec>0 so ordinary GET /api/needs-me stays pure (tests + browsers);
   // MCP room_needs_me already passes claimSec=45 and gets auto-ack with the lease.
