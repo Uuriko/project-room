@@ -20,6 +20,41 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const unavailable = () => fail(410, "link_unavailable", "This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
+// FUNNEL-FIXES pack 4 (invite-preview false-410 cure): the preview door must
+// not call an agent invite code dead. AGENT_INVITE_CODE_PATTERN is copied
+// verbatim from server/agent-invites.mjs CODE_PATTERN (probe R2) and applied
+// after the same confusable folding AgentInvites#preview uses (I/L -> 1,
+// O -> 0). The gate is shape-only: it reads no store and no room data, so
+// its answer is byte-identical for live, dead and fabricated RM-shaped
+// codes — it creates no existence oracle.
+const AGENT_INVITE_CODE_PATTERN = /^RM-(?:[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}|[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8})$/;
+const agentInviteCandidate = value => {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  const frag = /#agent-invite\/([^/?#\s]+)/i.exec(text);
+  if (frag) return frag[1];
+  if (/^https?:\/\//i.test(text)) {
+    const segs = text.split(/[?#]/)[0].split("/").filter(Boolean);
+    return segs.length ? segs[segs.length - 1] : "";
+  }
+  return text;
+};
+const isAgentInviteShape = value => {
+  const candidate = agentInviteCandidate(value);
+  if (!candidate) return false;
+  const folded = candidate.toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0");
+  return AGENT_INVITE_CODE_PATTERN.test(folded);
+};
+const wrongDoor = () => fail(422, "wrong_link_kind_agent_invite", "This is an agent invite code (RM-…), not a share link, so this preview cannot read it — and this response says nothing about whether the invite is live. Preview it with POST /api/agent-invites/preview with {\"code\":\"RM-…\"} in the request body, or fetch the invite's own /a/ link.");
+const notFound = () => fail(404, "link_not_found", "No invite link was issued for this token. Check for typos or ask the inviter for a fresh link.");
+// Preview-only truthful mapping for a genuine share link's own dead state
+// (pack 4 §3). Join doors never see this: they keep the folded 410 above.
+const DEAD_LINK = {
+  cancelled: ["link_cancelled", "This invite link was cancelled. Ask for a new invite link."],
+  expired: ["link_expired", "This invite link has expired. Ask for a new invite link."],
+  full: ["link_full", "This invite link has reached its join limit. Ask for a new invite link."],
+  authority_changed: ["link_authority_changed", "This invite link is no longer valid because its issuer's authority changed. Ask for a new invite link."],
+};
 export const shareLinkSchema = `
   CREATE TABLE IF NOT EXISTS share_links (
     id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
@@ -220,24 +255,36 @@ export class ShareLinks {
     return { id: row.id, roomId: row.room_id, role: access === "guest" ? "guest" : access, access, permissions: linkPermissions(access), createdAt: row.created_at,
       expiresAt: row.expires_at, maxJoins: row.max_joins, joins, remainingJoins: Math.max(0, row.max_joins - joins), status };
   }
-  find(token) {
+  // fold (default, join/admission callers): every miss is the folded 410
+  // link_unavailable, byte-identical to the pin. fold:false is preview-only
+  // (pack 4, probe R3): unknown well-formed credentials answer 404
+  // link_not_found and malformed input answers 422 invalid_link.
+  find(token, { fold = true } = {}) {
     if (classifyJoinToken(token) === "guest-agent") fail(422, "wrong_link_kind", "Guest invites are not human invite links.");
     const code = parseShareInviteCode(token);
     if (code) {
       const alias = this.db.prepare("SELECT link_id FROM share_link_codes WHERE code_hash=?").get(hash(normalizeShareInviteCode(code)));
       const row = alias && this.db.prepare("SELECT * FROM share_links WHERE id=?").get(alias.link_id);
-      if (!row) unavailable();
+      if (!row) { if (fold) unavailable(); notFound(); }
       return row;
     }
-    if (typeof token !== "string" || !tokenPattern.test(token)) unavailable();
+    if (typeof token !== "string" || !tokenPattern.test(token)) {
+      if (fold) unavailable();
+      fail(422, "invalid_link", "Invitation link required in the form of a #join/ token or #code/ short code");
+    }
     const row = this.db.prepare("SELECT * FROM share_links WHERE token_hash=?").get(hash(token));
-    if (!row) unavailable();
+    if (!row) { if (fold) unavailable(); notFound(); }
     return row;
   }
   preview(token, accountToken = null, binding = null) {
+    // Pack 4 wrong-door gate, preview path only and before any lookup
+    // (probe R3): join() and joinAgent() never pass through here.
+    if (isAgentInviteShape(token)) wrongDoor();
     return this.store.readTransaction(() => {
-      const row = this.find(token), link = this.view(row);
+      const anonymous = !accountToken && !binding;
+      const row = this.find(token, { fold: !anonymous }), link = this.view(row);
       if (link.status !== "active") {
+        if (anonymous) { const dead = DEAD_LINK[link.status]; fail(410, dead[0], dead[1]); }
         if (!accountToken || !binding) unavailable();
         try { this.store.authenticateAccountSession(accountToken, row.room_id, binding); }
         catch (error) { if ([401, 403, 409].includes(error.status)) unavailable(); throw error; }

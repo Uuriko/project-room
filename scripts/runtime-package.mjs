@@ -73,6 +73,7 @@ optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outsid
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/request-states.mjs"); // request lifecycle states (flag ROOM_REQUEST_STATES; imported by server/reply-requests.mjs; pure)
+optional.push("server/git-remote.mjs", "server/routes/git-remote.mjs"); // ROOM_GIT_REMOTE phase 0 helpers + status route (flag off = 404; route module imported by server/routes/table.mjs)
 optional.push("server/room-owner.mjs"); // owner lookup without the member census (bounty escrow)
 optional.push("server/dm-consents.mjs", "server/public-face.mjs", "server/current-public-face.mjs", "server/routes/public-lobby.mjs", "server/agent-paste-copy.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
 optional.push("server/public-agent-page.mjs", "server/routes/public-agent-page.mjs"); // public agent page (imported by server/store.mjs and server/routes/table.mjs)

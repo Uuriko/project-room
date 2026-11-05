@@ -7,8 +7,14 @@
         credentials. 30 per address per minute. A closed link can still be
         previewed by an existing active human member with their account-session
         cookie and X-Session-Binding header. This read-only recovery neither
-        creates membership nor consumes another place; outsiders and removed
-        members still receive link_unavailable.
+        creates membership nor consumes another place; a session-bearing
+        caller who does not authenticate as an active member still receives
+        link_unavailable. A fully anonymous preview names the link's own
+        state instead: link_cancelled, link_expired, link_full or
+        link_authority_changed, or link_not_found for an unknown token. An
+        RM- agent invite code is answered 422 wrong_link_kind_agent_invite
+        (shape-only; it says nothing about whether the invite is live).
+        Join doors are unchanged: joins keep the folded 410 link_unavailable.
       security: []
       requestBody:
         required: true
@@ -21,6 +27,7 @@
                 linkToken: { type: string }
       responses:
         '200': { description: "{ access, identity, link, room: { id, title } }" }
-        '410': { description: "link_unavailable (unknown, expired, cancelled or exhausted)" }
-        '422': { description: invalid_link or wrong_link_kind }
+        '410': { description: "link_unavailable (session-bearing non-member), or link_cancelled, link_expired, link_full or link_authority_changed (anonymous preview)" }
+        '404': { description: link_not_found }
+        '422': { description: invalid_link, wrong_link_kind or wrong_link_kind_agent_invite }
         '429': { description: rate_limited }
