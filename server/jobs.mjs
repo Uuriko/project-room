@@ -9,7 +9,7 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
-import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { backfillPublicReadModel, publicReadModelSweepDue } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, patrolPendingSince, runPatrolTick } from "./patrol.mjs";
 import { drainProjectMapQueue, projectMapPending } from "./project-map-store.mjs";
@@ -179,9 +179,11 @@ function autolinkDueAt(store, now) {
 }
 
 function backfillPending(store) {
-  const row = read(store, "SELECT done FROM public_read_model_backfill WHERE id=1");
-  if (!row) return true;
-  return Number(row.done) !== 1;
+  // Pending while a sweep is walking, and again once a completed sweep's
+  // re-arm interval has elapsed (publicReadModelSweepDue owns the rule,
+  // including the unstamped-finish inaugural case). Between completion
+  // and the interval the job stays disabled, as before.
+  return publicReadModelSweepDue(store);
 }
 
 function gmailOn(env) {
