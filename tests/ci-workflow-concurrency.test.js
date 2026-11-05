@@ -304,7 +304,8 @@ test("Cloudflare CI runs canonical runtime then browser scripts and preserves fa
   const logger = `#!${process.execPath}
 const args=process.argv.slice(2);
 if(args[0]==='-p'){console.log('a.check.mjs b.check.mjs');process.exit(0);}
-require('node:fs').appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify([require('node:path').basename(process.argv[1]),...args])+'\\n');
+// getBuiltinModule works whether the stub loads as CommonJS or ESM (CI's TMPDIR sits under the type:module root).
+process.getBuiltinModule('node:fs').appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify([process.getBuiltinModule('node:path').basename(process.argv[1]),...args])+'\\n');
 if(process.env.FAIL_RUNTIME==='1'&&args.includes('--test-shard=1/2'))process.exitCode=17;
 `;
   writeFileSync(join(dir, "npm"), logger, { mode: 0o755 });
