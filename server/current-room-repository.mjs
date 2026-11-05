@@ -1443,17 +1443,28 @@ export function publishCurrentCandidate(store,head,{generation,qualificationRece
 export function admitCurrentCandidateBudget(db,b) { admitCurrentSchema(db,b); return b; }
 
 // Selected work context never opens the legacy room or unrelated work bodies.
-// Wake policy needs only the room record, the actor and target member records
-// and, for a work wake, that one item. Bounded like any selected read; no
-// messages, roster census or unrelated work bodies.
-export function readCurrentWakePolicyState(store,roomId,memberIds,workItemId=null) {
+// Wake policy needs only the room record, the actor and target member records,
+// for a work wake that one item, and for a message wake that message and its
+// channel. The message and channel go through their witnessed readers so a
+// corrupt or witnessed-but-missing record throws and the delivery stays
+// pending, as the legacy whole-room read does. Bounded like any selected read.
+export function readCurrentWakePolicyState(store,roomId,memberIds,{workItemId=null,messageId=null}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;
   const room=readCurrentRecord(db,roomId,'metadata','room',b);if(!room)corrupt('missing wake policy room authority');
   const members=Object.create(null);
   for(const id of new Set(memberIds.filter(id=>typeof id==='string'))){const member=readCurrentRecord(db,roomId,'members',id,b);if(member!==undefined)members[id]=member;}
   const workItems=Object.create(null);
   if(typeof workItemId==='string'){const item=readCurrentWorkItem(db,roomId,workItemId,b);if(item)workItems[workItemId]=item;}
-  return {room,members,workItems};
+  const channels=Object.create(null);
+  if(typeof messageId==='string'){
+    const message=readCurrentMessage(db,roomId,messageId,b);
+    if(message){
+      const channelId=message.value?.channelId??'general',channel=readCurrentRecord(db,roomId,'channels',channelId,b);
+      if(channel===undefined)corrupt('wake message channel missing');
+      channels[channelId]=channel;
+    }
+  }
+  return {room,members,workItems,channels};
 }
 export function readCurrentSelectedWorkState(store,roomId,workId,viewerId,{includeOffers=false}={}) {
   const db=store.db,b=contextBudgets.get(db)??budget(),head=readCurrentHead(db,roomId,b);if(!head)return null;

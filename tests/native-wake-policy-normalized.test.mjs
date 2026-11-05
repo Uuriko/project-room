@@ -53,3 +53,33 @@ test('native wake policy is the same for legacy and normalized rooms, and normal
   assert.equal(Object.fromEntries(decisions)['dm from owner'], true);
   assert.equal(Object.fromEntries(decisions)['dm to an agent whose policy is nobody'], false);
 });
+
+// A message wake must not deliver over a corrupt or witnessed-but-missing
+// message or channel: the legacy whole-room read throws there and the outbox
+// keeps the delivery pending, so the normalized selected read must throw too.
+function lift(s, table, change) {
+  const guards = s.db.prepare("SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name=?").all(table);
+  for (const {name} of guards) s.db.exec(`DROP TRIGGER ${name}`);
+  change();
+  for (const {sql} of guards) s.db.exec(sql);
+}
+const tampers = {
+  'message body forged': s => lift(s, 'messages', () => s.db.prepare("UPDATE messages SET body='forged' WHERE message_id='note'").run()),
+  'message row removed': s => lift(s, 'messages', () => s.db.prepare("DELETE FROM messages WHERE message_id='note'").run()),
+  'channel record forged': s => lift(s, 'current_room_records', () => s.db.prepare("UPDATE current_room_records SET payload=json_set(payload,'$.name','forged') WHERE domain='channels' AND record_key='general'").run()),
+  'channel record removed': s => lift(s, 'current_room_records', () => s.db.prepare("DELETE FROM current_room_records WHERE domain='channels' AND record_key='general'").run())
+};
+for (const [name, tamper] of Object.entries(tampers)) test(`normalized message wake stays pending when ${name}`, t => {
+  const s = room(t, 'normalized-current-v1');
+  s.command(s.issueAccessKey('commons', 'owner'), 'commons', {id: 'note', type: T.MESSAGE_POSTED, data: {messageId: 'note', body: 'psst', toMemberId: 'agent'}});
+  const descriptor = {roomId: 'commons', memberId: 'agent', identityId: 'identity-agent', scopes: []};
+  for (const kind of ['dm', 'mention']) {
+    const input = {event: {name: 'room.requested', data: {roomId: 'commons', memberId: 'agent', messageId: 'note'}}, context: {kind, actorId: 'owner'}};
+    assert.equal(authorizeNativeEvent(s, descriptor, input), true, `${kind} delivers before the tamper`);
+  }
+  tamper(s);
+  for (const kind of ['dm', 'mention']) {
+    const input = {event: {name: 'room.requested', data: {roomId: 'commons', memberId: 'agent', messageId: 'note'}}, context: {kind, actorId: 'owner'}};
+    assert.throws(() => authorizeNativeEvent(s, descriptor, input), /current_room_corrupt/, kind);
+  }
+});
