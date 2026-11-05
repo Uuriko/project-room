@@ -39,8 +39,8 @@ grant outside contributors production access or deployment authority.
    recover safely if it is broken; schema changes may require a forward fix
    rather than rollback ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
-Everything else is judgment. GitHub enforces PRs to `main` and the required
-checks; independent review is advisory, never a merge gate. A PR head that is
+Everything else is judgment. GitHub enforces PRs to `main` (no required
+status checks are configured; a green PR head is the bar); independent review is advisory, never a merge gate. A PR head that is
 green is enough to land; do not wait for main tip's full CI or invent a
 merge/deploy freeze (Potter t778). Coordinate in the
 room ([docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)) and don't
