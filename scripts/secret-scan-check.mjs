@@ -141,6 +141,8 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // current-room-events.mjs loop guard: boolean expression of identifiers, not a credential.
+  "boundedWindow||trimmed||events.length>=limit||!chunk.hasMore||chunk.next<=scanAfter||source.bytes>=CURRENT_EVENT_SOURCE_BYTES",
   // Public Apache license URL in the home page structured data; not a credential.
   "https://www.apache.org/licenses/LICENSE-2.0",
   // Public relative documentation link embedded by wiki-build, not a credential.
