@@ -4,6 +4,7 @@
 // handlers read only the legacy Board store (work_claims), which native
 // rooms never write. Acceptance test 5 of the filed set is the existing
 // tests/receipt-search.test.js suite passing unmodified (run separately).
+// covers server/current-receipts.mjs via HTTP boundary
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
