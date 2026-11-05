@@ -8,6 +8,7 @@ import {ensureDefaultChannelState} from '../src/default-channel-state.js';
 import {readCurrentEventWindow,currentEventRedactionMessages} from './current-room-events.mjs';
 import { assertRestoreAdmitted, restorePending, verifyRestoreControl } from './restore-admission.mjs';
 import {readCurrentWorkListing} from './current-work-list.mjs';
+import {attentionWaitStatus} from './attention-wait.mjs';
 import { CURRENT_ROOM_SCHEMA, CURRENT_ROOM_GUARDS, upgradeUnusedCurrentFormat5, currentInviteContext, initializeCurrentRoom, currentRoomAuthority, currentRoomOwnerAuthority, isCurrentRoom, currentDmConsentEventContext, currentCommandContext, prepareCurrentWrite, withCurrentServingWriter, readCurrentRecord, readCurrentHistoryFloor, withCurrentReadContext, readCurrentSelectedWorkState, readCurrentOverviewWindow, currentVisibleHorizon, readCurrentPrivateWorkParties, readCurrentHead, currentConversationRows, chargeCurrentReadBudget } from './current-room-repository.mjs';
 import {bindReplayAppend} from './replay-cutover.mjs';
 import { savedHistoricalReplayCheckpoint } from './historical-replay-contract.mjs';
@@ -5811,7 +5812,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const link=m.kind==='agent'?this.db.prepare('SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=?').get(roomId,m.id):null;
         const host=link?this.agentHeartbeats.statusWindow(link.identity_id):null,observed=host&&host.status!=='unregistered'&&Number.isFinite(host.lastSeenAt)&&host.lastSeenAt<=this.now();
         const isWatching=watching.has(m.id),liveHost=observed&&host.status==='online';
-        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
+        return{memberId:m.id,displayName:m.displayName,kind:m.kind,watching:isWatching,lastSeenAt:observed?host.lastSeenAt:null,...(m.kind==='agent'?{courier:attentionWaitStatus(this,roomId,m.id)}:{}),statusMessage:m.statusMessage??null,presence:host?{status:host.status,lastSeenAt:observed?host.lastSeenAt:null,basis:observed?'host':'registration',sourceWindow:host.sourceWindow}:null,
           state:isWatching||liveHost?'listening':'unknown',isOwner:m.id===ownerId,scopes:[...m.permissions],ownerIdentityId:link?.identity_id??null,coverage:{execution:'not-evaluated',heldWork:'not-evaluated',queuedWakes:'not-evaluated'}};
       }).sort((a,b)=>a.memberId.localeCompare(b.memberId,'en'));
     },{maxRecords:512});

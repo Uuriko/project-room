@@ -133,3 +133,20 @@ test('includeWork keeps the cursor honest across a gap longer than one event win
   const bad = await f.call({timeoutSec: 0, includeWork: 'yes'}).result;
   assert.ok(bad.value.error || bad.value.result?.isError, JSON.stringify(bad));
 });
+
+test('presence shows whether a member courier is waiting and when it last waited', async t => {
+  const f = await fixture(t);
+  const courier = () => f.store.presence(f.saved.owner, 'commons', []).members.find(m => m.memberId === f.saved.identityId).courier;
+  assert.deepEqual(courier(), {waiting: false, lastWaitAt: null});
+  const waiting = f.call({timeoutSec: 2});
+  await delay(60);
+  const open = courier();
+  assert.equal(open.waiting, true);
+  assert.ok(Date.parse(open.lastWaitAt) <= Date.now());
+  f.post('wake-it', {toMemberId: f.saved.identityId});
+  await waiting.result;
+  const closed = courier();
+  assert.equal(closed.waiting, false);
+  assert.equal(closed.lastWaitAt, open.lastWaitAt, 'the last wait time survives the wait ending');
+  assert.equal('courier' in f.store.presence(f.saved.owner, 'commons', []).members.find(m => m.memberId === 'owner'), false, 'humans carry no courier field');
+});
