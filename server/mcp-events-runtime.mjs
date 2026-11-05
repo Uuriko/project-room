@@ -21,7 +21,9 @@ export function authorizeNativeEvent(store, descriptor, { event, context }) {
     // bounded selected read of exactly the records the checks below use.
     const state = canonicalNativeMentionPolicyContext(store, descriptor, event, context)
       ?? (isCurrentRoom(store.db, descriptor.roomId)
-        ? readCurrentWakePolicyState(store, descriptor.roomId, [context.actorId, descriptor.memberId], context.kind === 'work' ? context.workItemId : null)
+        ? readCurrentWakePolicyState(store, descriptor.roomId, [context.actorId, descriptor.memberId], {
+          workItemId: context.kind === 'work' ? context.workItemId : null,
+          messageId: ['mention', 'squad-mention', 'dm'].includes(context.kind) ? event?.data?.messageId ?? null : null })
         : store.room(descriptor.roomId).state);
     if (!state) return false;
     const actor = state.members[context.actorId], target = state.members[descriptor.memberId];
