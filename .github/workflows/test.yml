@@ -78,7 +78,7 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true'
         with:
           fetch-depth: 0 # The v2-journal and runtime-package gates read retained ancestor commits.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       - run: npm ci
@@ -152,7 +152,7 @@ jobs:
           # Preserve real base comparison instead of falling back to an old
           # committed baseline when a shallow checkout hides that history.
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
@@ -191,7 +191,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The agent-upgrade gates read retained ancestor commits.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -286,7 +286,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The packaged fallback gate reads retained ancestor commits.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -347,7 +347,7 @@ jobs:
         if: needs.browser-shards.result != 'skipped'
         with:
           fetch-depth: 0 # Affected selection diffs the pull-request base.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.browser-shards.result != 'skipped'
         with:
           node-version: 24
@@ -380,7 +380,7 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true'
         with:
           fetch-depth: 0 # The recovery gate packages an exact retained ancestor.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
@@ -456,7 +456,7 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true'
         with:
           fetch-depth: 0 # The recovery gate packages an exact retained ancestor.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 24
@@ -525,7 +525,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # secret-scan-diff and room-lifecycle tests read the origin/main tree.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -591,7 +591,7 @@ jobs:
           # Depth 2 gives the PR merge commit's first parent, which the i18n
           # ratchet scans. A depth-1 checkout looks like a modified baseline.
           fetch-depth: 2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
