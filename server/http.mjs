@@ -1,3 +1,4 @@
+import { OAUTH_FILE_SCOPE_LABELS } from "./oauth-client-contract.mjs";
 import { connectFunnelEnabled, createConnectFunnel } from "./connect-funnel.mjs";
 import {createAccountAgentEnrollment} from './account-agent-enrollment.mjs';
 import { writeStoreRoute } from "./store-pages.mjs";
@@ -1895,6 +1896,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (mcpConsent && !agentChoices.length && !adoption)
           return json(res, 409, { error: "agent_connection_required", error_description: "Join the room as yourself, then create your own connected agent before authorizing it" });
         const scopeLabels = {
+          ...OAUTH_FILE_SCOPE_LABELS,
           "rooms:read": "See your rooms",
           "chat:read": "Read messages",
           "chat:write": "Post messages",

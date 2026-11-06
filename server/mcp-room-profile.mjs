@@ -1,3 +1,4 @@
+import { withCurrentReadContext } from "./current-room-repository.mjs";
 import { withInviteShare } from "./invite-share.mjs";
 import { withMcpCallLog } from "./mcp-call-log.mjs";
 import {publishedLobbyContext} from './current-public-face.mjs';
@@ -551,14 +552,20 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal = null) {
   if (typeof spendCredential === "function") {
     spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
   }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
-  return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal));
+  const dispatch = () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, signal);
+  // File consent adds fresh OAuth sponsorship checks to the protected message
+  // reader. Reserve for that bounded composition, not additional file bytes or
+  // history. Nested reads share this one transaction and unchanged 256 KiB cap.
+  const readFiles = oauthPrincipal && (name === "room_get_file" || name === "room_list_files");
+  return withSpendCharge(store, secret, name, args, () => readFiles
+    ? store.transaction(() => withCurrentReadContext(store.db, args.roomId, dispatch, { maxRecords: 512 }))
+    : dispatch());
 }
 
 // A work-item tool given a Board claim id answered a bare work_not_found
@@ -1253,7 +1260,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         const value = await callWakeTool(store, secret, identity, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential, signal, oauthPrincipal);
       if (name === "room_check_access" && value.scope === "room") {
         value.nativeMonitoring = oauthPrincipal && typeof nativeStatus === "function"
           ? await nativeStatus(mcpOAuthPrincipalDescriptor(oauthPrincipal))
