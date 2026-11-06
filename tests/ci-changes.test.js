@@ -90,6 +90,10 @@ test("docs-only diffs are markdown or docs/, and any other file is not", () => {
   assert.equal(classifyChanges(["docs/INDEX.md", "README.md"]).docsOnly, true);
   assert.equal(classifyChanges(["docs/INDEX.md", "server/store.mjs"]).docsOnly, false);
   assert.equal(classifyChanges([".github/workflows/test.yml"]).docsOnly, false);
+});
+
+test("a workflow-only change runs the browser matrix (QA-5013 browser-hold cure)", () => {
+  assert.equal(classifyChanges([".github/workflows/test.yml"]).browser, true);
   assert.equal(classifyChanges([]).docsOnly, false);
 });
 
