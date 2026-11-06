@@ -3,7 +3,7 @@ const $ = selector => document.querySelector(selector);
 export function installPairing({ client, getState }) {
   const section = $("#agent-pairs");
   const list = $("#agent-pair-list");
-  if (!section || !list) return { refresh() {} };
+  if (!section || !list) return { refresh() {}, reset() {} };
   const can = () => {
     const member = getState()?.members?.[client.session?.member?.id];
     return member?.active !== false && (member?.id === getState()?.room?.ownerId
@@ -19,6 +19,10 @@ export function installPairing({ client, getState }) {
       section.hidden = pairs.length === 0;
       for (const pair of pairs) list.append(row(pair));
     } catch { section.hidden = true; }
+  }
+  function reset() {
+    section.hidden = true;
+    list.replaceChildren();
   }
   function row(pair) {
     const item = document.createElement("li");
@@ -60,5 +64,5 @@ export function installPairing({ client, getState }) {
     return item;
   }
   document.getElementById("agent-connect-dialog")?.addEventListener("toggle", () => { if ($("#agent-connect-dialog")?.open) void refresh(); });
-  return { refresh };
+  return { refresh, reset };
 }
