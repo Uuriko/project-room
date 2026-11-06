@@ -416,7 +416,7 @@ const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
 const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
-const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, replyContractBlob: '9'.repeat(40), messageReaderBlob: '8'.repeat(40), definitions: `server/writer-fence.mjs@${blob}\nsrc/reply-requests.js@${'9'.repeat(40)}\nserver/current-room-repository.mjs@${'8'.repeat(40)}` });
+const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, replyContractBlob: '9'.repeat(40), messageReaderBlob: '8'.repeat(40), oauthClientContractBlob: '7'.repeat(40), oauthProviderBlob: '6'.repeat(40), definitions: `server/writer-fence.mjs@${blob}\nsrc/reply-requests.js@${'9'.repeat(40)}\nserver/current-room-repository.mjs@${'8'.repeat(40)}\nserver/oauth-client-contract.mjs@${'7'.repeat(40)}\nserver/oauth-provider.mjs@${'6'.repeat(40)}` });
 const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema, schemaSource: fenceProof(schema, recoveryRevision) });
 
 test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
@@ -549,6 +549,8 @@ test(`actual recovery CLI refuses ${previousVersion}-to-${candidateVersion} fall
   mkdirSync(join(dir, "server")); mkdirSync(join(dir, "src")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
   writeFileSync(join(dir, 'src/reply-requests.js'), 'export const MAX_RESPONSE_BODY = 2048;\n');
   writeFileSync(join(dir, 'server/current-room-repository.mjs'), 'export const MESSAGE_INPUT = 131072;\n');
+  writeFileSync(join(dir, 'server/oauth-client-contract.mjs'), 'export const OAUTH_SCOPES = ["rooms:read"];\n');
+  writeFileSync(join(dir, 'server/oauth-provider.mjs'), 'export const GRANT_READER = 1;\n');
   // The extensionless fake pnpm is CommonJS even under repository-local TMPDIR.
   writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "commonjs" }));
   const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
@@ -682,7 +684,9 @@ test("automatic rollback refuses when a table list imported by writer-fence chan
   const blobs = { [`${oldRev}:server/writer-fence.mjs`]: "f".repeat(40), [`${newRev}:server/writer-fence.mjs`]: "f".repeat(40),
     [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40),
     [`${oldRev}:src/reply-requests.js`]: "9".repeat(40), [`${newRev}:src/reply-requests.js`]: "9".repeat(40),
-    [`${oldRev}:server/current-room-repository.mjs`]: "8".repeat(40), [`${newRev}:server/current-room-repository.mjs`]: "8".repeat(40) };
+    [`${oldRev}:server/current-room-repository.mjs`]: "8".repeat(40), [`${newRev}:server/current-room-repository.mjs`]: "8".repeat(40),
+    [`${oldRev}:server/oauth-client-contract.mjs`]: "7".repeat(40), [`${newRev}:server/oauth-client-contract.mjs`]: "7".repeat(40),
+    [`${oldRev}:server/oauth-provider.mjs`]: "6".repeat(40), [`${newRev}:server/oauth-provider.mjs`]: "6".repeat(40) };
   const git = args => {
     if (args[0] === "show") return fence;
     if (args[0] === "rev-parse" && blobs[args[1]]) return `${blobs[args[1]]}\n`;
@@ -708,6 +712,8 @@ test('automatic rollback refuses changed reply contracts at an identical schema 
   await git(['config', 'user.email', 'rollback@example.test']);
   writeFileSync(join(dir, 'server/writer-fence.mjs'), 'export const STORE_SCHEMA_VERSION = 45;\n');
   writeFileSync(join(dir, 'server/current-room-repository.mjs'), 'export const MESSAGE_INPUT = 131072;\n');
+  writeFileSync(join(dir, 'server/oauth-client-contract.mjs'), 'export const OAUTH_SCOPES = ["rooms:read"];\n');
+  writeFileSync(join(dir, 'server/oauth-provider.mjs'), 'export const GRANT_READER = 1;\n');
   writeFileSync(join(dir, 'src/reply-requests.js'), 'export const MAX_RESPONSE_BODY = 2048;\nthrow Error("must never evaluate source");\n');
   await git(['add', '.']); await git(['commit', '--quiet', '-m', 'old reply reader']);
   const old = await git(['rev-parse', 'HEAD']);
