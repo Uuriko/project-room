@@ -187,6 +187,7 @@ CREATE INDEX IF NOT EXISTS current_native_work_held ON current_room_records(room
 CREATE INDEX IF NOT EXISTS current_native_work_proposals ON events(room_id,json_extract(body,'$.data.workItemId'),sequence) WHERE json_extract(body,'$.type')='work.proposed';
 CREATE INDEX IF NOT EXISTS current_work_summary_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='workSummary' AND present=1;
 CREATE INDEX IF NOT EXISTS current_reply_request_keys ON current_room_record_proofs(room_id,record_key) WHERE domain='replyRequests' AND present=1;
+CREATE INDEX IF NOT EXISTS current_member_active_keys ON current_room_records(room_id,record_key) WHERE domain='members' AND COALESCE(json_extract(payload, '$.active'), 1) <> 0;
 CREATE INDEX IF NOT EXISTS current_messages_public_seq ON messages(room_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
 CREATE INDEX IF NOT EXISTS current_messages_channel_public_seq ON messages(room_id,channel_id,seq DESC,message_id DESC) WHERE to_member_id IS NULL OR to_member_id='';
 CREATE INDEX IF NOT EXISTS current_messages_incoming_seq ON messages(room_id,to_member_id,seq DESC,message_id DESC);
@@ -558,6 +559,33 @@ function currentAuthorityFromHead(db,roomId,head,b) {
   if(!room||!Object.hasOwn(members,room.ownerId))corrupt('missing owner authority');
   return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
 }
+// Active-only roster (DESIGN w3200 census family §2.1): proof-verified ACTIVE
+// member records only, enumerated through current_member_active_keys, read
+// under this helper's own budget(1024) — never the caller's shared budget.
+// "Active" matches activeMemberCount: absent `active` is active; only an
+// explicit JSON false is inactive. Refuses above 100 ACTIVE with the census's
+// identical 409 shape; a deactivated owner is simply absent, never corrupt.
+function currentActiveMembersFromHead(db,roomId,head) {
+  const b=budget(1024);
+  const keys=db.prepare("SELECT record_key FROM current_room_records WHERE room_id=? AND domain='members' AND COALESCE(json_extract(payload,'$.active'),1)<>0 ORDER BY record_key LIMIT 101").all(roomId);
+  charge(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+  if(keys.length>100)refuse('Room authority requires bounded membership');
+  if(keys.length>head.counts.members)corrupt('active member census exceeds complete census');
+  const members={};
+  for(const {record_key:key} of keys) {
+    const member=readCurrentRecord(db,roomId,'members',key,b);
+    if(member===undefined)corrupt('active member census differs');
+    Object.defineProperty(members,key,{value:member,enumerable:true,writable:true,configurable:true});
+  }
+  return members;
+}
+export function currentActiveMemberAuthority(db,roomId) {
+  const b=budget(1024),head=readCurrentHead(db,roomId,b);if(!head)return null;
+  const room=readCurrentRecord(db,roomId,'metadata','room',b);
+  if(!room||!validId(room.ownerId))corrupt('missing owner authority');
+  const members=currentActiveMembersFromHead(db,roomId,head);
+  return {sequence:head.sequence,ownerId:room.ownerId,members,historyVisibility:room.historyVisibility??null,historyDefaultsVersion:room.historyDefaultsVersion??null};
+}
 export function readCurrentMessage(db,roomId,messageId,b=contextBudgets.get(db)??budget()) {
   if(!b.schemaVerified&&!readCurrentHead(db,roomId,b))corrupt('message namespace is not initialized');
   const witness=readCurrentRecord(db,roomId,'messageWitness',messageId,b);
@@ -725,7 +753,7 @@ export function currentCommandContext(store,roomId,command,{actorId}={}) {
   // Access deactivation changes members only. Held canonical work remains
   // untouched; credential, connection and reminder retirement stays in Store.
   if(command.type==='member.added'||command.type==='member.access_changed'&&command.data.active===true)
-    return currentInviteContext(store,roomId,{memberIds:[actorId,command.data.memberId,command.data.referredBy],census:true});
+    return currentInviteContext(store,roomId,{memberIds:[actorId,command.data.memberId,command.data.referredBy],census:'active'});
   if(command.type==='member.access_changed'&&command.data.active===false)
     return currentInviteContext(store,roomId,{memberIds:[actorId,command.data.memberId]});
   return commandContextFromHead(store,roomId,command,head,b,{actorId});
@@ -877,7 +905,7 @@ export function currentInviteContext(store, roomId, { memberIds = [], census = f
     const db = store.db, head = readCurrentHead(db, roomId, b);
     if (!head) return null;
     const state = emptyRoomState();
-    state.members = census ? currentAuthorityFromHead(db, roomId, head, b).members : {};
+    state.members = census === 'active' ? currentActiveMembersFromHead(db, roomId, head) : census ? currentAuthorityFromHead(db, roomId, head, b).members : {};
     const keys = db.prepare("SELECT domain,record_key FROM current_room_record_proofs WHERE room_id=? AND domain IN ('metadata','shape') AND present=1 ORDER BY domain,record_key LIMIT 33").all(roomId);
     if (keys.length > 32) refuse('Current metadata shape exceeds bounded context');
     charge(b, keys.length * 256, keys.length);
