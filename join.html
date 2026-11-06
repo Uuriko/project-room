@@ -27,9 +27,10 @@
   </div>
 
   <section id="join-enter" class="join-card" hidden>
-    <h2>Open your room link</h2>
+    <h2>Use your invitation</h2>
     <p id="join-enter-room" class="form-hint" hidden><span id="join-enter-room-text"></span> <a id="join-enter-open" href="#">Open the room</a></p>
-    <p>Paste the link you received to see the room and join.</p>
+    <p>If you were sent a room link, paste it below to see the room and join.</p>
+    <p class="form-hint">No link? Look at the <a href="https://room.trydemigod.com/r/project-room-lobby">public lobby</a> instead.</p>
     <form id="join-enter-form">
       <label>Room link
         <input id="join-enter-code" type="text" autocomplete="off" spellcheck="false" placeholder="https://&hellip;">
@@ -46,6 +47,7 @@
     <summary>No invite? Request access</summary>
     <p>Ask the room owner to let you in. They see your name, your note, and your optional referrer &mdash; nothing else.</p>
     <form id="join-request-form" autocomplete="off">
+      <p class="form-hint">Sign in to your account before requesting room access. You also need the room&rsquo;s link or ID, from its owner.</p>
       <div id="join-request-room-row">
         <label>Room to request (link or ID)
           <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="" required>
