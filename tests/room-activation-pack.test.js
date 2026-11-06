@@ -267,7 +267,9 @@ test("view=brief: who is around, what you may do, up to three things to pick up"
   assert.ok(brief.around.every(member => member.handle !== "Pack Worker"), "the viewer is not listed as around");
   assert.ok(brief.around.some(member => member.handle === "Room owner" && member.state === "online"));
   assert.ok(brief.pickUp.length >= 1 && brief.pickUp.length <= 3);
-  assert.ok(brief.pickUp.some(item => item.id === "pack-work-2"), "unclaimed open work is offered");
+  assert.ok(brief.pickUp.some(item => item.id === "pack-work-2"), "claimable Board work is offered");
+  assert.ok(brief.pickUp.every(item => item.source === "board" && item.claimAction),
+    "every pickUp entry is a Board claim this viewer may claim (C1: no native-work backfill)");
   assert.ok(brief.pickUp.every(item => item.id !== "pack-work-1"), "claimed work is not offered");
   assert.equal(typeof brief.next.endpoint, "string");
   assert.equal(brief.full, `/api/rooms/${ROOM}/activation-pack`);
@@ -389,4 +391,80 @@ test("brief: a member holding live work is never counted quiet, and the recent w
   const brief = briefActivationPack(pack, members, now);
   assert.deepEqual(brief.around.filter(m => m.state === "online").map(m => m.handle).sort(), ["listening", "working"]);
   assert.equal(brief.around.some(m => m.handle === "future"), false);
+});
+
+// FUNNEL-FIXES pack 2, cure C1 (lane-02): the brief's pickUp is exactly the
+// viewer-gated Board claims — never a viewer-blind backfill of native work
+// items — and a member who fails the Board gate gets an explicit boardGate
+// naming the lawful next steps. Zero permission change.
+const c1Pack = (overrides = {}) => ({
+  contentTrust: "x",
+  room: { slug: "lobby", title: "Lobby", state: "active", owner: "owner1" },
+  orientation: { purpose: "p", recentDecisions: [] },
+  members: [],
+  openClaims: [],
+  openWork: [],
+  coordinationNorms: {},
+  participationRules: {},
+  eventCursor: 1,
+  generatedAt: "",
+  ...overrides
+});
+const c1Work = n => ({ id: `codex2-item-${n}`, title: `Item ${n}`, state: "proposed", claimant: null });
+const c1Claim = id => ({ id, title: `Claim ${id}`, source: "board",
+  claimAction: { method: "POST", endpoint: `/api/rooms/lobby/work-claims/${id}/claim`, params: {} } });
+
+test("C1 T1: brief pickUp never advertises work a base member cannot claim (lane-02)", () => {
+  const pack = c1Pack({
+    members: [{ id: "guest1", handle: "Guest", kind: "agent", permissions: [] }],
+    openClaims: [], // what availableClaimsInRoom returns for grantedPermissions: []
+    openWork: [1, 2, 3].map(c1Work)
+  });
+  const brief = briefActivationPack(pack, [], Date.now(), "guest1");
+  assert.deepEqual(brief.pickUp, [], "pickUp must not backfill with native work items");
+  assert.equal(brief.boardGate?.canClaimBoardWork, false);
+  assert.equal(brief.boardGate?.reason, "work_claims_not_permitted");
+  assert.deepEqual(brief.boardGate?.needsProfile, ["contribute", "review", "collaborate"]);
+  assert.deepEqual(brief.boardGate?.next.map(step => step.action),
+    ["ask-owner-for-contribute-invite", "request-permissions", "public-work"]);
+  assert.ok(brief.boardGate.next.some(step => step.action === "public-work"));
+  // The brief's own next action is the public-work step, never a
+  // work-context read of an item addressed to someone else.
+  assert.equal(brief.next.method, "POST");
+  assert.equal(brief.next.endpoint, "/api/public-work/match");
+});
+
+test("C1 T1b: a kind-less member in a room with no recorded owner still gets boardGate (never skipped)", () => {
+  const pack = c1Pack({
+    room: { slug: "lobby", title: "Lobby", state: "active" }, // no owner recorded
+    members: [{ id: "anon1", handle: "Anon", permissions: [] }], // no kind
+    openWork: [c1Work(1)]
+  });
+  const brief = briefActivationPack(pack, [], Date.now(), "anon1");
+  assert.deepEqual(brief.pickUp, []);
+  assert.equal(brief.boardGate?.canClaimBoardWork, false);
+});
+
+test("C1 T2: a contribute viewer is offered exactly their Board claims, each with source + claimAction", () => {
+  const pack = c1Pack({
+    members: [{ id: "pro1", handle: "Pro", kind: "agent", permissions: ["accept_work", "complete_work"] }],
+    openClaims: [c1Claim("c1"), c1Claim("c2")],
+    openWork: [c1Work(1), c1Work(2)]
+  });
+  const brief = briefActivationPack(pack, [], Date.now(), "pro1");
+  assert.deepEqual(brief.pickUp.map(item => item.id), ["c1", "c2"]);
+  assert.ok(brief.pickUp.every(item => item.source === "board" && item.claimAction?.method === "POST"));
+  assert.equal(brief.boardGate, undefined, "a viewer who passes the gate gets no boardGate");
+  assert.equal(brief.next.endpoint, "/api/rooms/lobby/work-claims/c1/claim");
+});
+
+test("C1 T3: mixed inventory never backfills the slots the claims leave empty", () => {
+  const pack = c1Pack({
+    members: [{ id: "pro1", handle: "Pro", kind: "agent", permissions: ["accept_work", "complete_work"] }],
+    openClaims: [c1Claim("c1")],
+    openWork: [1, 2, 3].map(c1Work)
+  });
+  const brief = briefActivationPack(pack, [], Date.now(), "pro1");
+  assert.equal(brief.pickUp.length, 1);
+  assert.equal(brief.pickUp[0].id, "c1");
 });
