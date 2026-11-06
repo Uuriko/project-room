@@ -1335,7 +1335,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "2505ad8e4eae4293",
+      "inputSchema": "d90fe22cf2f8ba57",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1927,7 +1927,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "2505ad8e4eae4293",
+      "inputSchema": "d90fe22cf2f8ba57",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

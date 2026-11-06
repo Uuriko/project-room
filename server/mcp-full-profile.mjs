@@ -1,3 +1,4 @@
+import { storedText } from "./text-results.mjs";
 import { digestMessagePage } from "../src/message-digest.js";
 import { experimentArm } from "./experiments.mjs";
 import { filterMessagePage } from "../src/message-query.js";
@@ -265,6 +266,23 @@ export async function callHostedStdioTool(store, secret, name, args) {
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
+// Finish in one call: an agent names only the evidence message. The server
+// reads that work-linked post and fills its event id, exact text hash and the
+// current previous completion; producerId defaults to null (unknown). Values
+// the caller sent are kept, and the usual completion checks still run.
+function fillTextResultEvidence(store, roomId, args) {
+  if (!validId(args?.evidenceMessageId) || !validId(args?.workItemId)) return;
+  try {
+    const state = store.room(roomId).state, work = state.workItems?.[args.workItemId];
+    if (!work) return;
+    const text = storedText(store.db, state, work.id, args.evidenceMessageId, args.evidenceMessageEventId ?? null);
+    args.evidenceMessageEventId ??= text.messageEventId;
+    args.evidenceVersion ??= text.evidenceVersion;
+    if (!Object.hasOwn(args, "previousCompletionEventId")) args.previousCompletionEventId = work.receipt?.eventId ?? null;
+    if (!Object.hasOwn(args, "producerId")) args.producerId = null;
+  } catch { /* leave as sent: the completion path reports what is wrong */ }
+}
+
 async function currentWorkRevision(store, secret, roomId, name, args, usesRevision, identity, command) {
   if (!usesRevision(name) || args?.expectedRevision !== undefined || !validId(args?.workItemId)) return undefined;
   // A retry must reconstruct the original command, not fill a newer revision.
@@ -390,6 +408,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
   }
   if (isWorkTool(name)) {
+    if (name === "room_submit_text_result") fillTextResultEvidence(store, roomId, rest);
     const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision, identity, buildWorkCommand(name, rest, identity));
     const command = buildWorkCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command,
