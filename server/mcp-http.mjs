@@ -13,7 +13,7 @@ import {
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
-import { livePublicMcpTools } from "./mcp-discovery.mjs";
+import { livePublicMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
@@ -89,6 +89,23 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   if (message.method === "tools/list") {
     if (message.params?.cursor !== undefined) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
+    }
+    // UT2 04-04 F1: the anonymous catalog is a fixed public set (least
+    // exposure, #1528), so a valid profile/focus still serves it — but an
+    // unrecognized value must not be silently swallowed. The authenticated
+    // handler (listSelection in server/mcp-room-profile.mjs) rejects the
+    // same values with -32602; before this check a bogus profile was
+    // indistinguishable from a correct one in every anonymous variant.
+    const profile = message.params?.profile;
+    if (profile !== undefined && !["core", "lean", "full"].includes(profile)) {
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { profile: "must be core, lean or full" } });
+    }
+    const focus = message.params?.focus;
+    if (focus !== undefined && (typeof focus !== "string" || !Object.hasOwn(MCP_TOOL_FOCUSES, focus))) {
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { focus: "must be conversation, work, review, automation, or public_work" } });
+    }
+    if (focus !== undefined && profile === "full") {
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { focus: "omit focus when profile is full" } });
     }
     return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools(), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
   }
