@@ -144,3 +144,5 @@ Other growth prompts in this folder were written in parallel and use these names
 Every figure is labelled `backfilled; source unknown`. Visits and billing are reported as missing and are never filled in. The command does not write the input file.
 
 AN-1b owns the minute job, the hourly export, and the R2 binding. AN-1c owns the request hook that fills `analytics_ctx`. Those are not part of this page's collector.
+
+**Export disabled (classification ruling, 2026-10-18):** the hourly NDJSON export is disabled in `server/analytics/export.mjs` and must not be wired up as designed — its line format carried raw `account_id`/`actor_id` identifiers to an external sink (breaching data bright lines U1/U2/U5) and no consumer of the exported objects exists. Any future analytics egress ships only as a de-identified, pseudonymised extract (W4 anonymiser pattern).
