@@ -30,7 +30,7 @@ import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, memberOwnerId, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { agentAccessProfiles } from "./agent-connections.mjs";
+import { agentAccessProfiles, agentProfileName, isAgentProfile, AGENT_PROFILE_ALIASES } from "./agent-connections.mjs";
 import { seedNewAgentPolicy } from "./agent-talk-policy.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
@@ -91,7 +91,7 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
   guest: "Guest: read and chat.",
-  member: "Member (default): steer, accept, complete, verify, manage claims, record external writes. Not manage_members, decide, or invite_member.",
+  agent_member: "Agent member (default; \"member\" is accepted as an alias): steer, accept, complete, verify, manage claims, record external writes. Not manage_members, decide, or invite_member.",
   collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
@@ -386,6 +386,8 @@ export class AgentInvites {
     return {
       profiles: Object.fromEntries(Object.entries(agentAccessProfiles).map(
         ([name, permissions]) => [name, { permissions: [...permissions], description: PROFILE_DESCRIPTIONS[name] }])),
+      // Input aliases resolve to a profile above; never a separate grant.
+      profileAliases: { ...AGENT_PROFILE_ALIASES },
       permissions: [...PERMISSIONS],
       agentSafePermissions: [...AGENT_INVITE_SAFE_PERMISSIONS],
       neverGrant: [...NEVER_GRANT],
@@ -421,7 +423,7 @@ export class AgentInvites {
     // room, including Muse development; owner-level must be asked for.
     if (profile === "owner" && ownerEquivalent === undefined && permissions === undefined) { ownerEquivalent = true; profile = undefined; }
     if (profile === undefined && permissions === undefined && ownerEquivalent === undefined) {
-      profile = "member";
+      profile = "agent_member";
     }
     const ownerLevel = ownerEquivalent === true;
     if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
@@ -442,12 +444,12 @@ export class AgentInvites {
     if (ownerLevel) {
       permissions = [...PERMISSIONS];
     } else if (profile !== undefined) {
-      if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
+      if (!isAgentProfile(profile))
         fail(422, "invalid_invite_scope", `profile must be one of: ${Object.keys(agentAccessProfiles).join(", ")}`);
       if (permissions !== undefined)
         fail(422, "invalid_invite_scope", "Choose a profile or explicit permissions, not both");
-      profileName = profile;
-      permissions = [...agentAccessProfiles[profile]];
+      profileName = agentProfileName(profile);
+      permissions = [...agentAccessProfiles[profileName]];
     }
     if (!Array.isArray(permissions) || (profileName === null && !permissions.length) || new Set(permissions).size !== permissions.length
       || permissions.some(p => !PERMISSIONS.includes(p))) {
