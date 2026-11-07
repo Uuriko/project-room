@@ -1,3 +1,4 @@
+import { readCurrentRecord } from "./current-room-repository.mjs";
 import {ServiceError} from './service-error.mjs';
 import {readCurrentPublicWork, currentPublicPageListed} from './current-public-work.mjs';
 import { hydrateWorkItems } from "./work-repository.mjs";
@@ -346,6 +347,49 @@ function listedRoomFields(store, state, listed) {
   return { roomId: state.room.id, roomTitle: cleanName(state.room.title) ?? directoryRoomTitle(store, state.room.id) };
 }
 
+// Credited member ids become identity ids through this room's links;
+// an unlinked member has no directory identity to credit.
+function creditedIdsFor(store, roomId, memberIds = null) {
+  const identityByMember = new Map();
+  try {
+    const rows = memberIds
+      ? memberIds.flatMap(id => store.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").all(roomId, id))
+      : store.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId);
+    for (const link of rows) if (!identityByMember.has(link.memberId)) identityByMember.set(link.memberId, link.identityId);
+  } catch { /* a store predating identity links credits nobody by id */ }
+  return ids => [...new Set(ids.map(id => identityByMember.get(id)).filter(id => typeof id === "string"))];
+}
+
+// One completed board work item's public receipt row. Shared by the
+// whole-room projection and the normalized single-item delta, so both write
+// the identical row shape.
+function workItemReceiptRow(roomId, state, item, room, href, creditedIds) {
+  if (!item || item.state !== "completed" || !item.receipt || typeof item.receipt !== "object") return null;
+  const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
+  const { agents, humans, agentIds } = creditsFrom(people);
+  const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
+    ? item.receipt.evidenceVersion : null;
+  return {
+    id: publicWorkItemReceiptId(roomId, item.id),
+    title: cleanName(item.title) ?? "Receipt",
+    source: "work-item",
+    originRoomId: roomId,
+    roomId: room.roomId,
+    roomTitle: room.roomTitle,
+    agents, humans, agentIds: creditedIds(agentIds),
+    pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
+    mergedAt: null,
+    // The room recorded this item complete and issued the receipt;
+    // that is the whole claim (receipt-share.mjs "room-recorded
+    // completion"), stated on the .json face too instead of the
+    // verification key vanishing while the HTML face claims it.
+    verificationState: "room_recorded",
+    hashes: hashList(version ? [version] : []),
+    at: iso(item.updatedAt) ?? new Date(0).toISOString(),
+    startHref: href,
+  };
+}
+
 function optedInRows(store, state) {
   const roomId = state?.room?.id;
   if (!roomId || publicReceipts(state).enabled !== true) return [];
@@ -353,15 +397,7 @@ function optedInRows(store, state) {
   const room = listedRoomFields(store, state, listed);
   const owner = credit(state, state.room?.ownerId);
   const href = startHref(owner?.name);
-  // Credited member ids become identity ids through this room's links;
-  // an unlinked member has no directory identity to credit.
-  const identityByMember = new Map();
-  try {
-    for (const link of store.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId)) {
-      if (!identityByMember.has(link.memberId)) identityByMember.set(link.memberId, link.identityId);
-    }
-  } catch { /* a store predating identity links credits nobody by id */ }
-  const creditedIds = memberIds => [...new Set(memberIds.map(id => identityByMember.get(id)).filter(id => typeof id === "string"))];
+  const creditedIds = creditedIdsFor(store, roomId);
   const rows = [];
   let claims = [];
   try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
@@ -425,30 +461,8 @@ function optedInRows(store, state) {
   }
   const items = state.workItems && typeof state.workItems === "object" ? Object.values(state.workItems) : [];
   for (const item of items) {
-    if (!item || item.state !== "completed" || !item.receipt || typeof item.receipt !== "object") continue;
-    const people = [credit(state, item.receipt.reportedById), credit(state, item.receipt.producerId), credit(state, item.accountableMemberId)];
-    const { agents, humans, agentIds } = creditsFrom(people);
-    const version = typeof item.receipt.evidenceVersion === "string" && SHA256.test(item.receipt.evidenceVersion)
-      ? item.receipt.evidenceVersion : null;
-    rows.push({
-      id: publicWorkItemReceiptId(roomId, item.id),
-      title: cleanName(item.title) ?? "Receipt",
-      source: "work-item",
-      originRoomId: roomId,
-      roomId: room.roomId,
-      roomTitle: room.roomTitle,
-      agents, humans, agentIds: creditedIds(agentIds),
-      pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
-      mergedAt: null,
-      // The room recorded this item complete and issued the receipt;
-      // that is the whole claim (receipt-share.mjs "room-recorded
-      // completion"), stated on the .json face too instead of the
-      // verification key vanishing while the HTML face claims it.
-      verificationState: "room_recorded",
-      hashes: hashList(version ? [version] : []),
-      at: iso(item.updatedAt) ?? new Date(0).toISOString(),
-      startHref: href,
-    });
+    const row = workItemReceiptRow(roomId, state, item, room, href, creditedIds);
+    if (row) rows.push(row);
   }
   return rows;
 }
@@ -643,12 +657,59 @@ export function refreshDirectoryForReceipt(store, receiptId) {
   for (const identityId of identities) refreshDirectoryIdentity(store, identityId);
 }
 
+// Normalized rooms (QA R1 defect 6). The command context is sparse, so this
+// writes only deltas it can prove from that context: the recorded opt-in
+// mirror, an opt-out's row deletion, and the one board item this command
+// completed. Credits read just that item's people from canonical records.
+// Items completed before an opt-in are not backfilled here.
+function syncNormalizedReceipts(store, { roomId, state, previous }) {
+  const recorded = state.room?.publicReceipts;
+  const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
+  const receiptsOn = publicReceipts(state).enabled === true;
+  const receiptsWere = previous ? publicReceipts(previous).enabled === true : false;
+  // The sparse context holds only the items this command touched: each one
+  // that is completed with a receipt is (re)written, and one that left
+  // completion (a failed verification blocks it) loses its row, matching
+  // the legacy whole-room projection for those items.
+  const touched = receiptsOn ? Object.values(state.workItems ?? {}).filter(item => item && typeof item.id === "string") : [];
+  const completed = touched.filter(item => item.state === "completed" && item.receipt && typeof item.receipt === "object");
+  const withdrawn = touched.filter(item => !completed.includes(item) && previous?.workItems?.[item.id]?.state === "completed");
+  let stored;
+  try { stored = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId); } catch { stored = undefined; }
+  const mirrorSetting = hasRecorded ? !stored || stored.enabled !== (recorded.enabled ? 1 : 0) : !!stored;
+  if (!mirrorSetting && !(receiptsWere && !receiptsOn) && !completed.length && !withdrawn.length) return;
+  const write = () => {
+    if (mirrorSetting) {
+      if (hasRecorded) store.db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+        ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
+      else store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+    }
+    if (receiptsWere && !receiptsOn) store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source IN ('work-claim','work-item')").run(roomId);
+    for (const item of withdrawn) store.db.prepare("DELETE FROM public_receipts WHERE id=?").run(publicWorkItemReceiptId(roomId, item.id));
+    if (!completed.length) return;
+    const listed = isListed(store, roomId), room = listedRoomFields(store, state, listed);
+    for (const item of completed) {
+      const people = [item.receipt.reportedById, item.receipt.producerId, item.accountableMemberId, state.room.ownerId].filter(id => typeof id === "string");
+      const members = { ...(state.members ?? {}) };
+      for (const id of people) if (!Object.hasOwn(members, id)) { const member = readCurrentRecord(store.db, roomId, "members", id); if (member) members[id] = member; }
+      const view = { ...state, members };
+      const row = workItemReceiptRow(roomId, view, item, room, startHref(credit(view, state.room.ownerId)?.name), creditedIdsFor(store, roomId, people));
+      if (row) insertReceipt(store, row);
+    }
+  };
+  if (store.db.isTransaction) write();
+  else store.transaction(write);
+}
+
 // Same transaction as the event write when the caller is already inside one.
 export function syncRoomPublication(store, { roomId, state, previous = null, auth = null } = {}) {
   if (!roomId || !state?.room) return;
   // Normalized publication is maintained from protected transition deltas,
   // never the intentionally sparse command context.
-  if (store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(roomId)) return;
+  if (store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(roomId)) {
+    syncNormalizedReceipts(store, { roomId, state, previous });
+    return;
+  }
   const pageOn = publicPage(state).enabled === true;
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
