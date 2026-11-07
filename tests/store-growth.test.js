@@ -55,6 +55,27 @@ test("a room projection past the escalation line is a named breach", t => {
   assert.equal(storeGrowthBreach(gauges, STORE_GROWTH_LIMITS), "maxProjectionBytes");
 });
 
+test("a tick whose relief exhausts its deadline still returns a breach result with the deferral counted", async t => {
+  const store = fixtureStore(t);
+  const job = jobByName("store-growth");
+  store.db.prepare("UPDATE rooms SET projection = ?").run("x".repeat(3_600_000));
+  // The deadline is already past when relief starts: the catch-up and
+  // archive legs must stop cleanly instead of running unbounded (the
+  // failure mode that left ticks unrecorded), and the tick must still
+  // return its breach result so the heartbeat records the failure.
+  const summary = await job.run(store, {
+    recoveryPoint: () => ({ key: "fixture-backup", target: "kv", ageDays: 0 }),
+    deadline: Date.now() - 1
+  });
+  assert.equal(summary.errors, 1);
+  assert.equal(summary.failureDetail?.code, "store_growth_limit");
+  assert.equal(summary.maxProjectionBytes, 3_600_000);
+  assert.equal(summary.reliefAttempted, 0);
+  assert.equal(summary.reliefRelieved, 0);
+  assert.equal(summary.reliefDeferred, 1, "the one room past the line is deferred, not attempted");
+  assert.ok(summary.reliefDeferredEvents > 0, `deferred catch-up events counted: ${summary.reliefDeferredEvents}`);
+});
+
 test("the db-size breach is judged against the same limits", () => {
   const gauges = { rooms: 3, events: 10, maxProjectionBytes: 10, dbBytes: STORE_GROWTH_LIMITS.dbBytes + 1 };
   assert.equal(storeGrowthBreach(gauges, STORE_GROWTH_LIMITS), "dbBytes");
