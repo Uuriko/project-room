@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "note": "Derived-store declarations (one-fact-one-home). Created with PR #5187's registration cure: the room projection is a read-time derivation that persists nothing, declared because its module names carry the projection marker.",
+  "entries": [
+    {
+      "store": "server/room-projection.mjs",
+      "kind": "module",
+      "sourceOfTruth": "The room's stored state as served by readRoomSnapshot (server/snapshot-window.mjs): the viewer-filtered, redacted, windowed snapshot. The projection module persists nothing; there is no stored copy of the slice.",
+      "mechanism": "Derived per request, in memory: projectRoomSnapshot cuts the requested classes from the shared windowed snapshot at read time, so a slice cannot drift from its source. Conformance is pinned by tests/room-projection.test.js (only-requested-classes with named omissions; summary carries counts and no bodies).",
+      "status": "conforming"
+    },
+    {
+      "store": "server/routes/room-projection.mjs",
+      "kind": "module",
+      "sourceOfTruth": "The same shared windowed snapshot (readRoomSnapshot in server/snapshot-window.mjs), reached through readRoomProjection in server/room-projection.mjs. The route module stores nothing.",
+      "mechanism": "No stored derivation: the handler validates the fields parameter (whole-refusal on unknown, duplicated, or missing fields) and returns the per-request slice produced from the live snapshot. Nothing is cached or persisted, so there is no copy to drift.",
+      "status": "conforming"
+    }
+  ]
+}
