@@ -2420,8 +2420,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
-        const indexable = !url.search;
-        if (indexable) res.setHeader("X-Robots-Tag", "all");
+        // #3710 consent copy (PR #5026, D6): "There is no noindex anywhere on
+        // these surfaces." Receipt links are shared with query strings
+        // (tracking params, ?room=, ?verify=1), so the public receipt
+        // surfaces are indexable with or without one — the global noindex
+        // default above must not survive on any response from this block.
+        res.setHeader("X-Robots-Tag", "all");
         // Owner-only public-receipts toggle: these representations are
         // toggle-controlled, so they must never sit in a shared cache — a
         // response cached while public would keep disclosing a room's

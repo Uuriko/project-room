@@ -114,6 +114,47 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   assert.match((await raw(origin, "/receipts")).text, /Public task/);
 });
 
+test("receipt surfaces carry no noindex with a query string (shared-link case)", async t => {
+  const { origin, store, ownerKey } = await serve(t);
+  // #3710 consent copy (PR #5026): D6 "There is no noindex anywhere on these
+  // surfaces." A shared receipt link almost always carries a query string
+  // (tracking params, ?room=, ?verify=1). Every receipt representation must
+  // therefore serve X-Robots-Tag: all with or without one; the global
+  // noindex default must remain for non-receipt routes.
+  const cases = [
+    "/receipts?utm_source=share",
+    "/receipts?room=commons&utm_source=share",
+    "/api/public/receipts?utm_source=share",
+    "/api/public/receipts?limit=5&utm_source=share",
+    `/receipts/${PWR}?utm_source=share`,
+    `/receipts/${PWR}.json?utm_source=share`,
+    `/receipts/${PWR}/badge.svg?utm_source=share`,
+    `/receipts/${PWR}/og.png?utm_source=share`,
+  ];
+  for (const path of cases) {
+    const res = await raw(origin, path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get("x-robots-tag"), "all", path);
+  }
+  // A published work-claim receipt (wcr_) detail page, shared with params.
+  await raw(origin, "/api/rooms/commons/commands", {
+    method: "POST",
+    headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "publish", type: "room.public_receipts_set", data: { enabled: true } }),
+  });
+  const id = collectPublicReceipts(store).find(item => item.title === "Ship the door")?.id;
+  assert.match(id, /^wcr_[a-f0-9]{32}$/);
+  for (const path of [`/receipts/${id}?utm_source=share`, `/receipts/${id}.json?verify=0&utm_source=share`, `/receipts/${id}/badge.svg?utm_source=share`]) {
+    const res = await raw(origin, path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get("x-robots-tag"), "all", path);
+  }
+  // Control: the global default is untouched outside the receipt surfaces.
+  const control = await raw(origin, "/api/health?utm_source=share");
+  assert.equal(control.status, 200);
+  assert.equal(control.headers.get("x-robots-tag"), "noindex, nofollow");
+});
+
 test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner toggle", async t => {
   const { origin, store, ownerKey } = await serve(t);
   // The public-work receipt is public from the start: its page carries
