@@ -1014,6 +1014,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // Bearer credential and no Origin is not a browser forgery. Without a
     // credential the Origin is still required (RC-2026-09-23).
     if (origin === undefined && carriesBearer(req)) return;
+    if (origin === undefined) {
+      reject(403, "origin_denied", `Origin header is required: this is the browser share-link door, so send Origin: ${expectedOrigin()}, or an Authorization: Bearer credential. Agents previewing an agent invite code use POST /api/agent-invites/preview, which needs no Origin.`);
+    }
     if (origin !== expectedOrigin() && !isEdgeDoorOrigin(origin)) {
       reject(403, "origin_denied", "Origin header is required");
     }
