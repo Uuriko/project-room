@@ -23,6 +23,8 @@
 //     (DEMIGOD_CURRENCY in server/demigod-policy-adapter.mjs) — this
 //     ledger never converts between currencies and never mixes units.
 
+import { minorString } from "./minor-units.mjs";
+
 export const CREDIT_EXPIRY_DAYS = 180;
 
 const MS_PER_DAY = 86400000;
@@ -30,13 +32,6 @@ const MS_PER_DAY = 86400000;
 function nonEmptyString(value, name) {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${name} must be a non-empty string, got ${String(value)}`);
-  }
-  return value;
-}
-
-function minorString(value, name) {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
-    throw new TypeError(`${name} must be a decimal string of minor units, got ${String(value)}`);
   }
   return value;
 }

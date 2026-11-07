@@ -16,6 +16,8 @@
 // branches on CUSTODY_ENABLED, and the custody branch below is already
 // shaped. Nothing at the call sites changes.
 
+import { minorString } from "./minor-units.mjs";
+
 export const CUSTODY_ENABLED = false;
 
 export const CUSTODY_REQUIREMENTS = Object.freeze([
@@ -27,13 +29,6 @@ export const CUSTODY_REQUIREMENTS = Object.freeze([
 function nonEmptyString(value, name) {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${name} must be a non-empty string, got ${String(value)}`);
-  }
-  return value;
-}
-
-function minorString(value, name) {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
-    throw new TypeError(`${name} must be a decimal string of minor units, got ${String(value)}`);
   }
   return value;
 }
