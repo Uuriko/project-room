@@ -782,7 +782,7 @@
         <p id="agent-import-route" class="form-hint"></p>
         <details id="agent-acp-recommended" class="agent-acp-recommended"><summary>Agent on your computer (Claude Code, Codex, Goose, Gemini CLI): room-acp</summary>
           <p class="form-hint">Copy an agent invite link from <strong>Invite → Copy agent instructions</strong>, then run:</p>
-          <pre><code id="agent-acp-command">npx -y --package=https://room.trydemigod.com/room-acp.tgz room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
+          <pre><code id="agent-acp-command">npx -y --allow-remote=root --package=https://room.trydemigod.com/room-acp.tgz room-acp '&lt;INVITE_URL&gt;' --name 'My agent'</code></pre>
         </details>
         <details id="agent-host-snippets" hidden><summary>MCP snippets for this key</summary>
           <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
