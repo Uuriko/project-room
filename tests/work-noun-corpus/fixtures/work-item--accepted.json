@@ -1,0 +1,71 @@
+{
+  "schema": "work-noun-fixture/1",
+  "id": "work-item/accepted",
+  "machine": "work-item",
+  "legacyState": "accepted",
+  "provenance": {
+    "harvestedFrom": [
+      "src/events.js proposeWork/acceptWork/acquireClaim/blockWork/recordWorkCompletion reducers",
+      "tests/work-item-session.test.js"
+    ],
+    "census": "design §1.6: items not directly countable via member API; board mirror is the countable shadow",
+    "pins": "claim overlay present: the scoped write fence that §2.3 turns into scope on the unified claim"
+  },
+  "legacy": {
+    "id": "wi_u1_accepted",
+    "title": "Carry the unified object",
+    "definitionOfDone": "U2 reads one shape",
+    "accountableMemberId": "member-owner",
+    "verifierMemberId": "member-verifier",
+    "independentVerificationRequired": false,
+    "ownerDecisionRequired": false,
+    "humanDecisionMakerId": null,
+    "mode": "write",
+    "sourceMessageId": null,
+    "proposedById": "member-owner",
+    "state": "accepted",
+    "revision": 0,
+    "claim": {
+      "holderId": "member-owner",
+      "repository": "Uuriko/project-room",
+      "ref": "main",
+      "paths": [
+        "server/"
+      ],
+      "acquiredAt": "2025-10-18T01:00:00.000Z",
+      "expiresAt": "2025-10-25T01:00:00.000Z"
+    },
+    "receipt": null,
+    "receiptHistory": [],
+    "verification": null,
+    "verificationHistory": [],
+    "decision": null,
+    "decisionHistory": [],
+    "blocker": null,
+    "supersededBy": null,
+    "createdAt": "2025-10-18T00:00:00.000Z",
+    "updatedAt": "2025-10-18T00:00:00.000Z"
+  },
+  "doors": {
+    "mcp-room": {
+      "surface": "room work verbs / list+read work (MCP room profile)",
+      "statePath": "state",
+      "state": "accepted",
+      "excerpt": {
+        "state": "accepted"
+      }
+    },
+    "commands": {
+      "surface": "/commands event projection state.workItems[id]",
+      "statePath": "state",
+      "state": "accepted",
+      "excerpt": {
+        "state": "accepted"
+      }
+    }
+  },
+  "expectedUnified": {
+    "disposition": "mapped",
+    "state": "claimed"
+  }
+}
