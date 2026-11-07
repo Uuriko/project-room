@@ -16,6 +16,7 @@ import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mc
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
+import { starterTaskMeta } from "./mcp-starter-task.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -143,7 +144,16 @@ async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, 
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
       return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
     }
-    return handleMcpJoinRpc(message, { mcpUrl });
+    const reply = handleMcpJoinRpc(message, { mcpUrl });
+    // Anonymous starter task: one public task on the first call. Read-only
+    // recommend (never autoClaim); any failure degrades to the empty case.
+    if (message?.method === "initialize" && reply?.result && typeof roomMcp === "function") {
+      let recommended = null;
+      try { recommended = await roomMcp({ jsonrpc: "2.0", id: "starter-task", method: "tools/call", params: { name: "public_work_recommend", arguments: { limit: 1 } } }, { mcpUrl, searchParams }); }
+      catch { recommended = null; }
+      reply.result._meta = { ...(reply.result._meta || {}), starterTask: starterTaskMeta(recommended) };
+    }
+    return reply;
   }
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;
