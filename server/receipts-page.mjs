@@ -90,7 +90,7 @@ export function readableUtc(value) {
 
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
-  const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
+  const description = "Public receipts of work done in Project Room: published work records from rooms that chose to publish them, each stating what was checked.";
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
@@ -100,7 +100,7 @@ export function renderReceiptsHtml(page) {
 <body><a class="skip-link" href="#main">Skip to content</a><header><p><a href="/">Project Room</a></p></header>
 <main id="main" tabindex="-1">
 <h1>Public receipts</h1>
-<p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
+<p>Public receipts from rooms whose owners turned publishing on, plus public-work receipts. A receipt records work as the room reported it, and each receipt states what was actually checked. Private rooms stay off this page until the owner publishes them.</p>
 ${items}
 ${next}
 </main>
@@ -404,7 +404,13 @@ const publicJson = receipt => ({
   humans: receipt.humans,
   pullRequest: receipt.pullRequest,
   mergedAt: receipt.mergedAt,
-  ...(receipt.verification ? { verification: receipt.verification } : {}),
+  ...(receipt.verification && typeof receipt.verification === "object" ? { verification: {
+    ...receipt.verification,
+    ...(receipt.verification.state === "verified" ? { tier: "member-reviewed verdict" } : {}),
+    ...(receipt.verification.state === "self_attested" ? { tier: "bundle unaltered (self-asserted)" } : {}),
+    mergeVerified: Boolean(receipt.pullRequest && receipt.mergedAt),
+    signed: false,
+  } } : receipt.verification ? { verification: receipt.verification } : {}),
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.state ? { state: receipt.state } : {}),
