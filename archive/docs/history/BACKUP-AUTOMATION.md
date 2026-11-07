@@ -7,6 +7,14 @@ skips when the schedule is not due, and every cycle it runs ends with a
 read-only restore verification against the existing drill logic in
 `server/backup.mjs`.
 
+Driver of record (2026-10-26): in this tree the cycle is driven by the
+systemd pair `deploy/project-room-backup.timer` (daily) +
+`deploy/project-room-backup.service`, whose `ExecStart` runs
+`scripts/backup-verify.mjs --schedule daily --force` (the timer is the
+schedule, so the script's due-gate is bypassed). The crontab line under
+"Installing the schedule" below remains the manual alternative for
+hosts that do not install the systemd units.
+
 ## Schedule configuration
 
 The runner is configured by flags or environment:
