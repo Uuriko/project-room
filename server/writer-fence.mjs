@@ -562,7 +562,7 @@ const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures", "projecti
 // — a store the patrol has never run against has none of them, so they are
 // allowed by the recovery audit but never required. The patrol writes only
 // these tables; older writers have no code path to them.
-const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"]);
+const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks", "patrol_rotation"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
