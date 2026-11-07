@@ -51,7 +51,15 @@ const DUE_WHERE = `(
 function query(store, sql, params = []) {
   if (!store?.db?.prepare) return null;
   try { return store.db.prepare(sql).all(...params); }
-  catch { return null; } // a store that has never run escrow has no tables
+  catch (error) {
+    // A store that has never run escrow has no tables: that is the
+    // legitimate "nothing waiting" case and still reads as empty. Any
+    // other store error (locked, corrupt, schema-broken) must surface —
+    // returning null here fabricated "no bounty waiting on time" and
+    // stalled epoch progression with no signal anywhere (B8-4/B8-5).
+    if (/no such table/i.test(error?.message ?? "")) return null;
+    throw error;
+  }
 }
 
 function dueCount(store, now, { excludeApproved = false } = {}) {
