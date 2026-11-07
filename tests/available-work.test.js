@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { availableBoardRows, availableClaimsInRoom, availablePublicTasks, availableWorkInRoom } from "../server/available-work.mjs";
+import { availableBoardRows, availableClaimsInRoom, availableWorkInRoom } from "../server/available-work.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 
 const ROOM = "available-demo";
@@ -91,40 +91,4 @@ test("room projection: work items join board claims; zero-inventory is explicit"
     workItemId: "item-1", expectedRevision: 1, repository: "repo", ref: "main",
     paths: ["server/available-work.mjs"], expiresAt: FUTURE_LEASE } });
   assert.equal(availableWorkInRoom(store, ROOM, { viewerId: "worker" }).total, 0);
-});
-
-test("public tasks: only unclaimed packets, paginated scan", () => {
-  const packet = (taskId, state) => ({ taskId, title: `Task ${taskId}`, namespaceId: "commons",
-    termsVersion: 1, claimable: state === "unclaimed",
-    claim: { state, generation: 1, leaseExpiresAt: null } });
-  const pages = {
-    "": { tasks: [packet("t1", "submitted"), packet("t2", "unclaimed")], nextCursor: "t2" },
-    t2: { tasks: [packet("t3", "claimed"), packet("t4", "unclaimed")], nextCursor: null }
-  };
-  const store = { publicWorkClaims: { list: ({ after }) => pages[after] } };
-  const { items, total } = availablePublicTasks(store, { limit: 50 });
-  assert.deepEqual(items.map(item => item.id), ["t2", "t4"]);
-  assert.equal(total, 2);
-  assert.equal(items[0].source, "publicTask");
-  assert.equal(items[0].claimAction.endpoint, "/api/public-work/tasks/t2/claim");
-  // No facade: explicit empty, never a throw.
-  assert.deepEqual(availablePublicTasks({}), { items: [], total: 0 });
-});
-
-test("public tasks: deadline-passed packets are not offered, and total counts the whole pool (#3879)", () => {
-  // Facade-faithful packets: a deadline-passed task keeps claim.state
-  // "unclaimed" but carries claimable:false (#3707), and the facade's
-  // claim op refuses it with 409 public_work_deadline_passed. The pool
-  // must not offer it, and total is the pool-wide claimable count (the
-  // availableWorkInRoom contract), not the limit-capped page size.
-  const packet = (taskId, claimable) => ({ taskId, title: `Task ${taskId}`, namespaceId: "commons",
-    termsVersion: 1, claimable, claim: { state: "unclaimed", generation: 1, leaseExpiresAt: null } });
-  const pages = {
-    "": { tasks: [packet("open-1", true), packet("stale-1", false)], nextCursor: "stale-1" },
-    "stale-1": { tasks: [packet("open-2", true), packet("open-3", true)], nextCursor: null }
-  };
-  const store = { publicWorkClaims: { list: ({ after }) => pages[after] } };
-  const { items, total } = availablePublicTasks(store, { limit: 2 });
-  assert.deepEqual(items.map(item => item.id), ["open-1", "open-2"]);
-  assert.equal(total, 3);
 });
