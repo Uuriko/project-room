@@ -66,10 +66,15 @@ export const API_KEY_SCOPE_WILDCARD_NOTE = "prefix:* wildcard grants every scope
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 
 // Create an agent API-key manager. store is a caller-owned Map (keyId -> record).
-export function createAgentApiKeys({ store, clock, random } = {}) {
+// onCredentialChange({ keyId, identityId, reason }) runs after a rotate or
+// revoke, so the caller can release claims and leases held under the old
+// secret (a rotated credential must not keep working through held claims).
+export function createAgentApiKeys({ store, clock, random, onCredentialChange } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(random === undefined || typeof random === "function", "random must be a function if given");
+  check(onCredentialChange === undefined || typeof onCredentialChange === "function", "onCredentialChange must be a function if given");
+  const changed = (record, reason) => { if (onCredentialChange) onCredentialChange({ keyId: record.keyId, identityId: record.identityId, reason }); };
   const keys = store ?? new Map();
   const now = clock ?? Date.now;
   const newSecret = random ?? (() => base64url(randomBytes(MIN_SECRET_ENTROPY_BYTES)));
@@ -151,6 +156,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     record.keyHash = sha256(secret);
     record.lastUsedAt = null;
     record.lastUsedUa = null; // rotation issues a fresh secret: old usage telemetry must not ride along
+    changed(record, "rotated");
     return Object.freeze({ ...publicRecord(record), secret });
   };
 
@@ -160,6 +166,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     check(record, `unknown key "${keyId}"`);
     check(!record.revoked, `key "${keyId}" is already revoked`);
     record.revoked = true;
+    changed(record, "revoked");
     return publicRecord(record);
   };
 
@@ -172,18 +179,25 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
   };
 
   // Scope check with prefix wildcards ("rooms:*"), mirroring token-scopes.
-  const grants = (keyId, requiredScope) => {
+  // When the caller passes the connection's current permissions, the
+  // effective grant is key scope AND current permission: narrowing a
+  // connection's settings takes effect without reissuing its key.
+  const grants = (keyId, requiredScope, { currentScopes } = {}) => {
     check(typeof keyId === "string" && keyId.length > 0, "keyId must be a non-empty string");
     check(typeof requiredScope === "string" && requiredScope.length > 0,
       "requiredScope must be a non-empty string");
     const record = keys.get(keyId);
     if (!record || record.revoked) return false;
     if (record.expiresAt !== null && now() >= record.expiresAt) return false;
-    return record.scopes.some(scope => {
+    const covers = list => list.some(scope => {
       if (scope === requiredScope) return true;
       if (scope.endsWith(":*")) return requiredScope.startsWith(scope.slice(0, -1));
       return false;
     });
+    if (!covers(record.scopes)) return false;
+    if (currentScopes === undefined) return true;
+    check(Array.isArray(currentScopes), "currentScopes must be an array if given");
+    return covers(currentScopes.filter(scope => typeof scope === "string" && scope.length > 0));
   };
 
   return Object.freeze({ issue, verify, rotate, revoke, keysForIdentity, grants });
