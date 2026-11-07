@@ -80,3 +80,37 @@ test("settlePullRequest still prefers the live singular link when it is set", ()
   assert.equal(settled.item.state, "done");
   assert.equal(settled.item.pullRequest.url, URL);
 });
+
+// ---- SR-03 (LAB-MUTATION): the readiness gate at settlePullRequest's
+// own call site. The predicate has its own tests and ready paths settle
+// all over the suites, but nothing settled a claim whose pulls were
+// still undecided and expected refusal — deleting the gate inside
+// settlePullRequest survived the whole settlement set. The invariant:
+// an open pull settles nothing, and one undecided link holds the batch.
+
+test("SR-03: settlePullRequest refuses a claim whose only pull is still open", () => {
+  const open = Object.freeze({ url: URL, repo: "Uuriko/project-room", number: 1600 });
+  const item = {
+    id: "unready-claim",
+    state: "claimed",
+    owner: "alice",
+    files: [],
+    pullRequest: open,
+    pullRequests: [open],
+  };
+  assert.equal(settlePullRequest(item, "merged", NOW), null);
+  assert.equal(settlePullRequest(item, "closed", NOW), null);
+});
+
+test("SR-03: settlePullRequest refuses while any one of several pulls is still open", () => {
+  const open = Object.freeze({ url: "https://github.com/Uuriko/project-room/pull/1601", repo: "Uuriko/project-room", number: 1601 });
+  const item = {
+    id: "partly-ready-claim",
+    state: "in_progress",
+    owner: "alice",
+    files: [],
+    pullRequests: [settledLink("merged"), open],
+  };
+  assert.equal(settlePullRequest(item, "merged", NOW), null,
+    "a decided link does not settle the claim while a sibling pull is undecided");
+});
