@@ -322,6 +322,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // and the module verifies its own schema on open. Replaces the slice 1/3
   // agent_operator_controls table (module removed).
   "agent_autonomy_tiers",
+  // agent_chat_tiers: t1_chat widening over a t1_readonly row (#5751
+  // rollback fence). Additive and NOT fenced: an older reader ignores it
+  // and reads the member as t1_readonly.
+  "agent_chat_tiers",
   // agent_skill_cards (RC-2026-09-24-202: members-directory skill cards).
   // Purely additive and intentionally NOT fenced — older writers have no
   // code path to it, and the module verifies its own shape on write.

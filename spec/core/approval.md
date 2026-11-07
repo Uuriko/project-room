@@ -40,7 +40,7 @@ Two records constrain an agent without waiting for a per-action approval. Both a
 
 The action class of a command MUST be one of `observe`, `draft`, or `act`. `observe` reads. `draft` records the caller's own intent and does not address another member, leave the room, or launch work. `act` is room-visible, grants access, sends, or launches work. An unclassified command type MUST fail closed. Source: `server/action-classes.mjs` (`classifyCommand`). The wake queue and attention preferences are `draft`. Inbox reply sends are `act`.
 
-The autonomy tier of an agent member MUST be `t1_readonly` or `t2_standard`. A missing row MUST behave as `t2_standard`. A `t1_readonly` agent MUST be refused on writes other than session status, session stop request, and session stopped, with HTTP 403 `agent_readonly`. The tier is read on the command, so a demotion applies on the next write. Source: `server/autonomy-tiers.mjs`.
+The autonomy tier of an agent member MUST be `t1_readonly`, `t1_chat`, or `t2_standard`. A missing row MUST behave as `t2_standard`. A `t1_readonly` agent MUST be refused on writes other than session status, session stop request, and session stopped, with HTTP 403 `agent_readonly`. A `t1_chat` agent MUST additionally be allowed message posted, edited, deleted, and DM posted, and MUST be refused on every other write with HTTP 403 `agent_chat_only`. The tier is read on the command, so a demotion applies on the next write. Source: `server/autonomy-tiers.mjs`.
 
 A client MAY show those two values. They are the enforcement record. They are not a decoration the agent sets.
 

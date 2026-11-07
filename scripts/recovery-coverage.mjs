@@ -348,6 +348,8 @@ export async function seedRecoveryCoverage(f) {
     VALUES('commons','agent','t2_standard',?,'owner')
     ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier='t2_standard',updated_at=excluded.updated_at,updated_by='owner'`)
     .run(f.now());
+  // agent_chat_tiers (#5751 rollback fence); inert over a t2_standard row.
+  f.store.db.prepare("INSERT OR IGNORE INTO agent_chat_tiers(room_id,member_id) VALUES('commons','agent')").run();
   // Seed one published skill card so the capture comparison covers
   // agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202).
   f.store.membersDirectory.setSkills(identityId, { publish: true,

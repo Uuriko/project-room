@@ -196,6 +196,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_chat_tiers",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "agent_capability_grants",
     "key": "room_id",
     "action": "delete",
