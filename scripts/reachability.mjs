@@ -25,11 +25,6 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // shipping an asset or passing a unit test does not prove feature integration.
 // Remove an exception when its actual runtime or operational loader is wired.
 export const KEEP = [
-  // Unmounted supervision/session integration; retain pending product review.
-  "server/supervision.mjs",
-  "server/supervision-routes.mjs",
-  "server/session-adapter.mjs",
-  "server/session-adapter/herdr-bridge-adapter.mjs",
   // Notification delivery integrations remain inert, not implicitly enabled.
   "server/notify-policy.mjs",
   "server/notify-email.mjs",
@@ -57,10 +52,6 @@ export const KEEP = [
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
   "server/push-notifications-supported.mjs",
-  // Pure checks. Wake, route, and MCP wiring waits on open PRs that already
-  // edit those files, and the runtime package list is one of them.
-  "server/repro-check.mjs",
-  "server/agent-audit.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
