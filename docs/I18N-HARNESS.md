@@ -7,7 +7,7 @@ CI lint-like gate.
 ## What it scans
 
 - UI strings: `src/**/*.js` and root `*.html` pages
-- Email templates: `server/notify-email.mjs`, `server/email-envelope.mjs`
+- Email templates: `server/email-envelope.mjs`
 - Error messages: `throw new Error("…")` / `new Error("…")` literals in `server/**/*.mjs`
 
 The harness only **reads** these files. It never edits UI code.
