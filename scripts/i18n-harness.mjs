@@ -7,7 +7,7 @@
 //
 // Scopes (user-facing string surfaces):
 //   - UI strings: src/**/*.js and root *.html pages
-//   - email templates: server/notify-email.mjs, server/email-envelope.mjs
+//   - email templates: server/email-envelope.mjs
 //   - error messages: throw/new Error(<literal>) in server/**/*.mjs
 //
 // Rules:
@@ -146,7 +146,6 @@ function expectedTrackedFiles() {
       (f) =>
         (f.startsWith("src/") && (f.endsWith(".js") || f.endsWith(".mjs"))) ||
         (f.endsWith(".html") && !f.includes("/")) ||
-        f === "server/notify-email.mjs" ||
         f === "server/email-envelope.mjs"
     )
     .filter(isScannableRel)
@@ -161,7 +160,7 @@ export function findUnpinnedFiles(expected, manifest) {
 // Files the harness READS but never modifies; everything else lives in
 // scripts/, tests/, strings/, docs/ (new files this lane owns).
 const UI_GLOBS = ["src", "index.html", "join.html", "agent-signin.html", "about.html", "offers.html", "operator.html", "offline.html", "404.html"];
-const EMAIL_FILES = ["server/notify-email.mjs", "server/email-envelope.mjs"];
+const EMAIL_FILES = ["server/email-envelope.mjs"];
 const RULES = ["hardcoded-ui-string", "sentence-concatenation", "positional-placeholder"];
 
 function walk(dir, out = []) {
