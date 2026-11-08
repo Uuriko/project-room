@@ -1,9 +1,9 @@
 # Project Room delivery ledger
 
-Execution order and complete scope mapping: [build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md).
+Execution order and complete scope mapping: [build-to-completion plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/BUILD-TO-COMPLETION-PLAN.md).
 
 Updated 2026-10-18. Owner role for these local items: Codex implementation.
-This ledger preserves the seven stages in the [execution plan](ARCHITECTURE-EXECUTION-PLAN.md),
+This ledger preserves the seven stages in the [execution plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ARCHITECTURE-EXECUTION-PLAN.md),
 plus the [infra research](FRONTIER-INFRA-RESEARCH-2026-10-18.md) and
 [startup/product strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md).
 Detailed requirements in those documents remain binding; these rows do not replace them.
@@ -18,7 +18,7 @@ evidence and a source revision, not just a checkbox.
 |---|---|---|---|
 | A1 | Reader/query cutover — in progress | None | Remaining consumers use explicit bounded contracts; privacy, ordering, export and recovery parity |
 | A2 | Canonical message entity writes — in progress | A1 contracts | Transaction-scoped contexts, touched outputs, no unrelated serialization, differential command tests and reversal |
-| A2.1 | Schema 41 replay isolation — qualified checkpoint | Schema 40 | [Recorded tests and measurements](MESSAGE-REPLAY-ISOLATION-PLAN.md); final broad release qualification remains A7 |
+| A2.1 | Schema 41 replay isolation — qualified checkpoint | Schema 40 | [Recorded tests and measurements](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/MESSAGE-REPLAY-ISOLATION-PLAN.md); final broad release qualification remains A7 |
 | A3 | Independent work/attempt/artifact aggregates — planned | A2 boundary pattern | Independent revisions/storage; cross-domain transactions, resumable migration, semantic parity and reverse migration |
 | A4 | Durable scheduling — planned | A3 | Due records committed with originating writes; no read-triggered flush; leases, fencing, retry, cancellation and restart drills |
 | A5 | Room authority and placement — planned | A3, A4 | One accepting authority, epoch migration, rollback and global identity/inbox continuity |
@@ -66,7 +66,7 @@ existing work; no automation has been activated by writing this plan.
 
 ## Adaptive system additions (2026-10-18)
 
-The [master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) sequences all work above
+The [master plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md) sequences all work above
 into six integration packages without replacing the original seven stages.
 
 | ID | Scope / status | Dependencies | Acceptance evidence required |

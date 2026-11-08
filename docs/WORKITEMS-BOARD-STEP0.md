@@ -366,7 +366,7 @@ Completed items awaiting required verification/owner acceptance map to delivered
 Item-backed board acceptance controls open canonical work; API attempts to approve
 through board bundles return a conflict with the canonical context/command paths.
 Native board deliveries retain their existing workflow. See
-[cutover qualification](WORK-CUTOVER-PLAN.md).
+[cutover qualification](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/WORK-CUTOVER-PLAN.md).
 
 ### Result reader extraction (2026-10-19)
 

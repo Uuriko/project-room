@@ -43,7 +43,7 @@ text. The current initial publication still has an unbounded transaction, and
 full replay still operates on growing state. These are remaining design defects,
 not acceptable permanent tradeoffs.
 
-See [the replay implementation and measurements](MESSAGE-REPLAY-ISOLATION-PLAN.md)
+See [the replay implementation and measurements](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/MESSAGE-REPLAY-ISOLATION-PLAN.md)
 and [machine-readable results](message-replay-benchmark-results.json).
 
 ## Research with the highest expected value

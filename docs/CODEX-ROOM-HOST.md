@@ -339,7 +339,7 @@ and asserts retry returns the same result without another model turn. It never
 uses a production Room connection or imports operator credentials. Its private
 fixture/journal are retained for reconciliation if execution is ambiguous.
 A passing report does not establish physical sleep/wake, service restart, work
-quality or general tool execution. See [the integrated qualification](WORK-INTEGRATION-PLAN.md).
+quality or general tool execution. See [the integrated qualification](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/WORK-INTEGRATION-PLAN.md).
 
 
 For the separate in-flight transport failure trial, append `--disconnect-after-start`
@@ -350,7 +350,7 @@ is reported as such; this does not certify physical sleep/wake or successful com
 
 ## Platform qualification
 
-See the [execution portability plan and qualification evidence](EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
+See the [execution portability plan and qualification evidence](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
 # Directed requests on a native host
 
 The shared-assistant watcher and directed-request receiver are distinct modes.

@@ -74,16 +74,6 @@ Schemathesis 4.x (`uvx`, or `pipx` if `uv` is absent) against a throwaway local 
 bash scripts/qa2/fuzz.sh qa2-fuzz-out
 ```
 
-### Public pages — `scripts/qa2/public-pages.mjs`
-
-axe WCAG 2.2 AA (serious and critical fail), canonical / robots / Open Graph, broken same-origin links, and horizontal overflow at 390px, for the public HTML pages. `--known path:substring` waives a triaged problem. Needs Playwright and `@axe-core/playwright`.
-
-```bash
-npx playwright install chromium
-npm i --no-save @axe-core/playwright@4
-node scripts/qa2/public-pages.mjs --origin http://127.0.0.1:4173 --json pages.json
-```
-
 ### Load smoke — `scripts/qa2/load-smoke.mjs`
 
 Dependency-free latency smoke (Node 22+). It mixes anonymous reads with one authenticated agent reading and posting, then archives the room and revokes the identity. Thresholds: p95 static ≤ 500 ms, p95 API read ≤ 800 ms, p95 post ≤ 1200 ms, error rate < 1% (429 counted separately). **It refuses `--vus` greater than 3 against any origin that is not loopback** (exit 2). Production has one Durable Object; do not point a heavier run at it.
