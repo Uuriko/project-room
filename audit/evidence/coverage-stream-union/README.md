@@ -1,9 +1,0 @@
-# Coverage evaluator memory repair
-
-Exact main 36fcdb9d hosted qualification 41839148713: all three collection batches passed, 15,994 tests total, 15,977 pass and 17 intentional skips, zero failures/cancellations. Unit, Cloudflare and browser jobs passed. Coverage then aborted in the parent evaluator at approximately 4.06GB V8 heap, exit 134. No threshold report was emitted, so its threshold verdict is unknown. Raw coverage was not retained by that workflow; no exact payload replay is available. Full private log SHA256 35662aed741d7c5beeb0796e6b3855a4bca3b3d8b2536c36f09bf0f60953e7a3.
-
-The old CLI grouped and retained every function/range record from all payloads before computing per-payload covered-line sets. The new CLI folds one payload at a time into covered-line sets for configured source files. It uses unchanged coveredLinesForPayload mathematics and a shared result evaluator. Thresholds, discovery, exclusions, missing-file accounting and time limits are unchanged. Peak memory still includes the current payload; no claim of a bounded individual JSON file parser.
-
-Causal synthetic memory probe, same 2,000 payloads of 150 functions/12 ranges at --max-old-space-size=64: reference grouped evaluator aborts with heap out of memory (signal 6); streaming evaluator exits 0, reports 100% and 180ms, 99,440KiB maxRSS on this Mac. RSS includes memory outside the 64MB V8 heap. This is a synthetic scaling proof, not the missing hosted raw payload replay.
-
-Focused tests compare complete reports and threshold outcomes against the reference across changing ranges, reversed/duplicate histories, exclusions, overlapping modules, missing/blank files, empty payloads and actual V8 split-process payloads. Stress child proves 2,000 payloads pass with a 64MB heap. Independent source review CLEAR. New hosted threshold qualification remains required.

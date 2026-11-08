@@ -1,3 +1,0 @@
-check-deps: ok (11 declared dependencies present)
-ok - 530 server modules, 4 grandfathered-untested, no new untested modules
-preflight: 760 runtime source files checked in 650ms; cold-package tests and full qualification still required

@@ -1,5 +1,0 @@
-{"phase":"old-rewake","now":300000,"attempt":1}
-{"phase":"old-rewake","now":600000,"attempt":2}
-{"phase":"new-arrival","now":600001,"send":false,"coalesced":true}
-{"phase":"new-due","now":900001,"due":[{"agentId":"synthetic-agent","roomId":"synthetic-room","attempt":1,"count":2,"signal":{"roomId":"synthetic-room","signalId":"new","reason":"rewake"}}]}
-{"phase":"outside-window-control","send":true,"count":1}

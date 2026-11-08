@@ -1,7 +1,0 @@
-{"table":"oauth_provider_codes","plan":["SCAN oauth_provider_codes"]}
-{"table":"oauth_provider_access_tokens","plan":["SCAN oauth_provider_access_tokens"]}
-{"table":"oauth_provider_refresh_tokens","plan":["SCAN oauth_provider_refresh_tokens"]}
-{"table":"oauth_invite_codes","plan":["SCAN oauth_invite_codes"]}
-{"table":"oauth_invite_access_tokens","plan":["SCAN oauth_invite_access_tokens"]}
-{"table":"oauth_invite_refresh_tokens","plan":["SCAN oauth_invite_refresh_tokens"]}
-{"table":"oauth_invite_grants","plan":["SCAN oauth_invite_grants"]}

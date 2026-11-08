@@ -1,9 +1,0 @@
-# Mixed legacy and native message maintenance
-
-Source `e65c78fc2c1f2ca919fe331cf36eda3bab888dad`, based on `2ebce68b3` plus the separate export fix. Actual Native HTTP test did not fail invitation setup: its synthetic conversation-certification endpoint called the real global legacy backfill, which selected a new normalized room and reached publishReplayMessages. Its raw canonical message DML correctly hit the protected current-writer guard. A temporary fixture catch logged that stack and was removed; no fixture bypass remains.
-
-Legacy backfill and parity selectors now validate each selected normalized head with the existing current schema, receipt, commitment and carrier checks, then move past it by room ID. They never write native messages or progress cursors. Explicit selected native legacy-parity requests refuse with guidance to use independent current-record integrity checking. Native integrity checks remain unchanged; no false legacy certification. Missing heads behind current markers and corrupt schema/head refuse instead of replaying or silently skipping.
-
-The three new controls fail against exact baseline runtime (0/3), then pass (3/3). They prove mixed-store legacy certification, exact unchanged native rows and cursors, direct old-writer refusal, the full independent oracle, malformed-marker refusal and corrupt-head/schema refusal. Existing legacy backfill/parity neighbors pass 38/38. Actual default Native HTTP file passes all 6 tests. Zero skips. ESLint and diff check pass.
-
-This remains global legacy maintenance: selected normalized rooms can incur repeated bounded metadata verification as the sweep advances. It is not a constant-cost whole-store operation, and no such claim is made. No history hydration for skipped native rooms, new schema/index, grants, deployment or live proof.
