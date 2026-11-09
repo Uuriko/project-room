@@ -1,5 +1,4 @@
 import { readConversation, readDirectConversations } from '../server/conversation-sync.mjs';
-import { createSquad } from "../server/squads.mjs";
 // Test gate: actual HTTP + SQLite protects viewer privacy, current-record
 // reconstruction and reset semantics. Existing full snapshot tests cannot
 // exercise signed bounded continuations. No production test seam.
@@ -266,10 +265,6 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
   assert.equal((await f.get({ messageId: 'explicit-reply' }, f.bob)).value.addressing.explicitlyMentioned, false);
   assert.equal((await f.get({ messageId: 'implicit-reply' }, f.alice)).value.addressing.explicitlyMentioned, false);
   assert.equal((await f.get({ messageId: 'silent-reply' }, f.alice)).value.addressing.explicitlyMentioned, false);
-  createSquad(f.store, f.owner, 'commons', { name: 'helpers', memberIds: ['alice'] });
-  f.post('squad-reply', '@squad/helpers inspect this', { replyToId: 'topic' });
-  assert.equal((await f.get({ messageId: 'squad-reply' }, f.alice)).value.addressing.explicitlyMentioned, true);
-  assert.equal((await f.get({ messageId: 'squad-reply' }, f.bob)).value.addressing.explicitlyMentioned, false);
   for (const [id, name] of [['alex-one', 'Alex Smith'], ['alex-two', 'Alex Jones']]) {
     f.command(f.owner, 'member.added', { memberId: id, displayName: name, kind: 'agent', permissions: [] });
   }
@@ -287,13 +282,12 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
 
 for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'projection fallback'}: cold selected mentions use fresh roster without room hydration`, async t => {
   const f = await setup(t);
-  createSquad(f.store, f.owner, 'commons', { name: 'helpers', memberIds: ['alice'] });
   for (const [id, displayName] of [['alex-one', 'Alex Smith'], ['alex-two', 'Alex Jones']])
     f.command(f.owner, 'member.added', { memberId: id, displayName, kind: 'agent', permissions: [] });
   const alex = f.store.issueAccessKey('commons', 'alex-one');
   const alias = f.store.identities.create('Global Helper');
   linkWithProof(f.store, f.owner, 'commons', alias, { memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
-  for (const [id, body] of [['direct', '@alice inspect'], ['squad', '@squad/helpers inspect'],
+  for (const [id, body] of [['direct', '@alice inspect'],
     ['ambiguous', '@Alex inspect'], ['named', '@Alex Smith inspect'], ['alias', '@Global Helper inspect']]) f.post(id, body);
   f.post('private', '@alice private', { toMemberId: 'bob' });
   if (indexed) {
@@ -308,7 +302,7 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
     finally { spy.mock.restore(); }
   };
   for (const [id, token, expected] of [['direct', f.alice, true], ['direct', f.bob, false],
-    ['squad', f.alice, true], ['squad', f.bob, false], ['ambiguous', alex, false],
+    ['ambiguous', alex, false],
     ['named', alex, true], ['alias', alias.secret, true], ['private', f.bob, false]])
     assert.equal(read(id, token).addressing.explicitlyMentioned, expected, id);
   assert.throws(() => read('private', f.alice), error => error.status === 404);

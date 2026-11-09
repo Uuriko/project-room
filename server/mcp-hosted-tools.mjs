@@ -212,30 +212,6 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     claimId: { ...idField, maxLength: 128, description: "Work-claim id to walk downstream from." }
   }, ["roomId", "claimId"])),
-  tool("squads_list", "List the squads in a room: id, name, goal, members, channel (the thread-root message id), owner, and state. Same call as GET /api/rooms/:roomId/squads. @squad/<name> in a message fans out to every active member. This read does not create, change, or disband a squad.", schema({
-    roomId: roomIdField
-  }, ["roomId"])),
-  tool("squads_get", "Read one squad by id or name: goal, member roster, channel thread, owner, and state. Same call as GET /api/rooms/:roomId/squads/:squadId. This read does not change the squad.", schema({
-    roomId: roomIdField,
-    squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"])),
-  tool("squads_create", "Create a squad in a room: name, goal, channel thread, and initial roster. Same call as POST /api/rooms/:roomId/squads. The caller becomes owner and joins the roster automatically. At most 12 members. @squad/<name> in a message fans out to every active member.", schema({
-    roomId: roomIdField,
-    name: { type: "string", minLength: 1, maxLength: 64, description: "Squad name: letters, digits, _ or -." },
-    goal: { type: "string", maxLength: 500, description: "Squad goal." },
-    channelMessageId: { ...idField, description: "Thread-root message id for the squad's channel." },
-    memberIds: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 }, description: "Active room members to seed the roster." }
-  }, ["roomId", "name"]), false),
-  tool("squads_update_members", "Add or remove squad members. Same call as POST /api/rooms/:roomId/squads/:squadId/members. Only the squad owner may add members or remove other members; any member may remove themselves. The owner cannot be removed from an active squad. At most 12 members.", schema({
-    roomId: roomIdField,
-    squadId: { ...idField, description: "Squad id (sq_...) or squad name." },
-    add: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 } },
-    remove: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 } }
-  }, ["roomId", "squadId"]), false),
-  tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
-    roomId: roomIdField,
-    squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false),
   tool("room_map", "Read this room's code map. GET /api/rooms/{roomId}/map/query. map.query returns a symbol or file with its neighbors and dependents. map.path finds a path from one symbol or file to another. map.hotspots lists the most coupled files. map.explain summarizes one symbol or file. Pass op query, path, hotspots, or explain. q is the symbol or file for query and explain. from and to are the ends of a path. repo is owner/name and defaults to the newest map in the room.", schema({
     roomId: roomIdField,
     op: { type: "string", enum: ["query", "path", "hotspots", "explain"], description: "map.query, map.path, map.hotspots, or map.explain." },

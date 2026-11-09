@@ -55,7 +55,6 @@ import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work
 import { alertLeaseRefusal, notifyClaimCollisions, notifyLeaseExpired } from "./agent-collisions.mjs";
 import { noteProjectMapOverlap, publishProjectMapOverlap, withProjectMapOverlap } from "./project-map-store.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
-import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { notifyContractChanges } from "./contract-notices.mjs"; // contract-change notices (flag)
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
@@ -1303,10 +1302,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
       }
-    }
-    // plan-squads: a work offer can target a squad; the squad must exist and be active.
-    if (data.squadId !== undefined && data.squadId !== null && !getActiveSquad(store.db, roomId, data.squadId)) {
-      reject(422, "squad_unknown", `squadId "${typeof data.squadId === "string" ? data.squadId : "?"}" is not an active squad in this room`);
     }
     // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
