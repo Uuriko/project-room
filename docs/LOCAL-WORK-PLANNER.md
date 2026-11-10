@@ -19,7 +19,8 @@ start models, execute shell commands, or enable background operation.
    existing runner resolves it. Record completed work only with evidence.
 3. Obtain a fresh report from each device: stable device fingerprint, runtime,
    capabilities, availability and active work. Two chats on one machine are one
-   device. A device reporting unavailable or silence is not spare capacity.
+   device. A fresh verified unavailable report blocks every alias of that physical
+   fingerprint until reconciled. A device reporting unavailable or silence is not spare capacity.
 4. Plan up to two queued tasks per available device, one executing at a time.
    Prefer high expected value per minute. Scope overlaps serialize onto the same
    device or wait. A failed job requires an investigation candidate, not endless
@@ -74,7 +75,8 @@ through the operator's existing `gh` connection. Each policy includes
 `repository`, positive integer `number`, `kind` (`review` or `failed_ci`), plus
 acceptance, valueReason, value, minutes, requires and scopes from the job schema.
 It uses argument arrays, never PR-supplied shell commands. Closed PRs are excluded;
-failed-CI policies require an actual completed failure. Skipped checks do not
+failed-CI policies require an actual completed CheckRun failure or a StatusContext
+FAILURE/ERROR; pending external statuses do not qualify. Skipped checks do not
 create failures or prove execution. The result contains jobs and dated source
 observations. Merge these with fresh devices, receipts and reservations before
 planning. Review scope is explicitly selected; scanning unrelated repositories

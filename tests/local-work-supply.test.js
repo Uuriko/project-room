@@ -68,3 +68,19 @@ test('real service claim, durable journal, delivery and replay execute a selecte
   await runPlannedRequest(input);
   assert.equal(calls,1,'re-entry must recover the saved outcome, not invoke host again');
 });
+
+test('discovers failed StatusContext checks and excludes pending or successful contexts',async()=>{
+  for(const state of ['FAILURE','ERROR','PENDING','SUCCESS']){
+    const result=await discover({...pr,statusCheckRollup:[{__typename:'StatusContext',state,context:'external CI',targetUrl:'https://example.test/ci'}]});
+    const failed=['FAILURE','ERROR'].includes(state);
+    assert.equal(result.jobs.length,failed?1:0);
+    if(failed) assert.deepEqual(result.observations[0].failedChecks,[{name:'external CI',url:'https://example.test/ci'}]);
+  }
+});
+test('preflight rejects a newly unavailable alias of the same physical device',async()=>{
+  const input=await setup(), fresh=structuredClone(input.snapshot);
+  fresh.devices.push({...fresh.devices[0],id:'alias',available:false});
+  await assert.rejects(runPlannedRequest({...input,refresh:async()=>fresh,runner:async options=>{
+    await options.preflight();throw Error('host must not execute');
+  }}),/Assignment changed/);
+});

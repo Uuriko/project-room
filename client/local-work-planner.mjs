@@ -28,6 +28,12 @@ export function planLocalWork({ devices, jobs, receipts = [], reservations = [],
   }
   const done = new Set(receipts.map(key));
   const held = new Set(reservations.map(key));
+  // Reconcile fresh reports across runtime aliases before assigning physical capacity.
+  const unavailablePhysical = new Set(devices.filter(device => {
+    const age = now - Date.parse(device?.observedAt);
+    return device?.verified === true && /^[a-f0-9]{16,64}$/.test(device.fingerprint ?? '')
+      && Number.isFinite(age) && age >= 0 && age <= freshnessMs && device.available !== true;
+  }).map(device => device.fingerprint));
   const devicesSeen = new Set(), physicalSeen = new Set(), eligible = [], unavailable = [];
   for (const device of devices) {
     if (!device?.id || devicesSeen.has(device.id) || !strings(device.capabilities)) throw Error('Invalid or duplicate device');
@@ -36,7 +42,7 @@ export function planLocalWork({ devices, jobs, receipts = [], reservations = [],
     let reason = null;
     if (device.verified !== true || !/^[a-f0-9]{16,64}$/.test(device.fingerprint ?? '')) reason = 'unverified_device';
     else if (!Number.isFinite(age) || age < 0 || age > freshnessMs) reason = 'stale_device';
-    else if (device.available !== true || reservations.some(r => r.deviceId === device.id)) reason = 'busy_or_unavailable';
+    else if (unavailablePhysical.has(device.fingerprint) || reservations.some(r => r.deviceId === device.id)) reason = 'busy_or_unavailable';
     else if (physicalSeen.has(device.fingerprint)) reason = 'duplicate_physical_device';
     // A second runtime on a busy physical machine must not obtain another slot.
     if (device.verified === true && reservations.some(r => devices.find(d => d.id === r.deviceId)?.fingerprint === device.fingerprint)) reason = 'busy_or_unavailable';

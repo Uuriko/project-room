@@ -42,3 +42,10 @@ test('capability and value limits prevent filler or unsuitable work', () => {
   assert.throws(()=>plan({jobs:[job('one',{minutes:1000})]}));
   assert.throws(()=>plan({jobs:[job('one',{acceptance:''})]}));
 });
+
+test('fresh unavailable aliases fence the physical device regardless of order', () => {
+  const free=device('a'), busy=device('b',{fingerprint:free.fingerprint,available:false});
+  for(const devices of [[free,busy],[busy,free]]) assert.equal(plan({devices}).assignments.length,0);
+  for(const extra of [{fingerprint:'b'.repeat(16)},{verified:false},{observedAt:new Date(now-120001).toISOString()}])
+    assert.ok(plan({devices:[free,{...busy,...extra}]}).assignments.length>0);
+});
