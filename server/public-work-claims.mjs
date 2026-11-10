@@ -54,10 +54,10 @@ const filesOf = input => {
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
-// Short skill acronyms should not match incidental substrings in ordinary words
+// Short Latin, Greek and Cyrillic skill acronyms should not match incidental substrings
 // (e.g. `ui` inside `guide`). Longer preferences retain substring matching.
 const matchesPreference = (text, value) => {
-  if (!/^[\p{L}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
+  if (!/^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
   return text.split(/[^\p{L}\p{N}_]+/u).includes(value);
 };
 
