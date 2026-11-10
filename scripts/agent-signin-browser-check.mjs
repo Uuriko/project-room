@@ -30,15 +30,15 @@ test("visible entry choices open focused flows without hiding pending agent sign
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   for (const width of [1280, 390]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    // These tests inject network outcomes; service workers can bypass page.route.
+    const page = await browser.newPage({ viewport: { width, height: 900 }, serviceWorkers: "block" });
     page.setDefaultTimeout(10000);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
     assert.equal(await page.locator('[data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.locator("#google-signin").isVisible(), false, "unconfigured provider is not offered");
-    // The wall's "Agent sign in" is a link to the standalone page now
-    // (decision #37); the whole flow below lives on /agent-signin.
+    // Legacy credential flows remain available directly on /agent-signin.
     await page.goto(new URL("/agent-signin", page.url()).href);
     await page.locator('[name="identityId"]').waitFor({ state: "visible" });
     assert.equal(new URL(page.url()).pathname === "/agent-signin", true);
@@ -57,7 +57,10 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator('[name="identityId"]').fill("ai_test");
     await page.locator('[name="secret"]').fill("invalid-test-credential");
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
-    const route = await pending;
+    let pendingTimer;
+    const route = await Promise.race([pending, new Promise((_, reject) => {
+      pendingTimer = setTimeout(() => reject(new Error("Agent rooms route was not intercepted")), 5000);
+    })]).finally(() => clearTimeout(pendingTimer));
     // Leaving mid-request is refused by the component's own guard, so
     // the pending request stays on screen (the wall step behaved the
     // same way through the same leave()).
@@ -157,7 +160,7 @@ for (const width of [1280, 390]) {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const browser = await chromium.launch({ headless: true });
     t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-    const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
+    const page = await browser.newPage({ viewport: { width, height: 900 }, serviceWorkers: "block" }), errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.goto(new URL("/agent-signin", page.url()).href);
@@ -198,7 +201,8 @@ for (const width of [1280, 390]) {
       } else await route.continue();
     });
     await page.locator('[data-agent-form="make-room"] button[type="submit"]').click();
-    await page.locator('[data-agent-status].error').waitFor();
+    await page.locator('[data-agent-status].error').waitFor({ timeout: 5000 });
+    assert.equal(sessionAttempts, 1, "the session response loss was injected once");
     assert.equal(await page.locator('[data-agent-form="make-room"]').count(), 0);
     assert.equal(roomCreates, 1);
     const session = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/agent/session");
