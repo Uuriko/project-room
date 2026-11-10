@@ -9,7 +9,6 @@ import { markIfOther, withContentTrust, stampThread } from "./content-trust.mjs"
 import { messageInHistory } from "./history-visibility.mjs";
 import { archiveMarker, THREAD_VISIBILITY_INDEXES } from "./messages-store.mjs";
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
-import { squadMentionTargets } from "./squads.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -198,8 +197,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       // Mention resolution needs fresh membership, not hydrated conversation or work history.
       const message = messages[0], members = store.roomAuthority(roomId).members;
       addressing.explicitlyMentioned = ((!message.toMemberId || message.toMemberId === auth.member.id)
-        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id))
-        || squadMentionTargets(store.db, roomId, message.body, message.authorId, members, message.toMemberId).includes(auth.member.id);
+        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id));
     }
     const nextCursor = currentPage ? (currentPage.continuation ? signed.encode({kind:"page",scope,sequence:head.sequence,anchor,
       before:currentPage.continuation.position,beforeId:currentPage.continuation.messageId,indexed:true,archiveMerged:false}) : null) : rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,

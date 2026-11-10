@@ -69,7 +69,6 @@ import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
 import { CONTENT_TRUST, stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust } from "./content-trust.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
-import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
 import { runRoomMap } from "./project-map-store.mjs";
 import { firstConnectTask } from "./first-connect-task.mjs";
 import { statusHint } from "./status-digest.mjs";
@@ -178,7 +177,6 @@ function validRoomArgs(name, args) {
   if (name === 'room_wait_for_attention') return Number.isSafeInteger(args.after) && args.after >= 0 && (args.timeoutSec === undefined || Number.isInteger(args.timeoutSec) && args.timeoutSec >= 0 && args.timeoutSec <= 120) && (args.includeWork === undefined || typeof args.includeWork === 'boolean');
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
-  if (name === "squads_list") return true;
   if (name === "room_map") {
     const repoOk = args.repo === undefined || typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200;
     if (!repoOk || !["query", "path", "hotspots", "explain"].includes(args.op)) return false;
@@ -187,11 +185,6 @@ function validRoomArgs(name, args) {
       return typeof args.from === "string" && typeof args.to === "string" && args.from.length >= 1 && args.to.length <= 300 && args.from.length <= 300 && args.to.length >= 1 && args.q === undefined;
     }
     return typeof args.q === "string" && args.q.length >= 1 && args.q.length <= 300 && args.from === undefined && args.to === undefined;
-  }
-  if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
-  if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
-  if (name === "squads_update_members" || name === "squads_disband") {
-    return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   }
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
@@ -725,20 +718,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
     return doc;
   }
-  if (name === "squads_list") return listSquads(store, secret, roomId);
   if (name === "room_map") return runRoomMap(store, secret, args);
-  if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
-  if (name === "squads_create") {
-    const data = { name: args.name };
-    if (args.goal !== undefined) data.goal = args.goal;
-    if (args.channelMessageId !== undefined) data.channelMessageId = args.channelMessageId;
-    if (args.memberIds !== undefined) data.memberIds = args.memberIds;
-    return createSquad(store, secret, roomId, data);
-  }
-  if (name === "squads_update_members") {
-    return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
-  }
-  if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
   if (name === "get_room_context" && args.view === "handoff") {
     // Flag ROOM_HANDOFF_PACKET: validRoomArgs refuses view unless enabled.
     const context = readComposedRoomContext(store, secret, roomId, { workAfter: args.work_after ?? "" });
@@ -1320,7 +1300,6 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   ...BOARD_CLAIM_TOOLS,
   "room_create", "room_join", "room_merge_members",
-  "squads_create", "squads_update_members", "squads_disband",
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",

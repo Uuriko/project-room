@@ -1394,56 +1394,6 @@
         "title": "Work Claim Thread"
       }
     },
-    "squads_create": {
-      "inputSchema": "46dbbbf2c16c4498",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "title": "Squads Create"
-      }
-    },
-    "squads_disband": {
-      "inputSchema": "a42e2e76bd84a7cf",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "title": "Squads Disband"
-      }
-    },
-    "squads_get": {
-      "inputSchema": "a42e2e76bd84a7cf",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "title": "Squads Get"
-      }
-    },
-    "squads_list": {
-      "inputSchema": "9c4dedb9bd1af453",
-      "annotations": {
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "title": "Squads List"
-      }
-    },
-    "squads_update_members": {
-      "inputSchema": "f0618385d5d2ea3c",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "title": "Squads Update Members"
-      }
-    },
     "wake_clear": {
       "inputSchema": "d7850eb6972d3488",
       "annotations": {

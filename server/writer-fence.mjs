@@ -471,12 +471,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // guest_selfserve pattern) so stores from the pre-pause-by window verify
   // all-or-nothing under allowAbsent without forcing operator reconciliation,
   // and WakeQueue.verifySchema() on open is the integrity gate.
-  "wake_queue_pause_by",
-  // squads (plan-squads): named groups with goal, roster, and thread channel.
-  // Purely additive and intentionally NOT fenced — older writers have no code
-  // path to it; the owner-managed roster rules in server/squads.mjs are the
-  // integrity gate.
-  "squads"
+  "wake_queue_pause_by"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
@@ -502,6 +497,16 @@ const RETIRED_EMISSARY_TABLES = Object.freeze([
 // do not have it.
 const RETIRED_OPERATOR_TABLES = Object.freeze([
   "agent_operator_controls",
+]);
+// Retired squads (plan-squads removal): no module creates the squads table
+// anymore (server/squads.mjs and its store-constructor schema exec are gone),
+// but databases written before the removal still carry it (no DROP was
+// issued, for data preservation). It stays in the allowed set so the recovery
+// audit passes on upgraded databases, while fresh databases simply do not
+// have it. It must not sit in unfencedAdditiveTables: that list feeds
+// applicationTables, whose members the recovery audit requires to be present.
+const RETIRED_SQUADS_TABLES = Object.freeze([
+  "squads",
 ]);
 // Analytics tables (server/analytics/schema.mjs) + the claim-bond P0 shadow
 // journal (server/analytics/claim-bond-shadow.mjs) + the P1 claim-reputation
@@ -573,7 +578,7 @@ const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_
 // Native event state is lazy and additive: old binaries have no writers.
 // Keep it outside versioned triggers so compatible rollback remains possible.
 export const MCP_EVENT_ADDITIVE_TABLES = Object.freeze(["mcp_event_subscriptions", "mcp_event_outbox"]);
-export const lazyAdditiveTables = Object.freeze(["message_replay_units", ...MCP_EVENT_ADDITIVE_TABLES, ...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES, "room_automations", "room_automation_runs", "room_inbound_hooks", "room_inbound_deliveries", "room_board_views", "connect_funnel_salt", "connect_funnel", "needs_me_claims"]);
+export const lazyAdditiveTables = Object.freeze(["message_replay_units", ...MCP_EVENT_ADDITIVE_TABLES, ...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...RETIRED_SQUADS_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES, "room_automations", "room_automation_runs", "room_inbound_hooks", "room_inbound_deliveries", "room_board_views", "connect_funnel_salt", "connect_funnel", "needs_me_claims"]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

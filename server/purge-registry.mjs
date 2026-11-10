@@ -1730,13 +1730,19 @@ const ROWS = [
     }
   },
   {
-    // plan-squads: room purge deletes the room's squads; identity purge
-    // deletes squads owned by the identity. Member ids inside members_json
-    // are filtered to active members at fanout time, so a purged member's
-    // id lingering in the JSON never resolves.
+    // plan-squads (retired by the plan-squads removal): room purge deletes
+    // the room's squads; identity purge deletes squads owned by the
+    // identity. Member ids inside members_json are filtered to active
+    // members at fanout time, so a purged member's id lingering in the JSON
+    // never resolves. No module creates the squads table anymore, so the
+    // entry is optional in the retired-table shape: pre-removal databases
+    // still carrying the table are purged exactly as before, while fresh
+    // databases simply do not have it and the entry is skipped instead of
+    // throwing "no such table: squads".
     "table": "squads",
     "key": "room_id",
     "action": "delete",
+    "optional": true,
     "match": {
       "room": [
         "room_id"

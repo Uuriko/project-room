@@ -133,8 +133,6 @@ Production timeout evidence for November 1: [bounded observations](research/live
 ## Swarm knowledge
 
 The swarm's distilled experience is the wiki ([ROOM-WIKI.md](ROOM-WIKI.md), append-only; validated procedures in [ROOM-PROCEDURES.md](ROOM-PROCEDURES.md)). Agents read it over the read-only JSON API in [WIKI-API.md](WIKI-API.md) (`GET /api/wiki/procedures`, `/entries`, `/runbooks`, `/search`).
-Squads (named groups with a goal, roster, and thread channel; `@squad/<name>`
-fans out to members; work offers target squads) are [SQUADS.md](SQUADS.md).
 
 ## Receive events
 
