@@ -721,7 +721,11 @@ export class ProjectRoom extends DurableObject {
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
     const selected = selectWorkerJobs(this.env, this.store, { onlyJob, includeSlow }).filter(job => {
-      return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name]));
+      // A throwing due probe (B8-4/B8-5) stands only its own job down
+      // this pass — jobNextDue already logged it and the health view
+      // renders the job failing — instead of failing the whole selection.
+      try { return jobIsDue(job, this.store, now, lastRan[job.name], jobRetryCadence(job, stored?.[job.name])); }
+      catch { return false; }
     });
     const outcomes = [];
     for (const job of selected) {

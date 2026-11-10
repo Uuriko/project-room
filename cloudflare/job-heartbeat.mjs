@@ -37,9 +37,16 @@ export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.inclu
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
 export function selectWorkerJobs(env, store, { onlyJob = null, includeSlow = true } = {}) {
-  return REGISTRY.filter(job => job.runtimes.includes("worker")
-    && (onlyJob === null || job.name === onlyJob) && (includeSlow || !job.slow)
-    && jobEnabled(job, env, store));
+  return REGISTRY.filter(job => {
+    if (!job.runtimes.includes("worker")) return false;
+    if (onlyJob !== null && job.name !== onlyJob) return false;
+    if (!includeSlow && job.slow) return false;
+    // A throwing due probe (B8-4/B8-5) excludes only its own job this
+    // pass — jobEnabled already logged it, and the health view renders
+    // that job failing — instead of failing the whole selection.
+    try { return jobEnabled(job, env, store); }
+    catch { return false; }
+  });
 }
 
 // Kept for callers that still ask by name. The registry gate is the source.
@@ -327,14 +334,30 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const failure = sanitizeFailureDetail(record.lastFailure);
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
     const source = REGISTRY.find(item => item.name === job.name);
-    const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
+    // A throwing due probe (B8-4/B8-5) is a failure of this job's gate,
+    // not a disable and not a pass: the entry renders failing with the
+    // probe error as its reason, and the rest of the view still renders.
+    let enabled = true;
+    let reason = null;
+    let next = null;
+    let probeError = null;
+    if (gatesKnown) {
+      try {
+        enabled = source ? jobEnabled(source, env ?? {}, store) : true;
+        reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
+        next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+      } catch (error) {
+        probeError = redactError(error?.message ?? error);
+        enabled = true;
+        reason = `Probe failed: ${probeError}`;
+        next = null;
+      }
+    }
     // Work-gating stops idle delivery attempts, but cannot erase the last
     // terminal callback failure from health. Feature-off remains disabled.
     const idleNativeFailure = !enabled && job.name === 'native-mcp-events' && store?.nativeMcpEventsEnabled === true
       && (record.consecutiveFailures ?? 0) > 0 && (Number(record.lastSummary?.exhausted) > 0 || Number(record.lastSummary?.dead) > 0);
-    const reason = idleNativeFailure ? 'Callback delivery failed; no pending deliveries'
-      : enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
-    const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+    if (idleNativeFailure) reason = 'Callback delivery failed; no pending deliveries';
     const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
     let pendingSince = null;
@@ -353,7 +376,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const attemptStuck = enabled && record.attemptOutcome === 'uncommitted'
       && Number.isFinite(record.uncommittedAttemptSinceAt)
       && now - record.uncommittedAttemptSinceAt > job.periodSeconds * 1000;
-    const failing = enabled && ((record.consecutiveFailures ?? 0) > 0 || attemptStuck);
+    const failing = enabled && ((record.consecutiveFailures ?? 0) > 0 || attemptStuck || probeError !== null);
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
     // Escrow overdue (guardian census F1): the keeper's own pass left due
@@ -376,7 +399,9 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       secondsSinceSuccess: enabled ? ageSeconds : null,
       // Free-form diagnostics can contain unknown credentials or personal data.
       // Keep the public marker fixed, including for errors stored before this rule.
-      lastError: record.lastError == null ? null : 'Job failed',
+      // A probe failure is a failure fact: it earns the same fixed marker,
+      // never the free-form probe text.
+      lastError: record.lastError == null && probeError === null ? null : 'Job failed',
       lastErrorAt: iso(record.lastErrorAt),
       // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
       // the text alone cannot say whether it is today's failure. On
@@ -400,7 +425,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: idleNativeFailure ? 'degraded' : !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      status: idleNativeFailure ? 'degraded' : !enabled ? 'disabled' : probeError !== null ? 'failing' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
