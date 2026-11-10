@@ -34,9 +34,19 @@ export class WakeTestRoom extends ProjectRoom {
    return Response.json({identity,ownerSecret:owner.secret});
   }
   if (path === '/__fixture/scope-revoke') {
-   const input=await request.json(),member=this.store.roomAuthority('scope-a',{memberId:'linked-worker'}).members['linked-worker'];
+   const input=await request.json(),waiters=this.store.agentHeartbeats._wakeWaiters;
+   const key=input.identityId+'\\0'+input.hostId,deadline=Date.now()+5000;
+   // Observe the real selected-room waiter, not elapsed host-side time. Check
+   // and revoke in the same Worker turn so the poll cannot expire between them.
+   let waiter;
+   while(!(waiter=waiters.get(key))){
+    if(Date.now()>=deadline)return Response.json({error:'selected poll did not register'},{status:504});
+    await new Promise(resolve=>setTimeout(resolve,10));
+   }
+   if(waiter.roomId!=='scope-a')return Response.json({error:'unexpected waiter room'},{status:409});
+   const member=this.store.roomAuthority('scope-a',{memberId:'linked-worker'}).members['linked-worker'];
    this.store.command(input.ownerSecret,'scope-a',{id:'revoke-held',type:'member.access_changed',data:{memberId:'linked-worker',expectedMemberRevision:member.revision,permissions:[],active:false}});
-   return Response.json({revoked:true});
+   return Response.json({revoked:true,heldRoomId:waiter.roomId});
   }
   if (path === '/__fixture/state') return Response.json({hosts:this.store.db.prepare('SELECT count(*) n FROM agent_hosts').get().n,
    signals:this.store.db.prepare('SELECT signal_id,delivered_at FROM agent_wake_signals').all(),
@@ -120,6 +130,15 @@ test('actual Worker global identity poll is narrowed to selected room across col
   const selected=await client.poll({hostId:'existing-global',waitMs:0});assert.equal(selected.roomId,'scope-a');assert.equal(selected.pendingWakes.length,1);assert.equal(selected.pendingWakes[0].roomId,'scope-a');await client.ack({signalIds:selected.pendingWakes.map(w=>w.signalId),fencingToken:lease.listener.fencingToken});
   await worker.dispose();worker=new Miniflare(config);const empty=await client.poll({hostId:'existing-global',waitMs:20});assert.equal(empty.roomId,'scope-a');assert.equal(empty.timedOut,true);assert.deepEqual(empty.pendingWakes,[]);
   const stillForeign=await(await api('/api/agent-wakes/poll?hostId=existing-global&waitMs=0',undefined,identity.secret)).json();assert.deepEqual(stillForeign.pendingWakes.map(w=>w.roomId),['scope-b']);
-  const held=client.poll({hostId:'existing-global',waitMs:200});await new Promise(r=>setTimeout(r,50));assert.equal((await api('/__fixture/scope-revoke',{ownerSecret})).status,200);await assert.rejects(held,error=>error.status===403);
+  const held=client.poll({hostId:'existing-global',waitMs:10000});
+  await Promise.all([
+   assert.rejects(held,error=>error.status===403),
+   (async()=>{
+    const revoked=await api('/__fixture/scope-revoke',{ownerSecret,identityId:identity.identityId,hostId:'existing-global'});
+    assert.equal(revoked.status,200,await revoked.clone().text());
+    assert.deepEqual(await revoked.json(),{revoked:true,heldRoomId:'scope-a'});
+   })(),
+  ]);
+  await assert.rejects(client.poll({hostId:'existing-global',waitMs:0}),error=>error.status===403);
  }finally{await worker.dispose();await rm(persistence,{recursive:true,force:true});}
 });
