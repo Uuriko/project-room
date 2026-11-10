@@ -48,8 +48,8 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 1);
-    assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
+    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 0);
+    assert.equal(await page.locator("#signin-agent-copy").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await openMagicSignin(page);
     await page.locator('#auth-signin-ui [data-signin-form="password"]').waitFor();

@@ -1006,10 +1006,6 @@ const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
-// Agent sign-in (RC-2026-09-23) moved off the wall to its own page
-// (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
-// the same component and endpoints; the wall keeps only the labeled
-// link (#agent-signin-button).
 async function openAccountSettings() {
   setSessionMenuOpen(false);
   const owned = accountClient.session;

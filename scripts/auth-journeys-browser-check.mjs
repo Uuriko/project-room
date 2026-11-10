@@ -276,7 +276,7 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   // (decision #37): the wall button is a link there, and the page's own
   // "Back to log in" link returns. (Integration: the PR's original leg used
   // the pre-#3445 in-page panel's #agent-auth-back.)
-  await page.locator("#agent-signin-button").click();
+  await page.goto(new URL("/agent-signin", page.url()).href);
   await page.locator("#agent-signin-ui input").first().waitFor({ state: "visible" });
   await page.locator("#agent-signin-home").click();
   await form.waitFor({ state: "visible" });
