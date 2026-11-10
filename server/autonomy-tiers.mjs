@@ -37,8 +37,9 @@
 // This module does not import server/store.mjs (store imports it); errors
 // carry status and code like ServiceError and the router reads them as such.
 import { EVENT_TYPES as T, ownMember } from "../src/events.js";
+import { isCurrentRoom, withCurrentReadContext } from "./current-room-repository.mjs";
 
-export const AUTONOMY_TIERS = Object.freeze(["t1_readonly", "t2_standard"]);
+export const AUTONOMY_TIERS = Object.freeze(["t1_readonly", "t1_chat", "t2_standard"]);
 // Absent row = legacy behavior: no behavior change for existing members
 // until the operator acts.
 export const DEFAULT_AUTONOMY_TIER = "t2_standard";
@@ -48,6 +49,11 @@ export const DEFAULT_AUTONOMY_TIER = "t2_standard";
 // redeem and share-link joins skip that hook and leave no row, which is the
 // same full access (DEFAULT_AUTONOMY_TIER). A later demotion stays put:
 // assignEnrollmentTier is ON CONFLICT DO NOTHING.
+// Enrollment stays t2_standard. t1_chat (read plus chat) is an owner-set
+// tier: the agent may read, post, edit or delete messages and send DMs;
+// every other write is refused 403 agent_chat_only until promoted. Making
+// t1_chat the enrollment default is a separate change: it needs ~200 test
+// fixtures to promote their agents first.
 export const ENROLLMENT_TIER = "t2_standard";
 
 // t1_readonly agents may not change room state at all, except the session
@@ -61,6 +67,16 @@ export const T1_READONLY_ALLOWED_COMMANDS = Object.freeze(new Set([
   T.SESSION_STOPPED,        // stops always land
 ]));
 
+// Commands a t1_chat agent may issue: the read-only set plus chat.
+export const T1_CHAT_ALLOWED_COMMANDS = Object.freeze(new Set([
+  ...T1_READONLY_ALLOWED_COMMANDS,
+  T.MESSAGE_POSTED,
+  T.MESSAGE_EDITED,
+  T.MESSAGE_DELETED,
+  T.DM_POSTED,
+]));
+export const CHAT_TIER_PROMOTE_HINT = "Ask the room owner to promote this agent to t2_standard (PUT /api/rooms/{roomId}/operator/agents/{memberId}).";
+
 // Room-local autonomy tiers. Created lazily — by the enrollment hook for new
 // agent members and by the owner API for promotions/demotions. Absent row =
 // t2_standard (see DEFAULT_AUTONOMY_TIER).
@@ -72,7 +88,17 @@ CREATE TABLE IF NOT EXISTS agent_autonomy_tiers (
   updated_at INTEGER NULL,
   updated_by TEXT NULL,
   PRIMARY KEY (room_id, member_id)
+);
+CREATE TABLE IF NOT EXISTS agent_chat_tiers (
+  room_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  PRIMARY KEY (room_id, member_id)
 );`;
+// Rollback fence for t1_chat (review on #5751): t1_chat is stored as
+// autonomy_tier='t1_readonly' plus an agent_chat_tiers row. A reader that
+// predates t1_chat sees t1_readonly and fails closed (narrower), never
+// open; this reader widens readonly to read-plus-chat only when the side
+// row exists.
 
 // Called from the writer boot path (next to ensureIdentitySecretSchema in
 // server/store.mjs), not the constructor: the table is purely additive, so
@@ -89,12 +115,13 @@ const refuse = (status, code, message) => { throw new AutonomyTierError(status, 
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const validMemberId = id => typeof id === "string" && MEMBER_ID_PATTERN.test(id);
 
-function rowToTier(row) {
+function rowToTier(row, chat = false) {
   if (!row) return null;
+  const stored = row.autonomy_tier ?? DEFAULT_AUTONOMY_TIER;
   return Object.freeze({
     roomId: row.room_id,
     memberId: row.member_id,
-    autonomyTier: row.autonomy_tier ?? DEFAULT_AUTONOMY_TIER,
+    autonomyTier: stored === "t1_readonly" && chat ? "t1_chat" : stored,
     updatedAt: row.updated_at ?? null,
     updatedBy: row.updated_by ?? null,
   });
@@ -104,8 +131,11 @@ function rowToTier(row) {
 // in the table wins on the agent's next command.
 export function getTier(db, roomId, memberId) {
   const row = db.prepare("SELECT * FROM agent_autonomy_tiers WHERE room_id=? AND member_id=?").get(roomId, memberId);
-  return rowToTier(row);
+  if (!row || row.autonomy_tier !== "t1_readonly") return rowToTier(row);
+  return rowToTier(row, Boolean(chatTableExists(db) && db.prepare("SELECT 1 FROM agent_chat_tiers WHERE room_id=? AND member_id=?").get(roomId, memberId)));
 }
+
+const chatTableExists = db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_chat_tiers'").get());
 
 function validateTier(autonomyTier) {
   if (!AUTONOMY_TIERS.includes(autonomyTier))
@@ -119,11 +149,15 @@ function validateTier(autonomyTier) {
 export function setTier(db, roomId, memberId, autonomyTier, { updatedBy = null, nowMs = Date.now() } = {}) {
   if (!validMemberId(memberId)) refuse(422, "invalid_autonomy_tier", "memberId must be a room member id");
   const tier = validateTier(autonomyTier);
+  const stored = tier === "t1_chat" ? "t1_readonly" : tier;
+  db.exec(AUTONOMY_TIERS_SCHEMA);
+  if (tier === "t1_chat") db.prepare("INSERT OR IGNORE INTO agent_chat_tiers (room_id, member_id) VALUES (?, ?)").run(roomId, memberId);
+  else db.prepare("DELETE FROM agent_chat_tiers WHERE room_id=? AND member_id=?").run(roomId, memberId);
   db.prepare(`INSERT INTO agent_autonomy_tiers (room_id, member_id, autonomy_tier, updated_at, updated_by)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(room_id, member_id) DO UPDATE SET
         autonomy_tier=excluded.autonomy_tier, updated_at=excluded.updated_at, updated_by=excluded.updated_by`)
-    .run(roomId, memberId, tier, nowMs, updatedBy);
+    .run(roomId, memberId, stored, nowMs, updatedBy);
   return getTier(db, roomId, memberId);
 }
 
@@ -165,6 +199,8 @@ export function enforceAutonomyTiers({ db, roomId, state, command, actor, nowMs 
   const tier = getTier(db, roomId, actor.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
   if (tier === "t1_readonly" && !T1_READONLY_ALLOWED_COMMANDS.has(command.type))
     fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type}`);
+  if (tier === "t1_chat" && !T1_CHAT_ALLOWED_COMMANDS.has(command.type))
+    fail(403, "agent_chat_only", `${memberName(state, actor.id)} runs at the read-and-chat autonomy tier: it may read and chat, but it cannot ${command.type}. ${CHAT_TIER_PROMOTE_HINT}`);
 }
 
 // Direct enforcement for store APIs that bypass store.command() — room file
@@ -178,6 +214,8 @@ export function enforceAutonomyTierForAction({ db, roomId, state, actor, action,
   const tier = getTier(db, roomId, actor.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
   if (tier === "t1_readonly")
     fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${action}`);
+  if (tier === "t1_chat")
+    fail(403, "agent_chat_only", `${memberName(state, actor.id)} runs at the read-and-chat autonomy tier: it may read and chat, but it cannot ${action}. ${CHAT_TIER_PROMOTE_HINT}`);
 }
 
 // Read model for the operator API: the tier row (null when neither the
@@ -216,7 +254,7 @@ function requireMember(room, memberId) {
 export function getAgentAutonomyTier(store, token, roomId, memberId, expectedSessionBinding = null) {
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = tierRoomContext(store, roomId, memberId);
     requireOwner(auth, room);
     requireMember(room, memberId);
     return { ...autonomyTierReport(store.db, roomId, room.state, memberId, store.now()), evaluatedThrough: room.sequence };
@@ -234,11 +272,22 @@ export function setAgentAutonomyTier(store, token, roomId, memberId, request, ex
     refuse(422, "invalid_autonomy_tier", "Supply exactly { autonomyTier }");
   return store.transaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
+    const room = tierRoomContext(store, roomId, memberId);
     requireOwner(auth, room);
     requireMember(room, memberId);
     const nowMs = store.now();
     setTier(store.db, roomId, memberId, request.autonomyTier, { updatedBy: auth.member.id, nowMs });
-    return { ...autonomyTierReport(store.db, roomId, store.room(roomId).state, memberId, nowMs), evaluatedThrough: store.room(roomId).sequence };
+    return { ...autonomyTierReport(store.db, roomId, room.state, memberId, nowMs), evaluatedThrough: room.sequence };
+  });
+}
+
+// Owner and member lookup for the operator tier API. Normalized (current)
+// rooms have no full projection; read the selected owner and members
+// through the addressed current-room authority instead (review on #5751).
+function tierRoomContext(store, roomId, memberId) {
+  if (!isCurrentRoom(store.db, roomId)) return store.room(roomId);
+  return withCurrentReadContext(store.db, roomId, () => {
+    const authority = store.roomAuthority(roomId, { memberId });
+    return { sequence: authority.sequence, state: { room: { ownerId: authority.ownerId }, members: authority.members } };
   });
 }

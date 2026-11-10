@@ -361,7 +361,7 @@ export function issueSpendGrant(db, roomId, agentId, {
   if (!validMemberId(agentId)) refuse(422, "invalid_spend_grant", "agentId must be a room member id");
   if (isGuestAgentMemberId(agentId))
     refuse(422, "spend_grant_guest_forbidden", "Spend grants cannot widen guest passes; upgrade the pass instead");
-  if (tierOf(db, roomId, agentId) === "t1_readonly")
+  if (["t1_readonly", "t1_chat"].includes(tierOf(db, roomId, agentId)))
     refuse(422, "spend_grant_tier_forbidden", "t1_readonly agents can never hold a spend grant");
   if (!validMemberId(grantedBy)) refuse(422, "invalid_spend_grant", "grantedBy must be a room member id");
   if (denomination !== SPEND_DENOMINATION)
@@ -445,7 +445,7 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     refuse(422, "invalid_spend_grant", "nonce must be a non-empty string, at most 128 chars");
   if (isGuestAgentMemberId(agentId))
     refuse(403, "spend_grant_denied", "Guest passes cannot hold spend grants");
-  if (tierOf(db, roomId, agentId) === "t1_readonly")
+  if (["t1_readonly", "t1_chat"].includes(tierOf(db, roomId, agentId)))
     refuse(403, "spend_grant_denied", "t1_readonly agents cannot hold spend grants");
 
   // #1525 + #3377: crash recovery. Void reservations orphaned past their

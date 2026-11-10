@@ -57,9 +57,9 @@ async function serve(t, { start = Date.parse("2026-09-14T12:00:00Z") } = {}) {
 // assert.throws returns undefined on this Node; capture the error instead.
 const capture = fn => { try { fn(); } catch (error) { return error; } throw new Error("expected the function to throw"); };
 
-test("constants: two tiers, t2 legacy default, t2 enrollment default", async t => {
+test("constants: three tiers, t2 legacy default, t2 enrollment default", async t => {
   const f = await serve(t);
-  assert.deepEqual(AUTONOMY_TIERS, ["t1_readonly", "t2_standard"]);
+  assert.deepEqual(AUTONOMY_TIERS, ["t1_readonly", "t1_chat", "t2_standard"]);
   assert.equal(DEFAULT_AUTONOMY_TIER, "t2_standard");
   assert.equal(ENROLLMENT_TIER, "t2_standard");
   assert.ok(f);
