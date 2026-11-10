@@ -757,7 +757,7 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
   // Normalized rooms deliberately do not publish receipt rows from sparse
   // command contexts. Qualify the bounded work lifecycle without enabling
   // publication; other commands and starter-room dependencies remain gated.
-  if(state.room.starterSeeded||state.room.publicReceipts?.enabled&&!RECEIPTS_ON_WORK_COMMANDS.has(command.type))
+  if (state.room.starterSeeded || (state.room.publicReceipts?.enabled && !RECEIPTS_ON_WORK_COMMANDS.has(command.type)))
     refuse('Published/starter room dependencies require qualification');
   const assistantScalar=db.prepare('SELECT length(CAST(value AS BLOB)) bytes FROM room_assistant_config WHERE room_id=?').get(roomId);
   if(assistantScalar&&(!Number.isSafeInteger(assistantScalar.bytes)||assistantScalar.bytes<2||assistantScalar.bytes>4096))refuse('Assistant configuration exceeds bounded context');
