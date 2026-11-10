@@ -194,6 +194,7 @@ test('short skill acronyms match whole tokens rather than unrelated words', t =>
   f.enable('c-underscore', ['underscore'], { kind: 'unpaid' }, 'main', 'commons', 'ui_kit');
   f.enable('d-punctuation', ['punctuation'], { kind: 'unpaid' }, 'main', 'commons', 'UI/UX review');
   f.enable('e-japanese', ['japanese'], { kind: 'unpaid' }, 'main', 'commons', '日本語ドキュメント');
+  f.enable('f-mixed', ['mixed'], { kind: 'unpaid' }, 'main', 'commons', '日本ui');
   const result = f.service().match(null, { skills: ['UI'], limit: 5 });
   assert.equal(result.recommendations[0].task.taskId, 'b-ui-review');
   assert.deepEqual(result.recommendations[0].reasons, ['Matches preference: ui']);
@@ -203,6 +204,8 @@ test('short skill acronyms match whole tokens rather than unrelated words', t =>
   assert.deepEqual(underscore.reasons, ['Available volunteer task with declared repository paths']);
   const punctuation = result.recommendations.find(entry => entry.task.taskId === 'd-punctuation');
   assert.deepEqual(punctuation.reasons, ['Matches preference: ui']);
+  const mixed = result.recommendations.find(entry => entry.task.taskId === 'f-mixed');
+  assert.deepEqual(mixed.reasons, ['Matches preference: ui']);
   const japanese = f.service().match(null, { skills: ['日本'], limit: 5 });
   assert.equal(japanese.recommendations[0].task.taskId, 'e-japanese');
   assert.deepEqual(japanese.recommendations[0].reasons, ['Matches preference: 日本']);
