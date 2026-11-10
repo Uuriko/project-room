@@ -126,6 +126,16 @@ final class LocalToolsTests {
             (["macTools": ["mode": "control", "connection": "/different"]], "different Mac tool connection"),
             (["macTools": ["mode": "approval_required", "connection": connection]], "needs approval")
         ] as [([String: Any], String)] { expectEqual(notice(change)?.contains(fragment), true) }
+        for (phase, macText) in [
+            ("recovery_pending", "Waiting to resolve an earlier operation before taking new work."),
+            ("report_reconciliation_pending", "A result was saved and is waiting to be reported to the room.")
+        ] {
+            let pending = base.merging(["phase": phase]) { _, new in new }
+            expectEqual(LocalHostReadiness.notice(host: pending, local: local, connection: connection, inMyMac: true), macText)
+            expectEqual(LocalHostReadiness.conversationNotice(host: pending)?.contains("Open My Mac"), true)
+            let stale = pending.merging(["statusFresh": false]) { _, new in new }
+            expectEqual(LocalHostReadiness.notice(host: stale, local: local, connection: connection, inMyMac: true)?.contains("unavailable"), true)
+        }
         expectEqual(notice([:], ["enabled": false])?.contains("paused"), true)
         let noScreen: [String: Any] = ["enabled": true, "capabilities": LocalToolReadiness.capabilities(enabled: true, accessibility: true, screenCapture: false)]
         expectEqual(notice([:], noScreen)?.contains("Screen Recording"), true)
