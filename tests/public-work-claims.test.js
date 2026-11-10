@@ -187,6 +187,18 @@ test('anonymous recommendations are grounded, bounded, and leave the registry/jo
   assert.throws(() => f.service().match(null, { skills: ['bad\nvalue'] }), code('invalid_public_work'));
 });
 
+test('short skill acronyms match whole tokens rather than unrelated words', t => {
+  const f = fixture(t);
+  f.enable('a-guide', ['docs/guide']);
+  f.enable('b-ui-review', ['src/ui']);
+  const result = f.service().match(null, { skills: ['UI'], limit: 5 });
+  assert.equal(result.recommendations[0].task.taskId, 'b-ui-review');
+  assert.deepEqual(result.recommendations[0].reasons, ['Matches preference: ui']);
+  const guide = result.recommendations.find(entry => entry.task.taskId === 'a-guide');
+  assert.deepEqual(guide.reasons, ['Available volunteer task with declared repository paths']);
+  assert.equal(result.claim, null);
+});
+
 test('explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart', t => {
   const f = fixture(t), [a, b] = f.identities;
   f.enable('a-docs', ['docs']); f.enable('b-typescript', ['src']); f.enable('c-overlap', ['src/file.js']);
