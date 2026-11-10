@@ -48,7 +48,7 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 17, "default core is the 13 conversation+Board tools plus 4 join readers for callers not yet in a room (#5468)");
-  assert.equal(full.length, 126, "full includes the caller-addressed room_wait_for_attention tool and the reviewed room_mark_caught_up (#5842)");
+  assert.equal(full.length, 121, "full includes the caller-addressed room_wait_for_attention tool and the reviewed room_mark_caught_up (#5842); 121 after the plan-squads removal retired the 5 squads tools (126 - 5)");
   assert.ok(full.some(tool => tool.name === "room_wait_for_attention"));
   assert.equal(new Set(full.map(tool => tool.name)).size, full.length, "full names remain unique");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
@@ -71,8 +71,8 @@ test("search finds long-tail tools with their exact schema and REST route", () =
   const land = searchActions("land queue remove", { limit: 3 });
   assert.ok(land.matches.some(match => match.name === "remove_land_item"));
   assert.ok(land.matches.length <= 3);
-  const withRest = searchActions("squads list").matches.find(match => match.name === "squads_list");
-  assert.match(withRest.rest, /^GET \/api\/rooms\/:roomId\/squads/);
+  const withRest = searchActions("agent invites list").matches.find(match => match.name === "room_list_agent_invites");
+  assert.match(withRest.rest, /^GET \/api\/rooms\/:roomId\/agent-invites/);
   assert.deepEqual(searchActions("zzzz qqqq").matches, []);
 });
 
@@ -87,7 +87,7 @@ test("run_action refuses itself, search, join and public-work tools, and unknown
   for (const name of ["room_run_action", "room_search_actions", "room_join_packet", "public_work_claim", "nope"]) {
     assert.equal(isRunnableAction(name), false, name);
   }
-  assert.equal(isRunnableAction("squads_list"), true);
+  assert.equal(isRunnableAction("room_list_agent_invites"), true);
 });
 
 test("over MCP: lean list, search, then run a long-tail action with the same result as a direct call", async t => {
@@ -96,22 +96,22 @@ test("over MCP: lean list, search, then run a long-tail action with the same res
   assert.equal(listed.result.profile, "lean");
   assert.ok(listed.result.tools.some(tool => tool.name === "room_search_actions"));
 
-  const found = await rpc(origin, "tools/call", { name: "room_search_actions", arguments: { query: "list squads" } }, secret);
+  const found = await rpc(origin, "tools/call", { name: "room_search_actions", arguments: { query: "list agent invites" } }, secret);
   assert.equal(found.result.isError, undefined);
-  assert.ok(found.result.structuredContent.matches.some(match => match.name === "squads_list"));
+  assert.ok(found.result.structuredContent.matches.some(match => match.name === "room_list_agent_invites"));
 
-  const direct = await rpc(origin, "tools/call", { name: "squads_list", arguments: { roomId: "ada-den" } }, secret);
-  const viaRun = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "squads_list", arguments: { roomId: "ada-den" } } }, secret);
+  const direct = await rpc(origin, "tools/call", { name: "room_list_agent_invites", arguments: { roomId: "ada-den" } }, secret);
+  const viaRun = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "room_list_agent_invites", arguments: { roomId: "ada-den" } } }, secret);
   assert.deepEqual(stable(viaRun.result), stable(direct.result), "run_action returns exactly what the direct call returns");
 
   // Argument checks still apply inside run_action.
-  const badInner = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "squads_list", arguments: { roomId: "ada-den", bogus: 1 } } }, secret);
-  const badDirect = await rpc(origin, "tools/call", { name: "squads_list", arguments: { roomId: "ada-den", bogus: 1 } }, secret);
+  const badInner = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "room_list_agent_invites", arguments: { roomId: "ada-den", bogus: 1 } } }, secret);
+  const badDirect = await rpc(origin, "tools/call", { name: "room_list_agent_invites", arguments: { roomId: "ada-den", bogus: 1 } }, secret);
   assert.deepEqual(stable(badInner), stable(badDirect));
 
   // Room access is still checked: a room this identity is not in.
-  const foreign = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "squads_list", arguments: { roomId: "not-my-room" } } }, secret);
-  const foreignDirect = await rpc(origin, "tools/call", { name: "squads_list", arguments: { roomId: "not-my-room" } }, secret);
+  const foreign = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "room_list_agent_invites", arguments: { roomId: "not-my-room" } } }, secret);
+  const foreignDirect = await rpc(origin, "tools/call", { name: "room_list_agent_invites", arguments: { roomId: "not-my-room" } }, secret);
   assert.deepEqual(stable(foreign), stable(foreignDirect));
 
   const recursion = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "room_run_action", arguments: {} } }, secret);
@@ -128,7 +128,7 @@ test("meta tools need an identity: anonymous calls are refused", async t => {
   const { origin } = await serve(t);
   const response = await fetch(`${origin}/room/mcp`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name: "room_search_actions", arguments: { query: "squads" } } })
+    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: { name: "room_search_actions", arguments: { query: "agent invites" } } })
   });
   const body = await response.json();
   assert.ok(body.error || body.result?.isError, "no anonymous search");
