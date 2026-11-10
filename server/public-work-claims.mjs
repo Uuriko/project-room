@@ -54,6 +54,12 @@ const filesOf = input => {
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+// Short skill acronyms should not match incidental substrings in ordinary words
+// (e.g. `ui` inside `guide`). Longer preferences retain substring matching.
+const matchesPreference = (text, value) => {
+  if (!/^[\p{L}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
+  return text.split(/[^\p{L}\p{N}_]+/u).includes(value);
+};
 
 // #3530: the standard public-work starter set — the newcomer tasks an
 // operator first seeded on the public board (the pw-garden round of
@@ -644,7 +650,7 @@ export class PublicWorkClaims {
             other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
         }).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
-          const matched = [...new Set(preferences.filter(value => text.includes(value)))];
+          const matched = [...new Set(preferences.filter(value => matchesPreference(text, value)))];
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
