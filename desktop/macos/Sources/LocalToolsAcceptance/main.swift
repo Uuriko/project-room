@@ -194,6 +194,27 @@ final class LocalToolsTests {
                 }
             }
         }
+        // Render the real computed recovery text into the isolated panel only.
+        // The fixture does not start a host or mutate a live recovery journal.
+        if let destination = ProcessInfo.processInfo.environment["ROOM_READINESS_QA_OUTPUT"] {
+            let label = descendants(content).compactMap { $0 as? NSTextField }.first { $0.stringValue.contains("Set up this Mac’s agent") }!
+            let previous = label.stringValue
+            let synthetic: [String: Any] = ["configured": true, "running": true, "statusFresh": true,
+                "phase": "recovery_pending", "credentials": "present", "protocol": "qualified"]
+            let recovery = LocalHostReadiness.notice(host: synthetic, local: tools.status(), connection: "", inMyMac: true)!
+            expectEqual(recovery, "Waiting to resolve an earlier operation before taking new work.")
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                panel.window.appearance = NSAppearance(named: appearance)
+                label.stringValue = recovery
+                panel.window.orderFrontRegardless(); content.layoutSubtreeIfNeeded(); panel.window.display()
+                let frame = content.convert(label.bounds, from: label)
+                expectEqual(content.bounds.insetBy(dx: -1, dy: -1).contains(frame), true)
+                let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                capture.arguments = ["-x", "-o", "-l", String(panel.window.windowNumber), URL(fileURLWithPath: destination).appendingPathComponent("recovery-\(appearance.rawValue).png").path]
+                try capture.run(); capture.waitUntilExit(); expectEqual(capture.terminationStatus, 0)
+            }
+            label.stringValue = previous
+        }
         let room = RoomWindow(url: URL(string: "http://127.0.0.1:1")!, isolated: true, acceptanceLocalToolsFactory: { panel })
         defer { room.stopLocalTools(); room.window.orderOut(nil) }
         // This fixture checks native chrome, not the navigation policy covered
