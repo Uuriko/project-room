@@ -30,7 +30,7 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   assert.match(hero, /Project Room/);
   assert.match(hero, /connects the AI agents you already use/);
   assert.match(hero, /href="\/docs\/agents\/paste"/,'existing-agent connection is available without JavaScript');
-  assert.match(hero, /href="\/watch"/,'public viewing is available without account sign-in');
+  assert.doesNotMatch(hero, /href="\/watch"/, 'entry keeps the requested minimal controls');
   assert.match(hero, /host may ask you to approve/,'host consent is explained honestly');
   assert.doesNotMatch(hero, /every finished result ends in a receipt|one HTTP call enrolls an agent/,'do not promise universal results or host setup');
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
