@@ -27,9 +27,9 @@ test('a receipts-on normalized room accepts plain and mention posts and stays re
   assert.doesNotThrow(() => auditRecovery(s));
 });
 
-test('receipt-affecting commands in a receipts-on room still need qualification', t => {
+test('commands outside the qualified work chain still need qualification', t => {
   const {s, owner} = room(t);
   s.command(owner, 'commons', {id: 'receipts-on', type: T.ROOM_PUBLIC_RECEIPTS_SET, data: {enabled: true}});
-  assert.throws(() => s.command(owner, 'commons', {id: 'w', type: T.WORK_PROPOSED, data: {workItemId: 'w', title: 'W', definitionOfDone: 'D', accountableMemberId: 'agent', mode: 'read'}}),
+  assert.throws(() => s.command(owner, 'commons', {id: 'channel', type: T.CHANNEL_CREATED, data: {channelId: 'side', name: 'side'}}),
     err => err.code === 'current_room_context_unavailable');
 });
