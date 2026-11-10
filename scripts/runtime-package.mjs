@@ -416,6 +416,7 @@ optional.push("server/routes/talk-policy.mjs"); // #5384 talk-policy RT routes (
 optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/front-door.mjs"); // EXP-7 Variant B: /about front-door live facts RT route (imported by server/routes/table.mjs)
 optional.push("src/front-door.js"); // EXP-7 Variant B: /about live-facts script (loaded by about.html, registered in server/public-assets.mjs)
+optional.push("server/routes/squads.mjs"); // plan-squads RT routes, cut from the current tree by the plan-squads removal — registration stays so genuine historical packages, whose routes/table.mjs imports it, remain packagable and verifiable (same shape as server/work-claim-mirror.mjs above)
 optional.push("server/project-map.mjs", "server/project-map-store.mjs", "server/routes/project-map.mjs"); // per-room code map (imported by server/jobs.mjs, server/routes/table.mjs, server/mcp-room-profile.mjs)
 optional.push("server/spend-pricing.mjs", "server/routes/spend-pricing.mjs"); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/routes/table.mjs and server/spend-grants.mjs)
 optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post budget (imported by server/store.mjs)
@@ -443,6 +444,7 @@ optional.push("server/messages-store.mjs"); // MSG-1: messages table written wit
 optional.push("server/message-redaction.mjs"); // PRIV-1: rewrite deleted message text out of the log (imported by server/store.mjs and server/account-deletion.mjs)
 optional.push("server/history-visibility.mjs"); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)
 optional.push("server/pins.mjs");
+optional.push("server/squads.mjs"); // plan-squads roster + thread channel, cut from the current tree by the plan-squads removal — registration stays so genuine historical packages, whose conversation-sync.mjs imports it, remain packagable and verifiable (same shape as server/work-claim-mirror.mjs above)
 optional.push("server/typing.mjs"); // ephemeral typing heartbeats (imported by server/http.mjs; pure, in-memory only)
 optional.push("server/notifications.mjs");
 optional.push("server/open-questions.mjs"); // F1: open-questions radar read (imported by server/http.mjs)
