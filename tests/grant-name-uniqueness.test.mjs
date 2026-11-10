@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {agentAccessProfiles, AGENT_PROFILE_ALIASES, agentProfilePermissions, isAgentProfile} from '../server/agent-connections.mjs';
+import {agentAccessProfiles, AGENT_PROFILE_ALIASES, agentProfilePermissions, isAgentProfile, isConnectionAccess} from '../server/agent-connections.mjs';
 import {INVITATION_ROLES, INVITATION_ROLE_POLICIES} from '../src/events.js';
 import {linkPermissions} from '../server/share-links.mjs';
 
@@ -30,4 +30,11 @@ test('the "member" alias keeps exactly the agent work set; human "member" keeps 
   assert.deepEqual([...INVITATION_ROLES.member], ['accept_work', 'complete_work', 'verify']);
   assert.deepEqual(linkPermissions('member'), ['accept_work', 'complete_work', 'verify']);
   for (const bogus of ['constructor', '__proto__', 'toString', 'owner', '']) assert.equal(isAgentProfile(bogus), false, bogus);
+});
+
+test('stored connection requests keep the spelling the previous release can re-validate', () => {
+  assert.equal(isConnectionAccess('member'), true);
+  assert.equal(isConnectionAccess('agent_member'), false);
+  for (const name of Object.keys(agentAccessProfiles).filter(name => name !== 'agent_member')) assert.equal(isConnectionAccess(name), true, name);
+  for (const bogus of ['constructor', '__proto__', '', null, undefined]) assert.equal(isConnectionAccess(bogus), false, String(bogus));
 });

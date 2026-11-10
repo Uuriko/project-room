@@ -33,6 +33,12 @@ export const AGENT_PROFILE_ALIASES = Object.freeze({ member: "agent_member" });
 export const agentProfileName = name => typeof name === "string" && Object.hasOwn(AGENT_PROFILE_ALIASES, name) ? AGENT_PROFILE_ALIASES[name] : name;
 export const isAgentProfile = name => typeof name === "string" && Object.hasOwn(access, agentProfileName(name));
 export const agentProfilePermissions = name => isAgentProfile(name) ? access[agentProfileName(name)] : undefined;
+// Connection requests are stored verbatim in immutable history and re-validated
+// on every read. The release before the rename rejects "agent_member" there, so
+// after a rollback one such row would fail the room's connection integrity
+// check. Until that release can no longer be restored, this API takes only the
+// spellings it already understood; "member" keeps the same bits via the alias.
+export const isConnectionAccess = name => isAgentProfile(name) && name !== AGENT_PROFILE_ALIASES.member;
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
 // never widen authority by renaming or editing a profile.
@@ -194,7 +200,7 @@ export class AgentConnections {
       || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
       || (action === "create" && identityId !== undefined && (typeof identityId !== "string" || !IDENTITY_ID_RE.test(identityId)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
-        || /[\u0000-\u001f\u007f]/.test(displayName) || !isAgentProfile(preset)
+        || /[\u0000-\u001f\u007f]/.test(displayName) || !isConnectionAccess(preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
     // The proof requirement is the fail-closed gate: no code, or a
     // malformed one, reads as identity_link_proof_required (never
