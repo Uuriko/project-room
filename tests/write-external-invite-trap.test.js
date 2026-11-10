@@ -96,10 +96,11 @@ test("trap: no documented invite profile carries write_external", () => {
     assert.equal(agentAccessProfiles[profile].includes("write_external"), false,
       `${profile} must not silently gain write_external in this pinning test`);
   }
-  // The one profile that DOES carry it is "member" — the no-scope default,
-  // absent from the packet / tools.md profile guidance. Pinned here so the
-  // cure discussion cannot claim it does not exist.
-  assert.equal(agentAccessProfiles.member.includes("write_external"), true);
+  // The one profile that DOES carry it is "agent_member" (input alias
+  // "member") — the no-scope default, absent from the packet / tools.md
+  // profile guidance. Pinned here so the cure discussion cannot claim it
+  // does not exist.
+  assert.equal(agentAccessProfiles.agent_member.includes("write_external"), true);
 });
 
 test("trap: collaborate invitee accepts write work, claims scope, and still cannot start or complete", () => {

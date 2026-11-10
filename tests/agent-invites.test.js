@@ -641,7 +641,8 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   const { store, origin, ownerKey } = await serve(t);
   // The module-level vocabulary names every profile and permission.
   const vocab = store.invites.vocabulary();
-  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "collaborate", "contribute", "guest", "member", "review"]);
+  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["agent_member", "chat", "collaborate", "contribute", "guest", "review"]);
+  assert.deepEqual(vocab.profileAliases, { member: "agent_member" });
   for (const [name, entry] of Object.entries(vocab.profiles)) {
     assert.ok(Array.isArray(entry.permissions), `${name} lists permissions`);
     assert.ok(entry.description && entry.description.length > 0, `${name} is described`);
@@ -665,7 +666,12 @@ test("#5384: no scope means Member, guest/owner names work, old names keep their
   const { origin, ownerKey } = await serve(t);
   const plain = await post(origin, "/api/rooms/commons/agent-invites", {}, ownerKey);
   assert.equal(plain.status, 201, JSON.stringify(plain.json));
-  assert.equal(plain.json.profile, "member");
+  assert.equal(plain.json.profile, "agent_member");
+  // rules-p1: the #5384 word still works as an alias with the same set.
+  const alias = await post(origin, "/api/rooms/commons/agent-invites", { profile: "member" }, ownerKey);
+  assert.equal(alias.status, 201, JSON.stringify(alias.json));
+  assert.equal(alias.json.profile, "agent_member");
+  assert.deepEqual([...alias.json.permissions].sort(), [...plain.json.permissions].sort());
   assert.deepEqual([...plain.json.permissions].sort(), ["accept_work", "complete_work", "manage_claims", "steer", "verify", "write_external"]);
   const guest = await post(origin, "/api/rooms/commons/agent-invites", { profile: "guest" }, ownerKey);
   assert.equal(guest.status, 201);
