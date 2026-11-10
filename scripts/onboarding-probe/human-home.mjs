@@ -42,8 +42,8 @@ async function journey(browser, origin, stamp, viewport, shots) {
       if (found) mark(step);
       else confusions.push(`${step} is not available on this page.`);
     }
-    const firstPost = steps.find(step => step.step === "first-room")
-      ? { t: steps.find(step => step.step === "first-room").t, calls: steps.length }
+    const firstRoom = steps.find(step => step.step === "first-room")
+      ? { t: steps.find(step => step.step === "first-room").t }
       : null;
     let account = null;
     try {
@@ -56,17 +56,17 @@ async function journey(browser, origin, stamp, viewport, shots) {
         roomIds: (listed.rooms ?? []).map(room => room.id),
       };
     } catch { /* cleanup skips a room it cannot name */ }
-    return { steps, confusions, firstPost, clicks, chars, words: 12, account };
+    return { steps, confusions, firstRoom, clicks, chars, words: 12, account };
   } finally {
     await page.close();
   }
 }
 
-export async function runHumanHome({ target, outDir = null, created = emptyCreated(), round } = {}) {
+export async function runHumanHome({ target, outDir = null, created = emptyCreated(), round, launchBrowser = launch } = {}) {
   const origin = String(target).replace(/\/$/, "");
   const stamp = qaStamp(round);
   let browser;
-  try { browser = await launch(); }
+  try { browser = await launchBrowser(); }
   catch {
     return { status: "not_available", steps: [], firstPost: null, firstClose: null, closeReachable: false, confusions: ["Playwright did not launch, so the human home path was not measured."] };
   }
@@ -83,13 +83,16 @@ export async function runHumanHome({ target, outDir = null, created = emptyCreat
     const human = klmEst({ clicks: wide.clicks + narrow.clicks, chars: wide.chars + narrow.chars, words: wide.words });
     const result = {
       steps: [...wide.steps, ...narrow.steps.map(step => ({ ...step, step: `${step.step}-390` }))],
-      firstPost: wide.firstPost,
+      // This path observes room visibility but never submits a message.
+      status: "not_available",
+      firstRoom: wide.firstRoom,
+      firstRoomMobile: narrow.firstRoom,
+      firstPost: null,
       firstClose: null,
       closeReachable: false,
-      confusions: [...wide.confusions, ...narrow.confusions.map(item => `390: ${item}`)],
+      confusions: ["This path does not post a message; first-post and task completion are not measured.", ...wide.confusions, ...narrow.confusions.map(item => `390: ${item}`)],
       human,
     };
-    if (!wide.firstPost) result.status = wide.confusions.some(item => item.includes("not available")) ? "not_available" : undefined;
     if (outDir) writeJson(join(outDir, "human-home.json"), result);
     return result;
   } catch {

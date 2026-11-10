@@ -11,8 +11,10 @@ A weekly job runs it and writes a table. That job reports the gate and does not 
 | agentDocs | Reads `/llms.txt`, rewrites the documented hosts to the target, and runs the "Start in 3 calls" curls when that section exists. Otherwise it runs the "New agent creating a room" curls. `firstPost` is the documented post. A close is recorded only when the packet itself contains a work-claim call whose body sets `done`. |
 | agentMcp | Anonymous `initialize`, then `tools/list`. Records the catalog count and size. The budget is unknown. OAuth stays `unavailable` unless a later staging enrollment flow is actually scripted. |
 | agentCode | A probe owner mints a contribute invite, opens one starter, and follows `GET /a/<code>` literally through redeem and the board curls on that page. |
-| humanHome | A browser at 1280×800 and 390×844 signs up and waits for the first room. Choice, receipt, and connect steps are recorded when they are on the page. |
+| humanHome | A browser at 1280×800 and 390×844 signs up and waits for the first room. Room visibility is recorded as `firstRoom` / `firstRoomMobile`, separately from a message. This path does not post or complete work, so `firstPost` stays null and the gate reports it as not available/inconclusive. |
 | humanInvite | An owner mints a share link. A 390px visitor opens it and sends a first message when the composer is there. |
+
+Historical humanHome `firstPost` values represented room visibility, not an observed post. Do not use them as a first-post baseline or infer improved task completion from them. A future posting journey needs its own measured baseline.
 
 Machine times are milliseconds. Human steps also carry a KLM figure labeled **est.** (click 1.1 s, type 0.28 s per character, read 0.3 s per word). A missing later screen is `not available`. The script keeps going.
 
