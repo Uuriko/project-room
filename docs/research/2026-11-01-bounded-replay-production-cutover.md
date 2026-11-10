@@ -336,7 +336,7 @@ restore; historical semantics after cache loss; and all privacy lifecycle owners
 The codec-witness/bootstrap gate above must be proved with an executable busy-
 room control before any runtime format selection is enabled.
 
-Explicit red control command (expected exit 1 before implementation):
+Explicit red control command (expected exit 1 before implementation; the control file was removed from the tree in the 2026-11-08 streamlining cut and is retained at [the base commit](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/scripts/controls/bounded-replay-cutover.red.mjs)):
 
 ```
 node --test scripts/controls/bounded-replay-cutover.red.mjs

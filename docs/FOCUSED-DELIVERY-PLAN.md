@@ -181,11 +181,11 @@ Rules: **Works** means deployed and verified on production, with the evidence li
 
 | Need | Maintained source | How to use it |
 | --- | --- | --- |
-| Decide the next bounded implementation | F1–F6 below and [delivery control](DELIVERY-CONTROL-PLAN.md) | Use current failures, measured bottlenecks and unfinished journeys; distinguish proposed, merged, deployed and verified. |
-| Understand current release and rejected candidates | [Delivery evidence checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Follow exact-source receipts and retained failures; do not revive a reverted optimization merely because its tests passed. |
+| Decide the next bounded implementation | F1–F6 below and [delivery control](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/DELIVERY-CONTROL-PLAN.md) | Use current failures, measured bottlenecks and unfinished journeys; distinguish proposed, merged, deployed and verified. |
+| Understand current release and rejected candidates | [Delivery evidence checkpoint](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Follow exact-source receipts and retained failures; do not revive a reverted optimization merely because its tests passed. |
 | Coordinate overlapping work and releases | [Room coordination](ROOM-COORDINATION.md), [AGENTS](../AGENTS.md), [deployment lane](DEPLOY-LANE.md) | Read current ownership and candidate state; dated claims below are not live leases or approval requirements. |
-| Trace an older unfinished requirement | [Total backlog](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
-| Implement a retained work/continuity boundary | [Continuity plan](CONTINUITY-BUILD-PLAN.md), [work lifecycle](WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
+| Trace an older unfinished requirement | [Total backlog](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
+| Implement a retained work/continuity boundary | [Continuity plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/CONTINUITY-BUILD-PLAN.md), [work lifecycle](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
 
 The product test remains: two people and an authorized agent turn a conversation
 into an accepted result, change direction, survive a disconnect, and return
@@ -298,7 +298,7 @@ concurrently, but implementation still uses the bounded active slices below.
 
 ### Cleanup follow-ups observed on 2026-10-29
 
-The [integrated cleanup checkpoint](DELIVERY-CONTROL-PLAN.md#integrated-cleanup-checkpoint--2026-10-29-2201-utc)
+The [integrated cleanup checkpoint](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/DELIVERY-CONTROL-PLAN.md#integrated-cleanup-checkpoint--2026-10-29-2201-utc)
 records the private-history paging repair; do not reopen that exact old-cap defect
 from an earlier plan. Hosted rollout and broader private-thread journeys still
 need their own evidence. Directory query/refresh cost, first-attempt Google sign-in

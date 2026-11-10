@@ -1,7 +1,7 @@
 # Project Room: verified work as the product
 
 Research checkpoint: 2026-10-18. This extends, rather than replaces, the
-[architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) and
+[architecture execution plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ARCHITECTURE-EXECUTION-PLAN.md) and
 [frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md).
 The [delivery ledger](DELIVERY-LEDGER.md) preserves outstanding commitments.
 
@@ -180,7 +180,7 @@ baselines, workload distributions and production percentiles needed for credible
 forecasts. The schema 41 local 100k edit result is approximately 0.409 ms versus
 44.779 ms previously, but the full replay still took 286.4 seconds. Neither number
 establishes end-user productivity. See the
-[measurement checkpoint](MESSAGE-REPLAY-ISOLATION-PLAN.md).
+[measurement checkpoint](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/MESSAGE-REPLAY-ISOLATION-PLAN.md).
 
 METR's early-2025 randomized study involved 16 experienced developers and 246
 real repository tasks; allowing contemporary AI tools increased completion time

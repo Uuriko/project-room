@@ -1,5 +1,0 @@
-# Existing join approvals in normalized Needs me
-
-Exact released base8c35203d. Actual owner browser had a loaded Grok Bot pending request inside #needs-attention, but mountUpdates.paint hid its #updates-decisions ancestor whenever normalized needs-me was active. The authorized queue and decision APIs already work. Remove only that blanket hiding; Mentions retains its existing filter behavior. No new grant, server command, approval semantics or room publication is introduced.
-
-Actual Chromium owner desktop1280/mobile390 controls fail2/2 before on visibility, pass after and approve the existing identity with exactly requested accept_work/complete_work. The two existing privacy/keyboard/catch-up cases also pass:4/4 total. Production Grok approval remains a separate post-deploy action, not proved by these fixtures.57 existing viewer/permission/retry tests pass;17 updates/normalized-access/manifest/shard controls pass. Local test configuration logs are not production configuration claims. Captured logs have trailing whitespace normalized.

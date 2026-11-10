@@ -1,6 +1,0 @@
-
-/Users/johnpotter/src/pr-per-room-owner-attention-1102/server/owner-overview.mjs
-  656:18  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
-
-✖ 1 problem (0 errors, 1 warning)
-

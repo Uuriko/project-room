@@ -1,3 +1,0 @@
-Adopted other-laptop source f269976fa1d10d0bb2049fd56567c5a6c8a1ba7d as d33ca8d17 on f02132a1c. Production runtime unchanged. Historical/current fixture resolution is exact-importer scoped and historical Store, adapter and seed producers use the same immutable revision.
-
-Root verification: actual Native work + schema comparison + full Cloudflare boot graph census 3/3 pass, Node24.22.1. Dependency audit passes. Original local attempt lacked cloudflare/node_modules and failed import resolution; the existing qualified dependency directory was linked, with no package/dependency policy changes. Other-laptop full before/after evidence: f0dfef4a2585ba4e3fbd8838e69460df448cb95f on evidence/member2-resync-matrix-1102 under main-test-import-repair. Diff secret scan clean.

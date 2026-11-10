@@ -1,5 +1,0 @@
-# Current export proof-page budget
-
-Source `96ddd29a3` on `2ebce68b3`. An actual default Native owner-created room with 25 distinct normal message writes failed its first export at 201 charged records, only 99,126 bytes. An eight-event read page succeeds at 157 records; four succeeds at 133; one at 115. Diagnostic fixture text is retained, not registered as another harness.
-
-Store.exportEvents current path now uses four-event source pages, preserving authenticated current-body/privacy/proof reads, global 200-record/256 KiB admission, numeric continuation, and late failure refusal. Legacy behavior is unchanged. Existing Node owner-export/privacy/fault tests: 17 pass; actual Native JSONL/HTML/cold/archived test: one pass. Zero skips. Whole export output remains materialized as before: this fix does not claim the whole export is bounded. Large single dependencies may still honestly refuse. The full before log also includes the separately investigated HTTP certification failure, not claimed fixed by the export patch.

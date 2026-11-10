@@ -28,4 +28,4 @@ node --test cloudflare/work-linked-post-native.check.mjs
 node scripts/secret-scan-diff.mjs --base 0448ab55d
 ```
 
-Evidence: [receipt](../../audit/evidence/work-linked-post-budget-20261102/receipt.json), with compressed source-bound before/after logs. New Native check is directly runnable; no broad package/manifest regeneration or deployment was performed in this lane.
+Evidence: [receipt](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/audit/evidence/work-linked-post-budget-20261102/receipt.json), with compressed source-bound before/after logs. New Native check is directly runnable; no broad package/manifest regeneration or deployment was performed in this lane.

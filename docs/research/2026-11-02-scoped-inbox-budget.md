@@ -64,7 +64,7 @@ Lint zero errors; secret scan clean. Native check is directly runnable, not adde
 to broad package/manifest scheduling in this lane. No production requests,
 credential access, push, merge, deployment or other runtime edits.
 
-Evidence: [receipt](../../audit/evidence/scoped-inbox-budget-20261102/receipt.json),
+Evidence: [receipt](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/audit/evidence/scoped-inbox-budget-20261102/receipt.json),
 with compressed matched before/after logs. Earlier fixture-only errors (missing
 HTTP inbox scope, then wrong synthetic revocation column) were corrected using
 the existing scope and revokeApiKey service; runtime auth was not loosened.

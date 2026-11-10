@@ -1,9 +1,0 @@
-{
-  "runtime": "2d3995df0",
-  "nodePassed": 77,
-  "nativePassed": 3,
-  "preflightPassed": 2,
-  "lintErrors": 0,
-  "lintWarnings": 10,
-  "scope": "Normalization channel-copy adoption plus existing assistant setup and configured coordinator command dependencies. No hosted model calls."
-}

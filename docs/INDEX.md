@@ -11,9 +11,9 @@ for each answer rather than copying its contents.
 | Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md) | Setup, discovery and scoped task context. |
 | Follow a current procedure | [Room procedures](ROOM-PROCEDURES.md), [coordination](ROOM-COORDINATION.md), [deployment lane](DEPLOY-LANE.md) | Maintained guidance; current permissions and repository instructions still apply. |
 | Diagnose and repair approved legacy message shapes | [Operator repair runbook](OPERATOR-LEGACY-MESSAGE-REPAIR.md) | Bounded diagnosis, fresh plans, exact-shape verification and refusal conditions. |
-| Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
-| Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
-| Verify a release | [Latest recorded release evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |
+| Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
+| Understand a design | [Architecture plan](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
+| Verify a release | [Latest recorded release evidence](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045), [release-record CLI and format](RELEASE-RECORD.md) | Source-bound observations; the CLI guide is not a live release record. Read the serving revision for current production state. |
 | See what is broken or planned for cutting | [Known issues](KNOWN-ISSUES.md) | The single ledger of known bugs, cuts and simplifications, with status, owner lane and decision. |
 | Learn from prior work | [Lessons](ROOM-WIKI.md), [history](#history), [archived backlog inventory](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md) | Historical evidence and unresolved requirements, not a second execution queue. |
 
@@ -114,7 +114,7 @@ The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROB
 
 The identity lifecycle (mint → link → rotate → revoke, with the honest gaps) is [IDENTITY-LIFECYCLE.md](IDENTITY-LIFECYCLE.md). Invite-code failures and lost secrets are covered in [FAQ.md](FAQ.md#troubleshooting).
 
-Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](EXECUTION-PORTABILITY-PLAN-20261018.md).
+Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/EXECUTION-PORTABILITY-PLAN-20261018.md).
 
 ## Coordinate
 
@@ -164,6 +164,8 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 
 Recent source-bound working notes not yet folded into a procedure (reachable for the orphan gate; read as dated evidence, not current authority): [account agent enrollment](ACCOUNT-AGENT-ENROLLMENT.md), [ACP current-thread read](ACP-CURRENT-THREAD-READ-20261102.md), [ACP existing-identity import](ACP-EXISTING-IDENTITY-IMPORT-20261102.md), [archived work](ARCHIVED-WORK.md), [normalized operational defaults](NORMALIZED-OPERATIONAL-DEFAULTS-20261102.md), [work-claims read surface](WORK-CLAIMS-READ.md), [room git-remote decision](decisions/2026-11-04-room-git-remote.md), [simplify design](design/SIMPLIFY-2026-10.md), and [git-remote design](design/git-remote.md).
 
+Retained ledgers, decisions and dated research formerly reached through the retired plan docs: [delivery ledger](DELIVERY-LEDGER.md), [work authority decision](WORK-AUTHORITY-DECISION.md), [quality and productivity scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md), [automation research and execution design](AUTOMATION-RESEARCH-AND-EXECUTION-DESIGN.md), [startup research and productivity strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md), [frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md), and [workspace simplification audit](WORKSPACE-SIMPLIFICATION-20261020.md).
+
 
 The [saved-identity ACP fix](research/2026-11-01-identity-continuity/ACP-FIX.md) records the qualified invitation behavior and shared-link boundary; the [identity-continuity qualification](research/2026-11-01-identity-continuity/README.md) preserves the original reproduction and native enrollment controls.
 
@@ -173,13 +175,13 @@ Specialized references that are current but narrow: [BEST-OF-N-BOUNTY-ATTEMPTS.m
 
 ## History
 
-Earlier implementation and release plans retain their original evidence:
+Earlier implementation and release plans retain their original evidence. Archive convention: plan docs and the `audit/` evidence tree removed from the working tree in the 2026-11-08 streamlining cuts remain readable in git history at base commit 1f871068, and references to removed material point at that immutable commit (blob/ for a file, tree/ for a directory) rather than a relative path:
 [unified conversation](UNIFIED-CONVERSATION-20261019.md),
 [chat-to-result](CHAT-RESULT-IMPLEMENTATION-20261019.md),
 [collaboration execution](COLLABORATION-EXECUTION-20261019.md),
-[focused collaboration](FOCUSED-COLLABORATION-PLAN-20261019.md),
-[entry simplification](ENTRY-SIMPLIFICATION-PLAN-20261019.md),
-[controller simplification](COLLABORATION-COMPONENTS-PLAN-20261019.md),
+[focused collaboration](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/FOCUSED-COLLABORATION-PLAN-20261019.md),
+[entry simplification](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/ENTRY-SIMPLIFICATION-PLAN-20261019.md),
+[controller simplification](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/COLLABORATION-COMPONENTS-PLAN-20261019.md),
 [release acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), and
-[cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
+[cross-platform release campaign](https://github.com/Uuriko/project-room/blob/1f871068393ac0db9653f4e35cf2fcca54a87834/docs/CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 Reconcile d[+11111 bytes at .content[1].resource.text]

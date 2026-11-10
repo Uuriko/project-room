@@ -1,3 +1,0 @@
-# Explicit boot graph qualification
-
-Original census could not bundle qualification aliases. Resolve four declared aliases in three exact fixtures to the same current-source modules their own harnesses select. No fixture or dependency is excluded. Building every fixture then exposed 12 unclassified intentional differences: 11 named shared fixture wrappers and the migration-only replay-mirror-retirement helper. Added exact per-module owner/reason records using the existing nested HTTP wrapper precedent; stale entries still fail. Production-only residual zero. Final existing Node and Native graph checks: 3/3 pass, zero skips. This is graph qualification, not a rerun of the complete Native suite. Original full suite at 2eb remains 174/187 pass.
