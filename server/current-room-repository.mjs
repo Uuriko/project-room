@@ -753,7 +753,11 @@ function commandContextFromHead(store,roomId,command,head,b,{readMessage,readWor
     else {if(!maps.has(key)||value!=='object')corrupt('unsupported map shape');state[key]??={};}
   }
   if(!state.room||state.room.id!==roomId)corrupt('missing room singleton');
-  if(state.room.publicReceipts?.enabled||state.room.starterSeeded)
+  // Public receipts are derived from work outcomes; a plain chat post neither
+  // reads nor changes them (normalized publication skips the whole-state
+  // sync), so it is qualified in a receipts-on room. Starter rooms stay
+  // refused: their guide reacts to posts with whole-room dependencies.
+  if(state.room.starterSeeded||state.room.publicReceipts?.enabled&&command.type!=='message.posted')
     refuse('Published/starter room dependencies require qualification');
   const assistantScalar=db.prepare('SELECT length(CAST(value AS BLOB)) bytes FROM room_assistant_config WHERE room_id=?').get(roomId);
   if(assistantScalar&&(!Number.isSafeInteger(assistantScalar.bytes)||assistantScalar.bytes<2||assistantScalar.bytes>4096))refuse('Assistant configuration exceeds bounded context');
