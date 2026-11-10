@@ -79,8 +79,10 @@ for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) {
   });
 }
 
-test('pending password sign-in fences provider navigation until it settles', async t => {
-  const f = await setup(t), page = await f.open();
+test('pending password sign-in fences provider navigation until it settles', { timeout: 30000 }, async t => {
+  // This case holds a request with page.route. A service worker can handle
+  // it before Playwright routing, leaving the pending fixture unresolved.
+  const f = await setup(t), page = await f.open({ ...DESK, serviceWorkers: 'block' });
   await page.route('**/api/auth/signin-options', route => route.fulfill({ status: 200, json: { providers: { google: { configured: true } } } }));
   let resolve; const pending = new Promise(done => { resolve = done; });
   await page.route('**/api/auth/password/login', route => resolve(route));
