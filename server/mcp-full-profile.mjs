@@ -151,7 +151,8 @@ export function catchUpHint(store, roomId, memberId) {
 }
 
 function replyRead(store, secret, roomId, name, args) {
-  if (name === "room_list_requests") return store.replyRequests.list(secret, roomId, args);
+  // Hosted tool readers always get each ask's progress and lifecycle state.
+  if (name === "room_list_requests") return store.replyRequests.list(secret, roomId, { ...args, states: true });
   if (name === "room_read_request") {
     const { requestMessageId, ...options } = args;
     return store.replyRequests.selected(secret, roomId, requestMessageId, options);

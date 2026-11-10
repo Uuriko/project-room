@@ -1,7 +1,7 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
 import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { replyPostMode, ANSWER_CREDENTIALS, MAX_REPLY_RESPONSE_CHARS, MAX_REPLY_RESPONSE_COMMAND_BYTES } from "../src/reply-requests.js";
+import { replyPostMode, ANSWER_CREDENTIALS, MAX_REPLY_RESPONSE_CHARS, MAX_REPLY_RESPONSE_COMMAND_BYTES, REPLY_PROGRESS_STATES } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
@@ -166,6 +166,24 @@ function withoutUntrusted(value) {
 }
 const assert = value => { if (!value) invalid(); };
 const requestFields = "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ");
+// A listed request may also carry `progress` (the recipient's last report) and
+// `lifecycle` (its derived state). Both are optional and shape-checked; any
+// other extra key is still refused.
+const REQUEST_LIFECYCLE_STATES = ["pending", "active", "needs_input", "error", "complete", "stale"];
+const validProgress = value => keys(value, ["state", "note", "at"]) && REPLY_PROGRESS_STATES.includes(value.state)
+  && (value.note === null || typeof value.note === "string" && value.note.length <= 1000) && (value.at === null || date(value.at));
+const validLifecycle = value => value && typeof value === "object" && !Array.isArray(value)
+  && Object.keys(value).every(key => ["state", "outcome", "unresponsive", "since", "thresholds"].includes(key))
+  && REQUEST_LIFECYCLE_STATES.includes(value.state) && typeof value.unresponsive === "boolean"
+  && (value.since === null || date(value.since))
+  && (value.outcome === undefined || ["answered", "declined", "cancelled"].includes(value.outcome))
+  && keys(value.thresholds, ["ackWindowMs", "staleAfterMs"]) && Object.values(value.thresholds).every(ms => Number.isSafeInteger(ms) && ms > 0);
+const listedRequestKeys = request => {
+  const extras = ["progress", "lifecycle"].filter(key => Object.hasOwn(request ?? {}, key));
+  return keys(request, [...requestFields, ...extras])
+    && (!extras.includes("progress") || validProgress(request.progress))
+    && (!extras.includes("lifecycle") || validLifecycle(request.lifecycle));
+};
 function validRequest(request) {
   return request && ["id", "openingEventId", "requesterId", "recipientId", "contextEventId"].every(key => validId(request[key]))
     && request.requesterId !== request.recipientId && nullableId(request.workItemId)
@@ -184,7 +202,7 @@ export function validateReplyRead(result, { name, args, roomId }) {
       && Array.isArray(result.requests) && result.requests.length <= 500);
     const ids = new Set();
     for (const request of result.requests) {
-      assert(keys(request, requestFields) && validRequest(request) && !ids.has(request.id)
+      assert(listedRequestKeys(request) && validRequest(request) && !ids.has(request.id)
         && (result.selection.status === "all" || request.status === result.selection.status)
         && (result.selection.direction === "incoming" ? request.recipientId === result.viewerId
           : result.selection.direction === "outgoing" ? request.requesterId === result.viewerId : [request.requesterId, request.recipientId].includes(result.viewerId)));

@@ -24,8 +24,14 @@ const pageKeys = [...bindingKeys, "kind", "afterSequence", "afterEventId", "hori
 const checkpointKeys = [...bindingKeys, "kind", "throughSequence", "throughEventId"];
 // progress appears only once the recipient has reported one, so requests
 // without it keep their exact prior shape.
-const compactRequest = request => withRequestState({ ...Object.fromEntries(
-  "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ").map(key => [key, request[key]])),
+// Installed clients validate a listed request against this exact key set and
+// reject anything else, so it is the default shape. `progress` and `lifecycle`
+// are added only for a reader that asks for states (hosted MCP always does;
+// REST with ?states=1): before this split, one progress report made the ask
+// unreadable through every local client.
+const compactRequest = request => Object.fromEntries(
+  "id openingEventId requesterId recipientId workItemId status revision contextEventId terminalEventId createdAt closedAt".split(" ").map(key => [key, request[key]]));
+const statefulRequest = request => withRequestState({ ...compactRequest(request),
   ...(request.progressState ? { progress: { state: request.progressState, note: request.progressNote ?? null, at: request.lastActivityAt ?? null } } : {}) }, request);
 const requestInHistory = (request, floor) => messageInHistory({ id: request.id, createdAt: request.createdAt }, floor);
 const scope = Object.freeze({ membership: "room", targetedMessages: "participants-only", externalExecution: false, acknowledges: false,
@@ -66,14 +72,18 @@ export class ReplyRequests {
     });
   }
   list(token, roomId, options = {}) {
+    const {states=false,...selection}=options;
+    if(typeof states!=="boolean")fail("invalid_reply_selection","states must be true or false");
+    options=selection;
     const {direction="incoming",status="open",expectedSessionBinding=null}=options;
-    if(isCurrentRoom(this.store.db,roomId))return readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest,readMessage,responseTemplates});
+    const shapeRequest=states?statefulRequest:compactRequest;
+    if(isCurrentRoom(this.store.db,roomId))return readCurrentReplies(this.store,token,roomId,"list",options,{scope,compactRequest:shapeRequest,readMessage,responseTemplates});
     if(options.cursor!==undefined||options.limit!==undefined)fail("invalid_reply_selection","Legacy request lists do not accept pagination; omit cursor and limit");
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
       fail("invalid_reply_selection", "Choose a request direction and current status");
     return this.read(token, roomId, expectedSessionBinding, ({ auth, room, floor }) => {
       const requests = Object.values(room.state.replyRequests ?? {}).filter(request => directionMatches(request, auth.member.id, direction)
-        && requestInHistory(request, floor) && (status === "all" || request.status === status)).map(compactRequest);
+        && requestInHistory(request, floor) && (status === "all" || request.status === status)).map(shapeRequest);
       const nextReads = requests.map(request => ({ requestMessageId: request.id,
         http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
