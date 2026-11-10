@@ -65,9 +65,17 @@ export class AgentWakeClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) })
       });
       let length = 0; const chunks = [];
-      if (response.body) for await (const chunk of response.body) {
-        length += chunk.length; if (length > 262144) { throw invalid(); }
-        chunks.push(Buffer.from(chunk));
+      try {
+        if (response.body) for await (const chunk of response.body) {
+          length += chunk.length; if (length > 262144) { throw invalid(); }
+          chunks.push(Buffer.from(chunk));
+        }
+      } catch (error) {
+        // A failed error body cannot override headers already received:
+        // auth failures stay fatal and transient failures retain Retry-After.
+        // Successful responses still require a complete, bounded body.
+        if (response.ok) throw error;
+        chunks.length = 0;
       }
       let value;
       try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
