@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkClaims, publicWorkClaimsSchema } from '../server/public-work-claims.mjs';
-import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from '../server/public-work-claim-fence.mjs';
-import { unpublishPublic } from '../server/legal-store.mjs';
+import { publicWorkClaimFenceSchema } from '../server/public-work-claim-fence.mjs';
 
 // Real store/identity/offer/lease boundary; registration/HTTP/workerd keepers
 // independently own transport and old-writer fencing. No registry doubles.
@@ -32,8 +30,6 @@ function fixture(t) {
     tick(ms) { clock += ms; }, reopen() { store.close(); store = new RoomStore(file, { now: () => clock }); } };
 }
 const claim = (requestId, extra = {}) => ({ requestId, expectedTermsVersion: 1, ...extra });
-const owned = (requestId, generation, extra = {}) => ({ ...claim(requestId), generation, ...extra });
-const code = expected => error => error.code === expected;
 
 // Reproduction: a ranked page must not declare completion while its scanned candidates remain hidden.
 test('recommendation pagination reaches every candidate within one scan page', t => {
