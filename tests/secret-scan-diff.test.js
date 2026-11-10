@@ -105,7 +105,7 @@ const prngBytes = (seed, n) => {
   return out;
 };
 const fakeHighEntropy = () =>
-  `deploy_token = "${prngBytes(0x5EED, 32).toString("base64url")}"`;
+  `deploy_ref = "${prngBytes(0x5EED, 32).toString("base64url")}"`;
 
 const SEEDS = [
   ["aws-access-key", fakeAwsKey],
