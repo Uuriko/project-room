@@ -58,7 +58,7 @@ const overlaps = (left, right) => left === right || left.startsWith(right + '/')
 // (e.g. `ui` inside `guide`). Longer preferences retain substring matching.
 const matchesPreference = (text, value) => {
   if (!/^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}]{1,2}$/u.test(value)) return text.includes(value);
-  return text.split(/[^\p{L}\p{N}_]+/u).includes(value);
+  return text.split(/[^\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}_]+/u).includes(value);
 };
 
 // #3530: the standard public-work starter set — the newcomer tasks an
