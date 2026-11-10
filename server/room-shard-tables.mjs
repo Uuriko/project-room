@@ -96,7 +96,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "room_vetting_receipts", "saved_messages", "share_link_access", "share_link_codes",
   "share_link_join_redemptions", "share_link_joins", "share_links", "sla_breach_alerts",
   "spam_quarantine", "spend_authorizations", "spend_grant_terms", "spend_room_reservations",
-  "squads", "stitch_identities", "stitch_links", "stitch_receipts", "stitch_revocations",
+  "stitch_identities", "stitch_links", "stitch_receipts", "stitch_revocations",
   "stitch_suggestions", "telegram_live_status", "thread_mutes", "wake_queue", "wake_queue_commands",
   "wake_queue_pause", "wake_queue_pause_by", "web_fetch_cache", "web_fetch_cache_rooms",
   "web_fetch_log", "web_research_log", "work_item_board_backfill",
@@ -117,7 +117,11 @@ export function roomTablesPresent(db) {
 
 // Grant families and callback secrets remain directory authority. They are
 // optional because a fresh store has never mounted OAuth or event delivery.
-const optionalDirectory = new Set(["message_replay_units", ...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
+// The retired squads table (plan-squads removal) is optional for the same
+// shape of reason: no module creates it anymore, so a fresh store simply
+// does not have it, while pre-removal stores still carrying it keep it as
+// directory authority.
+const optionalDirectory = new Set(["message_replay_units", "squads", ...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
 const directory = new Set(DIRECTORY_TABLES);
 const local = new Set(LOCAL_TABLES);
 const skipped = new Set(REPLAY_SKIPPED_TABLES);
