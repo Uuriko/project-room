@@ -216,11 +216,11 @@ async function findMatches(more = false) {
   const button = matchForm.querySelector('button'); button.disabled = true; $('#more-matches').disabled = true;
   try {
     const values = key => matchForm.elements[key].value.split(',').map(value => value.trim()).filter(Boolean);
-    const input = more ? { ...lastPreferences, after: matchAfter } : { skills: values('skills'), interests: values('interests'), reward: matchForm.elements.reward.value, limit: 3 };
+    const input = more ? { ...lastPreferences, after: matchAfter } : { skills: values('skills'), interests: values('interests'), reward: matchForm.elements.reward.value, limit: 3, cursorVersion: 2 };
     if (!more) { lastPreferences = input; matchAfter = null; $('#more-matches').hidden = true; }
     const result = await read('/api/public-work/match', flight.signal, false, input);
     if (flight !== matchFlight) return;
-    if (!result || result.claim !== null || !Array.isArray(result.recommendations) || result.recommendations.length > 3 || result.nextCursor !== null && !validId(result.nextCursor)) throw new Error('Unsupported recommendations');
+    if (!result || result.claim !== null || !Array.isArray(result.recommendations) || result.recommendations.length > 3 || result.nextCursor !== null && !(validId(result.nextCursor) || typeof result.nextCursor === 'string' && result.nextCursor.length <= 1024 && /^~[A-Za-z0-9_-]+$/.test(result.nextCursor))) throw new Error('Unsupported recommendations');
     for (const item of result.recommendations) {
       const task = item.task;
       if (!task || task.schema !== 'public-work-task/1' || !validId(task.taskId) || !Number.isSafeInteger(task.termsVersion) || task.termsVersion < 1 || typeof task.title !== 'string' || !Array.isArray(task.acceptanceCriteria) || !task.acceptanceCriteria.every(value => typeof value === 'string') || !Array.isArray(task.files) || !task.files.every(value => typeof value === 'string') || typeof task.repositoryUrl !== 'string' || typeof task.repositoryRef !== 'string' || task.claim?.state !== 'unclaimed' || !Array.isArray(item.reasons) || !item.reasons.every(value => typeof value === 'string')) throw new Error('Unsupported recommendation');

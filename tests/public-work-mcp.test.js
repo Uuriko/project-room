@@ -196,3 +196,19 @@ test('#1551: anonymous auth_required errors never name hosted tools in next[]',a
  assert.equal(gated.body.error.data.reason,'auth_required');
  assert.ok(!JSON.stringify(gated.body.error.data.next).includes('room_check_access'));
 });
+
+test('anonymous MCP can continue ranked recommendations within a scanned page', async t => {
+ const f=await fixture(t);
+ for(const id of ['next-a','next-b']){
+  f.store.projectOffers.create('commons','owner',{requestId:'create-'+id,offerId:id,reviewerMemberIds:['owner'],terms:{kind:'task',title:id,summary:'Synthetic',acceptanceCriteria:['Deliver result'],repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'human'}}});
+  f.store.projectOffers.transition('commons','owner',id,'publish',{requestId:'publish-'+id,expectedRevision:1});
+  f.store.publicWorkClaims.enable('commons','owner',id,{requestId:'enable-'+id,expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:[id+'.js']});
+ }
+ const before=state(f.store),seen=new Set();let after;
+ for(let i=0;i<10;i++){
+  const page=value(await f.call('public_work_recommend',{cursorVersion:2,limit:1,...(after?{after}:{})}));
+  for(const entry of page.recommendations){assert.ok(!seen.has(entry.task.taskId));seen.add(entry.task.taskId)}
+  if(!page.hasMore)break;assert.ok(page.nextCursor);after=page.nextCursor;
+ }
+ assert.deepEqual([...seen].sort(),['mcp:task','next-a','next-b']);assert.equal(state(f.store),before);
+});

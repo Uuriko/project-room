@@ -19,7 +19,8 @@ export const publicWorkMcpDefinitions = Object.freeze([
    skills: { ...strings, description: 'Skills you can apply, as short words such as "typescript" or "docs" (up to 20). Tasks whose title or acceptance criteria contain one rank first; nothing is filtered out.' },
    interests: { ...strings, description: 'Topics you want to work on, such as "accessibility" or "openapi" (up to 20). Ranked the same way as skills; nothing is filtered out.' },
    limit: { type: 'integer', minimum: 1, maximum: 5, description: 'How many recommendations to return, 1-5. Default 3.' },
-   after: { ...id, description: 'Paging cursor: pass the previous response nextCursor when hasMore is true.' }
+   cursorVersion: { type: 'integer', enum: [2], description: 'Opt in to complete ranked continuation; keep on every page.' },
+   after: { type: 'string', minLength: 1, maxLength: 1024, pattern: '^(?:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}|~[A-Za-z0-9_-]+)$', description: 'Opaque cursor: pass the previous response nextCursor unchanged. Restart if stale.' }
  }), true),
  tool('public_work_read_task', 'Read current public terms, repository paths and lease. No private room data or admission. Inspect before claiming.', schema({ taskId: { ...id, description: 'The task id from public_work_recommend (task.taskId), for example "t_abc".' } }, ['taskId']), true),
  tool('public_work_claim', 'Explicitly claim one public volunteer task with your saved identity. No room admission. Preserve requestId and exact arguments after an unknown response; expectedTermsVersion comes from a fresh task read.', schema({ ...binding, leaseHours: lease }, Object.keys(binding)), false),

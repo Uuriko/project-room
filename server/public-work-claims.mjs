@@ -606,7 +606,7 @@ export class PublicWorkClaims {
       return journal ? this.request(row, identity.identityId, action, input, operation) : operation();
   }
   match(secret, input) {
-    shape(input, [], ['requestId', 'skills', 'interests', 'reward', 'autoClaim', 'limit', 'leaseHours', 'after']);
+    shape(input, [], ['requestId', 'skills', 'interests', 'reward', 'autoClaim', 'limit', 'leaseHours', 'after', 'cursorVersion']);
     if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid request ID');
     const limit = input.limit ?? 3, reward = input.reward ?? 'volunteer';
     check(Number.isInteger(limit) && limit >= 1 && limit <= 5 && ['volunteer', 'work_trade', 'cash'].includes(reward), 'Invalid matching preferences');
@@ -616,7 +616,20 @@ export class PublicWorkClaims {
       check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), 'Invalid matching preferences');
       return values.map(value => value.trim().toLowerCase());
     });
-    check(input.after === undefined || identifier(input.after), 'Invalid matching cursor');
+    check(input.cursorVersion === undefined || input.cursorVersion === 2, 'Unsupported recommendation pagination version');
+    let scanAfter = input.after === undefined ? '' : input.after, resume = null;
+    check(typeof scanAfter === 'string' && (input.after === undefined || scanAfter.length > 0), 'Invalid matching cursor');
+    check(!(input.cursorVersion === 2 && input.autoClaim === true), 'Recommendation pagination version 2 cannot auto-claim');
+    if (scanAfter.startsWith('~')) {
+      check(input.cursorVersion === 2, 'Recommendation cursor requires cursorVersion 2');
+      try {
+        check(scanAfter.length <= 1024 && /^~[A-Za-z0-9_-]+$/.test(scanAfter), 'Invalid matching cursor');
+        resume = JSON.parse(Buffer.from(scanAfter.slice(1), 'base64url').toString('utf8'));
+        check(resume && resume.v === 1 && typeof resume.after === 'string' && (resume.after === '' || identifier(resume.after)) && Number.isSafeInteger(resume.offset) && resume.offset > 0 && typeof resume.digest === 'string' && /^[a-f0-9]{64}$/.test(resume.digest), 'Invalid matching cursor');
+        scanAfter = resume.after;
+      } catch (error) { if (error instanceof ServiceError) throw error; fail(422, 'invalid_public_work', 'Invalid matching cursor'); }
+    } else check(scanAfter === '' || identifier(scanAfter), 'Invalid matching cursor');
+    check(!(resume && input.autoClaim === true), 'Recommendation continuation cannot auto-claim');
     lease(input.leaseHours);
     const run = operation => input.autoClaim === true ? withPublicWorkClaimWriter(this.store, operation) : this.store.readTransaction(operation);
     return run(() => {
@@ -632,8 +645,9 @@ export class PublicWorkClaims {
       // public_work_recommend) claims nothing and is never counted.
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
+        if (input.cursorVersion === 2) outcome.cursorVersion = 2;
         if (reward !== 'volunteer') return outcome;
-        const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
+        const page = this.list({ limit: 100, after: scanAfter, claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
         const candidates = page.tasks.filter(task => {
@@ -647,7 +661,17 @@ export class PublicWorkClaims {
           const matched = [...new Set(preferences.filter(value => text.includes(value)))];
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
-        outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+        // Bind continuation to the selection and the actual scanned page. If
+        // work changes, restart instead of silently skipping/duplicating rows.
+        const digest = hash(JSON.stringify({ preferences, reward, limit, page, candidates }));
+        if (resume && (resume.digest !== digest || resume.offset >= candidates.length)) fail(409, 'stale_recommendation_cursor', 'Recommendations changed; restart without cursor');
+        const offset = resume?.offset ?? 0;
+        outcome.recommendations = candidates.slice(offset, offset + limit).map(({ task, reasons }) => ({ task, reasons }));
+        if (input.cursorVersion === 2 && input.autoClaim !== true && offset + limit < candidates.length) {
+          outcome.hasMore = true;
+          outcome.nextCursor = '~' + Buffer.from(JSON.stringify({v:1,after:scanAfter,offset:offset+limit,digest})).toString('base64url');
+        }
+
         // Machine-readable complement to a bare empty list (#2988): tasks
         // were inspected but none of them is claimable. Deliberately named
         // reasonCode, not reason/guidance — those are human-readable fields

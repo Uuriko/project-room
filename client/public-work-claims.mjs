@@ -4,6 +4,7 @@ import { assertServiceOrigin, RoomClientError } from './room-agent.mjs';
 import { edgeDoorApiPath } from '../src/service-origin.js';
 import { validId } from '../src/events.js';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const recommendationCursor = value => validId(value) || typeof value === 'string' && value.length <= 1024 && /^~[A-Za-z0-9_-]+$/.test(value);
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported public work response');
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -91,14 +92,15 @@ export class PublicWorkClaimsClient {
     if (!object(input) || input.autoClaim !== undefined && typeof input.autoClaim !== 'boolean'
       || input.autoClaim === true && !validId(input.requestId)
       || input.requestId !== undefined && !validId(input.requestId)
-      || input.after !== undefined && !validId(input.after)
+      || input.after !== undefined && !recommendationCursor(input.after)
+      || input.cursorVersion !== undefined && input.cursorVersion !== 2
       || input.limit !== undefined && (!positive(input.limit) || input.limit > 5)
       || input.reward !== undefined && !['volunteer', 'work_trade', 'cash'].includes(input.reward)
       || ['skills', 'interests'].some(key => input[key] !== undefined && (!Array.isArray(input[key]) || input[key].length > 20 || !input[key].every(value => typeof value === 'string' && value.trim() && value.length <= 100)))) throw new RoomClientError(0, 'invalid_input', 'Use bounded matching preferences and a stable request ID for an explicit claim');
     const result = await this.#request('/api/public-work/match', { ...options, data: input, authenticate: Boolean(this.#identitySecret) || input.autoClaim === true });
     if (!object(result) || !Array.isArray(result.recommendations) || result.recommendations.length > (input.limit ?? 3)
       || !Number.isSafeInteger(result.inspected) || result.inspected < 0 || result.inspected > 100 || typeof result.hasMore !== 'boolean'
-      || result.nextCursor !== null && !validId(result.nextCursor) || !Array.isArray(result.supportedRewards)
+      || result.nextCursor !== null && !recommendationCursor(result.nextCursor) || !Array.isArray(result.supportedRewards)
       || result.supportedRewards.length !== 1 || result.supportedRewards[0] !== 'volunteer') throw invalid();
     for (const item of result.recommendations) {
       if (!object(item) || !Array.isArray(item.reasons) || !item.reasons.every(value => typeof value === 'string')) throw invalid();

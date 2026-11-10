@@ -150,7 +150,7 @@ test('an empty bounded recommendation page recovers failed fresh and continuatio
   await f.page.locator('#find-work-status').filter({ hasText: 'Couldn’t find work' }).waitFor();
   assert.equal(await f.page.locator('#more-matches').isVisible(), false, 'a failed fresh search must not offer a discarded continuation');
   assert.equal(await f.page.locator('#find-work-form [type=submit]').isEnabled(), true);
-  assert.deepEqual(inputs.at(-1), { skills: [], interests: [], reward: 'volunteer', limit: 3 });
+  assert.deepEqual(inputs.at(-1), { skills: [], interests: [], reward: 'volunteer', limit: 3, cursorVersion: 2 });
   await f.page.locator('#find-work-form [type=submit]').click();
   await f.page.locator('#more-matches').waitFor({ state: 'visible' });
   await f.page.locator('#find-work-form [name=reward]').selectOption('cash');
@@ -227,7 +227,7 @@ test('editing preferences fences an older real match response and starts a fresh
   await f.page.goto(`${f.origin}/offers`); await f.page.locator('.match-filters summary').click(); await f.page.locator('#find-work-form [name=skills]').fill('JavaScript'); await f.page.locator('#find-work-form [type=submit]').click(); await captured;
   await f.page.locator('#find-work-form [name=skills]').fill('Python'); await f.page.locator('#find-work-form [name=reward]').selectOption('cash'); assert.equal(await f.page.locator('#find-work-form [type=submit]').isEnabled(), true);
   await f.page.locator('#find-work-form [type=submit]').click(); await f.page.locator('#find-work-status').filter({ hasText: 'No claimable cash matches' }).waitFor(); release(); await finished; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.match(await f.page.locator('#find-work-status').textContent(), /No claimable cash matches/); assert.deepEqual(inputs[1], { skills: ['Python'], interests: [], reward: 'cash', limit: 3 });
+  assert.equal(await f.page.locator('[data-copy-claim]').count(), 0); assert.match(await f.page.locator('#find-work-status').textContent(), /No claimable cash matches/); assert.deepEqual(inputs[1], { skills: ['Python'], interests: [], reward: 'cash', limit: 3, cursorVersion: 2 });
 });
 test('a completed native clipboard write cannot restore old match feedback after interests change', { timeout: 45000 }, async t => {
   const f = await setup(t, 1280); preferenceTask(f); await f.page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: f.origin });
@@ -252,4 +252,22 @@ test('immediate rejected match copy selects instructions for manual copy', { tim
   await f.page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('denied');}}}));
   await f.page.locator('[data-copy-claim]').click(); await f.page.locator('#find-work-status').filter({hasText:'Copy the selected instructions'}).waitFor();
   assert.equal(await f.page.locator('#find-work-results textarea').evaluate(el=>el===document.activeElement && el.selectionEnd>el.selectionStart),true);
+});
+
+test('anonymous visitor can continue ranked recommendations within one scan page', {timeout:45000}, async t => {
+ const f=await setup(t,1280);
+ for(let n=0;n<5;n++){
+  const id=`ranked-${n}`;
+  f.store.projectOffers.create('commons','owner',{requestId:`create-${id}`,offerId:id,reviewerMemberIds:['owner'],terms:{kind:'task',title:id,summary:'A useful contribution',acceptanceCriteria:['Read declared paths'],repositoryUrl:'https://github.com/Uuriko/project-room',reward:{kind:'unpaid'},approvalPolicy:{mode:'human'}}});
+  f.store.projectOffers.transition('commons','owner',id,'publish',{requestId:`publish-${id}`,expectedRevision:1});
+  f.store.publicWorkClaims.enable('commons','owner',id,{requestId:`enable-${id}`,expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:[`files/${id}`]});
+ }
+ await f.page.goto(`${f.origin}/offers`);
+ await f.page.locator('#find-work-form [type=submit]').click();
+ await f.page.locator('#more-matches').waitFor({state:'visible'});
+ const first=await f.page.locator('[data-match-offer]').evaluateAll(els=>els.map(x=>x.dataset.matchOffer));
+ await f.page.locator('#more-matches').click();
+ await f.page.locator('#more-matches').waitFor({state:'hidden'});
+ const second=await f.page.locator('[data-match-offer]').evaluateAll(els=>els.map(x=>x.dataset.matchOffer));
+ assert.equal(new Set([...first,...second]).size,5);assert.equal(first.length,3);assert.equal(second.length,2);
 });

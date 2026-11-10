@@ -186,3 +186,20 @@ test('saved-identity feedback rejects malformed or private follow-up pointers fr
     await assert.rejects(intercepted.readReview(receipt), error => error.code === 'invalid_response');
   }
 });
+
+test('SDK opt-in follows ranked continuation without changing legacy responses', async t => {
+ const f=await fixture(t);
+ for(const id of ['sdk-next-a','sdk-next-b']) {
+  f.store.projectOffers.create('commons','owner',{requestId:'create-'+id,offerId:id,reviewerMemberIds:['owner'],terms:{kind:'task',title:id,summary:'Synthetic',acceptanceCriteria:['Deliver result'],repositoryUrl:'https://github.com/example/project',reward:{kind:'unpaid'},approvalPolicy:{mode:'human'}}});
+  f.store.projectOffers.transition('commons','owner',id,'publish',{requestId:'publish-'+id,expectedRevision:1});
+  f.store.publicWorkClaims.enable('commons','owner',id,{requestId:'enable-'+id,expectedRevision:2,expectedTermsVersion:1,repositoryRef:'main',files:[id+'.js']});
+ }
+ const legacy=await f.publicClient.match({limit:1});assert.equal(legacy.cursorVersion,undefined);assert.equal(legacy.nextCursor,null);
+ const seen=new Set();let after;
+ for(let i=0;i<5;i++){
+  const page=await f.publicClient.match({cursorVersion:2,limit:1,...(after?{after}:{})});
+  assert.equal(page.cursorVersion,2);for(const row of page.recommendations)seen.add(row.task.taskId);
+  if(!page.hasMore)break;after=page.nextCursor;
+ }
+ assert.deepEqual([...seen].sort(),['client:task','sdk-next-a','sdk-next-b']);
+});

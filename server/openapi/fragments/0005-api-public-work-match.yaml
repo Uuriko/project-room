@@ -42,6 +42,10 @@
                         $ref: "#/components/schemas/PublicWorkOutcome"
                       -
                         type: "null"
+                  cursorVersion:
+                    type: "integer"
+                    enum: [2]
+                    description: "Echoed only when ranked continuation is requested."
                   inspected:
                     type: "integer"
                     minimum: 0
@@ -83,9 +87,13 @@
                   type: "string"
                   minLength: 1
                   maxLength: 128
+                cursorVersion:
+                  type: "integer"
+                  enum: [2]
+                  description: "Opt in to ranked continuation; repeat on every page. Cannot be combined with autoClaim. If a scanned page changes while resuming, restart on a stale cursor. Changes across source pages are not a snapshot. Legacy callers retain the prior source-scan behavior and may omit ranked candidates when the result limit truncates a scan page."
                 after:
                   type: "string"
-                  description: "nextCursor from the prior bounded scan; use a new requestId for a new autoClaim page."
+                  description: "Opaque nextCursor from the prior page; keep the same selection and cursorVersion."
                 skills:
                   type: "array"
                   maxItems: 20
