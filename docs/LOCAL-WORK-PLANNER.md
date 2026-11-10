@@ -63,6 +63,40 @@ revisions, duplicate side effects, failed acceptance and human rescue events.
 Keep unknown availability separate from observed idle time. Compare similar jobs;
 value/cost estimates are ordering inputs, not measured productivity gains.
 
-Current implementation covers planning and its regression tests. Automatic
-candidate discovery, atomic dispatch integration and two-device execution
-qualification are separate remaining work; no always-on execution is claimed.
+Current implementation covers planning, selected-PR discovery and an adapter to
+the existing atomic request runner. Production host configuration and two-device
+execution qualification remain; no always-on execution is claimed.
+
+## Live supply and dispatch adapter
+
+`node scripts/discover-local-work.mjs /absolute/policies.json` reads selected PRs
+through the operator's existing `gh` connection. Each policy includes
+`repository`, positive integer `number`, `kind` (`review` or `failed_ci`), plus
+acceptance, valueReason, value, minutes, requires and scopes from the job schema.
+It uses argument arrays, never PR-supplied shell commands. Closed PRs are excluded;
+failed-CI policies require an actual completed failure. Skipped checks do not
+create failures or prove execution. The result contains jobs and dated source
+observations. Merge these with fresh devices, receipts and reservations before
+planning. Review scope is explicitly selected; scanning unrelated repositories
+or inventing maintenance is not automatic.
+
+`runPlannedRequest` selects the first job for one device, requires an explicit
+source/head/device → formal request/revision binding, and calls the existing
+`runRequestOnce`. Its preflight refreshes planning before new execution. Request
+revision changes, device staleness, changed heads and new reservations block
+pickup. The service runner retains atomic request ownership, pagination,
+durable unknown-attempt fencing and saved-response recovery. The caller supplies
+its existing private journal, connection and configured host. Recovery of a
+previous attempt belongs to that existing runner; do not recreate a job to retry
+an unknown outcome. A plan itself never reserves cross-device write scopes:
+existing Room work claims must cover writes before a host edits.
+
+The adapter does not install a daemon. The subprocess backend's platform
+readiness still applies (Linux isolation is not assumed available on macOS).
+On these Macs, Codex scheduled chats perform the local work using their supported
+tools and coordinate claims through Room. The second Mac must confirm its own
+scheduled worker; shared Room membership does not prove a running host.
+
+Qualification covers a real local Room service and SQLite journal: selected
+request → claim → host result → recorded reply → retry without a second host
+invocation. This fixture is not proof of production unattended execution.
