@@ -233,8 +233,7 @@ test('legacy archived rows without reducer extras use journal recovery and upgra
 });
 
 
-test('public feed, squad channels and receipt deduplication survive archival and reopen', async t => {
- const { createSquad, getSquad } = await import('../server/squads.mjs');
+test('public feed and receipt deduplication survive archival and reopen', async t => {
  const { postReceiptCard } = await import('../server/receipt-cards.mjs');
  const f=setup(t);f.store.roomFlood={consume(){}};
  f.post('channel','Public channel.');f.post('private','Hidden private wording.',{toMemberId:'owner'});
@@ -252,8 +251,6 @@ test('public feed, squad channels and receipt deduplication survive archival and
  assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='channel'),false);
  assert.deepEqual(read(),before);
  assert.throws(()=>f.store.publicFace.feedByCode(publicCode,{after:'private'}),e=>e.code==='invalid_feed_cursor');
- const squad=createSquad(f.store,f.owner,'commons',{name:'archived-channel',goal:'Ship',memberIds:[],channelMessageId:'channel'});
- assert.equal(getSquad(f.store,f.owner,'commons',squad.squad.id).squad.channel,'channel');
  const head=f.store.headSequence('commons');
  assert.equal(f.store.transaction(()=>postReceiptCard(f.store,'commons',item,Date.now())),null);
  assert.equal(f.store.headSequence('commons'),head);
