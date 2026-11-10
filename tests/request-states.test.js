@@ -7,16 +7,18 @@ const t0 = Date.parse("2026-11-04T20:00:00.000Z");
 const at = ms => new Date(t0 + ms).toISOString();
 const open = extra => ({ status: "open", createdAt: at(0), ...extra });
 
-test("flag is off by default and only '1' turns it on", () => {
-  assert.equal(requestStatesEnabled({}), false);
-  assert.equal(requestStatesEnabled({ ROOM_REQUEST_STATES: "true" }), false);
+test("states are on by default and only '0' turns them off", () => {
+  assert.equal(requestStatesEnabled({}), true);
+  assert.equal(requestStatesEnabled(undefined), true);
   assert.equal(requestStatesEnabled({ ROOM_REQUEST_STATES: "1" }), true);
+  assert.equal(requestStatesEnabled({ ROOM_REQUEST_STATES: "false" }), true);
+  assert.equal(requestStatesEnabled({ ROOM_REQUEST_STATES: "0" }), false);
 });
 
-test("withRequestState leaves the compact shape untouched when the flag is off", () => {
+test("withRequestState leaves the compact shape untouched only when switched off", () => {
   const compact = { id: "r1", status: "open" };
-  assert.deepEqual(withRequestState(compact, open(), { env: {} }), compact);
-  const on = withRequestState(compact, open(), { env: { ROOM_REQUEST_STATES: "1" }, now: t0 + 1000 });
+  assert.deepEqual(withRequestState(compact, open(), { env: { ROOM_REQUEST_STATES: "0" } }), compact);
+  const on = withRequestState(compact, open(), { env: {}, now: t0 + 1000 });
   assert.equal(on.lifecycle.state, "pending");
   assert.equal(on.id, "r1");
 });

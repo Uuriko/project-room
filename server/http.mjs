@@ -4785,11 +4785,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "POST") return json(res, 200, store.requestRuns.apply(selected.token, roomId, await body(req), fence));
       }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
-        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status", "cursor", "limit"]
+        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status", "cursor", "limit", "states"]
           : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
         if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_reply_selection", "Invalid request selection");
-        const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : params.get(key)]));
+          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
+          || params.has("states") && params.get("states") !== "1") reject(422, "invalid_reply_selection", "Invalid request selection");
+        // states=1 opts a reader into progress and lifecycle on listed requests.
+        const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : key === "states" ? true : params.get(key)]));
         options.expectedSessionBinding = fence;
         const value = route === "reply-requests" ? store.replyRequests.list(selected.token, roomId, options)
           : route === "reply-context" ? store.replyRequests.selected(selected.token, roomId, params.get("requestMessageId"), options)
