@@ -280,3 +280,24 @@ test('sent open asks lead page one too, in both and outgoing directions, and clo
  const other=store.replyRequests.list(keys.other,'commons',{direction:'outgoing',limit:20});
  assert.equal(other.requests.some(r=>r.id==='z-my-ask'),false,'another member never sees my sent ask');
 });
+
+test('the SDK asks for ask states and falls back once against a service that predates them',async t=>{
+ const {store,keys}=fixture(t);
+ const server=createRoomServer({store});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ const origin=`http://127.0.0.1:${server.address().port}`,connection={version:1,origin,roomId:'commons',memberId:'reader',token:keys.reader};
+ const read=await new RoomAgentClient(connection).replyRead('room_list_requests',{});
+ assert.deepEqual(read.requests.map(r=>r.id),['question']);
+ assert.equal(read.requests[0].lifecycle.state,'pending','current service returns the state');
+ // Older service: refuses the unknown selector exactly as production did before the option existed.
+ const seen=[];
+ const old=new RoomAgentClient({...connection,fetchImpl:async(url,init)=>{
+  if(String(url).includes('/reply-requests'))seen.push(String(url).includes('states=1'));
+  if(String(url).includes('states=1'))return new Response(JSON.stringify({error:{code:'invalid_reply_selection',message:'Invalid request selection'}}),{status:422,headers:{'content-type':'application/json'}});
+  return fetch(url,init);
+ }});
+ const plain=await old.replyRead('room_list_requests',{});
+ assert.deepEqual(plain.requests.map(r=>r.id),['question']);assert.equal('lifecycle' in plain.requests[0],false);
+ await old.replyRead('room_list_requests',{});
+ assert.deepEqual(seen,[true,false,false],'asked once, fell back, then stopped asking');
+});

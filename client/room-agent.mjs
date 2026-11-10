@@ -407,6 +407,7 @@ export class RoomAgentClient {
   #token;
   #fetch;
   #memberId;
+  #statesUnsupported = false;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
     assertServiceOrigin(origin);
     if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,256})$/.test(token)) throw new Error("A valid Room and access key are required");
@@ -671,7 +672,18 @@ export class RoomAgentClient {
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
-    const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
+    // Ask the service for each listed request's progress and lifecycle state.
+    // A service that predates the option refuses it with 422; fall back to
+    // the plain list once and stop asking for the rest of this client's life.
+    const states = name === "room_list_requests" && !this.#statesUnsupported;
+    const url = extra => route + "?" + new URLSearchParams({ ...args, ...extra });
+    let result;
+    try { result = await this.#request(url(states ? { states: "1" } : {}), undefined, signal); }
+    catch (error) {
+      if (!states || error?.status !== 422 || error?.code !== "invalid_reply_selection") throw error;
+      this.#statesUnsupported = true;
+      result = await this.#request(url({}), undefined, signal);
+    }
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
   async assistant(input, { signal } = {}) {
