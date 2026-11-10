@@ -14,7 +14,7 @@ function fixture(t) {
   store.command(parker.secret, roomId, {id: 'ask', type: 'message.posted',
     data: {messageId: 'ask', toMemberId: olive.identityId, requestKind: 'reply', body: 'Please check deployment'}});
   const read = (claimSec = 45) => collectNeedsMe(store, olive.secret, {roomId, claimSec});
-  const request = () => store.replyRequests.list(olive.secret, roomId, {direction: 'incoming', status: 'open'}).requests.find(r => r.id === 'ask');
+  const request = () => store.replyRequests.list(olive.secret, roomId, {direction: 'incoming', status: 'open', states: true}).requests.find(r => r.id === 'ask');
   const ack = who => store.command(who.secret, roomId, {id: 'explicit-ack', type: 'reply_request.progressed',
     data: {requestMessageId: 'ask', expectedRequestRevision: 0, progress: 'acknowledged'}});
   return {store, roomId, olive, parker, read, request, ack};
