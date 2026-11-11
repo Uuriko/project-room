@@ -195,6 +195,11 @@ test('mixed native reads require every category while full grants read the real 
   const pack = await f.rpc('tools/call', { name: 'room_activation_pack', arguments: {} });
   assert.notEqual(pack.body.result?.isError, true, JSON.stringify(pack.body));
   assert.equal(pack.body.result.structuredContent.room.slug, 'commons');
+  const brief = await f.rpc('tools/call', { name: 'room_activation_pack', arguments: { view: 'brief' } });
+  assert.notEqual(brief.body.result?.isError, true, JSON.stringify(brief.body));
+  assert.equal(brief.body.result.structuredContent.view, 'brief');
+  assert.equal(brief.body.result.structuredContent.room.slug, 'commons');
+  assert.deepEqual(brief.body.result.structuredContent.you.permissions, pack.body.result.structuredContent.members.find(member => member.id === brief.body.result.structuredContent.you.memberId).permissions);
   assert.equal(pack.body.result.structuredContent.orientation.purpose, f.store.room('commons').state.room.charter?.purpose ?? f.store.room('commons').state.room.purpose ?? '');
 });
 
