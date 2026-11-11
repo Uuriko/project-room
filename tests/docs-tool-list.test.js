@@ -116,12 +116,13 @@ test("tools.md read/write table tools all resolve in the served catalog", () => 
 import { livePublicMcpTools } from "../server/mcp-discovery.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 
-const COUNT_WORDS = { four: 4, six: 6, seven: 7 };
+const COUNT_WORDS = { four: 4, six: 6, seven: 7, eight: 8 };
 
 function anonCatalogFromSkill(text, rel) {
   // Sentence shapes seen: "... serves six tools when no credential is sent: ..."
   // and "Without a credential the tool list is six tools: ...".
   const m =
+    text.match(/discovery lists\s*(eight|\d+)\s+entries:\s*([^\n.]+)\./i) ||
     text.match(/No credential:\s*(six|seven|four|\d+)\s+tools\s+only\s*\(([^\n.]+)\)\./i) ||
     text.match(/(six|seven|four|\d+)\s+tools[^.\n]*?credential[^:\n]*:([^\n.]+)\./i) ||
     text.match(/credential[^.\n]*?(six|seven|four|\d+)\s+tools[^:\n]*:([^\n.]+)\./i);
@@ -134,13 +135,18 @@ function anonCatalogFromSkill(text, rel) {
   return { count, names: [...names] };
 }
 
-test("skill files' no-credential catalog sentence matches the live anonymous catalog", () => {
+test("skill files distinguish eight discovery entries from seven anonymous actions and the OAuth check", () => {
   const live = livePublicMcpTools().map((t) => t.name);
   assert.ok(live.includes("room_identity_mint"), "live anonymous catalog includes room_identity_mint");
   for (const rel of ["skills/project-room/references/tools.md", "skills/ProjectRoom/SKILL.md",
     "skills/project-room-host-router/hosts/hosted-mcp.md"]) {
-    const { count, names } = anonCatalogFromSkill(read(rel), rel);
-    assert.equal(count, live.length, `${rel}: stated no-credential count matches live (${live.length})`);
+    const text = read(rel);
+    const { count, names } = anonCatalogFromSkill(text, rel);
+    assert.match(text, /first seven are anonymous public actions/i, `${rel}: execution count stays seven`);
+    assert.match(text, /room_check_access[^.]*HTTP 401[^.]*OAuth/, `${rel}: protected entry triggers OAuth`);
+    assert.match(text, /Listing it grants no anonymous Room access/, `${rel}: discovery is not permission`);
+    assert.doesNotMatch(text, /eight (anonymous|credential-free) (public )?actions/i);
+    assert.equal(count, live.length, `${rel}: stated no-credential discovery count matches live (${live.length})`);
     assertSetEqual(names, live, `${rel}: enumerated no-credential names match live catalog`);
   }
 });

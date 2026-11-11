@@ -13,6 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 const SHA = "a".repeat(40);
 
 function fixture(t) {
@@ -60,9 +61,7 @@ function landEvents(store, roomId = "commons") {
 
 function secondMember(store, ownerKey, name) {
   const identity = store.identities.create(name);
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: name, permissions: []
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", identity, { displayName: name, permissions: [] });
   return linked.memberId;
 }
 

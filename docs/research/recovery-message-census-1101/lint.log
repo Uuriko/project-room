@@ -1,0 +1,6 @@
+
+/Users/johnpotter/src/pr-recovery-independent-census-1101/server/current-room-repository.mjs
+  784:137  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+
+✖ 1 problem (0 errors, 1 warning)
+

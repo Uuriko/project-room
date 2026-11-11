@@ -171,3 +171,55 @@ test("retention deletes old delivered rows in bounded batches and continues on t
     assert.deepEqual(newest, Array.from({ length: WEBHOOK_DELIVERY_KEEP }, (_, i) => "batch-" + (total - 1 - i)));
   });
 });
+
+test("bounded retention passes protected old histories and revisits inserts behind its cursor", () => {
+  withStore((store, filename) => {
+    const old = NOW - 30 * DAY;
+    store.transaction(() => {
+      for (let i = 0; i < WEBHOOK_DELIVERY_PRUNE_BATCH; i++) {
+        insertDelivery(store.db, { id: `protected-${i}`, sub: `quiet-${i}`, at: old });
+      }
+      for (let i = 0; i < 120; i++) insertDelivery(store.db, { id: `later-${i}`, sub: "later", at: old + 1 });
+    });
+    const first = store.agentPlugin.pruneWebhookDeliveries();
+    assert.equal(first.examined, WEBHOOK_DELIVERY_PRUNE_BATCH);
+    assert.equal(first.deleted, 0);
+    assert.equal(first.moreMayRemain, true);
+    const cursor = first.nextCursor;
+    store.close();
+    const reopened = new RoomStore(filename, { now: () => NOW });
+    try {
+      insertDelivery(reopened.db, { id: "insert-behind", sub: "later", at: old - 1 });
+      const second = reopened.agentPlugin.pruneWebhookDeliveries({ cursor });
+      assert.equal(second.deleted, 20, "persisted cursor advances after restart past protected histories");
+      assert.equal(second.nextCursor, null);
+      assert.equal(reopened.agentPlugin.pruneWebhookDeliveries().deleted, 1, "next sweep catches an insertion behind the prior cursor");
+      assert.equal(reopened.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries WHERE subscription_id LIKE 'quiet-%'").get().n, WEBHOOK_DELIVERY_PRUNE_BATCH);
+      assert.equal(reopened.agentPlugin.pruneWebhookDeliveries({ cursor: { createdAt: 'invalid', deliveryId: 9 } }).deleted, 0);
+    } finally { reopened.close(); }
+  });
+});
+
+test("retention tie ordering matches newest rowid and restores cache plus cursor on rollback", () => {
+  withStore(store => {
+    const old = NOW - 30 * DAY;
+    store.transaction(() => {
+      insertSub(store.db, "ties");
+      for (let i = 0; i < 120; i++) insertDelivery(store.db, { id: `tie-${120-i}`, sub: "ties", at: old });
+    });
+    const expected = store.db.prepare("SELECT delivery_id FROM agent_webhook_deliveries ORDER BY created_at DESC,rowid DESC LIMIT 100").all().map(row => row.delivery_id).sort();
+    const deliveries = [{ deliveryId: 'tie-120' }];
+    const sub = { deliveries };
+    store.agentPlugin.subs.set('ties', sub);
+    const original = store.transaction.bind(store);
+    store.transaction = fn => original(() => { fn(); throw new Error('after cache update'); });
+    assert.throws(() => store.agentPlugin.pruneWebhookDeliveries(), /after cache update/);
+    assert.equal(sub.deliveries, deliveries);
+    assert.equal(store.agentPlugin.webhookRetentionCursor, undefined);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_webhook_deliveries").get().n, 120);
+    store.transaction = original;
+    assert.equal(store.agentPlugin.pruneWebhookDeliveries().deleted, 20);
+    assert.deepEqual(sub.deliveries, []);
+    assert.deepEqual(store.db.prepare("SELECT delivery_id FROM agent_webhook_deliveries ORDER BY delivery_id").all().map(row => row.delivery_id), expected);
+  });
+});

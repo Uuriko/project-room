@@ -1,0 +1,20 @@
+
+/Users/johnpotter/src/pr-current-reply-reader-1101/server/http.mjs
+  1038:9  warning  'timer' is never reassigned. Use 'const' instead  prefer-const
+
+/Users/johnpotter/src/pr-current-reply-reader-1101/server/reply-requests.mjs
+  257:31   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  257:104  warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  329:78   warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+  352:7    warning  Raw members index. Resolve members through ownMember(members, id) from src/events.js so prototype ids ("toString", "constructor", …) cannot pose as members  room/no-raw-members-index
+
+/Users/johnpotter/src/pr-current-reply-reader-1101/tests/current-reply-reader.test.mjs
+   43:21  warning  'found' is never reassigned. Use 'const' instead  prefer-const
+   56:49  warning  'ids' is never reassigned. Use 'const' instead    prefer-const
+   86:21  warning  'ids' is never reassigned. Use 'const' instead    prefer-const
+  107:21  warning  'ids' is never reassigned. Use 'const' instead    prefer-const
+  139:38  warning  'ids' is never reassigned. Use 'const' instead    prefer-const
+  158:21  warning  'found' is never reassigned. Use 'const' instead  prefer-const
+
+✖ 11 problems (0 errors, 11 warnings)
+

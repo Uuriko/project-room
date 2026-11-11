@@ -27,6 +27,7 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { readWorkItems } from "./work-repository.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
@@ -36,13 +37,28 @@ const usableClaim = item => Boolean(item) && !item.premiseFlag && !item.supersed
 // exact same test instead of its private copy (E1 PR-2). Returns the
 // claim rows from `board` (a store.workClaims.list() result) that are
 // claimable right now, in board order.
-export function availableBoardRows(board) {
+export function availableBoardRows(board, { workItems = undefined } = {}) {
   const list = Array.isArray(board) ? board : [];
   const done = new Set(list.filter(item => usableClaim(item) && item.state === "done").map(item => item.id));
   return list.filter(item => usableClaim(item)
     && item.state === "unclaimed"
     && (item.kind ?? "work") === "work"
-    && (item.dependsOn ?? []).every(dep => done.has(dep)));
+    && (item.dependsOn ?? []).every(dep => done.has(dep))
+    && (!item.workItemId || workItems === undefined || (Object.hasOwn(workItems, item.workItemId)
+      && workItems[item.workItemId]?.id === item.workItemId
+      && typeof workItems[item.workItemId]?.state === "string"
+      && workItems[item.workItemId].state !== "proposed")));
+}
+
+// Inbox authority does not carry work payloads. Inspect only otherwise-ready
+// linked work, in a selected batch, rather than hydrating the whole room for
+// each historical card. A failed canonical read propagates as unknown.
+export function availableBoardRowsInRoom(store, roomId, board) {
+  const candidates = availableBoardRows(board);
+  const ids = candidates.map(item => item.workItemId).filter(Boolean);
+  if (!ids.length) return candidates;
+  const workItems = Object.fromEntries(readWorkItems(store.db, roomId, ids));
+  return availableBoardRows(board, { workItems });
 }
 
 const boardItem = (roomId, item) => ({
@@ -116,7 +132,7 @@ export function memoizeBoardList(store) {
 // 400 claims), so the projection never forces a second read.
 export function availableClaimsFromBoard(board, roomId, { viewerId = null, state = null } = {}) {
   if (!viewerMayClaim(state, viewerId)) return [];
-  return availableBoardRows(board).map(item => boardItem(roomId, item));
+  return availableBoardRows(board, { workItems: state?.workItems }).map(item => boardItem(roomId, item));
 }
 
 // Room-scoped AvailableWork: board claims for one room. Returns

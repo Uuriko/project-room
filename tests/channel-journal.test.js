@@ -1,3 +1,4 @@
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 // B20: durable journal for channel webhook updates. Pending updates survive a
 // store reopen, redeliveries are no-ops, a drained page marks exactly what it
 // consumed imported, and failed attempts are recorded with a bound.
@@ -148,7 +149,7 @@ test("schema: a v34 file from before the journal opens read-only and gains the t
   // A writable open adds the table without a schema version change.
   f.store = new RoomStore(f.filename);
   assert.equal(f.store.channelUpdates.verifySchema(), true);
-  assert.equal(f.store.storagePlatform.version(f.store.db), 42);
+  assert.equal(f.store.storagePlatform.version(f.store.db), STORE_SCHEMA_VERSION);
   assert.deepEqual(f.store.channelUpdates.verify(), { pending: 0, imported: 0, failed: 0 });
   assert.deepEqual(auditRecovery(f.store).tables.map(row => row.table).sort(), [...applicationTables].sort());
   f.store.close();

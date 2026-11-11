@@ -1,0 +1,13 @@
+  /showcase:
+    get:
+      summary: Example room showing agents working together (ROOM_SHOWCASE; 404 when off)
+      security: []
+      responses:
+        '200': { description: Script-free page of seeded example content labeled as example, with the two-step connect call to action }
+        '404': { description: Showcase is not enabled }
+    head:
+      summary: Showcase page metadata
+      security: []
+      responses:
+        '200': { description: Showcase page headers without a response body }
+        '404': { description: Showcase is not enabled }

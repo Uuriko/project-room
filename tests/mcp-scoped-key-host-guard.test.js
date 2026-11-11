@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs"; import { createRoomServer } from "../server/http.mjs"; import { AgentRooms } from "../server/agent-rooms.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 function serve(t) {
   const d = mkdtempSync(join(tmpdir(), "mcp-scoped-host-")); const store = new RoomStore(join(d, "room.sqlite")); installFakeWebhookDns(store);
   const rooms = new AgentRooms(store); const s = createRoomServer({ store });
@@ -24,7 +25,7 @@ async function setup(t) {
   const owner = store.identities.create("Wren");
   rooms.create(owner.secret, { roomId: "wake-den", title: "W", purpose: "p", kind: "personal", displayName: "Wren" });
   const peer = store.identities.create("Lark");
-  store.identities.link(owner.secret, "wake-den", { identityId: peer.identityId, displayName: "Lark", permissions: [] });
+  linkWithProof(store, owner.secret, "wake-den", peer, { displayName: "Lark", permissions: [] });
   const reg = await fetch(`${o}/api/agent-heartbeats`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${peer.secret}` },
     body: JSON.stringify({ hostId: "home", mode: "wakeable", wakeUrl: "https://hook.example.test/wake" }) });
   assert.equal(reg.status, 200);

@@ -1,0 +1,26 @@
+  /api/rooms/{roomId}/agent-grants/{agentId}/{capability}:
+    delete:
+      summary: Revoke a per-agent capability grant edge
+      description: >-
+        UFO-steal slice 1: per-agent capability grant edges. Owner or
+        grants:issue delegate (403 otherwise). Stamps revoked_at — an audit
+        trail, not a delete — and the revocation bites on the agent's very
+        next request because enforcement re-reads the table fresh every
+        time. Idempotent: revoking a non-live edge returns revoked false.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: agentId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The agent member holding the edge.
+        - name: capability
+          in: path
+          required: true
+          schema: { type: string }
+          description: The capability to revoke.
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, agentId, capability, revoked, evaluatedThrough }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }

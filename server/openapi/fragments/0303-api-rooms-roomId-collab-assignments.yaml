@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/collab/assignments:
+    post:
+      summary: Assign a thread to a room member
+      description: >-
+        Room-token read/write (CSRF + rate limit). Assigns the thread to an
+        agent or human; assigning an already-assigned thread without force is
+        refused with 409 assign_conflict. Returns the wrapper-level
+        assignmentId used by the release route.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, assignee]
+              properties:
+                threadId: { type: string }
+                assignee: { type: object, description: "{ kind: agent|human, id } identity" }
+                force: { type: boolean, description: "Human-only takeover without a release first (default false)." }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ assignmentId, assignment: { threadId, assignee, status, assignedAt, history } }" }
+        '409': { description: assign_conflict }
+        '422': { description: assign_invalid }
+    get:
+      summary: List thread assignments for the room
+      description: Room-token read of every thread assignment in this room.
+      security:
+        - roomToken: []
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ assignments: [{ threadId, assignee, status, assignedAt, releasedAt?, history }] }" }

@@ -1,0 +1,28 @@
+  /api/rooms/{roomId}/collab/routing/{id}/resolve:
+    post:
+      summary: Resolve a routing record
+      description: >-
+        Room-token write (CSRF + rate limit). Marks a routed mention
+        resolved with an outcome; the resolver defaults to the caller.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, maxLength: 1000 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ record: { routingId, status: resolved, outcome, resolvedBy, resolvedAt } }" }
+        '404': { description: routing_not_found }
+        '409': { description: routing_transition }
+        '422': { description: routing_invalid }

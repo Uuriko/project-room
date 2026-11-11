@@ -1,0 +1,18 @@
+  /api/inbox/sources/{sourceId}:
+    get:
+      summary: Read one inbox source and its private draft
+      description: >-
+        Account-session read. `?view=email-text-v1` returns the email text
+        view, `email-excerpt-v1` the excerpt view. 404 for another account's
+        source.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, source, draft }" }
+        '404': { description: Source not found for this account }
+        '422': { description: unsupported_inbox_view }

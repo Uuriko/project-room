@@ -1,7 +1,9 @@
+import {assertAccountEnrollment} from './account-agent-enrollment.mjs';
 import { createHash } from "node:crypto";
-import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
+import { EVENT_TYPES as T, validId, ownMember, AGENT_INVITE_SAFE_PERMISSIONS, replayEvents, emptyRoomState } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
+import { seedNewAgentPolicy } from "./agent-talk-policy.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
@@ -14,7 +16,29 @@ const access = Object.freeze({
   // Autonomy-biased default for agent-to-agent invites: work + steer + verify.
   // Still attenuated — no manage_members / decide / write_external / invite_member.
   collaborate: ["steer", "accept_work", "complete_work", "verify"],
+  // #5384 simple levels. Guest = read and chat. Member = the work set most
+  // members hold today; owner-only stays manage_members/decide/invite_member.
+  // The older names above stay as API aliases with their original sets, so
+  // nobody's existing or future access under those names changes.
+  guest: [],
+  // rules-p1: "member" is also INVITATION_ROLES.member (accept/complete/verify,
+  // no steer), the grant human invitations and share links issue. Two live
+  // grants shared one name with different bits, so this one is agent_member.
+  agent_member: ["steer", "accept_work", "complete_work", "verify", "manage_claims", "write_external"],
 });
+// Input alias only, never a definition: #5384 callers and stored connection
+// requests say "member" for the agent work set. It resolves to agent_member's
+// exact bits, so no existing or future grant under that word changes.
+export const AGENT_PROFILE_ALIASES = Object.freeze({ member: "agent_member" });
+export const agentProfileName = name => typeof name === "string" && Object.hasOwn(AGENT_PROFILE_ALIASES, name) ? AGENT_PROFILE_ALIASES[name] : name;
+export const isAgentProfile = name => typeof name === "string" && Object.hasOwn(access, agentProfileName(name));
+export const agentProfilePermissions = name => isAgentProfile(name) ? access[agentProfileName(name)] : undefined;
+// Connection requests are stored verbatim in immutable history and re-validated
+// on every read. The release before the rename rejects "agent_member" there, so
+// after a rollback one such row would fail the room's connection integrity
+// check. Until that release can no longer be restored, this API takes only the
+// spellings it already understood; "member" keeps the same bits via the alias.
+export const isConnectionAccess = name => isAgentProfile(name) && name !== AGENT_PROFILE_ALIASES.member;
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
 // never widen authority by renaming or editing a profile.
@@ -62,7 +86,7 @@ export class AgentConnections {
     // account required) — a raw access key must not mint agent credentials.
     // The mutation path additionally requires a signed-in account session —
     // connection sponsorship is account-bound by schema.
-    if (!auth.delegate && (auth.member?.id !== this.store.room(roomId).state.room.ownerId
+    if (!auth.delegate && (auth.member?.id !== this.store.roomAuthority(roomId,{memberId:auth.member.id}).ownerId
       || !auth.member.permissions.includes("manage_members"))) {
       fail(403, "owner_required", "Only the room owner can manage agent connections");
     }
@@ -71,20 +95,32 @@ export class AgentConnections {
     }
     return auth;
   }
+  sponsor(token, roomId, binding) {
+    const auth = this.store.authenticate(token, roomId, binding);
+    if (auth.member.kind === "human" && auth.account && auth.kind === "session") return auth;
+    return this.owner(token, roomId, binding);
+  }
+  friendSponsored(row) {
+    const first = this.db.prepare("SELECT receipt_json FROM agent_connection_operations WHERE room_id=? AND member_id=? AND generation=1").get(row.room_id, row.member_id);
+    return first && JSON.parse(first.receipt_json).version === 2;
+  }
   authority(row) {
-    const room = this.store.roomAuthority(row.room_id);
-    const sponsor = ownMember(room.members, row.sponsor_member_id), member = ownMember(room.members, row.member_id);
+    const room = this.store.roomAuthority(row.room_id,{memberId:row.sponsor_member_id});
+    const sponsor = ownMember(room.members, row.sponsor_member_id), member = ownMember(this.store.roomAuthority(row.room_id,{memberId:row.member_id}).members, row.member_id);
     const account = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.sponsor_account_id);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.sponsor_member_id);
-    if (!sponsor || sponsor.kind !== "human" || sponsor.active === false || sponsor.id !== room.ownerId
-      || sponsor.revision !== row.sponsor_member_revision || !sponsor.permissions.includes("manage_members")
+    const friend = this.friendSponsored(row);
+    if (!sponsor || sponsor.kind !== "human" || sponsor.active === false
+      || (!friend && (sponsor.id !== room.ownerId || !sponsor.permissions.includes("manage_members")))
+      || (friend && (member?.accountableHumanId !== sponsor.id || member.permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !sponsor.permissions.includes(p))))
+      || sponsor.revision !== row.sponsor_member_revision
       || account?.active !== 1 || account.auth_epoch !== row.sponsor_auth_epoch || binding?.account_id !== row.sponsor_account_id
       || !member || member.kind !== "agent" || member.active === false || member.revision !== row.member_revision) return false;
     this.store.verifyInvitedMembership(row.room_id, sponsor);
     return true;
   }
   view(row) {
-    const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
+    const member = ownMember(this.store.roomAuthority(row.room_id,{memberId:row.member_id}).members, row.member_id);
     const credential = this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash);
     const status = row.status === "disconnected" ? "disconnected" : row.expires_at <= this.store.now() ? "expired"
       : !this.authority(row) ? "access_changed" : credential?.revoked !== 0 ? "revoked" : "key_issued";
@@ -107,6 +143,13 @@ export class AgentConnections {
       identityLastUsedAt: usage?.lastUsedAt ?? null, identityLastUsedUa: usage?.lastUsedUa ?? null,
       keyLastUsedAt: keyUse?.lastUsedAt ?? null, keyLastUsedUa: keyUse?.lastUsedUa ?? null };
   }
+  identityAuthority(roomId, memberId) {
+    const row = this.row(roomId, memberId);
+    // Legacy owner connections retain their existing identity lifecycle.
+    if (!row || !this.friendSponsored(row)) return true;
+    return row.status === "issued" && row.expires_at > this.store.now() && this.authority(row)
+      && this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash)?.revoked === 0;
+  }
   assertCredential(credential) {
     const row = this.row(credential.room_id, credential.member_id);
     if (row && (row.status !== "issued" || row.credential_hash !== credential.hash || credential.kind !== "access"
@@ -121,13 +164,15 @@ export class AgentConnections {
   }
   list(token, roomId, binding) {
     return this.store.readTransaction(() => {
-      this.owner(token, roomId, binding);
-      return { connections: this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? ORDER BY created_at,member_id").all(roomId).map(row => this.view(row)) };
+      const auth = this.sponsor(token, roomId, binding);
+      const owner = auth.delegate || auth.member.id === this.store.roomAuthority(roomId,{memberId:auth.member.id}).ownerId;
+      return { connections: this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? ORDER BY created_at,member_id").all(roomId)
+        .filter(row => owner || row.sponsor_account_id === auth.account?.id && row.sponsor_member_id === auth.member.id).map(row => this.view(row)) };
     });
   }
   validate(details, { historyReplay = false } = {}) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
-    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId, identityLinkCode } = details;
+    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId, identityLinkCode, accountEnrollment } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
     // RC-2026-09-24-201: optional identityId made enrollment atomic — the
     // membership, credential AND identity link landed in one transaction, so
@@ -145,7 +190,7 @@ export class AgentConnections {
     // other secret in this service).
     const createFields = [...common, "displayName", "access", "keyHash", "expiresAt",
       ...(agentType !== undefined ? ["agentType"] : []),
-      ...(identityId !== undefined ? ["identityId", ...(!historyReplay ? ["identityLinkCode"] : [])] : [])];
+      ...(identityId !== undefined ? ["identityId", ...(accountEnrollment !== undefined ? ["accountEnrollment"] : !historyReplay ? ["identityLinkCode"] : [])] : [])];
     const fields = action === "create" ? createFields
       : [...common, "expectedGeneration", "expectedMemberRevision", ...(action === "rotate" ? ["keyHash", "expiresAt"] : [])];
     const IDENTITY_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -155,14 +200,15 @@ export class AgentConnections {
       || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
       || (action === "create" && identityId !== undefined && (typeof identityId !== "string" || !IDENTITY_ID_RE.test(identityId)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
-        || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
+        || /[\u0000-\u001f\u007f]/.test(displayName) || !isConnectionAccess(preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
     // The proof requirement is the fail-closed gate: no code, or a
     // malformed one, reads as identity_link_proof_required (never
     // invalid_connection) so clients can tell "mint a code" apart from
     // "fix the request shape". apply() verifies and consumes the code;
     // without a valid one it throws the same 422.
-    if (action === "create" && identityId !== undefined && !historyReplay
+    if (action === "create" && accountEnrollment !== undefined && (typeof accountEnrollment !== "string" || !/^account-enroll-[a-f0-9]{64}$/.test(accountEnrollment))) fail(422, "identity_link_proof_required", "Invalid account enrollment evidence");
+    if (action === "create" && identityId !== undefined && accountEnrollment === undefined && !historyReplay
       && (typeof identityLinkCode !== "string" || !LINK_CODE_RE.test(identityLinkCode))) {
       fail(422, "identity_link_proof_required",
         "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
@@ -181,7 +227,7 @@ export class AgentConnections {
     const { identityLinkCode, ...persisted } = request;
     const requestJSON = JSON.stringify(persisted), fingerprint = hash(requestJSON);
     return this.store.transaction(() => {
-      const auth = this.owner(token, roomId, binding);
+      const auth = this.sponsor(token, roomId, binding);
       // Connection sponsorship is account-bound by schema (sponsor_account_id
       // and actor_account_id are NOT NULL REFERENCES accounts(id)): an
       // accountless owner — e.g. an agent identity bearer — may list
@@ -193,11 +239,22 @@ export class AgentConnections {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "This request was used for different settings");
         return { receipt: JSON.parse(prior.receipt_json), connection: this.view(this.row(roomId, prior.member_id)), duplicate: true };
       }
+      if (request.accountEnrollment) assertAccountEnrollment(this.store, roomId, request, {accountId:auth.account.id});
       let now = this.store.now();
       const before = this.row(roomId, memberId);
+      const authority = this.store.roomAuthority(roomId,{memberId});
+      const isOwner = auth.member.id === authority.ownerId;
+      const friend = action === "create" ? !isOwner : before && this.friendSponsored(before);
+      const ownConnection = before?.sponsor_member_id === auth.member.id && before?.sponsor_account_id === auth.account.id;
+      if (action !== "create" && ((!isOwner && (!friend || !ownConnection)) || (friend && action === "rotate" && !ownConnection)))
+        fail(403, "sponsor_required", "Only this agent's sponsor can reconnect it");
+      const authoritySequence = authority.sequence;
+      const permissions = action === "create" ? agentProfilePermissions(request.access) : ownMember(authority.members, memberId)?.permissions;
+      if (action !== "disconnect" && friend && (!permissions || permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !auth.member.permissions.includes(p))))
+        fail(403, "sponsor_scope_exceeded", "An agent can only receive working permissions its human sponsor holds");
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room access changed; refresh first");
       if (action !== "disconnect" && (expiresAt <= now || expiresAt > now + 30 * 86400000 + 3600000)) fail(422, "invalid_expiry", "Choose an expiry within 30 days");
-      const roomMembers = this.store.room(roomId).state.members;
+      const roomMembers = authority.members;
       const existingMember = Object.hasOwn(roomMembers, memberId) ? roomMembers[memberId] : undefined;
       if (action === "create" ? Boolean(before || existingMember)
         : !before || before.status === "disconnected" || before.generation !== expectedGeneration
@@ -212,18 +269,18 @@ export class AgentConnections {
       }
       let membership = null;
       if (action === "create") membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ADDED,
-        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: access[request.access], accountableHumanId: auth.member.id,
+        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: agentProfilePermissions(request.access), accountableHumanId: auth.member.id,
           ...(request.agentType ? { agentType: request.agentType } : {}),
           // RC-2026-09-24-201: stamp the identity on the member record so
           // the room state is self-describing (agent-rooms.mjs already does).
-          ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding);
-      if (action === "disconnect" && ownMember(this.store.room(roomId).state.members, memberId)?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
-        data: { memberId, expectedMemberRevision, active: false, permissions: ownMember(this.store.room(roomId).state.members, memberId)?.permissions } }, binding);
+          ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding, { agentConnectionSponsor: friend });
+      if (action === "disconnect" && ownMember(authority.members, memberId)?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId, expectedMemberRevision, active: false, permissions: ownMember(authority.members, memberId)?.permissions } }, binding, { agentConnectionSponsor: friend && !isOwner });
       // Read AFTER the create/disconnect commands above: downstream state
       // persistence needs the post-command member (revision, permissions) —
       // hoisting this read above the disconnect command was the #3283
       // hosted-CI failure (verifyHistory rejected the stale member_revision).
-      const member = ownMember(this.store.room(roomId).state.members, memberId);
+      const member = ownMember(this.store.roomAuthority(roomId,{memberId}).members, memberId);
       if (membership) now = Date.parse(membership.event.at);
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
@@ -239,7 +296,9 @@ export class AgentConnections {
       // so a disconnected identity can't keep acting through the bond
       // surface; the removed identity is echoed on the receipt for audit.
       if (action === "create" && request.identityId) {
-        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode);
+        if (request.accountEnrollment) assertAccountEnrollment(this.store, roomId, request, {accountId:auth.account.id});
+        else this.store.identities.consumeLinkCode(request.identityId, identityLinkCode,
+          { roomId, sponsorAccountId: auth.account.id });
         const identity = this.store.identities.get(request.identityId);
         if (!identity) fail(404, "identity_not_found", "No such agent identity");
         const plugin = this.store.agentPlugin;
@@ -265,7 +324,7 @@ export class AgentConnections {
       if (before) this.db.prepare(`UPDATE agent_connections SET ${Object.keys(row).filter(k => !["room_id", "member_id", "created_at"].includes(k)).map(k => k + "=?").join(",")} WHERE room_id=? AND member_id=?`)
         .run(...Object.entries(row).filter(([k]) => !["room_id", "member_id", "created_at"].includes(k)).map(([, v]) => v), roomId, memberId);
       else this.db.prepare(`INSERT INTO agent_connections(${Object.keys(row).join(",")}) VALUES(${Object.keys(row).map(() => "?").join(",")})`).run(...Object.values(row));
-      const receipt = { version: 1, action, requestId, roomId, memberId, generation: row.generation, status: row.status,
+      const receipt = { version: friend ? 2 : 1, ...(friend ? { authoritySequence } : {}), action, requestId, roomId, memberId, generation: row.generation, status: row.status,
         expiresAt: row.expires_at, at: now, membershipEventId: membership?.event.id ?? null, membershipSequence: membership?.sequence ?? null,
         ...(request.identityId ? { identityId: request.identityId } : {}),
         // RC-2026-09-24-210: auditable unlink — the immutable operations
@@ -273,8 +332,9 @@ export class AgentConnections {
         // the connection carried no link).
         ...(unlinkedIdentityId ? { unlinkedIdentityId } : {}) };
       this.db.prepare("INSERT INTO agent_connection_operations VALUES(?,?,?,?,?,?,?,?,?)").run(roomId, memberId, row.generation, auth.account.id, requestId, requestJSON, fingerprint, JSON.stringify(receipt), JSON.stringify(row));
+      if (action === "create") seedNewAgentPolicy(this.db, roomId, memberId, now);
       let mcpToken = null;
-      if (action === "create" && request.identityId) {
+      if (action === "create" && request.identityId && !request.accountEnrollment) {
         this.store.accountLogins.assertEmailVerified(auth.account.id);
         mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
           identityId: request.identityId, roomId,
@@ -343,6 +403,7 @@ export class AgentConnections {
       let previous = null;
       for (const [index, operation] of operations.entries()) {
         const request = JSON.parse(operation.request_json), receipt = JSON.parse(operation.receipt_json), state = JSON.parse(operation.state_json);
+        if(request.accountEnrollment) assertAccountEnrollment(this.store,row.room_id,request,{history:true,accountId:operation.actor_account_id});
         // RC-2026-09-24-210: history rows persist the code-free request
         // (the raw link code is verified, consumed, and never stored), so
         // replay skips the proof requirement — the code was proven when
@@ -351,13 +412,13 @@ export class AgentConnections {
           || operation.generation !== index + 1 || state.generation !== operation.generation || receipt.generation !== operation.generation
           || request.memberId !== row.member_id || receipt.memberId !== row.member_id || state.member_id !== row.member_id
           || receipt.roomId !== row.room_id || state.room_id !== row.room_id || receipt.requestId !== operation.request_id
-          || request.requestId !== operation.request_id || receipt.action !== request.action || receipt.version !== 1
+          || request.requestId !== operation.request_id || receipt.action !== request.action || ![1, 2].includes(receipt.version)
           || state.sponsor_account_id !== operation.actor_account_id || state.sponsor_member_revision !== request.expectedOwnerRevision
           || receipt.at !== state.updated_at || receipt.expiresAt !== state.expires_at || receipt.status !== state.status
           || (index === 0 ? request.action !== "create" || state.created_at !== state.updated_at
             : request.action === "create" || previous.status === "disconnected" || request.expectedGeneration !== previous.generation
               || state.created_at !== previous.created_at)) invalid();
-        const room = this.store.room(row.room_id).state, sponsor = ownMember(room.members, state.sponsor_member_id);
+        const authority = this.store.roomAuthority(row.room_id, { memberId: state.sponsor_member_id }), sponsor = ownMember(authority.members, state.sponsor_member_id);
         const account = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(state.sponsor_account_id);
         const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, state.sponsor_member_id);
         // The member↔account binding is a current-state record, not an
@@ -384,12 +445,28 @@ export class AgentConnections {
           // optional identityId echo; the key set is exact either way.
           // RC-2026-09-24-210: disconnect receipts may carry the optional
           // unlinkedIdentityId echo (auditable unlink).
-          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
+          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.version === 2 ? ["authoritySequence"] : []), ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
-          || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
+          || (receipt.version === 1 && !this.ownerIdsAt(row.room_id, authority.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id))
           || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
           || !account || account.auth_epoch < state.sponsor_auth_epoch || !bindingOk) invalid();
+        if (receipt.version === 2) {
+          if (!integer(receipt.authoritySequence) || receipt.authoritySequence > authority.sequence) invalid();
+          // Checkpoints can move past this operation after account deletion.
+          // The retained event log, not the latest checkpoint, proves past authority.
+          const history = this.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence<=? ORDER BY sequence").all(row.room_id, receipt.authoritySequence);
+          const historical = replayEvents(emptyRoomState(), history.map(entry => JSON.parse(entry.body)));
+          const actor = ownMember(historical.members, state.sponsor_member_id), target = ownMember(historical.members, row.member_id);
+          if (actor?.kind !== "human" || actor.active === false || actor.revision !== state.sponsor_member_revision) invalid();
+          if (request.action === "create") {
+            if (receipt.membershipSequence !== receipt.authoritySequence + 1) invalid();
+            if (target || agentProfilePermissions(request.access).some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !actor.permissions.includes(p))) invalid();
+          } else if (request.action !== "disconnect" || actor.id !== historical.room.ownerId) {
+            if (target?.accountableHumanId !== actor.id || previous.sponsor_account_id !== state.sponsor_account_id || previous.sponsor_member_id !== actor.id) invalid();
+            if (request.action !== "disconnect" && (target.active === false || target.permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !actor.permissions.includes(p)))) invalid();
+          }
+        }
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
           || credential.parent_hash !== null || credential.account_id !== null || credential.account_auth_epoch !== null || credential.expires_at !== state.expires_at
@@ -406,14 +483,14 @@ export class AgentConnections {
           if (!event || linked.sequence !== receipt.membershipSequence || event.actorId !== state.sponsor_member_id || event.data.memberId !== row.member_id
             || Date.parse(event.at) !== receipt.at || event.type !== (request.action === "create" ? T.MEMBER_ADDED : T.MEMBER_ACCESS_CHANGED)
             || (request.action === "create" ? event.data.kind !== "agent" || event.data.accountableHumanId !== state.sponsor_member_id
-              || event.data.displayName !== request.displayName.trim() || JSON.stringify(event.data.permissions) !== JSON.stringify(access[request.access]) || state.member_revision !== 0
+              || event.data.displayName !== request.displayName.trim() || JSON.stringify(event.data.permissions) !== JSON.stringify(agentProfilePermissions(request.access)) || state.member_revision !== 0
               : event.data.active !== false || event.data.expectedMemberRevision !== request.expectedMemberRevision || state.member_revision !== request.expectedMemberRevision + 1)) invalid();
         }
         if (previous && previous.credential_hash !== state.credential_hash && this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(previous.credential_hash)?.revoked !== 1) invalid();
         previous = state;
       }
       if (Object.keys(row).some(k => row[k] !== previous[k])) invalid();
-      const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
+      const member = ownMember(this.store.roomAuthority(row.room_id, { memberId: row.member_id }).members, row.member_id);
       if (!member || member.kind !== "agent" || member.revision < row.member_revision) invalid();
     }
   }

@@ -1,3 +1,4 @@
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -156,7 +157,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 42);
+  assert.equal(auditRecovery(f.store).schemaVersion, STORE_SCHEMA_VERSION);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);

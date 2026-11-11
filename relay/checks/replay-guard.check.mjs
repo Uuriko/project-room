@@ -14,7 +14,7 @@ const replayed = error => error?.code === "replay_rejected" && error?.status ===
 
 test("a signature honored once is rejected on immediate replay", () => {
   const now = 1_000_000;
-  let seen = assertFreshControlSignature([], "sig-a", now, WINDOW, now);
+  const seen = assertFreshControlSignature([], "sig-a", now, WINDOW, now);
   assert.throws(() => assertFreshControlSignature(seen, "sig-a", now, WINDOW, now), replayed);
 });
 
@@ -26,7 +26,7 @@ test("a future-dated signature cannot be replayed while its HMAC still verifies"
   // time would already have forgotten it. Fails pre-fix (replay accepted).
   const receivedAt = 1_000_000;
   const stamp = receivedAt + 200;
-  let seen = assertFreshControlSignature([], "sig-b", receivedAt, WINDOW, stamp);
+  const seen = assertFreshControlSignature([], "sig-b", receivedAt, WINDOW, stamp);
   const replayAt = stamp + 200;
   assert.ok(Math.abs(replayAt - stamp) <= HMAC_SKEW_SEC, "replay must still pass the HMAC window");
   assert.throws(

@@ -29,6 +29,16 @@ test("vendor token prefixes are redacted", () => {
   }
 });
 
+test("#3602: first-party credential prefixes (pri_/rak_/ga1.) are redacted", () => {
+  for (const token of ["pri_abcdefgh12345678", "rak_abcdefgh12345678", "ga1.abcdefgh12345678"]) {
+    for (const text of [`key ${token} stopped working`, `${token}-`, `${token} and ${token}`]) {
+      const out = scrubString(text);
+      assert.ok(!out.includes(token), `first-party token ${token.slice(0, 4)}… must not survive`);
+      assert.match(out, /\[REDACTED:token\]/);
+    }
+  }
+});
+
 test("every secret in a string is redacted, not just the first", () => {
   // Regression: the scrub regexes were non-global, so replace() stopped
   // after the first match and later secrets reached storage verbatim.

@@ -1,0 +1,30 @@
+  /api/rooms/{roomId}/collab/handoffs/{id}/transition:
+    post:
+      summary: Move a room handoff along its lifecycle
+      description: >-
+        Room-token write (CSRF + rate limit). Same account-scope resolution
+        as the other handoff routes. Legal edges: open → accepted →
+        completed, or open/accepted → released.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [accepted, completed, released] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ handoff: { handoffId, status, history } }" }
+        '404': { description: handoff_not_found }
+        '409': { description: handoff_no_account_scope or invalid_handoff_transition }
+        '422': { description: invalid_handoff_status }

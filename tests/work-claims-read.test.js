@@ -23,6 +23,7 @@ import { WORK_CLAIM_ROUTES } from "../server/routes/work-claims.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { matchRoute, dispatchRoute } from "../server/routes/dispatch.mjs";
 import { ServiceError } from "../server/service-error.mjs";
+import { mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
 import { createWork, claimWork, updateWork } from "../server/work-claims.mjs";
 
 const H = 3600 * 1000;
@@ -129,7 +130,7 @@ test("an API key without the rooms:read scope is rejected with 403", async t => 
   const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST",
     headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ identityId: identity.identityId, permissions: ["accept_work", "complete_work"] }),
+    body: JSON.stringify({ identityId: identity.identityId, permissions: ["accept_work", "complete_work"], identityLinkCode: mintHolderLinkCode(store, identity, "commons") }),
   });
   assert.equal(link.status, 201, "identity links as a room member");
   const issue = async scopes => {

@@ -30,6 +30,7 @@ class MeteredDatabase extends DurableDatabase {
     });
   }
   prepare(sql) {
+    const db = this;
     const all = (...args) => {
       const cursor = this.storage.sql.exec(sql, ...args);
       const rows = cursor.toArray();
@@ -38,6 +39,20 @@ class MeteredDatabase extends DurableDatabase {
     };
     return {
       all,
+      // Match the production adapter's streaming interface and account for
+      // consumed rows even when a caller stops iterating early.
+      *iterate(...args) {
+        const cursor = db.storage.sql.exec(sql, ...args);
+        let returned = 0;
+        try {
+          for (const row of cursor) {
+            returned++;
+            yield row;
+          }
+        } finally {
+          db.#note(sql, cursor, returned);
+        }
+      },
       get: (...args) => all(...args)[0],
       run: (...args) => durableStorage.transaction(this, () => {
         all(...args);

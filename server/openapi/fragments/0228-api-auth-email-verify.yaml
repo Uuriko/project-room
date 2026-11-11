@@ -1,0 +1,24 @@
+  /api/auth/email/verify:
+    post:
+      summary: Mark the signed-in account email verified
+      description: >-
+        Requires the account session, Origin, and CSRF. Accepts the 6-digit
+        code from password signup. A matching code sets verified_at on that
+        email. A wrong, expired, or reused code answers 401 invalid_email_code.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200': { description: "{status: verified, email}" }
+        '401': { description: account_session_required, invalid_session, or invalid_email_code }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_email_code }
+        '429': { description: rate_limited }

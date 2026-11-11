@@ -139,11 +139,19 @@ test("room actions open existing work and catch-up flows; shortcuts do not inter
 
 test("room actions offer only the current member's available flows", { timeout: 30000 }, async t => {
   const f = await setup(t, { role: "guest" }); await f.open();
-  for (const id of ["new-work", "agent"]) assert.equal(await f.action(id).count(), 0);
+  assert.equal(await f.action("new-work").count(), 0);
+  assert.equal(await f.action("agent").count(), 1, "an active human account can connect its own agent");
   assert.equal(await f.action("invite").count(), 1, "an in-room member can invite");
   for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent"]) assert.equal(await f.action(id).count(), 1);
   assert.equal(await f.action("how-inbox").count(), 0, "email workspace is deferred");
   await f.capture("guest");
+  await f.action("agent").click();
+  await f.page.locator("#agent-connect-dialog").waitFor({ state: "visible" });
+  assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "chat");
+  for (const profile of ["contribute", "review"]) {
+    assert.equal(await f.page.locator(`#agent-connect-access option[value="${profile}"]`).evaluate(option => option.disabled), true, "guest cannot delegate permissions it lacks");
+  }
+  await f.page.locator("#agent-connect-close").click();
 });
 
 test("room actions recheck stale controls and clear the menu when room access ends", { timeout: 30000 }, async t => {
@@ -285,7 +293,12 @@ for (const mobile of [false, true]) test(`channel finder ${mobile ? "touch" : "k
     assert.match(await p.locator('#room-actions-status').textContent(), /send.*finish|sending/i);
     assert.equal(await p.locator('#conversation-title').textContent(), '# studio');
     release(); await p.locator('#message-list .message-body').filter({ hasText: 'Deliberate pending send' }).waitFor();
-    await query.press('Enter');
+    // The row paints optimistically before the send settles, so the guard can
+    // still hold for a moment: retry until the finished send lets Enter through.
+    for (let tries = 0; tries < 40 && await p.locator('#conversation-title').textContent() !== '# general'; tries++) {
+      await query.press('Enter');
+      if (await p.locator('#conversation-title').textContent() !== '# general') await p.waitForTimeout(100);
+    }
     assert.equal(await p.locator('#conversation-title').textContent(), '# general');
     await p.unroute('**/api/rooms/commons/commands');
   }

@@ -32,8 +32,8 @@ function scrubAndRebuild(store) {
   store.transaction(() => redactRemainingMessageBodies(store.db, "commons"));
   store.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run("commons");
   const rebuilt = store.rebuildProjection("commons");
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?")
-    .run(rebuilt.sequence, JSON.stringify(rebuilt.state), "commons");
+  store.transaction(() => store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?")
+    .run(rebuilt.sequence, store.storedProjection("commons", rebuilt.state), "commons"));
 }
 
 test("setPin and the pin reducer agree on a live redacted message", t => {

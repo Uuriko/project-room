@@ -20,7 +20,10 @@ name: schema-gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # unlabeled re-runs the workflow when a label is removed, so removing
+    # ready-to-land replaces the last gate result with a skipped (NOT-RUN)
+    # one instead of leaving it standing as the latest run.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     # Docs-only diffs cannot move the schema migration. This check is not in
     # the merge gate's required set. deploy-prod reads the push run, which
     # stays unfiltered. A required check would need a companion job instead

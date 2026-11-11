@@ -1,3 +1,4 @@
+import { currentInviteContext, prepareCurrentWrite, withCurrentServingWriter } from "./current-room-repository.mjs";
 // Self-serve agent access requests.
 //
 // An agent that minted an identity (server/agent-identities.mjs) but has no
@@ -30,6 +31,7 @@
 
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
 import { PILOT_LIMITS } from "./store.mjs";
+import { AgentSponsorTransfers, sponsorTransferContents } from "./agent-sponsor-transfer.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -38,7 +40,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from "../src/events.js";
+import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember, publicPage, joinLink, canInviteMembers } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -98,7 +100,8 @@ const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
 // Public callers still see 'pending'; direct identity grants intentionally do
 // not settle these rows, because changed membership requires a fresh review.
 const UPGRADE_PENDING_STATUS = "pending_upgrade";
-const isPending = status => status === "pending" || status === UPGRADE_PENDING_STATUS;
+const ACCOUNT_PENDING_STATUS = "pending_account";
+const isPending = status => status === "pending" || status === UPGRADE_PENDING_STATUS || status === ACCOUNT_PENDING_STATUS;
 const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
@@ -109,13 +112,28 @@ export const REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Legacy admission rows contain a permission array. Upgrade intent lives in
 // the request row, not only in the replaceable event journal: restoring room
 // history must never reinterpret a stale upgrade as a fresh admission.
-const requestContents = permissionRequestContents;
+const requestContents = row => {
+  const stored = JSON.parse(row.requested_permissions);
+  const adoption=sponsorTransferContents(row);
+  if(adoption)return {permissions:[],upgrade:null,adoption};
+  if (stored?.kind !== "account-admission") {
+    if (row.status === ACCOUNT_PENDING_STATUS || row.identity_id.startsWith("account:")) fail(409, "invalid_request", "Unsupported stored account admission");
+    return permissionRequestContents(row);
+  }
+  if (stored.version !== 1 || !Array.isArray(stored.permissions) || !stored.permissions.every(p => ACCESS_REQUEST_PERMISSIONS.includes(p))
+    || typeof stored.accountId !== "string" || !stored.accountId || !Number.isSafeInteger(stored.authEpoch) || stored.authEpoch < 0
+    || row.identity_id !== accountPrincipal(row.room_id, stored.accountId)) fail(409, "invalid_request", "Unsupported stored account admission");
+  return { permissions: stored.permissions, upgrade: null, account: { id: stored.accountId, authEpoch: stored.authEpoch } };
+};
+const accountPrincipal = (roomId, accountId) => `account:${createHash("sha256").update(JSON.stringify([roomId, accountId])).digest("hex")}`;
 
 const rowToRequest = row => row ? Object.freeze({
   requestId: row.request_id,
   roomId: row.room_id,
-  identityId: requestContents(row).upgrade?.principalKind === "room-member" ? null : row.identity_id,
-  kind: requestContents(row).upgrade ? "permissions" : "join",
+  identityId: requestContents(row).adoption || requestContents(row).account || requestContents(row).upgrade?.principalKind === "room-member" ? null : row.identity_id,
+  ...(requestContents(row).account || requestContents(row).adoption ? { principalKind: "account" } : {}),
+  kind: requestContents(row).adoption ? "agent-sponsor-transfer" : requestContents(row).upgrade ? "permissions" : "join",
+  ...(requestContents(row).adoption ? {memberId:requestContents(row).adoption.memberId,recipientMemberId:requestContents(row).adoption.humanMemberId} : {}),
   ...(requestContents(row).upgrade ? { memberId: requestContents(row).upgrade.memberId } : {}),
   displayName: row.display_name,
   requestedPermissions: requestContents(row).permissions,
@@ -123,7 +141,7 @@ const rowToRequest = row => row ? Object.freeze({
   // "Who referred you?" free text, answered at request time; resolved to a
   // member id only at approval, so the stored text is never an attribution.
   referredBy: row.referred_by ?? null,
-  status: row.status === UPGRADE_PENDING_STATUS ? "pending" : row.status,
+  status: [UPGRADE_PENDING_STATUS, ACCOUNT_PENDING_STATUS].includes(row.status) ? "pending" : row.status,
   createdAt: row.created_at,
   decidedAt: row.decided_at,
   decidedBy: row.decided_by,
@@ -150,10 +168,31 @@ const countActiveMembers = members =>
 const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(
   ["manage_members", "decide", "manage_claims", "write_external", "invite_member"]);
 
+// Admission needs the bounded member census for capacity and name uniqueness,
+// never conversation or task history. Legacy rooms retain their existing path.
+const accessRoom = (store, roomId) => {
+  const context = currentInviteContext(store, roomId, { census: true });
+  return context ? { ...context.room, current: context.current } : store.room(roomId);
+};
+const accessProjection = (store, roomId, room, state, incoming) => {
+  const write = room.current ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming,
+    sequence: room.sequence + 1, current: room.current }) : null;
+  return { write, projection: write?.projection ?? store.storedProjection(roomId, state) };
+};
+const saveAccessEvent = (store, roomId, room, incoming, projection, write) => {
+  const sequence = room.sequence + 1;
+  withCurrentServingWriter(store.db, roomId, () => {
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    write?.persistEntities();
+  });
+};
+
 export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
     this.store = store;
     this.db = store.db;
+    this.sponsorTransfers = new AgentSponsorTransfers(this);
     this.memberPermissions = new MemberPermissionRequests(this, MAX_PENDING_PER_IDENTITY_ROOM);
     // Separate bucket from general API use: requesting access is rare and
     // sensitive. 5 requests per hour per identity is generous for humans
@@ -173,6 +212,84 @@ export class AccessRequests {
   // require an authorized reviewed decision.
   // requestId is the caller's idempotency key: retries with the same id
   // return the original request instead of creating a duplicate.
+  requestAccount(token, roomId, input, binding) {
+    return this.store.transaction(() => {
+      const auth = this.store.authenticateAccountSession(token, null, binding);
+      const { displayName, requestedPermissions, note = null, referredBy = null, requestId = `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}` } = input;
+      const name = typeof displayName === "string" ? displayName.trim() : "";
+      if (!name || name.length > 80 || !Array.isArray(requestedPermissions) || new Set(requestedPermissions).size !== requestedPermissions.length
+        || !requestedPermissions.every(p => ACCESS_REQUEST_PERMISSIONS.includes(p)) || typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)
+        || note !== null && (typeof note !== "string" || note.length > 500) || referredBy !== null && (typeof referredBy !== "string" || referredBy.length > 80))
+        fail(422, "invalid_request", "Use a display name, distinct room permissions, short requestId and optional notes");
+      const principal = accountPrincipal(roomId, auth.account.id);
+      const prior = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
+      if (prior) {
+        const contents = requestContents(prior);
+        if (prior.room_id !== roomId || contents.account?.id !== auth.account.id || contents.account.authEpoch !== auth.account.authEpoch
+          || prior.display_name !== name || JSON.stringify([...contents.permissions].sort()) !== JSON.stringify([...requestedPermissions].sort())
+          || prior.note !== (note?.trim() || null) || prior.referred_by !== (referredBy?.trim() || null)) fail(409, "request_conflict", "requestId is already in use");
+        return this.statusAccount(token, requestId, binding);
+      }
+      const room = accessRoom(this.store, roomId);
+      if (isRoomArchived(room.state)) fail(409, "room_archived", "Archived rooms cannot admit members");
+      assertAdmissibleMemberName(name, room.state.members);
+      const limit = this.rateLimiter.check(`account-access-request:${auth.account.id}`);
+      if (!limit.allowed) fail(429, "rate_limited", "Too many access requests");
+      this.expireOld(roomId, principal);
+      if (this.db.prepare("SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status='pending_account'").get(roomId, principal).n >= MAX_PENDING_PER_IDENTITY_ROOM)
+        fail(429, "too_many_pending", "Too many pending requests for this room");
+      const stored = { version: 1, kind: "account-admission", accountId: auth.account.id, authEpoch: auth.account.authEpoch, permissions: requestedPermissions };
+      this.db.prepare("INSERT INTO access_requests(request_id,room_id,identity_id,display_name,requested_permissions,note,referred_by,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+        .run(requestId, roomId, principal, name, JSON.stringify(stored), note?.trim() || null, referredBy?.trim() || null, ACCOUNT_PENDING_STATUS, this.store.now());
+      this.emitAccessRequested(roomId, { requestId, identityId: `request:${requestId}`, displayName: name, requestedPermissions, note: note?.trim() || null, at: this.store.now() });
+      return this.statusAccount(token, requestId, binding);
+    });
+  }
+
+  statusAccount(token, requestId, binding) {
+    const auth = this.store.authenticateAccountSession(token, null, binding);
+    const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
+    if (!row || requestContents(row).account?.id !== auth.account.id) fail(404, "not_found", "No such join request");
+    const live = rowToRequest(this.maybeExpire(row));
+    const bound = live.status === "approved" ? this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, auth.account.id) : null;
+    const member = bound && ownMember(this.store.roomAuthority(row.room_id).members, bound.member_id);
+    return { ...live, ...(member?.active !== false && member?.kind === "human" ? { memberId: member.id } : {}) };
+  }
+
+  cancelAccount(token, requestId, binding) {
+    return this.store.transaction(() => {
+      const live = this.statusAccount(token, requestId, binding);
+      if (live.status !== "cancelled" && live.status !== "pending") fail(409, "already_decided", "Request already decided");
+      if (live.status === "pending") this.db.prepare("UPDATE access_requests SET status='cancelled',decided_at=?,decision_note=? WHERE request_id=?")
+        .run(this.store.now(), "withdrawn by requester", requestId);
+      return this.statusAccount(token, requestId, binding);
+    });
+  }
+
+  approveAccount(token, roomId, row, grants, auth, binding) {
+    const account = requestContents(row).account;
+    const current = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(account.id);
+    if (!current || current.active !== 1 || current.auth_epoch !== account.authEpoch) fail(409, "account_access_changed", "Applicant account access changed; a fresh request is required");
+    const room = accessRoom(this.store, roomId);
+    if (isRoomArchived(room.state)) fail(409, "room_archived", "Archived rooms cannot admit members");
+    const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, account.id);
+    let memberId = bound?.member_id;
+    if (memberId) {
+      const member = ownMember(room.state.members, memberId);
+      if (member?.active === false || member?.kind !== "human") fail(409, "membership_conflict", "Existing membership must be reviewed separately");
+    } else {
+      assertMemberDisplayNameAvailable(row.display_name, room.state.members);
+      memberId = `human_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
+      this.store.command(token, roomId, { id: randomUUID(), type: T.MEMBER_ADDED,
+        data: { memberId, displayName: row.display_name, kind: "human", permissions: grants } }, binding);
+      this.store.ensureHumanAccountBinding(roomId, memberId, account.id);
+    }
+    this.db.prepare("UPDATE access_requests SET status='approved',decided_at=?,decided_by=? WHERE request_id=?")
+      .run(this.store.now(), auth.member.id, row.request_id);
+    return { ...rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(row.request_id)), memberId,
+      grantedPermissions: [...ownMember(this.store.roomAuthority(roomId).members, memberId).permissions], alreadyMember: Boolean(bound) };
+  }
+
   request(roomId, { identityId, displayName, requestedPermissions, note, referredBy, requestId }, secret = null) {
     if (typeof roomId !== "string" || !roomId) fail(422, "invalid_request", "roomId is required");
     if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
@@ -213,7 +330,7 @@ export class AccessRequests {
         "SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(rid, roomId);
       if (existing) {
         // Idempotent retry: only the original identity may observe it.
-        if (existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
+        if (requestContents(existing).account || existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
         if (this.upgradeBasis(existing)) this.store.identities.authenticateIdentitySecret(identityId, secret);
         // A retried auto-approval returns the approval record (member id +
         // grant), not just the row — so a lost response can recover the
@@ -226,6 +343,13 @@ export class AccessRequests {
         }
         const retryLive = rowToRequest(existing);
         if (retryLive.status === "pending") {
+          // A caller may recover its original read/chat request after the owner
+          // opens the room. Never retry standing permission rules or upgrades.
+          if (!requestContents(existing).account && !this.upgradeBasis(existing)
+            && !requestContents(existing).permissions.length && !requestedPermissions.length) {
+            const attempt = this.tryAutoApprove(roomId, rid, { publicOnly: true, identitySecret: secret });
+            if (attempt.approved) return attempt.response;
+          }
           return Object.freeze({ ...retryLive, next: this.pendingNext(rid, identityId) });
         }
         return retryLive;
@@ -276,7 +400,7 @@ export class AccessRequests {
       // Invalid upgrade proofs must not spend the real holder's request quota.
       const limit = this.rateLimiter.check(`access-request:${identityId}`);
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
-      const room = this.store.room(roomId);
+      const room = accessRoom(this.store, roomId);
       const member = linked ? ownMember(room.state.members, linked.memberId) ?? null : null;
       if (linked) {
         if (!member || member.active === false || member.identityId !== identityId || this.store.identities.secretRevoked(identityId)) {
@@ -347,7 +471,7 @@ export class AccessRequests {
   // behavior (request recorded, no timeline event — there is no live
   // timeline audience to notify).
   emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at, upgradeMember = null, identityScope = "global" }) {
-    const room = this.store.room(roomId);
+    const room = accessRoom(this.store, roomId);
     if (isRoomArchived(room.state)) return;
     if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
     const requestKey = createHash("sha256").update(`access-request:${requestId}`).digest("hex");
@@ -384,11 +508,9 @@ export class AccessRequests {
     let state;
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
-    const projection = this.store.storedProjection(roomId, state);
+    const { projection, write } = accessProjection(this.store, roomId, room, state, incoming);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
-    const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    saveAccessEvent(this.store, roomId, room, incoming, projection, write);
   }
 
   // The durable row distinguishes upgrades from legacy admission requests,
@@ -439,7 +561,7 @@ export class AccessRequests {
     const { auth } = this.#requireManageMembers(token, roomId, expectedSessionBinding);
     // A standing admission rule is a membership write: the read-only autonomy
     // tier cannot set one, even holding manage_members (issue #996).
-    enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "access_auto_approve", fail });
+    enforceAutonomyTierForAction({ db: this.db, roomId, state: accessRoom(this.store, roomId).state, actor: auth.member, action: "access_auto_approve", fail });
     if (!Array.isArray(permissions)) fail(422, "invalid_request", "permissions must be an array of permission strings; empty disables auto-approve");
     return this.store.transaction(() => {
       if (permissions.length === 0) {
@@ -487,14 +609,35 @@ export class AccessRequests {
   // Returns { approved: true, response } or { approved: false, pendingNote }.
   // pendingNote explains why a configured rule did not fire; it is null when
   // the room has no rule, preserving the existing silent-pending behavior.
-  tryAutoApprove(roomId, requestId) {
+  tryAutoApprove(roomId, requestId, { publicOnly = false, identitySecret = null } = {}) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
     if (!row || !isPending(row.status) || row.room_id !== roomId) return { approved: false, pendingNote: null };
+    if (requestContents(row).account) return { approved: false, pendingNote: "Account admission requires owner review." };
     if (this.upgradeBasis(row)) return { approved: false, pendingNote:
       "Additional permissions for an existing member require an authorized review; this request waits for a decision." };
+    const requested = requestContents(row).permissions;
+    // Owner-published open joining is existing invitation consent, not a
+    // standing permission upgrade or an implicit consequence of visibility.
+    if (!requested.length && !this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id,row.identity_id)) {
+      const room=accessRoom(this.store,row.room_id),ownerId=room.state.room.ownerId;
+      if (publicPage(room.state).enabled===true && joinLink(room.state).enabled===true && !isRoomArchived(room.state)) {
+        // Pending retries must prove the same current identity before admission.
+        if(publicOnly)this.store.identities.authenticateIdentitySecret(row.identity_id,identitySecret);
+        const identity=this.store.identities.get(row.identity_id);
+        if (!identity || identity.active===false) fail(401,"unauthenticated","Active agent identity required");
+        this.store.invites.admitLinkAgent({identity,roomId:row.room_id,displayName:row.display_name,permissions:[],historyGuest:true,
+          actorId:ownerId,eventId:createHash("sha256").update(`public-join:${row.room_id}:${requestId}`).digest("hex"),
+          grantActive:()=>publicPage(room.state).enabled===true&&joinLink(room.state).enabled===true&&!isRoomArchived(room.state),
+          grantCheck:()=>{if(!canInviteMembers(room.state,ownerId))fail(403,"invite_not_authorized","Current owner cannot admit members");}});
+        const now=this.store.now();
+        this.db.prepare("UPDATE access_requests SET status='approved',decided_at=?,decided_by='auto-approve',decision_note=? WHERE request_id=?")
+          .run(now,`read/chat guest admitted under public join enabled by ${ownerId}`,requestId);
+        return {approved:true,response:this.autoApproveResponse(rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId)),row.identity_id,[])};
+      }
+    }
+    if(publicOnly)return { approved: false, pendingNote: null };
     const config = this.getAutoApproveConfig(row.room_id);
     if (!config) return { approved: false, pendingNote: null };
-    const requested = requestContents(row).permissions;
     if (!requested.length || !requested.every(p => config.permissions.includes(p))) {
       return { approved: false, pendingNote:
         `This room auto-approves ${config.permissions.join(", ")}; the requested ${requested.join(", ") || "read/chat access"} is outside the rule, so it waits for an owner decision.` };
@@ -511,13 +654,13 @@ export class AccessRequests {
     // rule whose author lost membership administration stops admitting.
     // Fail-closed to pending — the owner queue is the safe default.
     let authorizerActive = false;
-    try { authorizerActive = memberCan(this.store.room(row.room_id).state, config.updatedBy, "manage_members"); }
+    try { authorizerActive = memberCan(accessRoom(this.store, row.room_id).state, config.updatedBy, "manage_members"); }
     catch { authorizerActive = false; }
     if (!authorizerActive) {
       return { approved: false, pendingNote:
         "This room's auto-approve rule is suspended: its author no longer holds membership administration. The request waits for an owner decision." };
     }
-    const room = this.store.room(row.room_id);
+    const room = accessRoom(this.store, row.room_id);
     if (isRoomArchived(room.state)) {
       return { approved: false, pendingNote: "This room is archived; new admissions wait for an owner decision." };
     }
@@ -572,13 +715,11 @@ export class AccessRequests {
     catch (error) {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }
-    const projection = this.store.storedProjection(row.room_id, state);
+    const { projection, write } = accessProjection(this.store, row.room_id, room, state, incoming);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {
       return { approved: false, pendingNote: "Room projection limit reached; the request waits for an owner decision." };
     }
-    const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
-    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+    saveAccessEvent(this.store, row.room_id, room, incoming, projection, write);
     this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
       .run(row.room_id, row.identity_id, row.identity_id, now);
     if (referrerMemberId && referrerMemberId !== row.identity_id) {
@@ -627,7 +768,7 @@ export class AccessRequests {
   // Anyone else gets 404, so pending requests are not enumerable.
   status(requestId, identityId, secret = null) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
-    if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
+    if (!row || row.identity_id !== identityId || requestContents(row).account) fail(404, "not_found", "No such join request");
     if (this.upgradeBasis(row)) this.store.identities.authenticateIdentitySecret(identityId, secret);
     return rowToRequest(this.maybeExpire(row));
   }
@@ -651,8 +792,8 @@ export class AccessRequests {
     if (!STATUSES.includes(status)) fail(422, "invalid_request", `status must be one of ${STATUSES.join(", ")}`);
     this.expireOld(roomId);
     const rows = this.db.prepare(
-      "SELECT * FROM access_requests WHERE room_id=? AND status IN (?,?) ORDER BY created_at ASC")
-      .all(roomId, status, status === "pending" ? UPGRADE_PENDING_STATUS : status);
+      "SELECT * FROM access_requests WHERE room_id=? AND status IN (?,?,?) ORDER BY created_at ASC")
+      .all(roomId, status, status === "pending" ? UPGRADE_PENDING_STATUS : status, status === "pending" ? ACCOUNT_PENDING_STATUS : status);
     return Object.freeze(rows.map(rowToRequest));
   }
 
@@ -664,11 +805,12 @@ export class AccessRequests {
     const { auth, authority } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
     // Deciding access requests is a membership write: the read-only autonomy
     // tier applies even when the agent holds manage_members (issue #996).
-    enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "access_decide", fail });
+    enforceAutonomyTierForAction({ db: this.db, roomId, state: accessRoom(this.store, roomId).state, actor: auth.member, action: "access_decide", fail });
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
+      if(sponsorTransferContents(row))return this.sponsorTransfers.review(token,roomId,live,{decision,permissions,note},auth,expectedSessionBinding);
       if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();
       if (this.upgradeBasis(row)) {
@@ -682,6 +824,12 @@ export class AccessRequests {
         this.db.prepare("UPDATE access_requests SET status='denied', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
           .run(now, auth.member.id, note?.trim() || null, requestId);
         return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+      }
+      // Issue #3378: the plain-approve path validates the decider's note
+      // exactly as deny does, before any grant side effect — an unusable
+      // note fails the decision instead of being silently discarded.
+      if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
+        fail(422, "invalid_request", "note must be text of at most 500 characters");
       }
       // Approve: the owner chooses the final permissions (never more than
       // the agent asked for is not enforced — the owner is sovereign — but
@@ -724,21 +872,34 @@ export class AccessRequests {
       }
       const unheld = this.store.delegation.unheldPermissions(authority, auth, grants);
       if (unheld.length) fail(403, "access_denied", `Cannot grant permissions not held: ${unheld.join(", ")}. Approve with permissions you hold, or ask the room owner`);
+      if (requestContents(row).account) return this.approveAccount(token, roomId, row, grants, auth, expectedSessionBinding);
       const identities = this.store.identities;
-      assertMemberDisplayNameAvailable(row.display_name, this.store.room(roomId).state.members);
+      assertMemberDisplayNameAvailable(row.display_name, accessRoom(this.store, roomId).state.members);
       // Referral attribution: match the "who referred you?" text against
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.
       const referrerMemberId = this.store.referrals.matchReferrer(roomId, row.referred_by);
+      // SECURITY-FIX C3 (#942): record the approval BEFORE driving
+      // link(). link() treats an approved access request on record as the
+      // holder proof for the binding (filing was secret-proven under
+      // #2912), so the flip must land first for that exemption to fire.
+      // Flip and link stay inside this one transaction — the pair is
+      // still atomic, and a failed link rolls the approval back too.
+      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
+        .run(now, auth.member.id, note?.trim() || null, requestId);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
         permissions: grants,
         settleAccessRequests: false,
+        // S2-1: name the request this link executes, so link()'s
+        // holder-proof gate treats it as the decision's own act
+        // (decider present and sovereign) rather than a later direct
+        // link leaning on the standing approved row, which is bounded
+        // by what the request asked for.
+        decidedRequestId: requestId,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
-      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
-        .run(now, auth.member.id, requestId);
       // Journal the completed referral in the same transaction, after the
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.
@@ -772,7 +933,7 @@ export class AccessRequests {
     return this.store.transaction(() => {
       this.store.identities.authenticateIdentitySecret(identityId, secret);
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
-      if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
+      if (!row || row.identity_id !== identityId || requestContents(row).account) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
       if (live.status === "cancelled") return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
       if (!isPending(live.status)) fail(409, "already_decided", `Request is already ${live.status}`);
@@ -802,7 +963,7 @@ export class AccessRequests {
     const cutoff = this.store.now() - REQUEST_TTL_MS;
     const scoped = identityId !== null;
     this.db.prepare(`UPDATE access_requests SET status='expired'
-      WHERE room_id=?${scoped ? " AND identity_id=?" : ""} AND status IN ('pending', 'pending_upgrade') AND created_at<?`)
+      WHERE room_id=?${scoped ? " AND identity_id=?" : ""} AND status IN ('pending', 'pending_upgrade', 'pending_account') AND created_at<?`)
       .run(...(scoped ? [roomId, identityId, cutoff] : [roomId, cutoff]));
   }
 }

@@ -1,0 +1,22 @@
+  /api/public/git-remote:
+    get:
+      summary: Room Git remote status (phase 0)
+      description: >-
+        Flag-gated status of the Room Git remote (ROOM_GIT_REMOTE). With
+        the flag off, the default, it answers 404 git_remote_disabled.
+        With the flag on it answers the phase number and the only ref
+        prefix agents may push (refs/heads/room/). No repos, refs, or
+        room data are served in phase 0.
+      security: []
+      responses:
+        '200':
+          description: Phase-0 status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phase: { type: integer }
+                  refsPrefix: { type: string }
+                  emptyAdvertisementBytes: { type: integer }
+        '404': {description: Git remote disabled}

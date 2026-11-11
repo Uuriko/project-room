@@ -1,0 +1,20 @@
+{
+ "runtimePin":"b69fedd36",
+ "restoreAuditProtocol":7,
+ "writerFormat":"normalized-current-v1-native-work-2",
+ "reportVersion":1,
+ "qualification":{
+  "actualNative":{"tests":1,"passed":1,"coverageSteps":299,"coveredRows":6094,"importedPartialEvents":1000,"engineChecks":455,"pointFoldRooms":1,"pointFoldDeferred":0,"coldReopen":true,"preparedWriterRefused":true,"ordinaryReady503UntilFullOracle":true,"finalReady200":true,"messageAndWorkExactRetries":true,"legalHistoryTimestampBytes":160029,"wholeRecoveryBounded":false},
+  "operatorAndOldProtocol":{"tests":4,"passed":4,"oldPin":"45af35c82","coldAndPreopenedRefused":true,"oldCoverageAdvance":0,"commonFoldAndExplicitUnsupportedPaths":true,"requiredOriginalOracle":true},
+  "valueAndProcess":{"tests":7,"passed":7,"sourceByteAdmissionBeforePartsFetch":true,"processExitBeforeAndAfterCommit":true},
+  "lintErrors":0
+ },
+ "cost":{"priorFixtureSteps":203,"newFixtureSteps":299,"finalActualNativeElapsedMs":18563.592375,"clockOnly":true,"cpuMeasured":false,"physicalSqliteRowsMeasured":false,"oldFixture250BudgetExceeded":true,"meaning":"Transitional additive independent fold plus scratch cleanup costs more than baseline. The250 limit was only a test progress budget; raised to400 without changing any production/source/platform limit. This is not optimized final recovery."},
+ "remaining":[
+  "Checkpoint and saved-historical bases explicitly defer to the required original full oracle until exact seeding is implemented; unsupported event dependencies and atoms requiring additional staging do the same.",
+  "Addressed fold completion is not independent drift certification: the original full oracle remains required even when deferred=0.",
+  "Original source ingestion/seal, complete global replay plans, all independent subsystem validators and reportVersion2 remain unfinished.",
+  "Native-work-3 attachment format is not represented by this isolated source. Root owns matched composition and qualification.",
+  "Source body and individual value-byte admission precede large reads/parts allocation; no whole recovery memory or CPU guarantee is claimed."
+ ]
+}

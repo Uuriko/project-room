@@ -1,3 +1,4 @@
+import { openConversationWork } from "./room-chrome.mjs";
 // Computed-style regression for the shared tokens and the regrouped Settings
 // dialog. The repo has no pixel-snapshot library; screenshots are evidence
 // and these assertions are the check.
@@ -169,7 +170,7 @@ test("message, pinned and work-fact text stays readable through light/dark chang
   await page.goto(origin + "/");
   await signInFixture(page, key);
   const row = id => page.locator(`#message-list [data-message-record-id="${id}"]`);
-  const card = page.locator('[data-work-record-id="test-handoff"]');
+  const card = await openConversationWork(page, 'test-handoff');
   const summary = card.locator(".work-details > summary");
   await summary.focus();
   await page.keyboard.press("Enter");

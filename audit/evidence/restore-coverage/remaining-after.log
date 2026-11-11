@@ -1,0 +1,53 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":46,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":34283504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":47,"legacyColdStartMs":46,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":50930024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":18,"integrity":"eager","phases":{"schema":{"ms":4,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":19,"heapBytes":61279296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":18,"legacyColdStartMs":18,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":0,"failed":true,"cpuMs":0,"heapBytes":61126144,"rooms":1,"sequences":12,"projectionBytes":130,"events":12}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":79051568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":87531000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":38,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":38,"heapBytes":103737728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":38,"legacyColdStartMs":38,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":50,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":152774568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":50,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":18,"integrity":"eager","phases":{"schema":{"ms":4,"rowsRead":0},"plugin":{"ms":3,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":19,"heapBytes":110415280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":18,"legacyColdStartMs":18,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":0,"failed":true,"cpuMs":0,"heapBytes":138762640,"rooms":1,"sequences":52,"projectionBytes":130,"events":52}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":36,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":37,"heapBytes":158993488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":37,"legacyColdStartMs":36,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":145593056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":17,"integrity":"eager","phases":{"schema":{"ms":4,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":17,"heapBytes":155212552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":17,"legacyColdStartMs":17,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":0,"failed":true,"cpuMs":0,"heapBytes":125602256,"rooms":1,"sequences":52,"projectionBytes":130,"events":52}
+✔ genuine old4aa warm prepared writer, cold constructor and old exact-guard suspension refuse new sealed bookkeeping (555.004959ms)
+ℹ {"oldPin":"4aa07fa84","oldWarmPreparedDenied":true,"oldColdDenied":true,"oldExactDropAttempts":0,"newContinuation":202}
+✖ same original snapshot measures repeated old work against durable new process advancement (543.464792ms)
+✔ preopened genuine 625b4f3d0 operator, replay and exact guard suspension refuse current audit gate (540.483541ms)
+✔ preopened genuine 7a5471142 operator, replay and exact guard suspension refuse current audit gate (519.650459ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2349.358834
+
+✖ failing tests:
+
+test at tests/restore-durable-coverage.test.mjs:66:1
+✖ same original snapshot measures repeated old work against durable new process advancement (543.464792ms)
+  Error: Restore admission schema requires reconciliation
+      at verifyRestoreControl (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/restore-admission.mjs:55:11)
+      at assertRestoreAdmitted (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/restore-admission.mjs:60:3)
+      at exportNdjsonLines (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/room-export.mjs:191:3)
+      at exportNdjsonLines.next (<anonymous>)
+      at exportNdjsonText (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/room-export.mjs:352:14)
+      at setup (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/tests/restore-durable-coverage.test.mjs:24:1261)
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/tests/restore-durable-coverage.test.mjs:70:239)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

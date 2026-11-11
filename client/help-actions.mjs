@@ -22,7 +22,7 @@ const definitions = [
 const actions = new Map(definitions.map(([name, status, title, description, extra]) => {
   const properties = { ...common, ...(status ? { expectedOfferRevision: revision, reason: text } : {}), ...extra };
   return [name, { status, type: status ? HELP_OFFER_UPDATED : HELP_OFFER_OPENED,
-    tool: { name, title, description: description + " Keep the exact input and requestId after an unknown result. Read current offers after a receipt; receipts describe the original operation, not current selection.",
+    tool: { name, title, description: description + " Help invitations and offers are unavailable in normalized Rooms; this tool requires the supported legacy help service. Keep the exact input and requestId after an unknown result. Read current offers after a receipt; receipts describe the original operation, not current selection.",
       inputSchema: { type: "object", properties, required: Object.keys(properties).filter(field => field !== "requestId" && field !== "expectedRevision"), additionalProperties: false },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));

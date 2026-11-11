@@ -1,0 +1,47 @@
+{
+  "source": "dea89bf1a20e572ba9ac837ebdb9fef65791291c",
+  "parent": "624909f412406aa393994b9049da6a23eb78ead2",
+  "beforeRuntime": "fe30291370295629db10a7b0489e0e5344685472",
+  "results": {
+    "causalBefore": {
+      "fail": 2,
+      "pass": 0
+    },
+    "receiverAfter": {
+      "pass": 21,
+      "fail": 0,
+      "skip": 0
+    },
+    "manifest": 8,
+    "lintExit": 0,
+    "secretExit": 0,
+    "diffExit": 0
+  },
+  "logs": [
+    {
+      "file": "notify-prefix-before-1103.log.gz",
+      "uncompressedSha256": "bddc7728bfb21ec56e47cdcaa5e713f05cddffbf000cebf0e5f02ef8907187ad",
+      "bytes": 3184
+    },
+    {
+      "file": "notify-prefix-after-1103.log.gz",
+      "uncompressedSha256": "5cf1e1fe032a8f1a37447ff8d2c777b2989372dd01ceb5bc07071f73abc2cf63",
+      "bytes": 3379
+    },
+    {
+      "file": "notify-prefix-manifest-1103.log.gz",
+      "uncompressedSha256": "f832eb474e05fe22dbb1193e2c37bb593fe35de180caeb9a2a260b4758dad7ca",
+      "bytes": 686
+    },
+    {
+      "file": "notify-prefix-lint-1103.log.gz",
+      "uncompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "notify-prefix-secret-1103.log.gz",
+      "uncompressedSha256": "032a58df7b52e989dfb33600fb6db9192497702e2e00b21f2c5cd456d253892a",
+      "bytes": 53
+    }
+  ]
+}

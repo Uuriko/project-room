@@ -230,6 +230,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
       try {
         await client.refresh(null, { fill: true });
+        // The room read is a window: an older result's message arrives through older pages.
+        if (needsConversation(view) && typeof client.pageOlder === "function") await client.pageOlder();
       } catch {
         if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
         return;
@@ -343,11 +345,12 @@ export function installResultReader({ client, getState, getSession, sameSession,
     const read = e.target.closest("[data-read-result]");
     if (read && getState() && !isBusy()) {
       const item = getState().workItems[read.dataset.readResult], receipt = item?.receipt;
-      if (!receipt?.nativeText) return true;
+      const compact = receipt && typeof receipt.summary !== "string" && !receipt.evidenceUrl && receipt.eventId && receipt.evidenceVersion;
+      if (!receipt?.nativeText && !compact) return true;
       const fromResults = Boolean(read.closest("#room-results-list"));
       if (fromResults && !currentResult(item)) return true;
       const view = { generation: client.generation, roomId: getSession().roomId, memberId: getSession().member.id, workItemId: item.id,
-        fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById };
+        fromResults, restoreDetails: !fromResults && Boolean(workRecord(item.id)?.querySelector(".work-details")?.open), previousCompletionEventId: receipt.nativeText?.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById };
       // Details are the entry path, not a second toolbar above the open result.
       // Restore them only when closing back to the originating control.
       forgetSelection();

@@ -1,0 +1,40 @@
+  /api/rooms/{roomId}/work-claims/config:
+    get:
+      summary: Read the room's work-claim caps
+      description: |
+        Returns the room's open-claim caps. maxMemberOpenClaims defaults to
+        20. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Caps for this room }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
+    post:
+      summary: Set the per-member open claim cap
+      description: |
+        The room owner sets maxMemberOpenClaims and maxOpenClaims (integers
+        from 1 to 10000; room default 1000) and staleSweep (boolean, default
+        false: when true, the cron closes unclaimed items idle 14 days). Send
+        at least one. The next claim past the member cap is 409
+        too_many_open_claims. Anyone else gets 403 work_claims_not_permitted.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                maxOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                staleSweep: { type: boolean }
+      responses:
+        '200': { description: The saved caps }
+        '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }

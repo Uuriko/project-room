@@ -1,3 +1,5 @@
+import { boardStateForWorkItem, liveClaim } from "./work-item-state.mjs";
+export { boardStateForWorkItem, liveClaim } from "./work-item-state.mjs";
 import { terminalWork } from "../src/workflow.js";
 import { hydrateWorkItems } from "./work-repository.mjs";
 // Decision #10 (workItems -> board claims) — the migration core.
@@ -26,7 +28,8 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
+import { ownerHeldClaimCopy } from "../src/agent-error.mjs";
 
 const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -105,7 +108,6 @@ export function boardClaimId(workItemId) {
 
 const iso = ms => new Date(ms).toISOString();
 const isoOrNull = value => (typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null);
-const msOf = value => (typeof value === "string" ? Date.parse(value) : Number.NaN);
 const cleanText = (value, max) => (typeof value === "string" && value.length > 0 ? value.slice(0, max) : null);
 
 // Files a claimed work item pins, in the board's stored shape (files: path
@@ -401,25 +403,6 @@ function evidenceForWorkItem(item) {
 // A claim is live only while its status is active and its lease has not
 // expired at `nowMs` — an expired lease is exactly what the board's own
 // sweep would release.
-export function boardStateForWorkItem(item, nowMs) {
-  switch (item?.state) {
-    case "superseded": return "closed";
-    case "completed": return terminalWork(item) ? "done" : "delivered";
-    case "blocked": return "blocked";
-    case "working": return "in_progress";
-    case "accepted": return liveClaim(item, nowMs) ? "claimed" : "unclaimed";
-    default: return "unclaimed"; // proposed
-  }
-}
-
-export function liveClaim(item, nowMs) {
-  const claim = item?.claim;
-  if (!claim || claim.status !== "active") return null;
-  const expires = msOf(claim.expiresAt);
-  if (!Number.isFinite(expires) || expires <= nowMs) return null;
-  return claim;
-}
-
 // The mapped board row for one work item. `existing` is the row already
 // on the board for this item (decoded from work_claims), if any: fields
 // the board owns natively and the work item cannot express (ci, deploy
@@ -515,7 +498,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     if (event.type === "work.superseded" && typeof event.data?.supersededByWorkItemId === "string") {
       chain.push({ kind: "supersede", targetId: boardClaimId(event.data.supersededByWorkItemId), at: atIso, actorId: event.actorId ?? "system", note: cleanText(event.data?.reason, 2000) });
     } else if (event.type === "work.handoff_recorded") {
-      chain.push({ kind: "handoff", targetId: boardClaimId(`${item.id}-next`), at: atIso, actorId: event.actorId ?? "system", note: cleanText(event.data?.nextAction, 2000) });
+      chain.push({ kind: "handoff", targetId: boardClaimId(item.id), at: atIso, actorId: event.actorId ?? "system", note: cleanText(event.data?.nextAction, 2000) });
     }
   }
 
@@ -545,10 +528,10 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     files: scope.files,
     fileBlocks: scope.fileBlocks,
     blobs,
-    // Dependencies are board-native structure (or lineage from a phantom
-    // card this item grew into): the work item cannot express them, so
-    // an existing row's list is preserved verbatim.
-    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [],
+    // A proposal seeds dependencies on its first Board card. Thereafter the
+    // Board owns the list, including lineage and explicit deletion waivers;
+    // replaying the original declaration must not restore waived edges.
+    dependsOn: Array.isArray(existing?.dependsOn) ? existing.dependsOn.filter(dep => typeof dep === "string").slice(0, 16) : [...(item.dependsOn ?? [])],
     parentClaimId: existing?.parentClaimId ?? null,
     evidenceRefs,
     premiseFlag: null,
@@ -560,7 +543,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,
@@ -766,53 +749,30 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
     }
     rows.set(claimId, mapped);
   }
-  // Successor lineage: the source card carries chain + supersededBy;
-  // the successor's card carries dependsOn [source] — the mirror's
-  // shape, created at supersede time whenever the successor has no card
-  // yet (a phantom, even when the successor is a merely-proposed work
-  // item; its own mapping later replaces the phantom's title and keeps
-  // the dependsOn, which the mapping preserves from existing rows). A
-  // successor that already has a board row of its own (board-native, or
-  // mapped from its item) is never given lineage it did not have —
-  // except the mapped-row case below, where the plan owns the row.
+  // Supersession is lineage, not a prerequisite: the source already carries
+  // chain + supersededBy. Waiting for that superseded source to become done
+  // would permanently block its replacement. Preserve explicit Board edges.
+  const itemsById = new Map((items ?? []).filter(item => item && typeof item.id === "string").map(item => [item.id, item]));
   for (const item of items ?? []) {
     if (!item || item.state !== "superseded" || typeof item.supersededBy !== "string") continue;
     const sourceId = boardClaimId(item.id);
     const targetId = boardClaimId(item.supersededBy);
     if (targetId === sourceId) continue;
     const supersedeEvent = (factsByItem.get(item.id)?.supersedeEvents ?? [])[0];
-    if (rows.has(targetId)) {
-      const target = rows.get(targetId);
-      if (!target.dependsOn.includes(sourceId)) {
-        target.dependsOn = [...target.dependsOn, sourceId].slice(0, 16);
-      }
-    } else if (!existing.has(targetId)) {
+    if (!rows.has(targetId) && !existing.has(targetId)) {
       rows.set(targetId, phantomSuccessorCard({
         targetId: item.supersededBy,
         title: item.supersededBy,
         at: supersedeEvent?.at ?? item.updatedAt,
         by: supersedeEvent?.actorId,
-        dependsOn: [sourceId],
+        dependsOn: itemsById.get(item.supersededBy)?.dependsOn ?? [],
       }));
     }
   }
-  // Handoff successors: "<item>-next" phantom cards for items with a
-  // recorded handoff, when no row for them exists yet. The title is the
-  // FIRST handoff's nextAction — the mirror creates the card at the
-  // first handoff and never retitles it.
-  for (const item of items ?? []) {
-    if (!item || (!item.handoff && !(item.handoffHistory?.length > 0))) continue;
-    const nextId = boardClaimId(`${item.id}-next`);
-    if (rows.has(nextId) || existing.has(nextId)) continue;
-    const firstHandoff = (factsByItem.get(item.id)?.events ?? []).find(event => event.type === "work.handoff_recorded");
-    rows.set(nextId, phantomSuccessorCard({
-      targetId: `${item.id}-next`,
-      title: firstHandoff?.data?.nextAction ?? item.handoff?.nextAction ?? `${item.id}-next`,
-      at: firstHandoff?.at ?? item.updatedAt,
-      by: firstHandoff?.actorId,
-      dependsOn: [boardClaimId(item.id)],
-    }));
-  }
+  // A handoff is partial progress on the original contract. It does not
+  // propose or accept another task; its chain points back to the real work.
+  // Existing historical successor rows are left untouched, including any
+  // ownership, delivery or review history they have accumulated.
   return { rows, diverged };
 }
 
@@ -990,10 +950,14 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
   // both lazy tables, which is what the purge registry's optional entry
   // and the health reader assume.
   store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
-  const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
-  const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
-  for (const roomId of roomIds) {
-    if (!force && markers.get(roomId) === WORK_ITEM_BOARD_BACKFILL_VERSION) continue;
+  // A shared store can contain many settled rooms. Keep their IDs/markers
+  // in SQLite; only pending rooms need projection reads and JS allocation.
+  // This still scans room metadata and probes the marker primary-key index.
+  const rooms = force ? store.db.prepare("SELECT id FROM rooms").all()
+    : store.db.prepare(`SELECT rooms.id FROM rooms LEFT JOIN ${WORK_ITEM_BOARD_BACKFILL_TABLE} AS marker
+        ON marker.room_id = rooms.id WHERE marker.version IS NULL OR marker.version != ?`)
+      .all(WORK_ITEM_BOARD_BACKFILL_VERSION);
+  for (const { id: roomId } of rooms) {
     const report = store.transaction(() => backfillRoomWorkItems(store, roomId, { nowMs }));
     aggregate.rooms += 1;
     aggregate.items += report.items;
@@ -1078,8 +1042,8 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // Occupied-successor refusal (the mirror's work_claim_conflict): a
   // handoff/supersede successor card that is a live claim NOT already
   // chained to this source belongs to someone else's work.
-  if (incoming.type === "work.handoff_recorded" || (incoming.type === "work.superseded" && typeof data.supersededByWorkItemId === "string")) {
-    const targetId = incoming.type === "work.handoff_recorded" ? boardClaimId(`${workItemId}-next`) : boardClaimId(data.supersededByWorkItemId);
+  if (incoming.type === "work.superseded" && typeof data.supersededByWorkItemId === "string") {
+    const targetId = boardClaimId(data.supersededByWorkItemId);
     const successorRow = existing.get(targetId);
     if (successorRow && SYNC_ACTIVE.has(successorRow.state) && !(successorRow.dependsOn ?? []).includes(claimId)) {
       refuse(409, "work_claim_conflict", `Board card ${targetId} is already claimed. It is not a successor of ${claimId}.`);
@@ -1098,7 +1062,18 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // itself is never rewritten here.
   const claimTaking = incoming.type === "claim.acquired" || incoming.type === "claim.renewed";
   if (claimTaking && current && SYNC_ACTIVE.has(current.state) && current.owner && current.owner !== actorId) {
-    refuse(409, "work_claim_conflict", `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`);
+    // DC1-A1: when the claim-taking actor is the room owner and the holder
+    // is a current member, serve the owner-release copy instead of the
+    // "reassign" prescription (same builder as the work-claim routes).
+    let boardRefusal = `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`;
+    try {
+      const authority = typeof store?.roomAuthority === "function" ? store.roomAuthority(roomId) : null;
+      const holder = authority?.members?.[current.owner] ?? null;
+      if (authority?.ownerId && actorId === authority.ownerId && holder && holder.active !== false) {
+        boardRefusal = ownerHeldClaimCopy({ holder: current.owner, leaseExpiresAt: current.leaseExpiresAt ?? null, roomId, claimId });
+      }
+    } catch { /* authority unavailable: keep the generic refusal */ }
+    refuse(409, "work_claim_conflict", boardRefusal);
   }
 
   const events = roomEvents(store, roomId);

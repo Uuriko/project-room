@@ -4,7 +4,10 @@ on:
   # PRs run relay checks only when the relay or the code its checks import
   # changes. Main pushes stay unfiltered, so a regression is still caught.
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # unlabeled re-runs the workflow when a label is removed, so removing
+    # ready-to-land replaces the last relay result with a skipped (NOT-RUN)
+    # one instead of leaving it standing as the latest run.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     paths:
       - "relay/**"
       - "machine/**"

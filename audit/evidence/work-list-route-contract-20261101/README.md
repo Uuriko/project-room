@@ -1,0 +1,7 @@
+# Work-list modern route publication
+
+Source47b40b511 onexactroot1f2. The existing work-list validation/argument/call body moved into the already packaged room-window route module. Its cleaned Acorn AST exactly matches the old body. Existing shared room-read authorization enforces current membership/session fences, API rooms:read and credential rate budget. Modern registry now owns the GET operation and OpenAPI documents bounded source continuation/privacy. Legacy allowlist bytes remain unchanged. No new handler engine or permissions.
+
+Original gate reports three errors for the served undocumented non-baseline legacy route; after extraction OpenAPI gate passes. Focused29, final own/manifest11, auth/docs14, cleanup16 pass in separate overlapping runs. Manifest regenerated unchanged45/179assets/9deployment. Schema metadata drift corrected with explicit production44 distinction. Four unused-binding errors fixed without removing module initialization or census metadata reads.25 inherited research orphans linked from INDEX as offline qualification;843 links pass.
+
+Final CI-mode contract clears route/schema/lint/secret/docs/design gates then fails its existing errors-catalog drift test on32 preexisting native45 codes. This genuine remaining blocker is retained and assigned as a separate catalog task, not waived. No wholeCI green or live deployment claim. Root adopted source as c345e555a. Compressed exact logs and baseline hash are listed in receipt.json.

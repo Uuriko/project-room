@@ -40,11 +40,19 @@ test("late account confirmation cannot invalidate a replacement", async () => {
   const replacement = accountSession("new", 2); client.generation++; client.session = replacement;
   pending.resolve(response(accountSession(null, 3))); assert.equal(await checking, null); assert.equal(client.session, replacement);
 });
+test("account confirmation can recover after a storage capacity refusal", async () => {
+  const original=accountSession("personal",2);let attempts=0;
+  const client=new AccountClient({fetcher:async()=>++attempts===1?response({error:{code:"pilot_limit",message:"Storage capacity"}},409):response(original)});
+  client.session=original;
+  await assert.rejects(client.confirm(),{status:409,code:"pilot_limit"});
+  assert.equal(client.session,original);assert.equal(await client.confirm(),true);assert.equal(client.session,original);
+});
 test("account confirmation retires denied ownership, preserves uncertain failures, and ignores obsolete failures", async () => {
   for (const failure of [
     { status: 401, code: "unauthenticated", ended: true },
     { status: 403, code: "access_denied", ended: true },
     { status: 409, code: "session_binding_changed", ended: true },
+    { status: 409, code: "pilot_limit", ended: false },
     { status: 500, code: "internal_error", ended: false },
     { status: null, code: "offline", ended: false }
   ]) {
@@ -366,4 +374,54 @@ for (const denied of [false, true]) test(`confirmation distinguishes concurrent 
   assert.equal(await oldCheck, null, "old confirmation must not retire the pending restore UI");
   const next = accountSession("new", 2); restored.resolve(response(next));
   assert.equal(await newRestore, next); assert.equal(replacement.session, next);
+});
+
+test("human admission binds the account and excludes claimed identities", async () => {
+  const owner=accountSession("human",2), calls=[];
+  const client=new AccountClient({fetcher:async(path,options)=>{calls.push({path,options});return response({requestId:"ar_human",principalKind:"account",identityId:null,status:"pending"});}});
+  client.session=owner;
+  await client.submitAccountAccessRequest({roomId:"commons",displayName:"Ada",requestId:"ar_human",requestedPermissions:[],accountId:"victim",identityId:"ai_wrong",secret:"must-not-send"});
+  await client.accountAccessRequest("ar_human");
+  assert.equal(calls[0].path,"/api/account/access-requests");
+  assert.equal(calls[1].path,"/api/account/access-requests/ar_human");
+  for(const {options} of calls){assert.equal(options.credentials,"same-origin");assert.equal(options.headers["X-CSRF-Token"],owner.csrf);assert.equal(options.headers["X-Session-Binding"],owner.sessionBinding);}
+  const body=JSON.parse(calls[0].options.body);
+  for(const key of ["accountId","identityId","secret"]) assert.equal(Object.hasOwn(body,key),false);
+});
+test("human admission ignores late results after account replacement",async()=>{
+  const pending=deferred(),client=new AccountClient({fetcher:()=>pending.promise});
+  client.session=accountSession("old",1);const reading=client.accountAccessRequest("ar_private");
+  client.generation++;client.session=accountSession("new",2);
+  pending.resolve(response({requestId:"ar_private",status:"approved"}));assert.equal(await reading,null);
+});
+test("human admission retires rejected sessions without replay",async()=>{
+  let calls=0;const client=new AccountClient({fetcher:async()=>{calls++;return response({error:{code:"session_binding_changed"}},409);}});
+  client.session=accountSession("old",1);
+  await assert.rejects(client.submitAccountAccessRequest({roomId:"commons"}));assert.equal(client.session,null);assert.equal(calls,1);
+});
+
+// #5954 made the anonymous preview name why a link is dead. Every such code
+// must still give an existing member the authenticated retry; a link that was
+// never issued must not.
+for (const code of ["link_unavailable", "link_cancelled", "link_expired", "link_full", "link_authority_changed"]) {
+  test(`a closed invite (${code}) still reopens for a signed-in member`, async () => {
+    const current = accountSession("member", 2), calls = [];
+    const client = new AccountClient({ fetcher: async (path, options) => {
+      calls.push(options.credentials);
+      return calls.length === 1 ? response({ error: { code, message: "closed" } }, 410) : response({ room: { id: "commons" } });
+    } });
+    client.session = current;
+    const prepared = await client.prepareShareLink("closed-token");
+    assert.equal(prepared.preview.room.id, "commons");
+    assert.equal(calls.length, 2, "anonymous preview, then the member retry");
+    assert.equal(calls[0], "omit");
+  });
+}
+
+test("an invite that was never issued is not retried as a member", async () => {
+  let calls = 0;
+  const client = new AccountClient({ fetcher: async () => { calls++; return response({ error: { code: "link_not_found", message: "No invite link was issued for this token." } }, 404); } });
+  client.session = accountSession("member", 2);
+  await assert.rejects(client.prepareShareLink("typo-token"), error => error.code === "link_not_found");
+  assert.equal(calls, 1);
 });

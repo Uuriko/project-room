@@ -1,0 +1,11 @@
+{
+  "source": "42ead22c0e97bd18bec82dc5094912f5a413c26b",
+  "runtime": "2a3f8480a",
+  "nativePass": 1,
+  "nativeFail": 0,
+  "coldRestarts": 2,
+  "lintErrors": 0,
+  "scanFiles": 1879,
+  "scanFindings": 0,
+  "live": false
+}

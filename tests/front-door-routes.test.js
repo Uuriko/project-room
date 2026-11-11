@@ -76,3 +76,51 @@ test("frontDoorFacts: counters computed from the receipts; HEAD passes the head 
   assert.deepEqual(calls.json.body.latestReceipt.agents, ["agent-a"]);
   assert.deepEqual(calls.json.body.latestReceipt.humans, ["human-b"]);
 });
+
+test("the featured receipt skips internal QA and fleet test runs", async () => {
+  const { featuredReceipt } = await import("../server/routes/front-door.mjs");
+  const real = { id: "r3", title: "Docs link sweep: SWARM-PLUG-IN.md" };
+  assert.equal(featuredReceipt([{ id: "r1", title: "FLEET-QA share journey: write the cold-open" }, { id: "r2", title: "QA: smoke" }, real]), real);
+  assert.equal(featuredReceipt([{ id: "r1", title: "qa-grokbot room check" }]), null);
+  assert.equal(featuredReceipt([]), null);
+});
+
+test("front-door provenance describes receipt units and samples the request clock", t => {
+  const store = openStore(t);
+  let now = Date.parse("2026-10-29T12:00:00.000Z");
+  store.now = () => now;
+  for (const letter of ["c", "d"]) seedReceipt(store, { id: `pwr_${letter.repeat(64)}`, title: "Same merged PR, separate receipt", at: "2026-10-01T00:00:00.000Z", merged: true });
+  const first = callFacts(store).json.body;
+  assert.equal(first.counters.resultsVerified, 2, "two receipts for one PR are not one unique merge");
+  assert.equal(first.computedAt, new Date(now).toISOString());
+  assert.equal(first.provenance.kind, "request-snapshot");
+  assert.equal(first.provenance.counters.resultsVerified.unit, "merge-linked receipt");
+  assert.equal(first.provenance.counters.resultsVerified.source, "/receipts");
+  assert.match(first.provenance.counters.resultsVerified.definition, /not distinct pull requests/);
+  assert.equal(first.provenance.counters.receiptsIssued.unit, "public receipt");
+  assert.equal(first.provenance.counters.workAvailableNow.source, "/offers");
+  now += 2500;
+  const next = callFacts(store).json.body;
+  assert.equal(next.computedAt, new Date(now).toISOString());
+  assert.notEqual(next.computedAt, first.computedAt);
+  assert.equal(next.latestReceipt.at, "2026-10-01T00:00:00.000Z");
+});
+
+test("public counter provenance does not include hidden receipts or private room identifiers", t => {
+  const store = openStore(t);
+  const hidden = `pwr_${"e".repeat(64)}`;
+  seedReceipt(store, { id: hidden, title: "Private receipt title", at: "2026-10-01T00:00:00.000Z", merged: true });
+  store.db.prepare("UPDATE public_receipts SET origin_room_id='private-room-sentinel',room_id='private-room-sentinel' WHERE id=?").run(hidden);
+  store.db.prepare(`INSERT INTO room_directory_settings (room_id, discoverable, listed_at, updated_at, public_receipts)
+    VALUES ('private-room-sentinel', 0, NULL, 0, 0)`).run();
+  const before = callFacts(store).json.body;
+  assert.equal(before.counters.receiptsIssued, 0);
+  assert.equal(before.counters.resultsVerified, 0);
+  assert.equal(before.latestReceipt, null);
+  assert.ok(before.provenance);
+  for (const secret of [hidden, "private-room-sentinel", "Private receipt title"]) assert.ok(!JSON.stringify(before).includes(secret));
+  store.db.prepare("UPDATE room_directory_settings SET public_receipts=1 WHERE room_id='private-room-sentinel'").run();
+  assert.equal(callFacts(store).json.body.counters.resultsVerified, 1, "explicit owner publication allows the existing public receipt");
+  store.db.prepare("INSERT INTO public_unpublish (kind,target,at,by_account) VALUES ('receipt',?,0,'op')").run(hidden);
+  assert.equal(callFacts(store).json.body.counters.receiptsIssued, 0, "operator removal remains effective");
+});

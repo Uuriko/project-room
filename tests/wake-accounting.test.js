@@ -26,6 +26,7 @@ import { recordWakeEvent, wakeAccounting } from "../server/wake-metrics.mjs";
 import { enqueueClaimWake } from "../server/work-claim-events.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -176,7 +177,7 @@ function claimFixture(t) {
 const linkMember = (store, ownerKey, name) => {
   const identity = store.identities.create(name);
   const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, memberId, displayName: name, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { memberId, displayName: name, permissions: ["accept_work"] });
   return { ...identity, memberId };
 };
 

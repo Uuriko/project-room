@@ -1,0 +1,15 @@
+  /api/account/terms:
+    post:
+      summary: Accept the current terms version
+      description: >-
+        Account session. Body `{ version }`. Records acceptance of the current
+        terms. A stale version is 409 terms_changed. Requires the account
+        cookie, same-origin Origin, and X-CSRF-Token.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Account session including terms status }
+        '401': { description: Sign in required }
+        '403': { description: Origin or CSRF rejected }
+        '409': { description: The terms version changed }
+        '422': { description: Invalid body }

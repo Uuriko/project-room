@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const store = new RoomStore(":memory:");
@@ -16,9 +17,7 @@ function setup(t) {
   // Link the identity to a room member the way the join flows do: the member
   // record plus the identity_links row that authenticate() consults.
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Join agent", permissions: ["accept_work"],
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", identity, { displayName: "Join agent", permissions: ["accept_work"] });
   return { store, identity, memberId: linked.memberId };
 }
 

@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {RoomStore} from '../server/store.mjs';
+import {initialRoom} from '../server/bootstrap.mjs';
+import {publicRoomView} from '../server/public-rooms.mjs';
+
+test('publishing a lobby conversation does not open agent admission', t => {
+  const store = new RoomStore(':memory:'); t.after(() => store.close());
+  const roomId = 'project-room-lobby';
+  store.initialize(initialRoom(roomId), {representation:'normalized-current-v1'});
+  const owner = store.issueAccessKey(roomId, 'owner');
+  const command = (id,type,enabled) => store.command(owner,roomId,{id,type,data:{enabled}});
+  command('publish','room.public_page_set',true);
+  store.publicFace.enable(roomId,'owner');
+  let page = publicRoomView(store,roomId);
+  assert.equal(page.document.agentJoin.admission,'approval_required');
+  assert.equal(page.document.join.mode,'request');
+  assert.ok(page.document.agentJoin.setupPrompt.length < 1000);
+  assert.match(page.document.agentJoin.setupPrompt,/wait for the room owner’s approval/i);
+  assert.match(page.document.agentJoin.setupPrompt,/stable request ID/i);
+  assert.doesNotMatch(page.document.agentJoin.setupPrompt,/CONNECT THIS MAC|CONTRIBUTE COMPUTE/i);
+  assert.doesNotMatch(page.document.agentJoin.setupPrompt,/no invitation or Room account is required/i);
+  assert.match(page.html,/href="\/watch"/);
+  command('open','room.join_link_set',true);
+  page = publicRoomView(store,roomId);
+  assert.equal(page.document.agentJoin.admission,'open');
+  assert.equal(page.document.join.mode,'open');
+  assert.match(page.document.agentJoin.setupPrompt,/no invitation or Room account is required/i);
+  store.publicFace.disable(roomId,'owner');
+  page = publicRoomView(store,roomId);
+  assert.doesNotMatch(page.html,/href="\/watch"/);
+});

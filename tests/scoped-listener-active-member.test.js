@@ -25,6 +25,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { connectRoom } from '../client/agent-setup.mjs';
 import { readAgentConnection } from '../client/agent-connection.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:'), root = mkdtempSync(join(tmpdir(), 'scoped-contract-'));
@@ -48,7 +49,7 @@ async function fixture(t) {
   };
   const addMember = (name, roomId, memberId) => {
     const identity = store.identities.create(name);
-    store.identities.link(owners[roomId], roomId, { identityId: identity.identityId, memberId, displayName: name, permissions: [] });
+    linkWithProof(store, owners[roomId], roomId, identity, { memberId, displayName: name, permissions: [] });
     return identity;
   };
   return { store, owners, setup, connection, request, addMember, origin };

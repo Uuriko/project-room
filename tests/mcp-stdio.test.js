@@ -85,8 +85,8 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
   assert.deepEqual(tools.filter(tool => tool.name.includes("outside_agent")).map(tool => tool.name), ["room_list_outside_agents", "room_introduce_outside_agent"]);
-  assert.equal(tools.length, 46);
-  for (const name of ["room_claim", "room_handoff"]) assert.ok(tools.some(tool => tool.name === name), `tools/list includes ${name}`);
+  assert.equal(tools.length, 49);
+  for (const name of ["room_claim", "room_handoff", "room_map"]) assert.ok(tools.some(tool => tool.name === name), `tools/list includes ${name}`);
   const assistant = tools.filter(tool => tool.name.startsWith("room_assistant_"));
   assert.deepEqual(assistant.map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
   assert.equal(assistant[0].annotations.readOnlyHint, true);
@@ -352,21 +352,21 @@ test("stdio Board reads forward canonical selections through the real SDK and HT
   assert.equal(requests.slice(before).some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
-// JSON-RPC cancellation must reach the second SDK fetch and suppress its late
+// JSON-RPC cancellation must reach the canonical Board fetch and suppress its late
 // output. The delayed bytes come from the real canonical route, not a mock client.
-test("stdio Board cancellation closes the canonical HTTP read and emits no late result", async t => {
+test("stdio Board cancellation closes the canonical HTTP read and emits no late result", { timeout: 10000 }, async t => {
   const { origin, token } = await boardHttpFixture(t);
   let entered, closed, release;
   const started = new Promise(resolve => { entered = resolve; });
   const disconnected = new Promise(resolve => { closed = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
   const proxy = createServer(async (req, res) => {
-    if (req.method !== "GET" || !["/api/rooms/commons", "/api/rooms/commons/work-claims-read"].includes(req.url)) {
+    if (req.method !== "GET" || req.url !== "/api/rooms/commons/board") {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith("/work-claims-read")) {
+    if (req.url.endsWith("/board")) {
       res.on("close", closed);
       entered();
       await gate;

@@ -1,0 +1,33 @@
+{
+  "base": "4aff0b3c5b8f3525c80cccecbbed9027d6297e86",
+  "testFix": "f04d07faf",
+  "before": "Root composed run: scoped Native1fail expected46 actual47;2other unrelated Native checks passed",
+  "cause": "original four addressed events43-46 followed by hidden47; optional verified skip now legitimately consumes47",
+  "after": {
+    "native": 1,
+    "pass": 1,
+    "fail": 0,
+    "skip": 0,
+    "lintExit": 0
+  },
+  "semantics": "Cold cursor equals warm observed cursor; bounded by independently returned seed head; hasMore iff belowhead; final continuation exactlyhead. All exact useful items/private-negative assertions retained. No runtime change.",
+  "commands": [
+    "node --test cloudflare/scoped-inbox-native.check.mjs",
+    "node node_modules/eslint/bin/eslint.js cloudflare/scoped-inbox-native.check.mjs cloudflare/scoped-inbox-native.test-fixture.mjs"
+  ],
+  "logs": [
+    {
+      "file": "composed-before-failure.log.gz",
+      "originalFullLogSha256": "58101eaf020cba82e9877def21f2a34627b05ee4c90d045328c1c6bf36ead78c",
+      "extractedSha256": "bf412ec2ac0ecbbef42d86e015ab4e54bba72153ce290c606aa6f8bf9093e902"
+    },
+    {
+      "file": "scoped-inbox-native-frontier-after-1103.log.gz",
+      "uncompressedSha256": "e65424df7f7594556c36e182abb9fe942c20717d779f9a7af775fbf6488b9707"
+    },
+    {
+      "file": "scoped-inbox-native-frontier-lint-1103.log.gz",
+      "uncompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

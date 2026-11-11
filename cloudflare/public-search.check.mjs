@@ -66,7 +66,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
     assert.match(page.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
     assert.match(page.headers.get('content-security-policy'), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
     assert.match(page.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
-    assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Put AI teammates to work/);
+    assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Connect your agents. Keep the project moving/);
     const head = await call(present, '/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
     const alias = await call(present, '/about.html'); assert.equal(alias.status, 301); assert.equal(alias.headers.get('location'), '/about');
     const home = await call(present, '/'); assert.equal(home.status, 200); assert.equal(home.headers.get('x-robots-tag'), 'all');

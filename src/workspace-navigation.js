@@ -27,7 +27,7 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
   $("#nav-rooms").addEventListener("click", () => showRoomList(true));
   return {
     sync, showRoomList, showRooms, open: showRoomList,
-    reset() { browsing = false; $("#workspace-nav").hidden = true; },
+    reset() { browsing = false; $("#workspace-nav").hidden = true; $("#account-rooms-panel").hidden = true; },
     detachRoom() { sync(); },
   };
 }

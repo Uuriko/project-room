@@ -1,0 +1,30 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":34293960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":42,"heapBytes":66038984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":11,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":11,"heapBytes":262176472,"rooms":1,"sequences":602,"projectionBytes":130,"events":602}
+{"event":"room.store_initialized","initializationMs":11,"legacyColdStartMs":11,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ same original snapshot measures repeated old work against durable new process advancement (12537.934833ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12672.076166
+
+✖ failing tests:
+
+test at tests/restore-durable-coverage.test.mjs:66:1
+✖ same original snapshot measures repeated old work against durable new process advancement (12537.934833ms)
+  Error: Recovery data requires operator reconciliation
+      at requireState (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/recovery.mjs:19:59)
+      at file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/recovery.mjs:59:5
+      at run (file:///private/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/durable-coverage-XMuWRA/target.sqlite.source45/server/store.mjs:697:22)
+      at Object.transaction (file:///private/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/durable-coverage-XMuWRA/target.sqlite.source45/server/store.mjs:724:22)
+      at RoomStore.readTransaction (file:///private/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/durable-coverage-XMuWRA/target.sqlite.source45/server/store.mjs:3985:39)
+      at auditRecovery (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/server/recovery.mjs:58:16)
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/restore-coverage-successor/tests/restore-durable-coverage.test.mjs:106:503)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)

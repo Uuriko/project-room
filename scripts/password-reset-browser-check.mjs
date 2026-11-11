@@ -154,17 +154,13 @@ test('targeted invitation survives mailed reset and still requires explicit acce
   assert.equal(await page.locator('#main').isVisible(), false);
 });
 
-for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form retains a quieter secondary magic-link action at ${viewport.width}px`, { timeout: 25000 }, async t => {
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form hides unearned magic-link recovery at ${viewport.width}px`, { timeout: 25000 }, async t => {
   const f = await setup(t); await f.page.setViewportSize(viewport);
   await f.page.locator('[data-forgot-password]').click();
-  const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]'), secondary = f.page.locator('[data-email-method="magic"]');
-  const first = await primary.boundingBox(), second = await secondary.boundingBox();
-  assert.ok(first && second);
-  assert.ok(second.y >= first.y + first.height + 8, 'secondary recovery action is below primary with a real gap');
-  assert.ok(Math.abs(first.x - second.x) < 1 && Math.abs(first.width - second.width) < 1, 'recovery choices occupy the same single column');
-  assert.ok(first.height >= 44 && second.height >= 44, 'both remain usable touch targets');
-  const sizes = await f.page.evaluate(() => ['[data-signin-form="reset-request"] button[type="submit"]', '[data-email-method="magic"]'].map(selector => parseFloat(getComputedStyle(document.querySelector(selector)).fontSize)));
-  assert.ok(sizes[1] < sizes[0], `magic link must be smaller: primary=${sizes[0]}px secondary=${sizes[1]}px`);
+  const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]');
+  const first = await primary.boundingBox();
+  assert.ok(first && first.height >= 44, 'password reset remains a usable touch target');
+  assert.equal(await f.page.locator('[data-email-method="magic"]').count(), 0, 'reset navigation does not qualify for email sign-in recovery');
   assert.equal(await f.page.locator('#auth-link-error').isVisible(), false, 'empty error block consumes no visible spacer');
 });
 

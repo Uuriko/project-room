@@ -12,7 +12,8 @@
 // This replaces the deleted src/multi-instance-election.mjs: that module was
 // a lease election for a multi-instance deploy that was never wired to any
 // production path. The supported topology is one server per database.
-import { openSync, readFileSync, statSync, unlinkSync, writeSync, closeSync } from "node:fs";
+import { openSync, readFileSync, statSync, fstatSync, unlinkSync, writeSync, closeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 export const INSTANCE_LOCK_ERRORS = Object.freeze(["instance_lock_held", "instance_lock_io"]);
@@ -24,8 +25,27 @@ const lockError = (code, message) => {
 };
 
 // process.kill(pid, 0) is the portable "does this pid exist" probe: it throws
-// ESRCH for a dead pid and EPERM for a live pid owned by another user.
-const pidAlive = pid => {
+// ESRCH for a dead pid and EPERM for a live pid owned by another user. But a
+// ZOMBIE also answers signal 0: an exited process that was never reaped keeps
+// its pid until its parent waits on it. A SIGKILLed server whose parent did
+// not reap it therefore reads as alive forever, and every later boot on the
+// same database directory is refused instead of reclaiming the stale lock.
+// On Linux, /proc/<pid>/stat answers liveness honestly: state Z (and X, the
+// dead state) means gone for our purposes. Where /proc is unavailable or
+// unreadable (non-Linux, hidepid), fall back to the signal-0 probe.
+export const procState = pid => {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // Field 2 (comm) is parenthesised and may itself contain spaces or a
+    // closing paren, so state is the first character after the LAST ")".
+    const close = stat.lastIndexOf(")");
+    return close >= 0 ? stat.slice(close + 1).trimStart()[0] ?? null : null;
+  } catch { return null; }
+};
+
+export const pidAlive = pid => {
+  const state = procState(pid);
+  if (state !== null) return state !== "Z" && state !== "X";
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === "EPERM"; }
 };
@@ -87,8 +107,12 @@ export function acquireInstanceLock(lockPath) {
       throw lockError("instance_lock_io", `instance lock: lock contention on ${lockPath}: ${fd.createError?.message ?? fd.createError}`);
     }
   }
+  // Ownership token (T3-L10g-C3): this acquisition's random token is
+  // written into the payload and checked by release() before it unlinks,
+  // so a stale owner can never delete a successor's lock at the same path.
+  const ownerToken = randomUUID();
   try {
-    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), token: ownerToken }));
   } catch (error) {
     try { closeSync(fd); } catch { /* never mask the write error */ }
     try { unlinkSync(lockPath); } catch { /* never mask the write error */ }
@@ -101,7 +125,25 @@ export function acquireInstanceLock(lockPath) {
     release() {
       if (released) return;
       released = true;
+      // Unlink only if the file at the path is still THIS acquisition:
+      // its payload must carry our ownership token, and the path must
+      // still name the same file our fd opened. If a racing boot has
+      // reclaimed the path (overwritten in place or unlinked and
+      // recreated), the file there is a successor's live lock — leave it.
+      let owns = false;
+      try {
+        const current = readLock(lockPath);
+        owns = Boolean(current && current.pid === process.pid && current.token === ownerToken);
+        if (owns) {
+          try {
+            const held = fstatSync(fd);
+            const atPath = statSync(lockPath);
+            if (held.dev !== atPath.dev || held.ino !== atPath.ino) owns = false;
+          } catch { /* stat unavailable: the token check above stands */ }
+        }
+      } catch { owns = false; }
       try { closeSync(fd); } catch { /* fd already closed; shutdown must not throw */ }
+      if (!owns) return;
       try { unlinkSync(lockPath); } catch { /* a racing boot may have reclaimed; shutdown must not throw */ }
     }
   };

@@ -188,6 +188,23 @@ test("authenticate finish upgrades the slot with the passkey method", async t =>
   assert.equal(f.store.authenticateAccountSession(fresh).account.id, "passkey-user");
 });
 
+test("passkey finish renews an old slot after verification and rotates its cookie", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { passkeyService: fakePasskeyService() });
+  signIn(f);
+  f.store.now = () => Date.now() - 29 * 86400000;
+  const slot = f.store.createAccountSessionSlot();
+  f.store.now = () => Date.now();
+  const res = await post(origin, "/api/auth/passkey/authenticate/finish", { ...jsonHeaders, Origin: origin },
+    { challengeId: "ch-auth-1", response: { id: "cred-http-1" }, sessionToken: slot.token, sessionRevision: 0 });
+  assert.equal(res.status, 200);
+  const fresh = freshSlotCookie(res);
+  assert.ok(fresh && fresh !== slot.token);
+  assert.ok(Number(/Max-Age=(\d+)/i.exec(res.headers.get("set-cookie") ?? "")?.[1]) > 29 * 86400);
+  assert.ok(f.store.authenticateAccountSession(fresh).expiresAt - f.store.now() > 29 * 86400000);
+  assert.throws(() => f.store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+});
+
 test("authenticate finish rejects stale revisions and malformed bodies", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { passkeyService: fakePasskeyService() });

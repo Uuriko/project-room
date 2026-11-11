@@ -21,7 +21,8 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
       f.store.close(); rmSync(f.directory, { recursive: true, force: true });
     });
     const say = (key, body) => f.store.command(f.keys[key], "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: crypto.randomUUID(), body } });
-    const page = await browser.newPage({ viewport, reducedMotion: "reduce" }), errors = [];
+    // Keep the held command visible to page.route rather than the service worker.
+    const page = await browser.newPage({ viewport, reducedMotion: "reduce", serviceWorkers: "block" }), errors = [];
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -33,10 +34,38 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
     await box.getByRole("button", { name: "Short", exact: true }).waitFor();
     if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}-${name}.png` });
     assert.equal(await box.getByRole("button", { name: "Detailed", exact: true }).isVisible(), true);
+    // The visible row is optimistic. Hold the command to prove that seeing
+    // the chip reply does not itself certify a durable send.
+    let releasePost, observePost, shortCommand;
+    const postGate = new Promise(resolve => { releasePost = resolve; });
+    const postObserved = new Promise(resolve => { observePost = resolve; });
+    t.after(() => releasePost());
+    await page.route("**/api/rooms/commons/commands", async route => {
+      const command = route.request().postDataJSON();
+      if (command?.type === T.MESSAGE_POSTED && command.data?.body === "Short") {
+        shortCommand = command;
+        observePost();
+        await postGate;
+      }
+      await route.continue();
+    });
     await box.getByRole("button", { name: "Short", exact: true }).click();
+    await postObserved;
     await page.locator("#message-list").getByText("Short", { exact: true }).waitFor();
     await box.waitFor({ state: "hidden" });
-    assert.ok(JSON.stringify(f.store.snapshot(f.keys.owner, "commons").state).includes('"body":"Short"'), "the tap posted an ordinary message");
+    const postedShort = () => f.store.snapshot(f.keys.owner, "commons").state.messages
+      .filter(message => message.id === shortCommand.data.messageId);
+    assert.equal(postedShort().length, 0, "optimistic visibility must precede the held command's commit");
+    const committed = page.waitForResponse(response => response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/api/rooms/commons/commands"
+      && response.request().postDataJSON()?.id === shortCommand.id);
+    releasePost();
+    const receipt = await committed;
+    assert.equal(receipt.ok(), true, "the exact chip command received a successful response");
+    const posted = postedShort();
+    assert.equal(posted.length, 1, "the tap committed exactly one ordinary message");
+    assert.equal(posted[0].body, "Short");
+    assert.equal(posted[0].authorId, "owner");
 
     say("producer", "Can someone check the staging deploy before Friday?");
     const task = box.getByRole("button", { name: "Make this a task", exact: true });

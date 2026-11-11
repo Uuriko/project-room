@@ -5,8 +5,9 @@
 # files vanish mid-task and parallel test runs die with SQLITE_FULL /
 # database-or-disk-is-full, producing hundreds of spurious failures.
 #
-# This wrapper points TMPDIR at a worktree-local .tmp/ directory (persistent,
-# not reaped, not size-constrained like /tmp) and ensures it exists.
+# Linux uses worktree-local .tmp/ (persistent, not size-constrained like /tmp).
+# macOS uses its private per-user temporary directory: long checkout paths
+# exceed the OS Unix-socket address limit and fail before bridge tests run.
 #
 # Usage:
 #   scripts/test-env.sh npm test                    # run a command
@@ -17,7 +18,17 @@
 
 # Resolve the repo root (the directory containing this script's parent).
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export TMPDIR="$REPO_ROOT/.tmp"
+if [ "$(uname -s)" = "Darwin" ]; then
+  ROOM_NATIVE_TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)" || { return 1 2>/dev/null || exit 1; }
+  if [ -z "$ROOM_NATIVE_TMPDIR" ] || [ ! -d "$ROOM_NATIVE_TMPDIR" ]; then
+    echo "Cannot resolve the macOS private temporary directory" >&2
+    return 1 2>/dev/null || exit 1
+  fi
+  export TMPDIR="$ROOM_NATIVE_TMPDIR"
+  unset ROOM_NATIVE_TMPDIR
+else
+  export TMPDIR="$REPO_ROOT/.tmp"
+fi
 mkdir -p "$TMPDIR"
 
 # Also set XDG_RUNTIME_DIR if unset, since some tools fall back to /tmp.

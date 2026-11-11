@@ -1,3 +1,4 @@
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -359,7 +360,7 @@ test("v2 migration preserves credentials and never merges matching Room member i
 
   let store = new RoomStore(filename);
   const alpha = store.authenticate(tokens[0]), beta = store.authenticate(tokens[1]);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 42);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
   assert.notEqual(alpha.account.id, beta.account.id, "matching legacy member ids are not identity proof across Rooms");
   assert.equal(alpha.account.authEpoch, 0); assert.equal(beta.account.authEpoch, 0);
   assert.equal(store.authenticate(sessions[0]).account.id, alpha.account.id);
@@ -416,7 +417,7 @@ test("an exact-scope write claim can be released at event and projection capacit
     repository: "Uuriko/project-room", ref: "main", paths: ["src/**"], expiresAt: "2099-01-01T00:00:00.000Z" }));
   const state = structuredClone(store.room("commons").state);
   state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
-  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
+  store.transaction(() => store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, store.storedProjection("commons", state)));
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "capacity-claim", expectedRevision: 2 })), { code: "pilot_limit" });
   const release = command(T.CLAIM_RELEASED, { workItemId: "capacity-claim", expectedRevision: 2 });
   assert.equal(store.command(owner, "commons", release).sequence, PILOT_LIMITS.eventsPerRoom + 1);
@@ -438,7 +439,7 @@ test("open work can be completed, unblocked, and superseded at event and project
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-new", title: "Replacement", definitionOfDone: "Carries the goal", accountableMemberId: "owner" }));
   const state = structuredClone(store.room("commons").state);
   state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
-  store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
+  store.transaction(() => store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, store.storedProjection("commons", state)));
   // Acquisition and ordinary progress remain capped.
   assert.throws(() => store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-extra", title: "New work", definitionOfDone: "Not at capacity", accountableMemberId: "owner" })), { code: "pilot_limit" });
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-blocked", expectedRevision: 2, resolvedBlocker: "skip" })), { code: "pilot_limit" });
@@ -509,8 +510,24 @@ test("the service rejects independent verification by a receipt's reported produ
 test("HTTP rate limits report backoff without creating extra room events", async t => {
   const { request, store, owner } = await http(t);
   const c = command(T.MESSAGE_POSTED, { body: "Idempotent request" });
-  for (let i = 0; i < 60; i++) assert.ok([200, 201].includes((await request("/api/rooms/commons/commands", { method: "POST", data: c })).status));
-  const result = await request("/api/rooms/commons/commands", { method: "POST", data: c });
-  assert.equal(result.status, 429); assert.equal(result.headers.get("retry-after"), "60");
+  // The write burst is 40 and refills slowly. Identical posts still count,
+  // and a refusal must not store a second message.
+  let limited = null;
+  let accepted = 0;
+  for (let i = 0; i < 80 && limited === null; i += 1) {
+    const res = await request("/api/rooms/commons/commands", { method: "POST", data: c });
+    if (res.status === 429) limited = res;
+    else {
+      assert.ok([200, 201].includes(res.status), String(res.status));
+      accepted += 1;
+      await res.text().catch(() => {});
+    }
+  }
+  assert.ok(accepted > 0, "the first identical post lands");
+  assert.ok(limited, "further identical posts spend the write burst");
+  assert.equal(limited.headers.get("x-ratelimit-limit"), "40");
+  assert.equal(limited.headers.get("x-ratelimit-bucket"), "write");
+  assert.ok(Number(limited.headers.get("retry-after")) >= 1);
+  assert.equal((await limited.json()).error.code, "rate_limited");
   assert.equal(store.snapshot(owner, "commons").state.messages.length, 1);
 });

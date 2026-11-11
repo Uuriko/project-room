@@ -1,0 +1,16 @@
+{
+  "producerCommit": "6a64ad3039600de2b382a16faead57f33dd304e3",
+  "producerSchema": 44,
+  "sha256": "418c46e38d4197a39abe4e1e7067fb95d65168f6b281caeb41a613d14e770044",
+  "bytes": 6198,
+  "purpose": "Synthetic historical synchronous restore cleanup fault controls; no current45 watermark substitution",
+  "generation": [
+    "git archive producer server src client strings package.json cloudflare/room-backup.mjs into temporary directory; use existing dependencies",
+    "new archived RoomStore(:memory:); assert PRAGMA user_version=44",
+    "initialize archived initialRoom(); issue synthetic commons owner access key",
+    "command message.posted id/messageId historical-cleanup-message body Synthetic historical restore cleanup qualification",
+    "archived exportNdjsonText(store.db); assert watermark sourceSchemaVersion=44; persist exact returned bytes"
+  ],
+  "dataPolicy": "All data generated locally for test; archived exporter applies its original sanitize policy. No production rows or credentials. Synthetic access key is not retained in plaintext.",
+  "reproduction": "Fixture is checked in so shallow CI and offline test runs require no Git history or network; helper verifies exact digest and schema watermark before use."
+}

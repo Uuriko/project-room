@@ -48,6 +48,17 @@ test("invite for a purpose: link opens the invited work item after join", { time
   const options = await purpose.locator("option").allTextContents();
   assert.ok(options.some(text => text.includes("Test: prepare an agenda")), `purpose picker lists the open question, got: ${options.join(" | ")}`);
   await purpose.selectOption("test-handoff");
+  assert.equal(await inviter.locator("#share-link-access").inputValue(), "member");
+  await inviter.locator("#share-link-create").click();
+  await inviter.locator("#share-link-result").waitFor({ state: "visible" });
+  const memberNote = await inviter.locator("#share-purpose-note").textContent();
+  assert.match(memberNote, /Test: prepare an agenda/);
+  assert.match(memberNote, /take, complete and verify work/);
+  assert.doesNotMatch(memberNote, /Guests can read/);
+  // The remaining journey deliberately exercises anonymous guest access.
+  await inviter.locator("#share-link-another").click();
+  await inviter.locator("#share-link-access").selectOption("guest");
+  await purpose.selectOption("test-handoff");
   await inviter.locator("#share-link-create").click();
   await inviter.locator("#share-link-result").waitFor({ state: "visible" });
   const url = await inviter.locator("#share-link-url").inputValue();
@@ -92,7 +103,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await stale.locator("#join-link-submit").click();
   await stale.locator("#main").waitFor({ state: "visible" });
   assert.match(await stale.locator("#status").textContent(), /no longer/i);
-  assert.equal(await stale.locator('[data-work-record-id="test-handoff"] .work-details').evaluate(el => el.open), false, "no item force-opened for a stale purpose");
+  assert.equal(await stale.locator('#message-list [data-work-record-id]').count(), 0, "no item mounted for a stale purpose");
   await staleContext.close();
 
   // 4. A plain link (no purpose) still joins without opening any item.
@@ -103,7 +114,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await plain.locator("#join-link-name").fill("Plain guest");
   await plain.locator("#join-link-submit").click();
   await plain.locator("#main").waitFor({ state: "visible" });
-  assert.equal(await plain.locator('[data-work-record-id="test-handoff"] .work-details').evaluate(el => el.open), false, "plain link opens no item");
+  assert.equal(await plain.locator('#message-list [data-work-record-id]').count(), 0, "plain link mounts no item");
   await plainContext.close();
 
   assert.deepEqual(errors, [], "no page errors");

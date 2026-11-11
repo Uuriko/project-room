@@ -1,0 +1,225 @@
+{
+  "date": "2026-11-01",
+  "scope": "Offline normalized browser background/selected attachments; not a release or complete product qualification",
+  "base": "b1ab70bbe",
+  "format": "normalized-current-v1-native-work-3",
+  "worker": {
+    "samples": [
+      {
+        "count": 1000,
+        "cold": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 631,
+            "rowsRead": 118830,
+            "rowsWritten": 419,
+            "unknown": 1,
+            "returnedSqlTextBytes": 93630,
+            "eventPayloadBytes": 0
+          }
+        },
+        "warm": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 631,
+            "rowsRead": 118830,
+            "rowsWritten": 419,
+            "unknown": 1,
+            "returnedSqlTextBytes": 93630,
+            "eventPayloadBytes": 0
+          }
+        },
+        "plan": [
+          {
+            "id": 4,
+            "parent": 0,
+            "notused": 54,
+            "detail": "SEARCH room_attachments USING COVERING INDEX current_room_attachments_message (room_id=? AND message_id=?)"
+          }
+        ],
+        "calls": 3,
+        "files": 18,
+        "restartCold": {
+          "statements": 57,
+          "rowsRead": 1824,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4360,
+            "rowsWritten": 4,
+            "unknown": 0,
+            "returnedSqlTextBytes": 1463,
+            "eventPayloadBytes": 0
+          }
+        },
+        "restartWarm": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4360,
+            "rowsWritten": 4,
+            "unknown": 0,
+            "returnedSqlTextBytes": 1463,
+            "eventPayloadBytes": 0
+          }
+        }
+      },
+      {
+        "count": 5000,
+        "cold": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 631,
+            "rowsRead": 118830,
+            "rowsWritten": 419,
+            "unknown": 1,
+            "returnedSqlTextBytes": 93630,
+            "eventPayloadBytes": 0
+          }
+        },
+        "warm": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 631,
+            "rowsRead": 118830,
+            "rowsWritten": 419,
+            "unknown": 1,
+            "returnedSqlTextBytes": 93630,
+            "eventPayloadBytes": 0
+          }
+        },
+        "plan": [
+          {
+            "id": 4,
+            "parent": 0,
+            "notused": 54,
+            "detail": "SEARCH room_attachments USING COVERING INDEX current_room_attachments_message (room_id=? AND message_id=?)"
+          }
+        ],
+        "calls": 3,
+        "files": 18,
+        "restartCold": {
+          "statements": 57,
+          "rowsRead": 1824,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4360,
+            "rowsWritten": 4,
+            "unknown": 0,
+            "returnedSqlTextBytes": 1463,
+            "eventPayloadBytes": 0
+          }
+        },
+        "restartWarm": {
+          "statements": 57,
+          "rowsRead": 238,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 44600,
+          "eventPayloadBytes": 0,
+          "rawRuntime": {
+            "statements": 2,
+            "rowsWritten": 2,
+            "unknown": 0
+          },
+          "startup": {
+            "statements": 34,
+            "rowsRead": 4360,
+            "rowsWritten": 4,
+            "unknown": 0,
+            "returnedSqlTextBytes": 1463,
+            "eventPayloadBytes": 0
+          }
+        }
+      }
+    ],
+    "source": "legal retained terminal metadata, eighteen committed selected files"
+  },
+  "commands": [
+    "/Users/johnpotter/.local/bin/node --test scripts/current-room-browser-check.mjs tests/current-browser-attachments.test.mjs",
+    "MINIFLARE_WORKERD_PATH=/Users/johnpotter/.npm/_npx/c943b712072b77c4/node_modules/workerd/bin/workerd /Users/johnpotter/.local/bin/node --test cloudflare/current-attachments-worker.check.mjs"
+  ],
+  "logs": {
+    "browser": "/tmp/current-browser-freeze-final.log",
+    "worker": "/tmp/current-attachments-worker-guard-final.log",
+    "neighborhood28": "/tmp/current-browser-full-focused.log",
+    "formatRestore": "/tmp/current-browser-files-format2.log"
+  },
+  "limits": [
+    "Complete composed cold pending restore/resume remains root qualification on new token",
+    "Browser selected files only; each metadata page examines at most8 candidates across at most8 visible messages; download is separate",
+    "New uploads/discards and assistant/request-run/notification/update/brief aggregates remain unavailable and explicitly disclosed",
+    "Full room attention not claimed; membership approval queue stays separate",
+    "Worker native runtime permission bookkeeping is2 writes per transaction, separate from0 adapter writes",
+    "Constructor startup/cold catalog overhead separate; initial empty startup has1 expected unknown statement, not zero/completely accounted",
+    "Worker 5k fixture uses retained terminal file metadata, not5000 active files or active quota bypass",
+    "Performance sample proves bounded selected source cost for measured sizes, not CPU/time bounds or production causality"
+  ]
+}

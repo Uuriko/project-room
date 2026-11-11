@@ -1,0 +1,100 @@
+{
+  "results": [
+    {
+      "source": "d721a7a03fe71aa1003acb6ea3ddad7a89452bab",
+      "requests": 260,
+      "max": {
+        "statements": 472,
+        "rowsRead": 58533,
+        "rowsWritten": 53,
+        "bytes": 1390626,
+        "drops": 6,
+        "unknown": 0
+      },
+      "totalRowsRead": 14673653,
+      "native": true,
+      "cli": true,
+      "exactT0": true,
+      "cleanupZero": true
+    },
+    {
+      "source": "8a4bac05688a8d26a5dd88cc3d8ddfa863433dec",
+      "requests": 260,
+      "max": {
+        "statements": 454,
+        "rowsRead": 30957,
+        "rowsWritten": 53,
+        "bytes": 1395394,
+        "drops": 6,
+        "unknown": 0
+      },
+      "totalRowsRead": 7706107,
+      "native": true,
+      "cli": true,
+      "exactT0": true,
+      "cleanupZero": true
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact": "report20-guard-baseline-result-1102.json.gz",
+      "sha256": "a0dd5919c742eaf435343d171d23ef39cf4b6654bb7e99a00362fe0d004d71c6",
+      "bytes": 2790585,
+      "gzipSha256": "a6966e5f2e3d76dfd301d506e626a657606ca0ed75802c601486ebd88e0483c4"
+    },
+    {
+      "artifact": "report20-guard-candidate-result-1102.json.gz",
+      "sha256": "abe7eb7328560e392618ba2e8f016e2962a4e582de718c63b233f6c1679d9d4d",
+      "bytes": 2744958,
+      "gzipSha256": "645cbc4a9b937858651b596e3b5d8b9019291a0ae0b6eff06a74d5196d00255a"
+    },
+    {
+      "artifact": "report20-guard-baseline-cured-native-1102.log.gz",
+      "sha256": "c7b050571480b56a98e77b637a0007fcf05c6d432c758371a7f3b5eb191e3a6d",
+      "bytes": 69069,
+      "gzipSha256": "89bfe0dad43f04afc1811c2bc38492ba58a14f99325fc80f1861a8ec8f20c511"
+    },
+    {
+      "artifact": "report20-guard-candidate-native-1102.log.gz",
+      "sha256": "2fd1fbdee4a9d3d468fcaa4e291b82e705c9ceff00f26fbe6db419f3beadd970",
+      "bytes": 68918,
+      "gzipSha256": "095852542008599be26e47dfa7df194350633417876deb340a16dc3f90da45bb"
+    },
+    {
+      "artifact": "report20-guard-final-focused-1102.log.gz",
+      "sha256": "90ae8f10a95beaa1772d5264c7ab27090625892c11daea46f1497032a0699466",
+      "bytes": 16428,
+      "gzipSha256": "411a77080f03349854a879ce47c57baf71f010ae7d0c184900568cbbc501aee3"
+    },
+    {
+      "artifact": "report20-guard-batching-causal-red-1102.log.gz",
+      "sha256": "a250601625b0a3b595612e346173200e020a3154f281af293364d30777da3ae5",
+      "bytes": 3814,
+      "gzipSha256": "6477462452d8aef6ff69d37743fc4c0e9e82a6cd02f32e25cc02c0c91d9647d9"
+    },
+    {
+      "artifact": "report20-guard-baseline-native-1102.log.gz",
+      "sha256": "a55d7e1535de68a1e18e1385cf54109d7812846ca76e9db2348985a56c543080",
+      "bytes": 3145,
+      "gzipSha256": "43c45addcf090fa2dfe5ab500d67622cdc9c0e164b50050bc3266ccf3fdc3a43"
+    },
+    {
+      "artifact": "report20-native-envelope-diagnostic-1102.log.gz",
+      "sha256": "f79436ded562f4f98e3ccae885012604a0406c5af608ae2d2a7326d3571333d9",
+      "bytes": 9062,
+      "gzipSha256": "f7104736f41ddbc7e040c78ccd56224506d0de68f36903187f5dd82263a71c68"
+    },
+    {
+      "artifact": "report20-guard-batch-scan-1102.log.gz",
+      "sha256": "fbda0d5beb887ed63ae623ee67b08870547cc70746cff1ebaea2c6fa493e0b21",
+      "bytes": 53,
+      "gzipSha256": "c4d0ce634c744719b05f89ee87d675e04b3ab2eb285e3f0bcf6c61a121d50055"
+    }
+  ],
+  "nodePass": 17,
+  "nodeFail": 0,
+  "nodeExit": 0,
+  "nativeEachPass": 1,
+  "nativeEachExit": 0,
+  "productionCalls": false
+}

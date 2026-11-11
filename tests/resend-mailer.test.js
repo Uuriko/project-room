@@ -151,3 +151,13 @@ test("reset mail uses only the reset purpose and notification never carries proo
   assert.doesNotMatch(messages[1].text + messages[1].html, /reset-proof|replacement-password|[?]reset=/);
   await assert.rejects(() => send({ to: "owner@example.com", code: "proof", purpose: "password-reset" }), /configured app URL/);
 });
+
+test("plaintext sign-in mail says link, not button (it has no button)", async () => {
+  const calls = [];
+  const fetchFn = async (url, options) => { calls.push(options); return { ok: true, status: 200 }; };
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn });
+  await send({ to: "user@example.com", code: "abc123", baseUrl: "https://room.example.com/" });
+  const body = JSON.parse(calls[0].body);
+  assert.ok(body.text.includes("If the link doesn't work, enter this code instead: abc123"));
+  assert.equal(body.text.includes("button"), false);
+});

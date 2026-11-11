@@ -10,6 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { createWork, claimWork, appendWorkPullRequest, claimHistoryLength } from "../server/work-claims.mjs";
+import { recordPullOutcome } from "../server/claim-coordination.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "../server/work-claim-sqlite.mjs";
 import { syncClaimPullRequests, sweepStaleUnclaimedClaims } from "../server/claim-pr-sync.mjs";
 import { summaryFailure } from "../cloudflare/job-heartbeat.mjs";
@@ -134,9 +135,14 @@ test("deployed closes come from the candidate pass, not the validation rotation;
   const poison = createWork({ id: "poison-claim" }, { now: NOW - HOUR, agentId: "agent-b" });
   registry.set("aaa-bad", { ...poison, repo: "https://github.com/Uuriko/project-room" });
   // A land claim whose revision is live, in the latest-sorting room.
-  const land = createWork(
-    { id: "landed", kind: "land", revision: SOURCE_REVISION },
+  // L04-C4: legitimately closable — held on a live lease with its pull
+  // recorded merged — not merely a preset revision matching live.
+  const LAND_PR = "https://github.com/Uuriko/project-room/pull/2479";
+  let land = createWork(
+    { id: "landed", kind: "land", revision: SOURCE_REVISION, pullRequest: LAND_PR },
     { now: NOW - HOUR, agentId: "agent-a" });
+  land = claimWork(land, "agent-a", { now: NOW - HOUR, leaseHours: 6 });
+  land = recordPullOutcome(land, LAND_PR, "merged", NOW - HOUR);
   registry.set("zzz-land", land);
   const out = await syncClaimPullRequests(store, {
     env: {}, token: null, fetchImpl: noFetch, nowMs: NOW, deadline: Date.now() + 120_000

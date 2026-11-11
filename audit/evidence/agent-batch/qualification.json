@@ -1,0 +1,121 @@
+{
+  "utc": "2026-11-04T08:13:47.747596+00:00",
+  "base": "f3ed6e19a19aacc63d2ed64574b73c3be62baf12",
+  "source": "013b8dc80ae4800c15f018d3ce7b683d5530eb07",
+  "heads": {
+    "5745": "65ee1232765a80f60e4655a921f7bb8d6835367c",
+    "5838": "4ca6d03c4d3d7f5801b8f70e02c75b56dd46d337",
+    "5839": "04b053c1eec1fec0b56f95e438e073938ecccce1",
+    "5841": "aa3378d60eb8824e8bf0eb064b76c00f175ea217",
+    "5842": "4d624f4613330c84f3d8118fbe6b1ecab0c04462"
+  },
+  "mergeBases": {
+    "5745": "39b59de64b88cb28c67328a37cd297de2d2f706e",
+    "5838": "39b59de64b88cb28c67328a37cd297de2d2f706e",
+    "5839": "39b59de64b88cb28c67328a37cd297de2d2f706e",
+    "5841": "39b59de64b88cb28c67328a37cd297de2d2f706e",
+    "5842": "39b59de64b88cb28c67328a37cd297de2d2f706e"
+  },
+  "heldAncestry": {
+    "5858": {
+      "head": "44116b0b73a267cf60e7c85fa0d0968579cc5b85",
+      "ancestor": false,
+      "exit": 1,
+      "error": ""
+    },
+    "5874": {
+      "head": "588d71cd0c25ab72a07f8aa706af4aec4c49f630",
+      "ancestor": false,
+      "exit": 1,
+      "error": ""
+    },
+    "5891": {
+      "head": "eacefceb158d9c0235ae175150ffa29049f9dae3",
+      "ancestor": false,
+      "exit": 1,
+      "error": ""
+    }
+  },
+  "node": "v24.22.1",
+  "runs": [
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/agent-wake-bucket.test.js tests/agent-wake-bucket-poll.test.js tests/wake-adapters-scheduler.test.mjs tests/stalled-assignment-needs-me.test.mjs tests/agent-collisions.test.js tests/lease-expiry-notice.test.js tests/mcp-mark-caught-up.test.js tests/mcp-stdio.test.js tests/mcp-oauth-http.test.js",
+      "pass": 76,
+      "fail": 0,
+      "skip": 0,
+      "log": "focused.tap"
+    },
+    {
+      "command": "TMPDIR=\"$PWD/.tmp\" /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/current-work-list.test.mjs tests/current-native-inbox.test.mjs tests/current-oauth-work-read.test.mjs tests/claim-pr-sync-room-scoping.test.js tests/mcp-catalog-contract.test.js tests/candidate-manifest.test.js",
+      "pass": 41,
+      "fail": 0,
+      "skip": 0,
+      "log": "contracts-before.tap"
+    }
+  ],
+  "review": [
+    "Five clean merges; no conflict resolutions or author source corrections.",
+    "All five exact heads unchanged at final GitHub check, open and nondraft.",
+    "Existing scheduler-generation and signal-aware ack controls pass in composition.",
+    "ROOM_WAKE_ADAPTERS and ROOM_ASSIGNMENT_DEADLINES deployment flags remain explicit 0; no workflow delta. Collision notices retain existing default-off ROOM_COLLISION_ALERTS gate. Wake bucket is an always-active local poll guard, not a provider adapter feature.",
+    "Own catch-up marker uses existing authenticated forward-only cursor, preserves open formal requests and history floor, catalog writes still use API-key/guest/autonomy gates.",
+    "Stalled proposer listing retains authenticated source pagination and read budgets; exact owned index export/restore tests pass.",
+    "candidate-manifest.mjs --write supported and executed; produced zero source delta. Catalog snapshot matches composed tools."
+  ],
+  "limits": [
+    "No browser, Native/workerd, full suite, hosted CI rerun, deploy or provider calls.",
+    "Wake bucket/coalescer are in-memory; restart refills bucket. Guard delays only long polls with waitMs>0 and cannot promise universal model-turn rate limiting across heartbeat, waitMs=0, multiple hosts or push paths.",
+    "Merge-notice behavior tests invoke helper plus separate existing claim-sync scoping tests; no claim of end-to-end external GitHub merge execution.",
+    "Current-native-inbox.test.mjs is a Node SQLite test, not workerd."
+  ],
+  "rootNative": {
+    "pass": 3,
+    "fail": 0,
+    "log": "/tmp/root-agent-coordination-native.log",
+    "coverage": [
+      "actual current-native-inbox Worker",
+      "attention wait Native",
+      "normalized claims Native conflicts/lost-save/cold-retry/100expiredclaims"
+    ],
+    "limits": [
+      "SQL-cost diagnostics include incomplete observer coverage; no aggregate cost-completeness claim.",
+      "No live quota exhaustion or collision flag activation."
+    ]
+  },
+  "hostedHeadEvidence": {
+    "pr": 5745,
+    "head": "65ee1232765a80f60e4655a921f7bb8d6835367c",
+    "run": 41797057622,
+    "result": "full requested CI success: unit/contract/cloudflare/friendagent andall6browser shards; baseline39plus5745, not entirecomposedsource"
+  },
+  "rootFollowups": {
+    "coldPackage": {
+      "pass": 1,
+      "fail": 0,
+      "log": "/tmp/root-coordination-cold-package.log"
+    },
+    "contractAndStaging": {
+      "pass": 23,
+      "log": "/tmp/root-coordination-contract-final.log"
+    },
+    "stagingRepair": "Old exactregex rejected addeddeferred60s flag. Existing test now executes actualstaging shell with fakepnpm and assertsisolatedstaging argv/keepvars/deferredvalue; no Cloudflarecall.",
+    "caughtUpText": "Clarifies hiddenguest/read-only catalog vs allowed ownread-position update; no visibility/auth/scope behaviorchange.",
+    "priorityAndMemory": {
+      "source": "258cdb74a483d0260e91dcc7e3b9fc0e39b3baf0",
+      "rootAdoption": "2eed78bc4",
+      "peerAffectedNodePass": 74,
+      "finalComposedNodePass": 81,
+      "fail": 0,
+      "postChangeNativePass": 2,
+      "bounds": "4096 bookkeeping IDs globally; eviction fails open for delay only, not durable signals",
+      "priority": "Trusted ask/assignment producer paths bypass ordinary chat bucket, under unchanged pause guard",
+      "proof": "Five independent red controls before; actual authenticated polls, actual scoped acknowledgements and5000 queued rows retained after bookkeeping eviction",
+      "limits": [
+        "Not end-to-end public producer authentication proof; producer permissions are unchanged.",
+        "Not a universal model-turn rate limiter or cross-host SLA.",
+        "Native2 tests cover compiled listener/attention flow and cold lease; urgency/exhaustion is actual NodeHTTP proof.",
+        "Cold package proof predates priority-only changes; dependency closure unchanged."
+      ]
+    }
+  }
+}

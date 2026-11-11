@@ -1,0 +1,52 @@
+{
+  "runtimePin": "7a55f1853",
+  "currentMainIncluded": "b6917a237004f994f60731d3d0ab9f4130e4e27a",
+  "protocol": 16,
+  "schema": 45,
+  "node": {
+    "pass": 173,
+    "fail": 0,
+    "skip": 0,
+    "includes": "recovery, pending constructor, presence, patrol, metadata, manifest and six Google consent browser journeys"
+  },
+  "native": {
+    "pass": 6,
+    "fail": 0,
+    "skip": 0,
+    "includes": "pending constructor publication-write-retry, invitation recovery, patrol opt-out, three edge discovery controls"
+  },
+  "package": {
+    "pass": 3
+  },
+  "publication": {
+    "pass": 15,
+    "fullNodeSuite": "explicitly skipped in CI mode"
+  },
+  "independentReview": "No substantive composition blocker; readonly source review, no duplicate tests",
+  "logs": {
+    "node": {
+      "sha256": "f397dd5e6054430502e9bd812ec719e8b54a11ccb5283a954175cdfc19dda548",
+      "path": "node.log.gz"
+    },
+    "native": {
+      "sha256": "14300e6d4192c89b116767923edb15d0d425242da4df2e4f03acf321c0238a89",
+      "path": "native.log.gz"
+    },
+    "package": {
+      "sha256": "77677b696af4f93fb8087c754b3e5a5910bd75dd2edeab1e1c0b9d288029fa16",
+      "path": "package.log.gz"
+    },
+    "publication": {
+      "sha256": "b2cd9302711ab2de0f1e7b4c171a23ce0571b1038a90407ce5354ff183ac198b",
+      "path": "publication.log.gz"
+    }
+  },
+  "fullOriginalOracleRequired": true,
+  "deployed": false,
+  "liveVerified": false,
+  "remainingLimits": [
+    "Final full recovery audit and invitation oracle remain synchronous and repeat independent phase work.",
+    "Legal large SQLite atoms and tokenization lack strict CPU/heap bounds.",
+    "No live schema45 conversion, real Claude acceptance, second-human install or Android delivery proof."
+  ]
+}

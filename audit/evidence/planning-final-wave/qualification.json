@@ -1,0 +1,35 @@
+{
+  "source": "9f7503e563984b95b4ec9290a1de2067bb75b345",
+  "base": "a137b29c14d7d7d6dff5dfcdd640d472080aa510",
+  "originals": [
+    5889,
+    5894,
+    5896,
+    5899
+  ],
+  "tests": {
+    "node": 25,
+    "actualNativeOffAndEnabledCold": 2,
+    "exactColdPackage": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "causal": [
+    "Three sort controls200before,422after: invalidstate, suppliedcursor, readyqueue.",
+    "ActualWorkers composition rejectedprojectId in savedview422; queryallowlist repaired and actualwrite/read/coldrestart passed.",
+    "PriorRoot view bodyrevocation/APIkeyscope and planningresponse/unknownshape controls redbefore then green.",
+    "RequestId planning ambiguity explicitly422; existingordinary note replay/changedpayload409 preserved."
+  ],
+  "review": [
+    "No new feature activated or external keyconfigured.",
+    "Alert defaultoff withoutbothsecrets; existingtrusteddefaultbranch workflow only,10stimeoutandredirecterror.",
+    "Planning/view/project fields retained byfieldcompatible46foundation.",
+    "Savedviewsaddsroom_board_views tolazy recoveryinventory; automaticwriter-definition rollbacktargeta137 is NOTqualified. Existinggates retained; forwardrecoveryorexact-pairmanualqualificationrequired, no schema-number bypass."
+  ],
+  "limits": [
+    "Nativecases use syntheticlocalconsentingfixtures, not real externalproviderhook.",
+    "Enabledplanning sorts use existingroomclaim-list/topN design, not provenflatcostatlargeclaimcounts.",
+    "No paid/provider access or newownerpermissions.",
+    "Optional features remain off pendingactivation qualification."
+  ]
+}

@@ -1,10 +1,8 @@
-// Deep-link reveal vs the background fill (bug sweep 2026-10-16,
+// Deep-link reveal vs selected-record hydration (bug sweep 2026-10-16,
 // CLIENT-CORE Finding 2, issue #3884): a cold load at a message link
-// older than the first window (newest 100) used to drop the reveal —
-// revealLocationHash ran once, on the windowed snapshot, and nothing
-// re-ran it when the fill brought the message in. The client now pends
-// the reveal and fires it on the first snapshot that holds the target,
-// exactly once, unless the user takes over first (another navigation,
+// older than the first window must reveal the target once its selected-record
+// /conversation read resolves. The client keeps that reveal pending until the
+// record arrives, unless the user takes over first (another navigation,
 // a thread/channel switch, or a reader scroll). Disposable rooms only.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +14,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
 // 130 messages: the first snapshot windows the newest 100, so seed-10
-// sits in the omitted segment only the background fill delivers, while
+// sits outside that window and needs a selected-record read, while
 // seed-120 is inside the first window.
 const TOTAL = 130;
 const OLD_ID = "seed-10";
@@ -37,9 +35,9 @@ async function seed(store, keys) {
   }
 }
 
-// gateFill holds every /conversation page (the backfill's only path)
-// until releaseFill() runs, so a test can act while the fill is
-// provably still in flight instead of racing its 250 ms head start.
+// gateFill holds /conversation reads, including selected-record hydration,
+// until releaseFill() runs, so cancellation happens before the target arrives.
+// The same gate also covers any lazy history paging triggered by the reader.
 async function setup(t, { gateFill = false } = {}) {
   const f = createAcceptanceFixture({ managedProducer: false });
   await seed(f.store, f.keys);
@@ -51,7 +49,8 @@ async function setup(t, { gateFill = false } = {}) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }), errors = [], outside = [];
+  // Keep both the hydration gate and origin guard visible to page.route.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce", serviceWorkers: "block" }), errors = [], outside = [];
   page.setDefaultTimeout(30000); page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
@@ -97,8 +96,21 @@ test("a reader scroll before the fill lands cancels the pending reveal", { timeo
   assert.equal(await rowPresent(page, OLD_ID), false, "target still behind the gated fill");
   const list = page.locator("#message-list");
   const box = await list.boundingBox();
+  // Playwright sends wheel input without waiting for the renderer to process
+  // it. Keep the response gated until the real reader event reaches the app;
+  // otherwise this test races reader input against selected-record hydration.
+  await page.evaluate(() => {
+    window.__readerWheelObserved = false;
+    addEventListener("wheel", event => {
+      if (event.isTrusted && document.querySelector("#message-list").contains(event.target)) {
+        window.__readerWheelObserved = true;
+      }
+    }, { capture: true, once: true });
+  });
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, 800);
+  await page.waitForFunction(() => window.__readerWheelObserved === true);
+  assert.equal(await rowPresent(page, OLD_ID), false, "reader input was delivered before the gated response");
   ctx.releaseFill();
   await page.waitForFunction(id => Boolean(document.querySelector(`[data-message-record-id="${id}"]`)), OLD_ID, { timeout: 20000 });
   await page.waitForTimeout(1000);

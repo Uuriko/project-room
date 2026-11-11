@@ -1,0 +1,13 @@
+  /api/version:
+    get:
+      summary: Deployed revision
+      description: Open (also HEAD). `{ status, mode, sourceRevision, buildId }`; no room data.
+      security: []
+      responses:
+        '200': { description: "{ status, mode, sourceRevision, buildId }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }

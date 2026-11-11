@@ -1,0 +1,67 @@
+{
+  "scope": "offline bounded private work context on normalized current rooms; not onboarding/deployment",
+  "runtime": "4aa07fa84",
+  "formatToken": "normalized-current-v1-work-privacy-1",
+  "sourceSha256": {
+    "server/current-work-privacy.mjs": "f059ae17cfb3197a98c77d2a95c35d19190962528e466c72f092077fe2c0a1cf",
+    "server/current-room-repository.mjs": "ff4e043f0c7f0513ae9ba225f8072f6033fba32a16e156a42b3a240996317ed2",
+    "server/replay-cutover.mjs": "17a096147c4188287411ca5ea8170205a76353a22fe761bad568dccd5ab58db7",
+    "server/store.mjs": "77b28c5d15c45c7a2e31670c404be9934748522d32635b927f444773383aeb2b"
+  },
+  "causalEvidence": {
+    "correctedLegacyFixture": true,
+    "requestPolicyVersion": 1,
+    "storedRequests": 1,
+    "observerExposedBefore": true,
+    "redLog": "/tmp/current-private-context-corrected-causal-red.log"
+  },
+  "node": {
+    "focusedPass": 43,
+    "oldRuntimeFencePass": 1,
+    "oldRuntimePin": "1c36aee6aaa0a651a711eaab2cb3c6adbc8f5c37",
+    "logs": [
+      "/tmp/current-private-index-checkpoint.log",
+      "/tmp/current-private-old45-fence.log"
+    ]
+  },
+  "actualWorker": {
+    "pass": 1,
+    "canonicalHPrivateRequest": true,
+    "actualCurrentRequestResponse": true,
+    "composedContextBeginSelected": true,
+    "fullAudit": true,
+    "coldReopen": true,
+    "exactRetry": true,
+    "warmComposedSql": {
+      "statements": 264,
+      "rowsRead": 693,
+      "adapterWrites": 0,
+      "rawRuntimePermitWrites": 0,
+      "unknown": 0
+    },
+    "coldComposedSql": {
+      "statements": 264,
+      "rowsRead": 2329,
+      "adapterWrites": 0,
+      "rawRuntimePermitWrites": 0,
+      "unknown": 0
+    },
+    "scopeNote": "SQL adapter plus native runtime-permit counters; fixture credential KV lookup is separate native platform work",
+    "log": "/tmp/current-private-index-worker-composed.log"
+  },
+  "invariants": [
+    "Every native work has a protected explicit public-zero or private count record; missing metadata refuses",
+    "Per-work request and per-party reference counts update atomically with existing events/commands/body/receipt transaction",
+    "Selected reply context examines only addressed workRequest prefix, bound to the exact per-work count",
+    "Existing workRoleHolder and actual request parties preserve access; unrelated viewers receive null title/definition",
+    "Work bodies remain authoritative in existing work_entities; privacy indexes carry no body authority",
+    "Old warm/cold same-floor readers and writers refuse exact owned guard mismatch; old admission token cannot open the writer permit",
+    "No cross-request cache and no global request scan on these current reads"
+  ],
+  "limits": [
+    "Selected work with more than8 linked requests requires continuation and currently refuses",
+    "Other default inbox/bootstrap/updates/events/work-list reader ports remain unfinished",
+    "New offline format must be qualified with matching recovery artifact; older45 source is not labeled compatible",
+    "No live floor or production migration has occurred"
+  ]
+}

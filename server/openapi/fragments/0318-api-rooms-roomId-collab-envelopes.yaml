@@ -1,0 +1,55 @@
+  /api/rooms/{roomId}/collab/envelopes:
+    post:
+      summary: Open a typed handoff envelope delegating work to an agent
+      description: >-
+        Room-token write (CSRF + rate limit). The envelope carries the seven
+        typed sections: objective, inputs (references, never blobs),
+        authority (permission bits, room/work resource scope, expiry),
+        expectedOutput, acceptanceTest (machine-checkable checks),
+        termination (expiry plus the on-expiry behaviour), and provenance
+        (creator, claim id, task id, parent envelope, full ancestor chain).
+        Authority bits are confined to the collab vocabulary — manage_members
+        and decide are rejected so a handoff can never escalate privilege.
+        The sender becomes the envelope's provenance creator; the envelope
+        opens in the proposed state.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, objective, inputs, authority, expectedOutput, acceptanceTest, termination]
+              properties:
+                to: { type: string, description: "recipient agent id" }
+                objective: { type: string, maxLength: 2000 }
+                inputs: { type: array, items: { type: object }, description: "[{ kind: work|message|file|url|note, ref, label?, sha? }]" }
+                authority: { type: object, description: "{ permissions, scope: { rooms, workIds }, expiresAt, note? }" }
+                expectedOutput: { type: object, description: "{ kind: text_result|verification|decision|artifact|report, description }" }
+                acceptanceTest: { type: object, description: "{ checks: [{ kind, ... }] } — at least one check" }
+                termination: { type: object, description: "{ expiresAt, onExpiry: escalate|release, escalateTo?, maxRounds? }" }
+                provenance: { type: object, description: "{ claimId?, taskId?, parentEnvelopeId?, chain? } — createdBy is stamped from the sender" }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ envelopeId, status: proposed, roomId, envelope, history }" }
+        '422': { description: invalid_handoff_envelope or invalid_input }
+    get:
+      summary: List typed handoff envelopes in the room
+      description: >-
+        Room-token read. Envelopes newest first, optionally filtered with
+        `?status=` (proposed, accepted, completed, rejected, expired,
+        escalated, cancelled) and `?to=` (recipient agent id).
+      security:
+        - roomToken: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [proposed, accepted, completed, rejected, expired, escalated, cancelled] }
+        - name: to
+          in: query
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ envelopes: [{ envelopeId, status, roomId, envelope, history }] }" }
+        '422': { description: invalid_envelope_status }

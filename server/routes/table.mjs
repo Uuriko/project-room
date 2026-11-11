@@ -1,4 +1,9 @@
+import {WORK_RECEIPT_EXTENSION_ROUTES} from "../agent-discovery.mjs";
+import { OPERATOR_LIFECYCLE_ARCHIVE_ROUTES, OPERATOR_NORMALIZATION_ROUTES, OPERATOR_ATTACHMENT_INDEX_ROUTES, OPERATOR_WAKE_INDEX_ROUTES } from "../operator-routes.mjs";
+import { MCP_INVITE_OAUTH_ROUTES, MCP_REGISTER_OAUTH_ROUTES } from "./mcp-invite-oauth.mjs";
 import { AGENT_WORK_ROUTES } from "./agent-work.mjs";
+import { AGENT_INVITE_REDEEM_ROUTES } from "./agent-invite-redeem.mjs";
+import { AGENT_ROOM_TOKEN_ROUTES } from "./agent-room-token.mjs";
 import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 // Declarative HTTP route table (batch RT).
 //
@@ -7,8 +12,10 @@ import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 // `scope`. Both columns are required now.
 
 import { HUMAN_PUSH_ROUTES } from "./human-push.mjs";
+import { PUBLIC_LOBBY_ROUTES } from "./public-lobby.mjs";
 import { DEMO_ROUTES } from "./demo.mjs";
 import { DOWNLOAD_ROUTES } from "../download-page.mjs";
+import { SHOWCASE_ROUTES } from "../showcase-page.mjs";
 import { FRONT_DOOR_ROUTES } from "./front-door.mjs";
 import { ROOM_ASSISTANT_ROUTES } from "./room-assistant.mjs";
 import { DESKTOP_AUTH_ROUTES } from "./desktop-auth.mjs";
@@ -17,23 +24,34 @@ import { SIGNIN_OPTIONS_ROUTES } from "./signin-options.mjs";
 import { AUTH_ROUTES } from "./auth.mjs";
 import { INBOX_ROUTES } from "./inbox.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "./member-permissions.mjs";
+import { TALK_POLICY_ROUTES } from "./talk-policy.mjs";
 import { AGENT_FLEET_ROUTES } from "./agents.mjs";
 import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
 import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
+import { BOARD_VIEW_ROUTES } from "./board-views.mjs";
+import { AUTOMATION_ROUTES } from "./automations.mjs";
+import { INBOUND_HOOK_ROUTES } from "./inbound-hooks.mjs";
 import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
+import { ROOM_WINDOW_ROUTES } from "./room-window.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
 import { AGENT_PRESENCE_ROUTES } from "./agent-presence.mjs"; // Presence Gap 4: cross-room presence read
+import { GIT_REMOTE_ROUTES } from "./git-remote.mjs"; // ROOM_GIT_REMOTE phase 0 status (flag off = 404)
+import { DOOR_FUNNEL_ROUTES } from "./door-funnel.mjs"; // DOOR-FUNNEL-READ: public door funnel aggregates
+import { VERDICT_INBOX_ROUTES } from "./verdict-inbox.mjs"; // COMP-DEEP #1: sectioned verdict inbox
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
 import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kill switch
 import { CODE_DROP_ROUTES } from "./code-drops.mjs"; // room-native patch exchange
 import { SQUAD_ROUTES } from "./squads.mjs"; // plan-squads
+import { PROJECT_MAP_ROUTES } from "./project-map.mjs";
 import { PUBLIC_AGENT_PAGE_ROUTES } from "./public-agent-page.mjs";
+import { PAIRING_ROUTES } from "./pairing.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_PARITY_NOTE = /^(?:mcp:[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*|exempt:\S.{7,})$/;
+export const ROUTE_PUBLICATION_NOTE = /^(?:gate:public-visibility|open:\S.{7,})$/;
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Every `type` name the route-table schema validator (schemaErrors in
@@ -57,8 +75,8 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES]);
+export const ROUTES = Object.freeze([...WORK_RECEIPT_EXTENSION_ROUTES, ...OPERATOR_LIFECYCLE_ARCHIVE_ROUTES, ...OPERATOR_NORMALIZATION_ROUTES, ...OPERATOR_ATTACHMENT_INDEX_ROUTES, ...OPERATOR_WAKE_INDEX_ROUTES, ...AGENT_WORK_ROUTES, ...AGENT_ROOM_TOKEN_ROUTES, ...DEMO_ROUTES, ...PUBLIC_LOBBY_ROUTES, ...DOWNLOAD_ROUTES, ...SHOWCASE_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PROJECT_MAP_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
+  ...MCP_INVITE_OAUTH_ROUTES, ...MCP_REGISTER_OAUTH_ROUTES, ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...TALK_POLICY_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...ROOM_WINDOW_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...DOOR_FUNNEL_ROUTES, ...GIT_REMOTE_ROUTES, ...VERDICT_INBOX_ROUTES, ...PR_WEBHOOK_ROUTES, ...AUTOMATION_ROUTES, ...INBOUND_HOOK_ROUTES, ...BOARD_VIEW_ROUTES, ...PAIRING_ROUTES, ...AGENT_INVITE_REDEEM_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -84,6 +102,12 @@ export function assertRouteRow(row) {
   // thing; "exempt:<reason>" says why there is none. tests/route-parity-notes.test.js
   // requires it on every row not in scripts/route-parity-baseline.json.
   if (row.parity !== undefined && !ROUTE_PARITY_NOTE.test(String(row.parity))) problems.push("parity");
+  // #3674: publication declaration. "gate:public-visibility" says the public
+  // read passes through the one publication gate (server/public-visibility.mjs);
+  // "open:<reason>" says why the surface serves no gated member content.
+  // tests/route-publication.test.js requires it on every scope:"public" row;
+  // an undeclared public row is treated as closed there (fail-closed).
+  if (row.publication !== undefined && !ROUTE_PUBLICATION_NOTE.test(String(row.publication))) problems.push("publication");
   return problems;
 }
 
@@ -101,6 +125,8 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
   Object.freeze({ id: "agent-work", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-work" }),
   Object.freeze({ id: "digest", group: "room", method: "GET", path: "/api/rooms/{roomId}/digest" }),
+  Object.freeze({ id: "room-bootstrap", group: "room", method: "GET", path: "/api/rooms/{roomId}/bootstrap" }),
+  Object.freeze({ id: "room-messages", group: "room", method: "GET", path: "/api/rooms/{roomId}/messages" }),
   Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
   Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),

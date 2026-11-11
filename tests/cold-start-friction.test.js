@@ -1,3 +1,4 @@
+import { currentInviteContext } from '../server/current-room-repository.mjs';
 // Cold-start friction: MCP error shapes, room-create defaults, land-queue
 // pr_not_found, and replyToId.
 import test from "node:test";
@@ -14,7 +15,7 @@ import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
-import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../server/agent-discovery.mjs";
+import { discoveryDoc, llmsTxt, llmsFullTxt, wellKnownMcpJson } from "../server/agent-discovery.mjs";
 import { EVENT_TYPES as T, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 function setup(t) {
@@ -69,7 +70,7 @@ test("authenticated MCP reports field reasons and serves replyToId", async t => 
 
   const listed = await mcp(rpc("tools/list"), { authorization: `Bearer ${identity.secret}` });
   assert.equal(listed.result.profile, "core");
-  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length + 4);
+  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length); // a joined member does not see the 4 join helpers (#5468)
   assert.ok(listed.result.tools.every(tool => MCP_TOOL_NAME_RE.test(tool.name)));
   const full = await mcp(rpc("tools/list", { profile: "full" }), { authorization: `Bearer ${identity.secret}` });
   assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);
@@ -119,7 +120,7 @@ test("room create defaults kind, roomId, and displayName and names the bad field
   const created = rooms.create(identity.secret, { title: "Ada Room", purpose: "Ship the first post" });
   assert.match(created.roomId, /^ada-room-[0-9a-f]{4}$/);
   assert.equal(created.duplicate, false);
-  const state = store.room(created.roomId).state;
+  const state = currentInviteContext(store, created.roomId, { memberIds: [identity.identityId] }).room.state;
   assert.equal(state.room.kind, "personal");
   assert.equal(state.members[identity.identityId].displayName, "Ada Agent");
 
@@ -197,8 +198,10 @@ test("add_land_item for a missing pull request is 404 pr_not_found and is not st
 test("llms.txt exposes connection commands and /.well-known/mcp points at hosted MCP", () => {
   const text = llmsTxt();
   assert.match(text, /custom User-Agent/);
-  assert.match(text, /\{"title":"Ada room","purpose":"Ship the first post"\}/);
-  assert.match(text, /tools\/list/);
+  assert.match(text, /New rooms are open unless visibility is private/);
+  assert.match(text, /\/llms-full\.txt/);
+  assert.ok(Buffer.byteLength(text) <= 5120, "the discovery index stays small");
+  assert.match(llmsFullTxt(), /tools\/list/);
   assert.match(text, /room_post_message/);
   const doc = discoveryDoc("/.well-known/mcp");
   assert.equal(doc.type, "application/mcp-server-card+json; charset=utf-8");

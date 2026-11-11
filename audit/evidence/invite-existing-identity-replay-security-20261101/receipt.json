@@ -1,0 +1,138 @@
+{
+  "base": "bbb8b348423f002b3c636207ecc175faa3a2b573",
+  "runtimeInitial": "57707bac35a2685dd9822a09d470d6b9dc4f9b49",
+  "sourceFrozen": "8eaf91e56d23e0fc16aeb9cb9a548b5ac691da53",
+  "sourceHashes": {
+    "plugins/project-room/skills/project-room/references/errors-catalog.md": "89c5fb650e5adcf7fdfcb589fc48672b0e9647640cbbc58d155432076036977c",
+    "server/agent-invites.mjs": "3d8e34d2ab33056d7f50c4ac4093efb8172ead206d602d09ef375507e50ce155",
+    "skills/project-room/references/errors-catalog.md": "89c5fb650e5adcf7fdfcb589fc48672b0e9647640cbbc58d155432076036977c",
+    "src/agent-error.mjs": "2f71368592780dd5f717e7284b5ea081dbe2d91420041af78967da982b606533",
+    "tests/agent-invite-existing-identity-replay-security.test.mjs": "46fc683279253c083f75f85bf78c9cb3e0a75381209c8726c00ea83e1e4da080"
+  },
+  "logs": [
+    {
+      "artifact": "causal-before.log.gz",
+      "uncompressedBytes": 1528,
+      "sha256": "68eb1d67ec282c8120b89037eeb2d5609dadbaa49b037f85bb62001a2fcfee8f"
+    },
+    {
+      "artifact": "first-after.log.gz",
+      "uncompressedBytes": 709,
+      "sha256": "448948dbe54b45c37fd7a83466f2c93b25e383df1aff23783372ef40a4ac98a0"
+    },
+    {
+      "artifact": "frozen-security.log.gz",
+      "uncompressedBytes": 6084,
+      "sha256": "7efd6c6c5f44a3f2ca068646179f98fae86a7591532672a4d23ffd033952c036"
+    },
+    {
+      "artifact": "invite-neighbors.log.gz",
+      "uncompressedBytes": 38345,
+      "sha256": "fafde03913f58d6526a3bc42141174b984bd9d5e9bb520e68fd1e677f0804927"
+    },
+    {
+      "artifact": "recovery-neighbors.log.gz",
+      "uncompressedBytes": 9581,
+      "sha256": "a3c102a10bb9869f8bf3fd4e4f8bbc00179733b7dbb15fc830cc016a76d5741e"
+    },
+    {
+      "artifact": "check-missing-catalog.log.gz",
+      "uncompressedBytes": 71949,
+      "sha256": "aeff5c1d2309dcb695581e9d6068f16774148d9046f2d2f88aab38247f3ffa2b"
+    },
+    {
+      "artifact": "check-missing-skill-mirror.log.gz",
+      "uncompressedBytes": 472,
+      "sha256": "51d539bcf86233e4ebaeafcdae3589856cc25f3d24b0a79d02d8a533154c90ef"
+    },
+    {
+      "artifact": "check-terminal.log.gz",
+      "uncompressedBytes": 70929,
+      "sha256": "2e6181aa5ef40cbc5c396de75604e500d8700ead086c6e9b1bfaebdbc2cd4642"
+    },
+    {
+      "artifact": "secret-frozen.log.gz",
+      "uncompressedBytes": 53,
+      "sha256": "98dfec7566192a41dd200c706493c812d9ecaef2e3877fa60508e04f658bd7b4"
+    }
+  ],
+  "checks": [
+    {
+      "command": "node --test tests/agent-invite-existing-identity-replay-security.test.mjs (one original cross-owner attack control, base runtime)",
+      "exit": 1,
+      "pass": 0,
+      "fail": 1
+    },
+    {
+      "command": "node --test tests/agent-invite-existing-identity-replay-security.test.mjs (first attack control after fix)",
+      "exit": 0,
+      "pass": 1,
+      "skip": 0
+    },
+    {
+      "command": "node --test tests/agent-invite-existing-identity-replay-security.test.mjs (frozen source eight database/recovery controls plus actual HTTP)",
+      "exit": 0,
+      "pass": 9,
+      "skip": 0,
+      "source": "8eaf91e56d23e0fc16aeb9cb9a548b5ac691da53"
+    },
+    {
+      "command": "node --test tests/agent-invites.test.js tests/agent-invite-replay-window.test.js tests/agent-inviter-accountability.test.js tests/agent-invite-redeem-routes.test.js",
+      "exit": 0,
+      "pass": 58,
+      "skip": 0,
+      "scope": "same security admission code; before later recovery-guidance/catalog additions"
+    },
+    {
+      "command": "node --test tests/agent-invite-existing-identity-replay-security.test.mjs tests/errors-catalog-drift.test.js tests/agent-error-next.test.js tests/agent-error-hints.test.js",
+      "exit": 0,
+      "pass": 30,
+      "skip": 0,
+      "scope": "eight own controls, before additive HTTP control"
+    },
+    {
+      "command": "CI=1 PATH=/Users/johnpotter/.local/bin:$PATH npm run check (first run)",
+      "exit": 1,
+      "reason": "new code missing from required errors catalog"
+    },
+    {
+      "command": "CI=1 PATH=/Users/johnpotter/.local/bin:$PATH npm run check (second run)",
+      "exit": 1,
+      "reason": "required plugin mirror not yet regenerated"
+    },
+    {
+      "command": "CI=1 PATH=/Users/johnpotter/.local/bin:$PATH npm run check (terminal run)",
+      "exit": 0,
+      "driftTests": 15,
+      "fullNodeSuite": "explicitly skipped in CI; not claimed",
+      "startSource": "0db8ff4ea4e5f3a21653bdad8bd09e9de58f54a2",
+      "duringRunChange": "Only error-guidance English sentence changed in 8eaf; frozen nine-control suite and scan executed afterward on exact8eaf."
+    },
+    {
+      "command": "node scripts/secret-scan-check.mjs (frozen source)",
+      "exit": 0,
+      "files": 1710,
+      "findings": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "fixtureCorrections": [
+    "Initial new-mint fault control incorrectly required duplicate:false; established first-mint response omits the field. Corrected to assert not duplicate:true; runtime unchanged.",
+    "Initial HTTP replay control incorrectly expected200; established handler returns201 even for duplicate:true. Corrected to201; runtime unchanged. These interim full logs were overwritten by the final own-suite run; failures remain in session tool outputs, not misrepresented as archived raw logs."
+  ],
+  "limits": [
+    "Local Node SQLite cold reopen and actual loopback HTTP; not actual Worker/native app or production verification",
+    "Newly minted identity recovery retains existing 30-day bearer replay window, now only with exact immutable mint basis",
+    "Old ambiguous receipts intentionally require existing holder credential; no migration inference or automatic recovery grant",
+    "No schema, OAuth/auth core, identity-secret implementation, host/background permission, offline45 activation, push, PR or deploy change"
+  ],
+  "securityProperties": [
+    "No raw identity secret, invitation code or room token in immutable basis; only codeHash and existing receipt binding",
+    "Point lookup deterministic immutable operator_actions record, atomic with burn/member/link/receipt/token transaction",
+    "Exact minted basis requires matching action, target, result, request and serialized code/request/identity/room/member payload",
+    "Existing/relinked identity basis is reused, never eligible for credential-less global rotation"
+  ]
+}

@@ -1,0 +1,63 @@
+  /api/public-work/tasks/{taskId}:
+    get:
+      operationId: "getPublicWorkTask"
+      summary: "Inspect current task terms and lease."
+      description: "Public: no credential required."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/PublicWorkTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "Invalid fields, unsupported query or ineligible owner task."
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        -
+          name: "taskId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security: []
+    head:
+      operationId: "headPublicWorkTask"
+      summary: "Inspect current task terms and lease."
+      description: "Public: no credential required."
+      responses:
+        "200":
+          description: "OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "Invalid fields, unsupported query or ineligible owner task."
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        -
+          name: "taskId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security: []

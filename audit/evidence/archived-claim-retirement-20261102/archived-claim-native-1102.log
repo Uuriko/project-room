@@ -1,0 +1,13 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":91,"integrity":"deferred","phases":{"schema":{"ms":20,"rowsRead":8389},"plugin":{"ms":42,"rowsRead":41041},"fence":{"ms":22,"rowsRead":47386},"verifies":{"ms":3,"rowsRead":21746},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":91,"legacyColdStartMs":91,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":5,"integrity":"deferred","phases":{"schema":{"ms":2,"rowsRead":886},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":3,"projectionBytes":130}
+{"event":"room.store_initialized","initializationMs":7,"legacyColdStartMs":5,"clockSemantics":"io-bound","cpuMeasured":false}
+✔ actual Native archived registry and original receipt survive cold restart (1234.322417ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1488.42525

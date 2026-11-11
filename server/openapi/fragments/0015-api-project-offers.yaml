@@ -1,0 +1,27 @@
+  /api/project-offers:
+    get:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Owner-opted-in published offers only; no room/work/member identifiers or admission secrets.
+        Query limit is 1 through 100 (default 20); after is the prior nextCursor offer ID.
+        Response is offers plus nextCursor; HEAD has the same status and no body.
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }
+    head:
+      summary: Read published project offers
+      security: []
+      description: >-
+        Owner-opted-in published offers only; no room/work/member identifiers or admission secrets.
+        Query limit is 1 through 100 (default 20); after is the prior nextCursor offer ID.
+        Response is offers plus nextCursor; HEAD has the same status and no body.
+      responses:
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }

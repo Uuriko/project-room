@@ -27,6 +27,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { encodeRow } from "../server/persisted-row.mjs";
 import { GUEST_CREDENTIAL_TTL_MIN_MS } from "../server/guest-invites.mjs";
 import { agentsJson, llmsTxt } from "../server/agent-discovery.mjs";
@@ -185,7 +186,10 @@ test("minute and daily budgets stop anonymous mints and leave in-process mints a
     daily.create("Day One", anon("192.0.2.30"));
     const over = refusal(() => daily.create("Day Two", anon("192.0.2.31")));
     assert.match(over.message, /daily budget/);
-    assert.equal(over.headers["Retry-After"], "3600");
+    // True wait, not the old fixed 3600: the only counted mint is brand new,
+    // so its slot frees a full rolling day later (see mint-retry-after-truth).
+    assert.equal(over.headers["Retry-After"], "86400");
+    assert.equal(over.detail.mintBudget.scope, "global");
     const invited = daily.create("Invited");
     assert.match(invited.secret, /^pri_/);
     assert.equal(stored(dailyStore, invited.identityId).mintAddress, null);
@@ -267,8 +271,8 @@ test("anonymous identities that never activate expire; auth, link, and post keep
     const quiet = ids.create("Quiet Read", anon("203.0.113.14"));
     const internal = ids.create("Internal");
     store.transaction(() => ids.noteActivated(authed.identityId));
-    ids.link(owner, "commons", { identityId: linked.identityId, permissions: [] });
-    ids.link(owner, "commons", { identityId: posted.identityId, permissions: [] });
+    linkWithProof(store, owner, "commons", linked, { permissions: [] });
+    linkWithProof(store, owner, "commons", posted, { permissions: [] });
     store.db.prepare("UPDATE agent_identities SET activated_at=NULL WHERE identity_id IN (?, ?)").run(linked.identityId, posted.identityId);
     setTier(store.db, "commons", posted.identityId, "t2_standard", { updatedBy: "owner", nowMs: now });
     store.command(posted.secret, "commons", {

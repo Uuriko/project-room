@@ -54,7 +54,13 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /demo": [undefined, 200],
+  "GET /watch": [undefined, 200],
+  "GET /extensions/work-receipt/v1": [undefined, 200],
+  "HEAD /extensions/work-receipt/v1": [undefined, 200],
   "HEAD /demo": [undefined, 200],
+  // ROOM_SHOWCASE is off by default, so an anonymous probe gets 404.
+  "GET /showcase": [undefined, 404],
+  "HEAD /showcase": [undefined, 404],
   "GET /download": [undefined, 200],
   "HEAD /download": [undefined, 200],
   // Native login starts/callbacks require PKCE query shape. The exchange is
@@ -102,6 +108,10 @@ const PROBES = {
   "POST /mcp": [{}, 200],
   "GET /room/mcp": [undefined, 200],
   "POST /room/mcp": [{}, 200],
+  // Native connection is disabled when no deployment OAuth client is configured.
+  "POST /oauth/invite": [{}, 404],
+  // Registration is public metadata only and unavailable without configured MCP clients.
+  "POST /oauth/register": [{}, 404],
   "POST /a2a": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],
@@ -145,6 +155,10 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public door funnel (DOOR-FUNNEL-READ): counts-only weekly joins/mints
+  // aggregates; public by design, answers 200 with honest zeros on an
+  // empty store.
+  "GET /api/public/door-funnel": [undefined, 200],
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
@@ -153,6 +167,7 @@ const PROBES = {
   // honest zeros on an empty store.
   "GET /api/public/front-door": [undefined, 200],
   "HEAD /api/public/front-door": [undefined, 200],
+  "GET /api/public/git-remote": [undefined, 404],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
@@ -171,6 +186,11 @@ const PROBES = {
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
+  "GET /api/agent-invites/redeem": [undefined, 200],
+  "GET /api/pair": [undefined, 422],
+  "POST /api/pair": [{}, 422],
+  "GET /pair": [undefined, 422],
+  "GET /pair/{}": [undefined, 200],
   // Invite preview (#3259: POST-only, code in the body): a bare probe (no
   // code) gets 422 invalid_invite. The retired GET form is not an open
   // route and so has no probe here; its 405 is pinned in
@@ -180,7 +200,8 @@ const PROBES = {
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
-  "POST /api/share-links/preview": [{ linkToken: token() }, 410],
+  // Anonymous preview of an unknown well-formed token: truthful 404 link_not_found (pack 4).
+  "POST /api/share-links/preview": [{ linkToken: token() }, 404],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   // The v0 guest-agent-links exchange was removed (#3216): its routes are
   // not open, not declared, and answer plain 404 — pinned by

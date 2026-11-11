@@ -1,0 +1,11 @@
+  /api/rooms/{roomId}/code/{dropId}:
+    get:
+      summary: Read one code drop
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: dropId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Code drop with checks
+        '404':
+          description: No such drop

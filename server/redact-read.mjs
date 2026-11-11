@@ -114,6 +114,10 @@ export function redactMessageTree(message) {
 
 export function redactSnapshotState(state) {
   if (!state || typeof state !== "object") return state;
+  if (Object.hasOwn(state, 'messageAuthority')) {
+    const { messageAuthority: _authority, ...publicState } = state;
+    state = publicState;
+  }
   const messages = redactMessages(state.messages);
   const byId = indexMessages(state.messages);
   let eventLog = state.eventLog;

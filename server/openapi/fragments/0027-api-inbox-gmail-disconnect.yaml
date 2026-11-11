@@ -1,0 +1,19 @@
+  /api/inbox/gmail/disconnect:
+    post:
+      summary: Delete locally stored Gmail credentials and disconnect. Saved copies remain.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mailboxId: { type: string, maxLength: 128 }
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }

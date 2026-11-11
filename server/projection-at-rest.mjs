@@ -1,5 +1,7 @@
+import { assertProjectionWrite, recordProjectionWrite } from './write-integrity.mjs';
 import { hydrateWorkItems, referenceWorkItems } from "./work-repository.mjs";
-import { isMessageEntityRef, referenceMessageEntities, hydrateMessageEntities } from "./message-entity-projection.mjs";
+import { hasMessageAuthority, hydrateMessageAuthority, messageAuthorityProjection } from './message-authority.mjs';
+import { isMessageEntityRef, referenceMessageEntities, hydrateMessageEntities, retainMessageEntities } from "./message-entity-projection.mjs";
 // Phase 1a: message bodies at rest outside the room projection row.
 //
 // The reducer, the cache and every reader keep full message bodies in
@@ -68,12 +70,41 @@ const shaOf = body => createHash("sha256").update(body, "utf8").digest("hex");
 
 // Pure memo: re-hashing every large body on every write is the main cost of
 // the serializer. A string comparison is cheaper and cannot be wrong.
+// Independent from the parsed projection cache: bound retained text across
+// rooms here too. Eviction only loses a hash optimization; persisted authority
+// and immediate body release never depend on this memo. UTF-16 text plus an
+// entry allowance is an accounting budget, not a claim about exact JS heap size.
+export class ProjectionBodyHashMemo {
+  constructor({ maxBytes = 8 * 1024 * 1024, maxRooms = 32, maxEntries = 8192 } = {}) {
+    this.maxBytes = maxBytes; this.maxRooms = maxRooms; this.maxEntries = maxEntries;
+    this.rooms = new Map(); this.bytes = 0; this.entries = 0;
+  }
+  get(roomId) { return this.rooms.get(roomId)?.records ?? new Map(); }
+  delete(roomId) {
+    const previous = this.rooms.get(roomId);
+    if (!previous) return;
+    this.bytes -= previous.bytes; this.entries -= previous.records.size;
+    this.rooms.delete(roomId);
+  }
+  set(roomId, candidates) {
+    this.delete(roomId);
+    const records = new Map(); let bytes = 0;
+    for (const [id, record] of candidates) {
+      const weight = 128 + 2 * (String(id).length + record.body.length + record.sha.length);
+      if (weight > this.maxBytes - bytes || records.size >= this.maxEntries) continue;
+      records.set(id, record); bytes += weight;
+    }
+    if (!records.size || this.maxRooms < 1) return;
+    while (this.rooms.size && (this.rooms.size >= this.maxRooms
+      || this.bytes + bytes > this.maxBytes || this.entries + records.size > this.maxEntries))
+      this.delete(this.rooms.keys().next().value);
+    this.rooms.set(roomId, { records, bytes }); this.bytes += bytes; this.entries += records.size;
+  }
+}
 const hashMemo = new WeakMap();
-function memoFor(db, roomId) {
-  let rooms = hashMemo.get(db);
-  if (!rooms) { rooms = new Map(); hashMemo.set(db, rooms); }
-  let memo = rooms.get(roomId);
-  if (!memo) { memo = new Map(); rooms.set(roomId, memo); }
+function memoFor(db) {
+  let memo = hashMemo.get(db);
+  if (!memo) { memo = new ProjectionBodyHashMemo(); hashMemo.set(db, memo); }
   return memo;
 }
 const statements = new WeakMap();
@@ -125,6 +156,25 @@ function restoreEnvelope(message) {
   return out;
 }
 
+// Shared pure per-record codec. The normal serializer supplies its existing
+// memo/write callback; bounded replay can use the same byte/key-order transform
+// without writing serving bodies or manufacturing a new row authority.
+export function projectionMessageAtRest(original, {enabled=false, bodySha=shaOf}={}) {
+  if(!enabled)return original;
+  const message=nullEnvelope(original)?slimEnvelope(original):original;
+  return slimmable(original)?renameKey(message,'body','bodyRef',bodySha(message.body,message.id)):message;
+}
+
+// The same per-record inverse used by bounded qualification; callers supply
+// an independently admitted body, not a repair or full-room hydration path.
+export function projectionMessageFromRest(original,{bodyForSha}={}) {
+  const message=hasMarker(original)?restoreEnvelope(original):original;
+  if(typeof message?.bodyRef!=='string')return message;
+  const body=bodyForSha?.(message.bodyRef);
+  if(typeof body!=='string'||shaOf(body)!==message.bodyRef)throw Error('Missing qualified projection body');
+  return renameKey(message,'bodyRef','body',body);
+}
+
 // Delete every body row the projection about to be stored no longer
 // references (win 4, replacing the json_each trigger). `referenced` is the
 // set of bodyRef shas in the new stored text. Callers run this in the same
@@ -145,9 +195,22 @@ function releaseUnreferencedBodies(db, roomId, referenced) {
 // rooms.projection. With enabled=false the output is JSON.stringify(state),
 // byte for byte, apart from rehydrating any bodyRef a raw-read state carries.
 export function storedProjection(db, roomId, state, options = {}) {
-  return serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
+  assertProjectionWrite(db,roomId);
+  const projection = serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
+  recordProjectionWrite(db,roomId,projection);
+  return projection;
 }
-function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [] } = {}) {
+function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [], retainedMessageIds = [], messageAuthorityCount } = {}) {
+  // A nonmemoizing rewrite (deletion, inline rollback or entity cutover) must
+  // not retain the old plaintext. Keep the previous memo only for this call;
+  // publish the newly referenced set below if serialization uses it.
+  const previousMemo = hashMemo.get(db)?.get(roomId);
+  hashMemo.get(db)?.delete(roomId);
+  if (hasMessageAuthority(state)) {
+    const serialized = JSON.stringify(messageAuthorityProjection(state, messageAuthorityCount));
+    if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, new Set());
+    return serialized;
+  }
   if (state?.messages?.some(isMessageEntityRef)) state = { ...state, messages: hydrateMessageEntities(db,roomId,state.messages) };
   if (messageEntities && Array.isArray(state?.messages)) {
     if (state.messages.some(message => typeof message?.bodyRef === "string" || hasMarker(message))) {
@@ -159,6 +222,8 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
     if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db,roomId,new Set());
     return JSON.stringify({...state,messages});
   }
+  if (retainedMessageIds.length && Array.isArray(state?.messages))
+    state = { ...state, messages: retainMessageEntities(db, roomId, state.messages, retainedMessageIds) };
   const messages = Array.isArray(state?.messages) ? state.messages : null;
   if (!messages) return JSON.stringify(state);
   const carriesRefs = messages.some(message => message && typeof message.bodyRef === "string" || hasMarker(message));
@@ -183,17 +248,18 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
   }
   const { known, insert } = prepared(db);
   const present = new Set(known.all(roomId).map(row => row.sha));
-  const memo = memoFor(db, roomId), seen = new Map();
-  const slim = messages.map(original => {
-    const message = nullEnvelope(original) ? slimEnvelope(original) : original;
-    if (!slimmable(original)) return message;
-    const cached = memo.get(message.id);
-    const sha = cached && cached.body === message.body ? cached.sha : shaOf(message.body);
-    seen.set(message.id, { body: message.body, sha });
-    if (!present.has(sha)) { insert.run(roomId, sha, message.body); present.add(sha); }
-    return renameKey(message, "body", "bodyRef", sha);
-  });
-  hashMemo.get(db).set(roomId, seen);
+  const cache = memoFor(db), memo = previousMemo ?? new Map(), seen = new Map();
+  const slim = messages.map(original => projectionMessageAtRest(original, {
+    enabled: true,
+    bodySha(body, id) {
+      const cached = memo.get(id);
+      const sha = cached && cached.body === body ? cached.sha : shaOf(body);
+      seen.set(id, { body, sha });
+      if (!present.has(sha)) { insert.run(roomId, sha, body); present.add(sha); }
+      return sha;
+    }
+  }));
+  cache.set(roomId, seen);
   const referenced = new Set();
   for (const message of slim) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);
   // The `present` set above is the pre-write index (plus this write's
@@ -225,6 +291,7 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
 // a row whose bytes no longer hash to its key is reported missing there,
 // which routes the caller to the same rebuild-from-log recovery.
 export function hydrateProjection(db, roomId, state, { verifyBodyHashes = false, workEntities = true } = {}) {
+  state = hydrateMessageAuthority(db, roomId, state);
   if (workEntities) state = hydrateWorkItems(db, roomId, state);
   if (state?.messages?.some(isMessageEntityRef)) state.messages = hydrateMessageEntities(db,roomId,state.messages);
   const messages = Array.isArray(state?.messages) ? state.messages : [];

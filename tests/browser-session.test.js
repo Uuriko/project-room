@@ -99,7 +99,7 @@ test("clearStoredPasswords drops sessionStorage keys that name a password", () =
 test("session hint copy never names a secret and explains cookie vs localStorage", () => {
   assert.match(SESSION_HINT_COPY, /HttpOnly session cookie/);
   assert.match(SESSION_HINT_COPY, /not localStorage/);
-  assert.match(SESSION_HINT_COPY, /Room-key sessions and account sessions each stay signed in for up to 8 hours/);
+  assert.match(SESSION_HINT_COPY, /Account sessions stay signed in for up to 30 days; room-key sessions and guest access last up to 8 hours/);
   assert.match(SESSION_HINT_COPY, /Log out/);
   assert.doesNotMatch(SESSION_HINT_COPY, /pri_|ga1\.|ROOM_AGENT_TOKEN|sk-/);
 });

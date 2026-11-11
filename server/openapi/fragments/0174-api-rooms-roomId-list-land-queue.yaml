@@ -1,0 +1,17 @@
+  /api/rooms/{roomId}/list_land_queue:
+    get:
+      deprecated: true
+      summary: List the room land queue
+      description: >-
+        Deprecated compatibility view over work claims of kind land. The
+        response shape is unchanged and the land_queue rows are kept.
+        Each item includes the pull request number, title, head SHA, check
+        rollup (pending, green, or red), behind-main flag, merged SHA, and
+        tip when one was reported. Any member can list. API keys need
+        rooms:read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: "{ roomId, items }"
+        '401': { description: unauthenticated }

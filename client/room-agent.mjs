@@ -1,12 +1,14 @@
+import { digestMessagePage } from "../src/message-digest.js";
+import { filterMessagePage, validMessageQuery } from "../src/message-query.js";
+import { validWorkPage } from "../server/work-list-page.mjs";
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
-import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
-import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
+import { searchWork, searchWorkMatches, completedResults, currentResult } from "../src/work-selectors.js";
 import { createHash, randomUUID } from "node:crypto";
-import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown } from "../src/work-packet.js";
+import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown, validSourceObservation } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -16,8 +18,7 @@ import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
-import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
-import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
@@ -84,14 +85,25 @@ async function scanBackward(fetchPage, after, end, limit) {
   let bound = end, pages = 0;
   while (collected.length < limit && bound - 1 > after && pages < MESSAGE_SCAN_PAGES) {
     const lo = Math.max(after, bound - 1 - MESSAGE_SCAN_PAGE);
-    const page = await fetchPage(lo, MESSAGE_SCAN_PAGE);
-    pages += 1;
+    // A service may return fewer source events than requested (record or byte
+    // budgets). Finish this window before selecting its newest messages.
     const window = [];
-    for (const item of page?.events ?? []) {
-      if (!item || !Number.isSafeInteger(item.sequence)) continue;
-      if (item.sequence <= lo || item.sequence >= bound) continue;
-      if (isPostedMessage(item)) window.push(item);
+    let cursor = lo, complete = false;
+    while (!complete && pages < MESSAGE_SCAN_PAGES) {
+      const page = await fetchPage(cursor, MESSAGE_SCAN_PAGE);
+      pages += 1;
+      for (const item of page?.events ?? []) {
+        if (!item || !Number.isSafeInteger(item.sequence)) continue;
+        if (item.sequence <= lo || item.sequence >= bound) continue;
+        if (isPostedMessage(item)) window.push(item);
+      }
+      const next = page?.next;
+      complete = !page?.hasMore || Number.isSafeInteger(next) && next >= bound - 1;
+      if (!complete && (!Number.isSafeInteger(next) || next <= cursor))
+        throw new RoomClientError(409, "message_window_unavailable", "Message source did not advance; retry the selected window");
+      cursor = next;
     }
+    if (!complete) throw new RoomClientError(409, "message_window_unavailable", "Latest message window exceeds bounded scan; use an addressed after cursor");
     collected.unshift(...window);
     bound = lo + 1;
   }
@@ -114,6 +126,7 @@ export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, l
   const map = mapMessage ?? (item => item);
   if (latest && Number.isSafeInteger(end) && end > after) {
     const { collected, reachedStart, capped } = await scanBackward(fetchPage, after, end, limit);
+    if (capped && !reachedStart && collected.length < limit) throw new RoomClientError(409, "message_window_unavailable", "Latest messages exceed bounded scan; use an addressed after cursor");
     const selected = collected.slice(-limit);
     return {
       messages: selected.map(map),
@@ -123,6 +136,7 @@ export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, l
   }
   const { collected, scanCursor, reachedEnd, capped } = await scanForward(fetchPage, after, limit, latest);
   if (latest) {
+    if (!reachedEnd) throw new RoomClientError(409, "message_window_unavailable", "Latest messages exceed bounded scan; use an addressed after cursor");
     const selected = collected.slice(-limit);
     return {
       messages: selected.map(map),
@@ -178,7 +192,7 @@ function checkedOffers(result) {
   } catch { throw new RoomClientError(200, "invalid_response", "Help offers do not match selected work and participants"); }
 }
 
-function checkedWorkSnapshot(value, roomId) {
+function checkedWorkSnapshot(value, roomId, expectedView = "work") {
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
@@ -190,11 +204,11 @@ function checkedWorkSnapshot(value, roomId) {
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
       const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
-      if (value.snapshotView !== "work" || value.snapshotVersion !== 1
+      if (value.snapshotView !== expectedView || value.snapshotVersion !== 1
         || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
         || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
         || !exact(state, "room members workItems")) throw new Error();
-    } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
+    } else if (expectedView !== "work" || value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
       || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
@@ -206,7 +220,11 @@ function checkedWorkSnapshot(value, roomId) {
         || new Set(member.permissions).size !== member.permissions.length) throw new Error();
     }
     for (const [id, item] of Object.entries(state.workItems)) {
-      if (!validId(id) || item?.id !== id || !text(item.title) || !text(item.definitionOfDone)
+      // Private tracked-request definitions are withheld as an exact null pair
+      // by the authorized snapshot. Keep their metadata without interpreting
+      // withheld text as malformed or accepting partial/empty definitions.
+      const definitionWithheld = item?.title === null && item?.definitionOfDone === null;
+      if (!validId(id) || item?.id !== id || !definitionWithheld && (!text(item.title) || !text(item.definitionOfDone))
         || !Object.values(WORK_STATES).includes(item.state) || !integer(item.revision) || item.revision > value.sequence
         || !["read", "write"].includes(item.mode) || !Number.isFinite(Date.parse(item.updatedAt))
         || !validId(item.accountableMemberId) || !Object.hasOwn(state.members, item.accountableMemberId)
@@ -308,8 +326,13 @@ export async function redeemAgentInvite(origin, code, displayName, options = {})
     token: options.identitySecret }, options);
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   const roomToken = value?.mcpToken?.credential;
+  // A lost-response replay returns the same membership with mcpToken null and
+  // next.action rotate. The room credential is replaced at token/rotate, not
+  // minted again here. A first redemption still has to carry a rak_ credential.
+  const replay = value?.duplicate === true && value?.mcpToken == null
+    && Array.isArray(value?.next) && value.next.some(step => step?.action === "rotate");
   if (typeof value?.identityId !== "string" || typeof value?.memberId !== "string"
-    || typeof roomToken !== "string" || !roomToken.startsWith("rak_"))
+    || !(replay || (typeof roomToken === "string" && roomToken.startsWith("rak_"))))
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
   return value;
 }
@@ -349,10 +372,10 @@ export async function joinSharedInvite(origin, linkToken, displayName, options =
     throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
   return value;
 }
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter } = {}, options = {}) {
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter, visibility } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
-    body: { roomId, title, purpose, kind, displayName, requestId, starter } }, options);
+    body: { roomId, title, purpose, kind, displayName, requestId, starter, visibility } }, options);
   if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
   return value;
@@ -368,12 +391,23 @@ export async function listAgentRooms(origin, identitySecret, { after = "", ...op
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid room list");
   return value;
 }
+export function validProjectMapArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)
+    || Object.keys(args).some(key => !["op", "q", "from", "to", "repo"].includes(key))) return false;
+  const bounded = value => typeof value === "string" && value.length >= 1 && value.length <= 300;
+  if (args.repo !== undefined && !(typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200)) return false;
+  if (args.op === "hotspots") return args.q === undefined && args.from === undefined && args.to === undefined;
+  if (args.op === "path") return bounded(args.from) && bounded(args.to) && args.q === undefined;
+  return ["query", "explain"].includes(args.op) && bounded(args.q) && args.from === undefined && args.to === undefined;
+}
+
 export class RoomAgentClient {
   #origin;
   #roomId;
   #token;
   #fetch;
   #memberId;
+  #statesUnsupported = false;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
     assertServiceOrigin(origin);
     if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,256})$/.test(token)) throw new Error("A valid Room and access key are required");
@@ -435,8 +469,9 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
-    const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    const snapshotRead = suffix === "" || suffix === "?view=work" || suffix === "?view=orientation";
+    const boardRead = suffix === "/board" || suffix.startsWith("/board?");
+    if (this.#memberId && (snapshotRead || boardRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -478,15 +513,28 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    // Identity checks need current membership and ownership, not message history.
+    // Require the versioned identity view; never fall back to a full room.
+    let snapshot;
+    try { snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=identity`, undefined, signal); }
+    catch (error) {
+      if (error instanceof RoomClientError && error.status === 422 && error.code === "invalid_snapshot_view") {
+        throw new RoomClientError(422, "invalid_snapshot_view", "This server does not support identity preflight version 1. Deploy the matching server before using this client; no broader read was attempted.");
+      }
+      throw error;
+    }
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
-      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "identity" || snapshot.snapshotVersion !== 1
+      || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
+      || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
+      || !member || member.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !Number.isSafeInteger(member.revision) || member.revision < 0
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
@@ -535,50 +583,41 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
-  // Agents named before they have a seat. Reading the room snapshot assembles
-  // the network. It grants no access, mints no identity, and issues no invite.
+  // The service assembles canonical introduction history and applies viewer
+  // visibility and verifier authority. A recent-message snapshot is incomplete.
   async outsideAgents({ signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    // Conservative verifier set: the client honors verify records from the
-    // room owner only (it cannot see delegation grants). The server's fuller
-    // set is authoritative; this just lets the client display verified links.
-    const ownerId = snapshot.state?.room?.ownerId;
-    const verifiers = typeof ownerId === "string" && ownerId ? new Set([ownerId]) : null;
-    return {
-      contractVersion: 1,
-      grantsAccess: false,
-      evaluatedThrough: snapshot.sequence,
-      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, { verifiers })
-    };
+    return this.#outsideAgentResponse(await this.#request("/outside-agents", undefined, signal));
   }
-  // Name an agent who has no seat. The post is an ordinary room message.
-  // Reading it grants no access, mints no identity, and issues no invite.
-  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  #outsideAgentResponse(value) {
+    if (!value || value.contractVersion !== 1 || value.grantsAccess !== false
+      || !Number.isSafeInteger(value.evaluatedThrough) || value.evaluatedThrough < 0
+      || !Array.isArray(value.agents) || value.agents.some(agent => !agent || typeof agent.externalRef !== "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent network");
+    }
+    return value;
+  }
   async recordOutsideAgent(input, { signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
-    const snapshot = await this.snapshot({ signal });
-    let plan;
-    try {
-      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
-    } catch (error) {
-      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
-      throw error;
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["externalRef", "displayName", "origin", "reach", "note"].includes(key))) {
+      throw new RoomClientError(422, "invalid_outside_agent", "Choose public agent facts only");
     }
-    if (plan.recorded !== "replay") {
-      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    const value = this.#outsideAgentResponse(await this.#request("/outside-agents", { ...input, action: "introduce" }, signal));
+    if (!["introduce", "sighting", "replay"].includes(value.recorded) || value.externalRef !== input?.externalRef) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent receipt");
     }
-    const network = await this.outsideAgents({ signal });
-    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+    return value;
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
   // `after` is the previous response's cursor.after: the two event-log lists
   // (DMs, direct @mentions) then return only newer entries instead of
   // re-sending their heads; standing lists always ride in full.
-  agentInbox({ limit, after, signal } = {}) {
+  agentInbox({ limit, after, olderCursor, signal } = {}) {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set("limit", String(limit));
     if (after !== undefined) params.set("after", String(after));
+    if(olderCursor!==undefined)params.set("olderCursor",olderCursor);
     const query = params.toString();
     return this.#request(`/agent-inbox${query ? `?${query}` : ""}`, undefined, signal);
   }
@@ -588,7 +627,16 @@ export class RoomAgentClient {
   // latest:true returns the latest messages in chronological order
   // (GET /conversation parity). next is the newest sequence, so following it
   // as after does not repeat the page. hasMore means older messages exist.
-  async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
+  // Saves this member's catch-up marker (POST /cursor). Forward-only on the
+  // service; a later cold room_read_messages returns it as catchUp.after.
+  async markCaughtUp(sequence, { signal } = {}) {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new RoomClientError(0, "invalid_cursor", "Use a nonnegative integer sequence");
+    return this.#request("/cursor", { sequence }, signal);
+  }
+
+  async roomMessages({ after = 0, limit = 50, latest = false, view = "full", query, signal } = {}) {
+    if (query !== undefined && !validMessageQuery(query)) throw new Error("Search text is 1 to 80 characters");
+    if (!["full", "digest"].includes(view)) throw new Error("Choose full or digest message view");
     const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
     const mapMessage = ({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
@@ -598,20 +646,44 @@ export class RoomAgentClient {
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     });
-    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
+    // Read the bounded context cursor, not every event since room creation.
+    // The hosted implementation already anchors its backward scan to this head.
+    let end = null;
+    if (latest) {
+      const context = await this.roomContext({ signal });
+      const head = context?.cursors?.roomSequence;
+      if (context?.roomId !== this.#roomId || !Number.isSafeInteger(head) || head < 0 || head >= Number.MAX_SAFE_INTEGER)
+        throw new RoomClientError(200, "invalid_response", "Room context has no valid message horizon");
+      if (after > head) throw new RoomClientError(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      end = head + 1;
+    }
+    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, end, mapMessage });
     const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
     const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
-    return withContentTrust({
+    const page = withContentTrust({
       roomId: this.#roomId,
       messages: mapped,
       next: cursor.next,
       hasMore: cursor.hasMore,
     });
+    const searched = query === undefined ? page : filterMessagePage(page, query);
+    return view === "digest" ? digestMessagePage(searched, this.#memberId) : searched;
   }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
-    const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
+    // Ask the service for each listed request's progress and lifecycle state.
+    // A service that predates the option refuses it with 422; fall back to
+    // the plain list once and stop asking for the rest of this client's life.
+    const states = name === "room_list_requests" && !this.#statesUnsupported;
+    const url = extra => route + "?" + new URLSearchParams({ ...args, ...extra });
+    let result;
+    try { result = await this.#request(url(states ? { states: "1" } : {}), undefined, signal); }
+    catch (error) {
+      if (!states || error?.status !== 422 || error?.code !== "invalid_reply_selection") throw error;
+      this.#statesUnsupported = true;
+      result = await this.#request(url({}), undefined, signal);
+    }
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
   async assistant(input, { signal } = {}) {
@@ -715,10 +787,13 @@ export class RoomAgentClient {
     return resultDraft((await this.workContext(workItemId, { signal: options.signal })).work);
   }
   async workContext(workItemId, options = {}) {
-    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "includeOffers", "signal"].includes(key))) throw new Error("Use includeSource, includeOffers and signal options only");
-    const { includeSource = false, includeOffers = false, signal } = options;
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "includeOffers", "sourceObservation", "signal"].includes(key))) throw new Error("Use includeSource, includeOffers and signal options only");
+    const { includeSource = false, includeOffers = false, sourceObservation, signal } = options;
     if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") throw new Error("Choose one work ID and boolean context options");
+    if (sourceObservation !== undefined && (!includeSource || !validSourceObservation(sourceObservation)
+      || sourceObservation.roomId !== this.#roomId || sourceObservation.workItemId !== workItemId)) throw new Error("Use a source observation for this work with includeSource=true");
     const query = new URLSearchParams({ workItemId });
+    if (sourceObservation !== undefined) query.set("sourceObservation", JSON.stringify(sourceObservation));
     if (includeSource) query.set("includeSource", "true");
     const result = await this.#request(`/work-context?${query}`, undefined, signal, false, includeOffers);
     if (includeOffers && result?.offerContextVersion === undefined && result?.offers === undefined)
@@ -731,10 +806,40 @@ export class RoomAgentClient {
       || !validId(result.viewer?.id) || result.viewerId !== result.viewer.id || !Number.isSafeInteger(result.evaluatedThrough) || result.evaluatedThrough < 0
       || !Number.isSafeInteger(result.work.revision) || result.work.revision < 0 || !Number.isFinite(Date.parse(result.evaluatedAt))
       || (!includeSource && (source?.status !== "not_requested" || source.message !== null))
-      || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable"].includes(source.status) : source.status !== "not_linked")
+      || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable", ...(sourceObservation === undefined ? [] : ["not_modified"])].includes(source.status) : source.status !== "not_linked")
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (source && Object.hasOwn(source, "freshness")) {
+      const observation = source.observation;
+      const eligible = ["included", "not_modified"].includes(source.status);
+      if (eligible && !validSourceObservation(observation)) throw new RoomClientError(200, "invalid_response", "Invalid source freshness observation");
+      const expected = !eligible ? "unavailable" : !sourceObservation ? "observed"
+        : observation.messageId === sourceObservation.messageId && observation.revision === sourceObservation.revision && observation.sha256 === sourceObservation.sha256 ? "unchanged" : "changed";
+      if (!includeSource || (sourceObservation && sourceObservation.viewerId !== result.viewer.id) || source.freshness !== expected || (eligible
+        ? !validSourceObservation(observation) || observation.roomId !== this.#roomId || observation.workItemId !== workItemId
+          || observation.viewerId !== result.viewer.id || observation.messageId !== result.work.sourceMessageId
+          || (source.status === "not_modified" ? !sourceObservation || expected !== "unchanged" || source.message !== null
+            : expected === "unchanged" || observation.sha256 !== createHash("sha256").update(source.message.body, "utf8").digest("hex"))
+          || !isDeepStrictEqual(source.nextRead, { tool: "room_read_work", arguments: { workItemId, includeSource: true, sourceObservation: observation } })
+        : observation !== null || source.nextRead !== null || source.editedAt !== null)
+        || source.editedAt !== null && (typeof source.editedAt !== "string" || !Number.isFinite(Date.parse(source.editedAt))))
+        throw new RoomClientError(200, "invalid_response", "Invalid source freshness observation");
+    } else if (sourceObservation !== undefined) throw new RoomClientError(200, "source_freshness_unavailable", "This service does not support source comparison");
+    if (Object.hasOwn(result.next, "replacement")) {
+      const link = result.next.replacement;
+      const expectedRead = { tool: "room_read_work", arguments: { workItemId: result.work.supersededBy } };
+      if (!link || result.next.action !== "superseded" || !validId(link.workItemId) || link.workItemId === workItemId
+        || link.workItemId !== result.work.supersededBy || !["available", "unavailable"].includes(link.status)
+        || (link.status === "available" ? !isDeepStrictEqual(link.nextRead, expectedRead) : link.nextRead !== null))
+        throw new RoomClientError(200, "invalid_response", "Invalid work replacement navigation");
+    }
+    if (Object.hasOwn(result, "dependencies") && (!Array.isArray(result.dependencies) || result.dependencies.length > 16
+      || result.dependencies.some(dep => !dep || typeof dep.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(dep.id)
+        || typeof dep.state !== "string" || dep.state.length > 32 || typeof dep.satisfied !== "boolean"
+        || dep.satisfied && dep.state !== "done")
+      || new Set(result.dependencies.map(dep => dep.id)).size !== result.dependencies.length))
+      throw new RoomClientError(200, "invalid_response", "Invalid work dependency observation");
     if (Object.hasOwn(result, "resume") && !isDeepStrictEqual(result.resume,
       workResume(result.work, Date.parse(result.evaluatedAt), result.context.roomOwnerId)))
       throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
@@ -877,21 +982,36 @@ export class RoomAgentClient {
     const path = params.size ? `/work-claims?${params}` : "/work-claims";
     const page = await this.#request(path, undefined, signal);
     if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
-    const claims = [...(page.claims ?? [])];
+    if (page.hasMore !== true || !Array.isArray(page.claims)) {
+      return { ...page, claims: Array.isArray(page.claims) ? page.claims : [], hasMore: true };
+    }
+    const claims = [...page.claims];
     let next = page.nextCursor;
     const seen = new Set();
+    let done = false;
     for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
       seen.add(next);
       const moreParams = new URLSearchParams(params);
       moreParams.set("cursor", next);
       const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
-      claims.push(...(more?.claims ?? []));
-      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+      // Stop at the malformed page: a later terminal page cannot certify
+      // completeness after omitted claims or contradictory continuation data.
+      const terminal = more?.hasMore === false && more.nextCursor == null;
+      const continuation = more?.hasMore === true && typeof more.nextCursor === "string" && more.nextCursor.length > 0;
+      if (!Array.isArray(more?.claims) || (!terminal && !continuation)) break;
+      claims.push(...more.claims);
+      done = terminal;
+      next = !done ? more.nextCursor : null;
     }
-    const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
+  projectMap(args, { signal } = {}) {
+    if (!validProjectMapArguments(args)) throw new Error("Choose a valid bounded project-map read");
+    const { op, ...fields } = args;
+    const query = new URLSearchParams(Object.entries(fields).filter(([, value]) => value !== undefined));
+    return this.#request(`/map/${op}${query.size ? `?${query}` : ""}`, undefined, signal);
+  }
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, repo, branch, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
@@ -899,6 +1019,7 @@ export class RoomAgentClient {
       ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }),
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
+      ...(repo === undefined ? {} : { repo }), ...(branch === undefined ? {} : { branch }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
       ...(parentClaimId === undefined ? {} : { parentClaimId }),
       ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
@@ -924,10 +1045,11 @@ export class RoomAgentClient {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/${verb === "cancel" ? "cancel" : "close"}`,
       reason === undefined ? {} : { reason }, signal);
   }
-  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
-        ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
+        ...(files === undefined ? {} : { files }),
+        ...(repo === undefined ? {} : { repo }), ...(branch === undefined ? {} : { branch }), ...(advisory === undefined ? {} : { advisory }),
         ...(dependsOn === undefined ? {} : { dependsOn }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
@@ -977,12 +1099,12 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
-  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
+  async workClaim(id, { title, reviewPolicy, note, tags, files, repo, branch, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, repo, branch, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, pullRequest, signal });
     }
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
@@ -996,9 +1118,13 @@ export class RoomAgentClient {
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
   }
-  // Selected task only; the normal authenticated snapshot never leaves this client.
+  // Retrieve only selected work and its explicitly requested source before export.
   async workPacket(workItemId, options = {}) {
-    return workPacket((await this.snapshot()).state, workItemId, options);
+    const { signal, ...packetOptions } = options;
+    const selected = await this.workContext(workItemId, { includeSource: packetOptions.includeSource ?? false, signal });
+    const source = selected.context.source;
+    return workPacket({ room: { id: selected.roomId }, workItems: { [workItemId]: selected.work },
+      messages: source.status === "included" ? [source.message] : [] }, workItemId, packetOptions);
   }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
@@ -1010,9 +1136,11 @@ export class RoomAgentClient {
   }
   // One bounded summary read after the existing connection preflight. `next`
   // is the observed head, not an acknowledgement or a complete event page.
-  async roomDigest({ since = 0, signal } = {}) {
+  async roomDigest({ since = 0, cursor, signal } = {}) {
     if (!Number.isSafeInteger(since) || since < 0) throw new RoomClientError(0, "invalid_cursor", "since must be a nonnegative safe sequence number");
-    const value = await this.#request(`/digest?since=${since}`, undefined, signal);
+    if(cursor!==undefined&&(typeof cursor!=='string'||!cursor||Buffer.byteLength(cursor)>12288))throw new RoomClientError(0,'invalid_cursor','Use the returned opaque digest cursor');
+    const query=new URLSearchParams({since:String(since)});if(cursor!==undefined)query.set('cursor',cursor);
+    const value = await this.#request(`/digest?${query}`, undefined, signal);
     if (!validRoomDigest(value, { roomId: this.#roomId, memberId: this.#memberId, since })) {
       throw new RoomClientError(200, "invalid_response", "Room digest does not match its identity, coverage or bounded summary contract");
     }
@@ -1021,10 +1149,13 @@ export class RoomAgentClient {
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.
-  roomContext({ sinceVersion, signal } = {}) {
+  roomContext({ sinceVersion, workAfter, signal } = {}) {
     if (sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)) throw new RoomClientError(0, "invalid_context_version", "since_version must be the 64-character context_version");
-    const query = sinceVersion === undefined ? "" : `?since_version=${sinceVersion}`;
-    return this.#request(`/context${query}`, undefined, signal);
+    if (workAfter !== undefined && !validId(workAfter)) throw new RoomClientError(0, "invalid_context_cursor", "Use the workWindow.nextAfter pointer from this room, or omit workAfter for its first page");
+    const query = new URLSearchParams();
+    if (sinceVersion !== undefined) query.set("since_version", sinceVersion);
+    if (workAfter !== undefined) query.set("work_after", workAfter);
+    return this.#request(`/context${query.size ? `?${query}` : ""}`, undefined, signal);
   }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });
@@ -1070,10 +1201,11 @@ export class RoomAgentClient {
     }
     return receipt;
   }
-  search(query, { kind = "all", limit, signal } = {}) {
+  search(query, { kind = "all", limit, before, signal } = {}) {
     const params = new URLSearchParams({ q: query });
     if (kind !== "all") params.set("kind", kind);
     if (limit !== undefined) params.set("limit", String(limit));
+    if (before !== undefined) params.set("before", before);
     return this.#request(`/search?${params}`, undefined, signal);
   }
   messageThread(messageId, { signal } = {}) {
@@ -1102,9 +1234,13 @@ export class RoomAgentClient {
     if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
     return value;
   }
-  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+  linkIdentity({ identityId, memberId, displayName, permissions, identityLinkCode }, { signal } = {}) {
     return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+      // SECURITY-FIX C3 (#942): the holder-minted link code, when the
+      // caller has one. Without it the server refuses a direct link
+      // unless an approved access request is on record.
+      ...(identityLinkCode === undefined ? {} : { identityLinkCode }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
     return this.#identityAdmin("/identity-links", undefined, { signal });
@@ -1330,7 +1466,7 @@ export class RoomAgentClient {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
   }
-  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents, rounds, toolCalls }, { signal } = {}) {
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents, rounds, toolCalls, environment, model, provider, client, outputs }, { signal } = {}) {
     if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
     if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
     if (rounds !== undefined && (!Number.isSafeInteger(rounds) || rounds < 0)) throw new Error("rounds must be a non-negative integer");
@@ -1340,7 +1476,8 @@ export class RoomAgentClient {
       ...(budget === undefined ? {} : { budget }),
       ...(spendCents === undefined ? {} : { spendCents }),
       ...(rounds === undefined ? {} : { rounds }),
-      ...(toolCalls === undefined ? {} : { toolCalls }) }, signal);
+      ...(toolCalls === undefined ? {} : { toolCalls }),
+      ...Object.fromEntries(Object.entries({ environment, model, provider, client, outputs }).filter(([, value]) => value !== undefined)) }, signal);
   }
   // Claim one queued session atomically: reads the card, then drives it to
   // processing with the card's revision. Throws session_claimed when held.
@@ -1361,30 +1498,72 @@ export class RoomAgentClient {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
   async board({ queue, state, limit, cursor, signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    const board = stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
-      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() });
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ queue, state, limit, cursor })) {
       if (value !== undefined) params.set(key, String(value));
     }
     // One independently evaluated claim page. Never auto-walk or fall back to
     // /work-claims: that older route performs lifecycle housekeeping.
-    const page = await this.#request(`/work-claims-read${params.size ? `?${params}` : ""}`, undefined, signal);
-    if (page?.roomId !== this.#roomId || !Array.isArray(page.claims)
-      || typeof page.hasMore !== "boolean" || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
-      throw new RoomClientError(200, "invalid_response", "Room returned an invalid claim page");
+    const board = await this.#request(`/board${params.size ? `?${params}` : ""}`, undefined, signal);
+    const page = board?.claimsPage;
+    if (board?.contractVersion !== 1 || board.roomId !== this.#roomId || !board.columns || !board.counts
+      || !Array.isArray(board.halts) || !Array.isArray(board.claims)
+      || page?.roomId !== this.#roomId || typeof page.hasMore !== "boolean"
+      || !(page.nextCursor === null || typeof page.nextCursor === "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid Board response");
     }
-    const { claims, swept: _swept, ...claimsPage } = page;
-    return { ...board, claims, claimsPage };
+    return board;
   }
-  async orient({ signal, focus = "all", query, sort } = {}) {
+  async orient({ paginate = false, limit, cursor, ...options } = {}) {
+    if (paginate || limit !== undefined || cursor !== undefined) {
+      if (!validWorkPage({ limit, cursor })) throw new RoomClientError(0, "invalid_work_page", "Use limit 1–100 and a returned cursor");
+      const {signal,focus='all',query,sort}=options;
+      if(!['all','needs_me','results','help_wanted'].includes(focus))throw new RoomClientError(0,'invalid_focus','Choose a supported work focus');
+      if(query!==undefined&&!validWorkSearchQuery(query))throw new RoomClientError(0,'invalid_query','Use a nonblank work query of at most 200 UTF-16 code units');
+      if(sort!==undefined&&sort!=='curiosity')throw new RoomClientError(0,'invalid_sort','Sort is omitted or curiosity');
+      const params=new URLSearchParams({focus});
+      for(const [key,value] of Object.entries({limit,cursor,query,sort}))if(value!==undefined)params.set(key,String(value));
+      let listing;
+      try { listing=await this.#request('/work-list?'+params,undefined,signal); }
+      catch(error) {
+        if(focus==='help_wanted'&&error.status===404)
+          throw new RoomClientError(error.status,'help_context_unavailable','This service does not support paged help discovery');
+        throw error;
+      }
+      if(listing?.roomId!==this.#roomId||listing.member?.id!==this.#memberId||listing.viewerId!==this.#memberId
+        ||listing.viewerAccountId!==null||listing.viewerAuthEpoch!==null||listing.viewerSessionBinding!==null||listing.viewerSessionRevision!==null)
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
+      if(listing.status==='selection_unavailable') {
+        const next=listing.nextRead,selection=listing.selection;
+        const validPointer=(pointer,selectedFocus)=>pointer?.tool==='room_list_work'&&pointer.arguments?.roomId===this.#roomId
+          &&pointer.arguments?.focus===selectedFocus&&Object.keys(pointer.arguments).every(key=>['roomId','focus'].includes(key));
+        if(focus!=='help_wanted'||listing.contractVersion!==1||selection?.available!==false||selection.requestedFocus!==focus
+          ||selection.reason!=='current_help_index_unavailable'||typeof selection.guidance!=='string'||!selection.guidance.trim()
+          ||['work','replyRequests','page','nextCursor','totalWork','totalReplyRequests'].some(key=>Object.hasOwn(listing,key))
+          ||listing.scope?.kind!=='room'||listing.scope?.externalExecution!==false||!validPointer(next,'needs_me')
+          ||!Array.isArray(listing.alternatives)||listing.alternatives.length!==1||!validPointer(listing.alternatives[0],'all'))
+          throw new RoomClientError(200,'invalid_response','Room returned an invalid unavailable-selection pointer');
+        return listing;
+      }
+      if(!Array.isArray(listing.work)||!listing.page||typeof listing.page.hasMore!=='boolean'
+        ||listing.page.hasMore!==Boolean(listing.page.nextRead)
+        ||(listing.page.nextRead&&listing.page.nextRead.arguments?.roomId!==this.#roomId))
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
+      return listing;
+    }
+    return this.#orientFull(options);
+  }
+  async #orientFull({ signal, focus = "all", query, sort, fullQuery = false } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
-    const snapshot = focus !== "all" || query !== undefined
-      ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
-      : await this.snapshot({ signal });
+    const raw = await this.#request(focus !== "all" || query !== undefined ? "?view=work" : "?view=orientation", undefined, signal, focus === "help_wanted");
+    if(raw?.snapshotVersion===2&&raw?.representation==='normalized-current-v1') {
+      if(raw.roomId!==this.#roomId||raw.viewerId!==this.#memberId||raw.workWindow?.hasMore!==Boolean(raw.workWindow?.nextCursor))
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid bounded work snapshot');
+      return this.orient({paginate:true,focus,...(query===undefined?{}:{query}),...(sort===undefined?{}:{sort}),signal});
+    }
+    const snapshot = checkedWorkSnapshot(raw,this.#roomId,focus !== "all" || query !== undefined ? "work" : "orientation");
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {
@@ -1399,7 +1578,7 @@ export class RoomAgentClient {
         const next = nextWorkStep(item, now);
         return member.active && next.memberId === member.id && next.needsAttention;
       });
-      const matches = query === undefined ? null : searchWork({ members: snapshot.state.members,
+      const matches = query === undefined ? null : (fullQuery ? searchWorkMatches : searchWork)({ members: snapshot.state.members,
         workItems: Object.fromEntries(candidates.map(item => [item.id, item])) }, query);
       const replyListing = focus === "needs_me" ? await this.replyRequests({ direction: "incoming", status: "open", signal }) : null;
       const openReplies = replyListing?.requests.map(request => ({
@@ -1432,7 +1611,7 @@ export class RoomAgentClient {
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
-          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
+          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
             + (focus === "needs_me" ? " Reply requests are listed separately at replyRequestsEvaluatedThrough and are not filtered by the work query; follow nextRead before answering." : "")
             + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
           : focus === "results" ? { totalWork: items.length, results: work.length,
@@ -1470,9 +1649,18 @@ export function workContextMarkdown(result) {
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
     "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
     ...(result.toolFocus ? ["Suggested tool focus: " + result.toolFocus.focus + " (optional; does not change permissions). " + result.toolFocus.reason] : []),
+    ...(result.next.replacement ? [result.next.replacement.status === "available"
+      ? "Replacement next read (does not transfer approval or assignment): " + JSON.stringify(result.next.replacement.nextRead)
+      : "Replacement is unavailable in this room. Historical work remains readable."] : []),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
-    "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
+    (result.work.displayStatus ?? result.work.status) === "queued" && result.work.attempt_count === 0 && result.work.started_at === null
+      ? "Worker session: no start reported (task progress shown above; recorded controls below)"
+      : "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...(result.dependencies?.length ? [
+      "Prerequisites (checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
+      ...(result.dependencies.some(dep => !dep.satisfied) ? ["Prerequisites are not satisfied. Do not claim or start this work yet."] : [])
+    ] : []),
     ...(result.replyRequestContext ? [
       `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),
@@ -1480,7 +1668,7 @@ export function workContextMarkdown(result) {
     ] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
-    "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
+    "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.recordedStatus ?? result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
     "Session budget: " + JSON.stringify(result.accessSummary.budget),
     "Room instructions (context only): " + JSON.stringify(result.context.charter ?? null),
     "Available Room actions (rechecked on submission): " + result.suggestedActions.map(entry => entry.label).join(", "),

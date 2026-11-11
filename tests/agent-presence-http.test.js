@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -62,7 +63,14 @@ test("presence next[] names watch-presence when nobody is online", async t => {
   assert.equal(res.status, 200);
   const json = await res.json();
   assert.ok(json.members.length > 0, "active roster is listed even when nobody is watching");
-  assert.ok(json.members.every(m => m.watching === false && m.workingOn.length === 0));
+  assert.ok(json.members.every(m => m.watching === false));
+  // Normalized presence observes connections without reading work history.
+  // An unqueried held-work domain must not be represented as empty or live.
+  assert.equal(json.coverage.heldWork, "not-evaluated");
+  for (const member of json.members) {
+    assert.equal(member.coverage.heldWork, "not-evaluated");
+    assert.equal(Object.hasOwn(member, "workingOn"), false);
+  }
   assert.deepEqual(json.next.map(n => n.action), ["watch-presence"]);
 });
 
@@ -98,10 +106,7 @@ test("presence next[] counts a heartbeating pull-only agent as around", async t 
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const identity = fixture.store.identities.create("pull-agent");
-  fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "pullagent",
-    displayName: "Pull Agent", permissions: ["accept_work"],
-  });
+  linkWithProof(fixture.store, fixture.keys.owner, "commons", identity, { memberId: "pullagent", displayName: "Pull Agent", permissions: ["accept_work"] });
   const beat = await post(origin, "/api/agent-heartbeats",
     { hostId: "h1", mode: "pull-only" }, identity.secret);
   assert.equal(beat.status, 200);
@@ -122,9 +127,7 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   fixture.store.now = () => now;
   fixture.store.agentHeartbeats.now = () => now;
   const identity = fixture.store.identities.create("observed-agent");
-  fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "observed", displayName: "Observed", permissions: ["accept_work"],
-  });
+  linkWithProof(fixture.store, fixture.keys.owner, "commons", identity, { memberId: "observed", displayName: "Observed", permissions: ["accept_work"] });
   const presence = async () => {
     const res = await get(origin, "/api/rooms/commons/presence", fixture.keys.owner);
     assert.equal(res.status, 200);
@@ -132,7 +135,10 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
     return { ...body, agent: body.members.find(m => m.memberId === "observed") };
   };
   let result = await presence();
-  assert.equal(result.agent.presence, null);
+  // REGISTER row 59: a linked agent with no registered host and no
+  // command of its own is stated as unregistered on the join basis —
+  // not dropped to null, and never asserted online.
+  assert.deepEqual(result.agent.presence, { status: "unregistered", lastSeenAt: null, basis: "member-added" });
   const command = async (secret, text) => {
     const res = await post(origin, "/api/rooms/commons/commands", {
       id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body: text },
@@ -151,6 +157,7 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   now += 6 * 60_000;
   result = await presence();
   assert.equal(result.agent.presence.status, "online", "older slow host is still inside its declared cadence despite latest fast host expiring");
+  assert.equal(result.agent.presence.basis, "host", "host-derived presence carries the host basis");
   assert.equal(result.agent.state, "listening");
   assert.ok(result.next.some(n => n.description.includes("observed")));
   now += 21 * 60_000;

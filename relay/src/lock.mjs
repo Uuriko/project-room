@@ -5,10 +5,18 @@
 
 import { ACTIVE_STATES, isSlot } from "./protocol.mjs";
 
+// The expiry evidence for a claim, in three cases the caller must not merge:
+// a null leaseExpiresAt is a lease-less claim, which the producer
+// (server/work-claims.mjs isLeaseExpired) treats as non-expiring, so it maps
+// to null here too. A present value that parses maps to its timestamp. A
+// present value that does not parse is corrupt evidence: it maps to NaN,
+// and the caller fails closed on it, exactly as the enroll check in
+// machine-link.mjs and liveLease in auth.mjs already do. Collapsing NaN to
+// null would upgrade a corrupt expiry into a permanent slot hold.
 function expiryMs(claim) {
   if (claim?.leaseExpiresAt == null) return null;
-  const ms = Date.parse(claim.leaseExpiresAt);
-  return Number.isFinite(ms) ? ms : null;
+  if (typeof claim.leaseExpiresAt !== "string") return NaN;
+  return Date.parse(claim.leaseExpiresAt);
 }
 
 export function isActiveWorkClaim(claim, now) {
@@ -19,7 +27,7 @@ export function isActiveWorkClaim(claim, now) {
   if (typeof claim.owner !== "string" || claim.owner.length === 0) return false;
   if (typeof claim.claimedAt !== "string" || !Number.isFinite(Date.parse(claim.claimedAt))) return false;
   const expiry = expiryMs(claim);
-  if (expiry !== null && expiry <= now) return false;
+  if (expiry !== null && (!Number.isFinite(expiry) || expiry <= now)) return false;
   return true;
 }
 

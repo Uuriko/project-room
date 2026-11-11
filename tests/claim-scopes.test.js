@@ -183,15 +183,22 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   f.mutate('a', T.CLAIM_RENEWED, 'lane', { expiresAt: new Date(f.store.now() + 120000).toISOString() });
   const renewed = f.store.workClaims.get('commons', 'lane');
   assert.ok(Date.parse(renewed.leaseExpiresAt) > before);
+  const contract = structuredClone(f.item('lane'));
   f.mutate('a', T.WORK_HANDOFF_RECORDED, 'lane', {
     doneSummary: 'Header is drafted', nextAction: 'Review the header', limitReason: 'Context is full'
   });
   const handed = f.store.workClaims.get('commons', 'lane');
   assert.equal(handed.chain.at(-1).kind, 'handoff');
-  assert.equal(handed.chain.at(-1).targetId, boardClaimId('lane-next'));
-  const successor = f.store.workClaims.get('commons', 'lane-next');
-  assert.deepEqual(successor.dependsOn, ['lane']);
-  assert.equal(successor.title, 'Review the header');
+  assert.equal(handed.chain.at(-1).targetId, boardClaimId('lane'));
+  assert.equal(handed.workItemId, 'lane');
+  assert.equal(handed.title, 'lane', 'handoff progress does not replace the agreed task title');
+  assert.deepEqual(handed.dependsOn, [], 'continuing the same work adds no dependency on itself');
+  assert.equal(f.item('lane').state, contract.state, 'handoff does not complete or restart the work');
+  assert.equal(f.item('lane').definitionOfDone, contract.definitionOfDone);
+  assert.equal(f.item('lane').accountableMemberId, contract.accountableMemberId);
+  assert.equal(f.item('lane').handoff.nextAction, 'Review the header');
+  assert.equal(f.item('lane-next'), undefined, 'a new task requires its own proposal and acceptance');
+  assert.equal(f.store.workClaims.get('commons', 'lane-next'), null, 'no implicit successor card');
   f.store.command(f.keys.owner, 'commons', command(T.WORK_PROPOSED, {
     workItemId: 'lane-b', title: 'Replacement', definitionOfDone: 'Versioned result',
     accountableMemberId: 'owner', mode: 'write', independentVerificationRequired: false, ownerDecisionRequired: false
@@ -202,7 +209,7 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   const superseded = f.store.workClaims.get('commons', 'lane');
   assert.equal(superseded.supersededBy, 'lane-b');
   assert.equal(superseded.chain.at(-1).kind, 'supersede');
-  assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, ['lane']);
+  assert.deepEqual(f.store.workClaims.get('commons', 'lane-b').dependsOn, []);
 });
 
 test('a handoff from a member without the board profile is refused and writes no board cards', t => {
@@ -270,14 +277,19 @@ test('an ownerless room refuses a handoff without a claim profile but admits a b
   const row = f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons');
   const projection = JSON.parse(row.projection);
   projection.room.ownerId = '';
-  f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(projection), 'commons');
+  f.store.transaction(() => f.store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(f.store.storedProjection('commons', projection), 'commons'));
   f.propose('job', 'narrow', 'read');
   f.store.command(narrowKey, 'commons', command(T.WORK_STARTED, { workItemId: 'job', expectedRevision: 1 }));
+  const beforeRefusal = f.store.room('commons').sequence;
+  const sourceBeforeRefusal = f.store.workClaims.get('commons', 'job');
   assert.throws(
     () => f.store.command(narrowKey, 'commons', command(T.WORK_HANDOFF_RECORDED, {
       workItemId: 'job', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
     })),
     { status: 403, code: 'work_claims_not_permitted' });
+  assert.equal(f.store.room('commons').sequence, beforeRefusal, 'refused ownerless handoff adds no event');
+  assert.deepEqual(f.store.workClaims.get('commons', 'job'), sourceBeforeRefusal);
+  assert.equal(f.item('job').handoff ?? null, null, 'refused handoff does not record canonical progress');
   assert.equal(f.store.workClaims.get('commons', 'job-next'), null);
   // A contribute-profile member still records the handoff in the ownerless room.
   f.propose('lane', 'a', 'read');
@@ -285,7 +297,17 @@ test('an ownerless room refuses a handoff without a claim profile but admits a b
   f.store.command(f.keys.a, 'commons', command(T.WORK_HANDOFF_RECORDED, {
     workItemId: 'lane', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
   }));
-  assert.equal(f.store.workClaims.get('commons', 'lane-next').dependsOn[0], 'lane');
+  const handed = f.store.workClaims.get('commons', 'lane');
+  assert.equal(handed.workItemId, 'lane');
+  assert.equal(handed.state, 'in_progress');
+  assert.equal(handed.owner, 'a');
+  assert.equal(handed.chain.at(-1).kind, 'handoff');
+  assert.equal(handed.chain.at(-1).targetId, boardClaimId('lane'));
+  assert.deepEqual(handed.dependsOn, []);
+  assert.equal(f.item('lane').state, 'working');
+  assert.equal(f.item('lane').handoff.nextAction, 'Finish it');
+  assert.equal(f.item('lane-next'), undefined);
+  assert.equal(f.store.workClaims.get('commons', 'lane-next'), null, 'ownerless handoff continues the original contract too');
 });
 
 test('historical overlapping reservations still initialize, replay and reopen unchanged', t => {
@@ -306,4 +328,20 @@ test('historical overlapping reservations still initialize, replay and reopen un
   assert.deepEqual(f.store.room(roomId).state, before);
   const reopened = new RoomStore(f.filename);
   try { assert.deepEqual(reopened.room(roomId).state, before); } finally { reopened.close(); }
+});
+
+for (const explicitPredecessor of [false, true]) test(`replacement retains its explicit ${explicitPredecessor ? 'superseded predecessor' : 'other unfinished'} prerequisite`, t => {
+  const f = fixture(t); f.propose('old'); f.propose('prerequisite');
+  const dependency = explicitPredecessor ? 'old' : 'prerequisite';
+  f.store.command(f.keys.owner, 'commons', command(T.WORK_PROPOSED, {
+    workItemId: 'replacement', title: 'Replacement', definitionOfDone: 'Versioned result',
+    accountableMemberId: 'a', mode: 'write', independentVerificationRequired: false,
+    ownerDecisionRequired: false, dependsOn: [dependency]
+  }));
+  f.mutate('owner', T.WORK_SUPERSEDED, 'old', { supersededByWorkItemId: 'replacement', reason: 'New scope' });
+  assert.deepEqual(f.store.workClaims.get('commons', 'replacement').dependsOn, [dependency], 'phantom preserves declared prerequisites');
+  f.mutate('a', T.WORK_ACCEPTED, 'replacement');
+  assert.throws(() => f.mutate('a', T.CLAIM_ACQUIRED, 'replacement', f.scope()), { code: 'work_claim_dependencies_unmet' });
+  assert.deepEqual(f.store.workClaims.get('commons', 'replacement').dependsOn, [dependency]);
+  assert.equal(f.item('replacement').claim, null);
 });

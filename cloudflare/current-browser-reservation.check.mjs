@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {Miniflare} from 'miniflare';import {fileURLToPath} from 'node:url';
+test('actual Native composed browser supports100small members and keeps nested200record refusal',{timeout:120000},async()=>{
+ const script=(await build({entryPoints:[fileURLToPath(new URL('./current-browser-reservation.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
+ const mf=new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'CurrentBrowserReservationRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:'https://room.example'},serviceBindings:{ASSETS:async()=>new Response('Not found',{status:404})}});
+ try{const response=await mf.dispatchFetch('https://room.example/__run');assert.equal(response.status,200,await response.clone().text());const result=await response.json();assert.equal(result.members,100);assert.equal(result.first.shown,8);assert.equal(result.first.complete,false);assert.ok(result.first.nextAfter);assert.equal(result.next.shown,1);assert.equal(result.next.nextAfter,null);assert.equal(result.nestedCode,'current_room_context_unavailable');}finally{await mf.dispose();}
+});

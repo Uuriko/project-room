@@ -1,0 +1,64 @@
+  /api/operator/normalization/plan:
+    post:
+      x-room-permission: operator
+      summary: Plan one-time adoption of normalized room storage
+      description: >-
+        Operator-token management only. Reads the current room head, metadata
+        proof and legacy assignment counts. No room data changes. The plan binds
+        the exact head and explicit legacy assignment disposition; it does not
+        certify historical replay. Existing accounts, members, credentials,
+        connections, events and canonical work remain intact.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, discardLegacyAssignments]
+              properties:
+                roomId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+                discardLegacyAssignments: { type: boolean }
+      responses:
+        '200': { description: Exact head and assignment census with planHash }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Already normalized, read-only, conflicting candidate or unreconciled source }
+        '422': { description: Invalid request }
+  /api/operator/normalization/execute:
+    post:
+      x-room-permission: operator
+      summary: Adopt current room state into normalized storage atomically
+      description: >-
+        Verifies the reviewed plan and current metadata proof, materializes the
+        current state once, and atomically publishes entity records and a small
+        room carrier. This one-time operation scales with current state; ordinary
+        posts thereafter update affected records. Exact request retries return
+        the saved result; changed input conflicts. An interrupted transaction
+        rolls back. Explicit discardLegacyAssignments true removes only legacy
+        work_claims, work_claim_history and collab_assignments for this room.
+        Canonical tasks, messages, accounts, grants, revocations and security
+        journals remain intact. No historical replay certification is claimed.
+      security:
+        - operatorToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roomId, discardLegacyAssignments, planHash, requestId, reason]
+              properties:
+                roomId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+                discardLegacyAssignments: { type: boolean }
+                planHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+                reason: { type: string, description: Nonblank reason of at most 280 UTF-8 bytes }
+      responses:
+        '200': { description: Committed adoption result or exact duplicate }
+        '404': { description: Operator surface unset or credential not accepted }
+        '409': { description: Stale plan, conflicting request, existing candidate or unreconciled source }
+        '422': { description: Invalid request }
+        '503': { description: Stored proofs or authority require reconciliation }

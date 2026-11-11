@@ -7,7 +7,8 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { findAgentOverlaps, collisionAlertsEnabled } from "../server/agent-collisions.mjs";
+import { findAgentOverlaps, collisionAlertsEnabled, concurrentMergeTargets, notifyConcurrentMerge } from "../server/agent-collisions.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const live = (id, owner, extra) => ({ id, owner, state: "claimed", files: [], ...extra });
 
@@ -48,8 +49,8 @@ async function room(t, featureEnv) {
   const ada = store.identities.create("Ada");
   const bea = store.identities.create("Bea");
   for (const [identity, memberId, displayName] of [[ada, "ada", "Ada"], [bea, "bea", "Bea"]]) {
-    store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work"]
+    linkWithProof(store, ownerKey, "commons", identity, {
+      memberId, displayName, permissions: ["accept_work", "complete_work"]
     });
   }
   const server = createRoomServer({ store });
@@ -127,4 +128,43 @@ test("flag off posts nothing, and a hard file lease still refuses the second cla
   assert.match(refusal, /Ada \(held\)/);
   assert.equal(loud.store.agentHeartbeats.pendingWakes(loud.adaId).length, 1);
   assert.equal(loud.store.agentHeartbeats.pendingWakes(loud.beaId).length, 1);
+});
+
+test("concurrent merge targets every other live claim in the repo, with or without shared paths", () => {
+  const repo = "Uuriko/project-room";
+  const merged = { id: "m", owner: "ada", state: "done", repo, branch: "lane-m", files: ["server/a.mjs"] };
+  const claims = [
+    merged,
+    live("disjoint", "bea", { repo, files: ["src/b.js"] }),
+    live("shared", "cy", { repo, files: ["server/a.mjs", "x.js"] }),
+    live("other-repo", "dee", { repo: "Uuriko/elsewhere", files: ["server/a.mjs"] }),
+    live("finished", "eve", { repo, state: "done", files: ["server/a.mjs"] }),
+    live("same-lane", "ada", { repo, branch: "lane-m", files: ["server/a.mjs"] })
+  ];
+  const targets = concurrentMergeTargets(claims, merged);
+  assert.deepEqual(targets.map(t => t.claimId), ["disjoint", "shared"]);
+  assert.deepEqual(targets.find(t => t.claimId === "shared").overlap, ["server/a.mjs"]);
+  assert.deepEqual(targets.find(t => t.claimId === "disjoint").overlap, []);
+  assert.deepEqual(concurrentMergeTargets(claims, { id: "m" }), []);
+});
+
+test("a merged pull tells the other live agent what landed and wakes it, only when the flag is on", async t => {
+  for (const [flag, expectPost] of [["off", false], ["on", true]]) {
+    const { store, ada, bea, beaId, adaId } = await room(t, { ROOM_COLLISION_ALERTS: flag });
+    await ada.workClaim("lane-a", { files: ["server/a.mjs"], repo: "Uuriko/project-room", branch: "lane-a", advisory: true });
+    await bea.workClaim("lane-b", { files: ["src/b.js"], repo: "Uuriko/project-room", branch: "lane-b", advisory: true });
+    const merged = store.workClaims.get("commons", "lane-a");
+    const url = "https://github.com/Uuriko/project-room/pull/42";
+    const sent = notifyConcurrentMerge(store, "commons", merged, { url, mergedSha: "0123456789abcdef" });
+    const notice = (await posts(bea)).find(body => body.includes(`${url} merged`));
+    if (!expectPost) { assert.deepEqual(sent, []); assert.equal(notice, undefined); continue; }
+    assert.equal(sent.length, 1);
+    assert.match(notice, /Bea \(lane-b\): .*pull\/42 merged at 0123456789ab from lane-a\./);
+    assert.match(notice, /No shared paths/);
+    assert.match(notice, /Rebase onto the new base and re-run your tests/);
+    assert.equal(store.agentHeartbeats.pendingWakes(beaId).length, 1);
+    assert.equal(store.agentHeartbeats.pendingWakes(adaId).length, 0, "the merging agent is not told about its own merge");
+    notifyConcurrentMerge(store, "commons", merged, { url, mergedSha: "0123456789abcdef" });
+    assert.equal((await posts(bea)).filter(body => body.includes(`${url} merged`)).length, 1, "retry does not duplicate the post");
+  }
 });

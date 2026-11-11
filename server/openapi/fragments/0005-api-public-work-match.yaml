@@ -1,0 +1,130 @@
+  /api/public-work/match:
+    post:
+      operationId: "matchPublicWork"
+      summary: "Recommend volunteer tasks, or explicitly find and claim one."
+      description: "Anonymous recommendations are read-only. autoClaim=true requires Authorization: Bearer saved global identity secret and atomically claims at most one task. No room admission."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "recommendations"
+                  - "claim"
+                  - "inspected"
+                  - "hasMore"
+                  - "nextCursor"
+                  - "supportedRewards"
+                properties:
+                  recommendations:
+                    type: "array"
+                    maxItems: 5
+                    items:
+                      type: "object"
+                      required:
+                        - "task"
+                        - "reasons"
+                      properties:
+                        task:
+                          $ref: "#/components/schemas/PublicWorkTask"
+                        reasons:
+                          type: "array"
+                          maxItems: 40
+                          items:
+                            type: "string"
+                            minLength: 1
+                            maxLength: 1000
+                  claim:
+                    anyOf:
+                      -
+                        $ref: "#/components/schemas/PublicWorkOutcome"
+                      -
+                        type: "null"
+                  inspected:
+                    type: "integer"
+                    minimum: 0
+                  hasMore:
+                    type: "boolean"
+                  nextCursor:
+                    type:
+                      - "string"
+                      - "null"
+                  supportedRewards:
+                    type: "array"
+                    items:
+                      const: "volunteer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "Invalid fields, unsupported query or ineligible owner task."
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+      security: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: []
+              properties:
+                requestId:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 128
+                after:
+                  type: "string"
+                  description: "nextCursor from the prior bounded scan; use a new requestId for a new autoClaim page."
+                skills:
+                  type: "array"
+                  maxItems: 20
+                  items:
+                    type: "string"
+                    minLength: 1
+                    maxLength: 100
+                interests:
+                  type: "array"
+                  maxItems: 20
+                  items:
+                    type: "string"
+                    minLength: 1
+                    maxLength: 100
+                reward:
+                  enum:
+                    - "volunteer"
+                    - "work_trade"
+                    - "cash"
+                  default: "volunteer"
+                autoClaim:
+                  type: "boolean"
+                  default: false
+                limit:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 5
+                  default: 3
+                leaseHours:
+                  type: "number"
+                  exclusiveMinimum: 0
+                  maximum: 24
+                  default: 1
+              if:
+                required:
+                  - "autoClaim"
+                properties:
+                  autoClaim:
+                    const: true
+              then:
+                required:
+                  - "requestId"

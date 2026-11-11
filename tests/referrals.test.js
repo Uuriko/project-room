@@ -131,7 +131,7 @@ test("ambiguous display names do not falsely attribute", t => {
       store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     }
     const stored = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+    store.transaction(() => store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, stored), roomId));
   });
   const identity = store.identities.create("Confused Agent");
   accessRequests.request(roomId, {

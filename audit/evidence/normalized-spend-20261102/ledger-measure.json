@@ -1,0 +1,87 @@
+{
+  "runtime": "Node SQLite",
+  "clock": "wall-only; not CPU",
+  "scope": "ledger fold only, excludes fixture creation/auth/authority/priced dispatch",
+  "rowMetric": "returned rows, not physical SQLite engine rows",
+  "bytesMetric": "JSON-serialized statement results, not physical IO or bind bytes",
+  "samples": [
+    {
+      "workItems": 3,
+      "fixtureMsExcluded": 57.96762500000001,
+      "measured": [
+        {
+          "elapsedMs": 2.1403329999999983,
+          "get": 41,
+          "all": 12,
+          "run": 0,
+          "returnedRows": 335,
+          "serializedResultBytes": 147791,
+          "workBodyReads": 3,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 2.6173339999999996,
+          "get": 41,
+          "all": 12,
+          "run": 0,
+          "returnedRows": 335,
+          "serializedResultBytes": 147791,
+          "workBodyReads": 3,
+          "committedCents": 120
+        }
+      ]
+    },
+    {
+      "workItems": 43,
+      "fixtureMsExcluded": 66.893542,
+      "measured": [
+        {
+          "elapsedMs": 20.118875000000003,
+          "get": 567,
+          "all": 94,
+          "run": 0,
+          "returnedRows": 3741,
+          "serializedResultBytes": 2322769,
+          "workBodyReads": 43,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 18.383375,
+          "get": 567,
+          "all": 94,
+          "run": 0,
+          "returnedRows": 3741,
+          "serializedResultBytes": 2322769,
+          "workBodyReads": 43,
+          "committedCents": 120
+        }
+      ]
+    },
+    {
+      "workItems": 500,
+      "fixtureMsExcluded": 944.0745829999998,
+      "measured": [
+        {
+          "elapsedMs": 213.35554100000013,
+          "get": 6508,
+          "all": 1036,
+          "run": 0,
+          "returnedRows": 42586,
+          "serializedResultBytes": 28388918,
+          "workBodyReads": 500,
+          "committedCents": 120
+        },
+        {
+          "elapsedMs": 211.44629099999997,
+          "get": 6508,
+          "all": 1036,
+          "run": 0,
+          "returnedRows": 42586,
+          "serializedResultBytes": 28388918,
+          "workBodyReads": 500,
+          "committedCents": 120
+        }
+      ]
+    }
+  ]
+}

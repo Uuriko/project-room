@@ -1,0 +1,45 @@
+  /api/rooms/{roomId}/dm-consents/{requesterId}/decide:
+    post:
+      summary: Decide a DM consent request
+      description: >-
+        The targeted member approves, rejects, or blocks
+        a pending request: exactly { decision }. Blocking is directional and
+        sticky; unblock with POST .../dm-consents/unblock.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: requesterId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject, block] }
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  requesterId: { type: string }
+                  targetId: { type: string }
+                  status: { type: string }
+                  reason: { type: [string, 'null'] }
+                  createdAt: { type: integer }
+                  decidedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: dm_decide_forbidden
+        '404':
+          description: No such pending request
+        '422':
+          $ref: '#/components/responses/InvalidInput'

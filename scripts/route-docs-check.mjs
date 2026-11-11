@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { renderOpenApi } from "./openapi-document.mjs";
 import { openapiOperations, routeCandidates } from "./open-routes.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
@@ -53,7 +54,7 @@ export function routeSources(root) {
     pluginRoutes: read("server/agent-plugin-routes.mjs"),
     nextActionsRoutes: read("server/next-actions-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
-    openapi: read("docs/openapi.yaml"),
+    openapi: renderOpenApi(root),
   };
 }
 

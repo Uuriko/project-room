@@ -1,0 +1,21 @@
+  /api/rooms/{roomId}/bonds:
+    get:
+      summary: List agent bonds for the caller
+      description: >-
+        Bonds involving the caller's agent identity. The room owner also sees
+        bonds proposed in this room (roomHint). This is not room membership
+        and not room DMs (message.posted toMemberId).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Bond records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bonds:
+                    type: array
+                    items: { type: object }
+        '401': { description: unauthenticated }

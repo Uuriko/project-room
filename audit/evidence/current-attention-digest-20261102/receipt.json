@@ -1,0 +1,170 @@
+{
+  "base": "a2a4e31b4",
+  "sourceChain": [
+    "ca091900b",
+    "cf774eab2",
+    "e809807b8",
+    "b04d37f2f",
+    "dd003d5a0"
+  ],
+  "syntheticOnly": true,
+  "baselineOriginalSlice": {
+    "tests": 20,
+    "pass": 5,
+    "fail": 15
+  },
+  "newCurrentControlsAtExactBase": {
+    "tests": 4,
+    "pass": 0,
+    "fail": 4
+  },
+  "composedNodeAtCf774": {
+    "tests": 55,
+    "pass": 55,
+    "skipped": 0
+  },
+  "afterBudgetCure": {
+    "tests": 38,
+    "pass": 38,
+    "skipped": 0
+  },
+  "idleCursor": {
+    "before": "original whole-result randomized ciphertext equality fails",
+    "after": {
+      "tests": 1,
+      "pass": 1,
+      "completeSourceMessagesPerIndependentChain": 30,
+      "maxExaminedPerPage": 4,
+      "blobHydrations": 0
+    }
+  },
+  "nativeAtB04": {
+    "tests": 1,
+    "pass": 1,
+    "sizes": [
+      1000,
+      5000
+    ],
+    "warm": {
+      "statements": 303,
+      "rowsRead": 1680,
+      "rowsWritten": 0,
+      "unknown": 0
+    },
+    "cold": {
+      "statements": 303,
+      "rowsRead": 3266,
+      "rowsWritten": 0,
+      "unknown": 0
+    },
+    "returnedSqlTextBytes": [
+      481993,
+      430761
+    ],
+    "responseBytes": 2302,
+    "rawRuntimeWarm": {
+      "statements": 0,
+      "rowsWritten": 0,
+      "unknown": 0
+    },
+    "scope": "Same selected positive tail at both sizes. Does not measure complete traversal of private backlog. Constructor costs excluded; clock samples are workerd elapsed, not CPU. Returned SQL text includes repeated catalog/receipt reads, not bounded by one nested record-context byte allowance."
+  },
+  "contracts": {
+    "legacyDigest": 1,
+    "legacyResponseBytes": 4096,
+    "nativeDigest": 2,
+    "nativeResponseBytes": 16384,
+    "nativeGlobalTotals": null,
+    "sourceBytePrefix": 65536,
+    "singleExistingEventAtomMax": 131072,
+    "globalRecordCapUnchanged": 200,
+    "globalAttentionComplete": false,
+    "cursorColdInvalidation": "explicit restart required"
+  },
+  "lint": "0 errors",
+  "secretScan": "clean; final whitespace edit full Acorn AST identical",
+  "logs": {
+    "needs-me-attention-before": {
+      "sha256": "48d588bfbbf51f6168c450fa7a8bb6260863458df32f8f4f0e91a24d3c16faaa",
+      "bytes": 35811
+    },
+    "current-needs-me-causal-before": {
+      "sha256": "70e1c01e7c8440fd389f3d1a26a25d636fb1d1b1ae5c3fe3f2190b923ec0c51f",
+      "bytes": 9269
+    },
+    "needs-me-attention-final": {
+      "sha256": "98c7dff7b46d8fc6e5aab9fafb7e58d280206cc375517ef9b5cb669dc0fd6749",
+      "bytes": 28442
+    },
+    "needs-me-attention-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "current-needs-me-final-focused": {
+      "sha256": "88524a6bfb639f7f17d5a13d2728e015f5eb130d780c36d0a65d951ac1e09e1f",
+      "bytes": 3348
+    },
+    "current-needs-me-final-focused-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "current-needs-me-digest-worker": {
+      "sha256": "7a580785b7d1e254e261c5dcf97536405847f34fb1ff9d0d40998440226af7c1",
+      "bytes": 2917
+    },
+    "current-inbox-work-budget-before": {
+      "sha256": "2b87c7ff8ff1f523fcdc566809fb263e5f4f77688881ddd36e39f9dea3bfba5f",
+      "bytes": 2308
+    },
+    "current-inbox-work-budget-after": {
+      "sha256": "4ed627c50fd4a01ee144d5360ba4e02924d7aa5123d59504de128e967e842ddd",
+      "bytes": 724
+    },
+    "current-inbox-budget-composed": {
+      "sha256": "453b8128b7624603d99e900391adfa44acbaeb4cecd987d465520042dfc5ab3d",
+      "bytes": 26227
+    },
+    "current-inbox-budget-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "idle-inbox-cursor-before": {
+      "sha256": "0fef07ee885a99ef5efe2c7d0a6011a754220dab87cc53a15a487ffa362c3781",
+      "bytes": 5333
+    },
+    "idle-inbox-cursor-after": {
+      "sha256": "55325e7282554bf49c6b9d3362722ce315a202a09a05fc611e61b45c076472f4",
+      "bytes": 699
+    },
+    "idle-inbox-cursor-lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "needs-me-events-secret-scan": {
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "bytes": 24
+    }
+  },
+  "sourceSha256": {
+    "client/room-agent.mjs": "b50e1240af64aef2f4613027a9cf714228d8a472f144f70baf1660fb4bdf59f2",
+    "client/room-digest.mjs": "23805e7af4439cafde314247ec39eca8f3b8bd505bd7d508d43bc0d450a2b167",
+    "cloudflare/current-native-inbox-worker.test-fixture.mjs": "4a865974d2f07dfd1791736caf24f9f2315b00ddf577bf2efdc9960d7b373226",
+    "cloudflare/current-needs-me-digest-worker.check.mjs": "7b0f7c22bee46d98ac4e4ddfab7c15ac7db7b1fa5b44cd1f1a0644c0b52f3718",
+    "docs/openapi.yaml": "ba8baf8c9b1f4337896758d333726e5d8ce64cf197cc0baaecc1f4529416072a",
+    "server/current-native-inbox.mjs": "65a5696ce89d838b954e4715605d646554c18202ca704605a4d86e752448efbf",
+    "server/current-needs-me.mjs": "33168a23726a0a1519b5a6edef4f097cda978c01a1063e3c528a47d2f0e47ade",
+    "server/current-room-events.mjs": "422d847fa1180870fc95086ee4d53eb25e5666d71a2110b44ce10c549befb224",
+    "server/openapi/fragments/0389-api-rooms-roomId-digest.yaml": "b2aa884de85397ec351ab13169f46e8243b35e55a3857df5bed650160a49780c",
+    "server/room-digest.mjs": "92db39e64c9c024d38bbfcc59f17c6137e0d11fc362aa308b74a28285b47ba96",
+    "server/routes/room-digest.mjs": "b5a1480b5f05111eac3f15718e2b7766a16316a83d24087f628f712ea7492467",
+    "server/store.mjs": "cb9b7b5938c3a71d1a77802d01636647c5ee767834d1aa32294113f70dff64bd",
+    "tests/current-needs-me-attention.test.mjs": "008913223a3fb29c0c3c65ce795946a4a0311b76a623ed77e3f671fda93408d4",
+    "tests/idle-inbox-hydration.test.js": "dff8d6ad5f0fc667f3f18f0b930997bd8f012d7148f7064125b18355ed986f88",
+    "tests/needs-me-conversation-attention.test.js": "026282da4b29088f98b4c8342fe4b034512f31c58137a8f3c35bfd4ead858529",
+    "tests/needs-me-digest-coverage.test.js": "b40d4af1605279e65cff9907314d06db9bc86ba26bd5b0f7578e410bd1127b0f",
+    "tests/needs-me-digest-overflow.test.js": "6c7b3ef99c29f30864b65d5c793aa6c584305c7804760825936d4b5c46eed103",
+    "tests/needs-me-examined-bounds.test.js": "663e0ed9290cc79fb355d975ee86596372f4789e48525beae08d5053e3c715f0",
+    "tests/needs-me-scan-budgets.test.js": "3f0491a72aa593775e7df072bfc65cf87bf0e040bbbfc37fe3156bc635cc6e02",
+    "tests/needs-me.test.js": "509b72854852d13d595c6825abd99b91d0be0d5bc2bd014ba2ffeb374bbbc582"
+  }
+}

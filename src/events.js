@@ -1,10 +1,13 @@
-import { canAdministerRoom } from './room-administration.js';
+import { uiText } from './strings.js';
+import { prepareClaimOverlap, matchClaimOverlap } from './claim-overlap.js';
+import { currentRecordClaimOverlaps, inheritCurrentRecordContext } from './current-record-context.js';
+import { canAdministerRoom, canInviteCoOwners, museDevelopmentAccess } from './room-administration.js';
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
-import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
+import { REPLY_CANCELLED, cancelReplyRequest, REPLY_PROGRESSED, progressReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
@@ -16,8 +19,12 @@ import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-sess
 export const MAX_MESSAGE_BODY_CHARS = 65536;
 export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
 
+// Retained history only. These types must not re-enter the live command catalog.
+export const RETIRED_REPLAY_EVENT_TYPES = Object.freeze({ MESSAGE_REACTION_SET: "message.reaction_set" });
+
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
+  ROOM_DEVELOPMENT_ACCESS_SET: "room.development_access_set",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
@@ -35,7 +42,12 @@ export const EVENT_TYPES = Object.freeze({
   // --- end GR2 ---
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
+  MEMBER_MERGED: "member.merged",
+  PAIR_REQUESTED: "pair.requested",
+  PAIR_APPROVED: "pair.approved",
+  PAIR_DENIED: "pair.denied",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
+  MEMBER_SPONSOR_TRANSFERRED: "member.sponsor_transferred",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
@@ -52,6 +64,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
+  REPLY_REQUEST_PROGRESSED: REPLY_PROGRESSED,
   POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
@@ -335,13 +348,23 @@ export function firstBlockedWakeTarget(state, actorId, targetIds) {
 // personal / organization badge until a real organization model (D1) exists;
 // rooms created before it read as personal. Archive is an owner-only event
 // (room.archived) that turns the room read-only: reads, streams and export
-// continue, and no further event of any type is accepted for that room. A
+// continue. Ordinary coordination stays frozen; only the active current owner
+// may explicitly erase content through the existing privacy events. A
 // member leaves by ending their own access (member.access_changed on
 // themself, permissions unchanged, active false) without needing
 // manage_members; the owner cannot leave.
 export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
 export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
 export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
+// One policy for live admission and deterministic replay. These internal
+// follow-up events remain absent from the public command catalog. Target,
+// revision, membership and evidence checks still belong to their handlers.
+export function isArchivedOwnerPrivacyEvent(state,incoming) {
+  if(!isRoomArchived(state)||!['message.deleted','message.redacted','receipt.evidence_withdrawn'].includes(incoming?.type))return false;
+  const actor=ownMember(state.members,incoming.actorId);
+  return actor?.active===true&&actor.id===state.room.ownerId;
+}
+
 export function isLeaveRequest(state, incoming) {
   const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
   return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
@@ -396,6 +419,15 @@ export function spendPricingEnabled(state) {
   const stored = state?.room?.spendPricing;
   if (!stored) return true;
   return stored.enabled !== false;
+}
+
+function setDevelopmentAccess(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (state.room.id !== "muse-room") throw new Error("Development access is only available in Muse Room");
+  if (!ownerLevel(state, actor.id)) throw new Error("Room administrator required");
+  if (typeof incoming.data?.enabled !== "boolean" || Object.keys(incoming.data).some(k => k !== "enabled")) throw new Error("enabled must be a boolean");
+  state.room.developmentAccess = { enabled: incoming.data.enabled, setById: actor.id, setAt: incoming.at,
+    revision: (state.room.developmentAccess?.revision ?? 0) + 1 };
 }
 
 function setSpendPricing(state, incoming) {
@@ -565,6 +597,7 @@ export function replay(events) {
 //   - message.posted only reads existing messages and pushes new ones
 //     (plus a possible ":channel" copy) — the array needs a fresh slice,
 //     never an element clone;
+//   - member.added changes membership only and shares existing records;
 //   - message.edited / message.deleted / message.redacted / poll.voted
 //     rewrite elements in place, but only the addressed message and its
 //     ":channel" copy — slice the array and deep-clone just those
@@ -583,7 +616,9 @@ const MESSAGE_REWRITE_TYPES = new Set([
   EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
 ]);
 function lightMessageCloneIds(incoming) {
-  if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
+  // Membership addition leaves existing message records untouched. Keeping their
+  // references also lets the store prove this after post-reducer hooks.
+  if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED || incoming?.type === EVENT_TYPES.MEMBER_ADDED) return new Set();
   if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return null;
   const messageId = incoming.data?.messageId;
   if (typeof messageId !== "string" || !messageId) return null;
@@ -591,6 +626,7 @@ function lightMessageCloneIds(incoming) {
 }
 function cloneStateForApply(current, incoming, journal = null) {
   const state = { ...current, ...(journal ?? {}) };
+  inheritCurrentRecordContext(current,state);
   if (!journal && Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
   if (!journal && current.seenEvents && typeof current.seenEvents === "object") {
     state.seenEvents = { ...current.seenEvents };
@@ -649,7 +685,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
   if (incoming.type !== EVENT_TYPES.ROOM_CREATED) {
     if (!state.room) throw new Error("Room must be created before other events");
     if (incoming.roomId !== state.room.id) throw new Error("Event belongs to a different Room");
-    if (isRoomArchived(state)) throw new Error("Room is archived");
+    if (isRoomArchived(state)&&!isArchivedOwnerPrivacyEvent(state,incoming)) throw new Error("Room is archived");
   }
 
   const handlers = {
@@ -658,6 +694,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
+    [EVENT_TYPES.ROOM_DEVELOPMENT_ACCESS_SET]: setDevelopmentAccess,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---
@@ -669,7 +706,12 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
+    [EVENT_TYPES.MEMBER_MERGED]: mergeMembers,
+    [EVENT_TYPES.PAIR_REQUESTED]: recordPair,
+    [EVENT_TYPES.PAIR_APPROVED]: recordPair,
+    [EVENT_TYPES.PAIR_DENIED]: recordPair,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
+    [EVENT_TYPES.MEMBER_SPONSOR_TRANSFERRED]: transferMemberSponsor,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
@@ -686,9 +728,10 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
+    [EVENT_TYPES.REPLY_REQUEST_PROGRESSED]: progressReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
     // message.reaction_set; replay skips them.
-    "message.reaction_set": () => {},
+    [RETIRED_REPLAY_EVENT_TYPES.MESSAGE_REACTION_SET]: () => {},
     [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
@@ -824,7 +867,7 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "dependsOn", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1021,6 +1064,60 @@ function transferOwnership(state, incoming) {
   state.room.ownershipRevision = (state.room.ownershipRevision ?? 0) + 1;
 }
 
+function recordPair(state, incoming) {
+  requireFields(incoming.data, ["pairId", "displayName", "status"]);
+  if (!["pending", "approved", "denied"].includes(incoming.data.status)) throw new Error("Invalid status");
+  const code = incoming.data.userCode;
+  if (code !== undefined && (typeof code !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code))) throw new Error("Invalid userCode");
+  if (incoming.data.memberId !== undefined && !Object.hasOwn(state.members, incoming.data.memberId)) {
+    if (incoming.data.status === "approved") throw new Error("Unknown member");
+  }
+}
+
+// Owner, or a member who holds both membership administration and decide.
+// invite_member alone is not owner-level.
+function ownerLevel(state, actorId) {
+  if (actorId === state.room?.ownerId) return true;
+  const actor = Object.hasOwn(state.members, actorId) && state.members[actorId];
+  return Boolean(actor && actor.active !== false
+    && actor.permissions.includes("manage_members") && actor.permissions.includes("decide"));
+}
+
+function mergeMembers(state, incoming) {
+  requireFields(incoming.data, ["keptMemberId", "retiredMemberId", "expectedKeptRevision", "expectedRetiredRevision"]);
+  if (!ownerLevel(state, incoming.actorId)) throw new Error("Owner required");
+  const kept = Object.hasOwn(state.members, incoming.data.keptMemberId) && state.members[incoming.data.keptMemberId];
+  const retired = Object.hasOwn(state.members, incoming.data.retiredMemberId) && state.members[incoming.data.retiredMemberId];
+  if (!kept || !retired || kept.active === false || retired.active === false) throw new Error("Unknown member");
+  if (kept.kind !== "agent" || retired.kind !== "agent") throw new Error("Agents only");
+  if (kept.id === retired.id || kept.id === state.room.ownerId || retired.id === state.room.ownerId) throw new Error("Cannot merge");
+  if (kept.revision !== incoming.data.expectedKeptRevision || retired.revision !== incoming.data.expectedRetiredRevision) {
+    throw new Error("Stale revision");
+  }
+  const union = [];
+  for (const permission of PERMISSIONS) {
+    if (kept.permissions.includes(permission) || retired.permissions.includes(permission)) union.push(permission);
+  }
+  const isOwner = incoming.actorId === state.room.ownerId;
+  const granted = isOwner ? union : union.filter(permission => !AGENT_ADMIN_PERMISSIONS.includes(permission) || kept.permissions.includes(permission));
+  validatePermissions(granted, "agent", false, isOwner && granted.some(permission => AGENT_ADMIN_PERMISSIONS.includes(permission)));
+  kept.permissions = granted;
+  kept.revision += 1;
+  kept.mergedFrom = [...(kept.mergedFrom ?? []), retired.id];
+  retired.active = false;
+  retired.mergedInto = kept.id;
+  retired.revision += 1;
+  for (const message of state.messages ?? []) {
+    if (message.authorId === retired.id) message.authorId = kept.id;
+    if (message.toMemberId === retired.id) message.toMemberId = kept.id;
+  }
+  for (const item of Object.values(state.workItems ?? {})) {
+    if (item.accountableMemberId === retired.id) item.accountableMemberId = kept.id;
+    if (item.verifierMemberId === retired.id) item.verifierMemberId = kept.id;
+    if (item.claim && item.claim.holderId === retired.id) item.claim.holderId = kept.id;
+  }
+}
+
 function addMember(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "kind", "permissions"]);
   const memberId = incoming.data.memberId;
@@ -1031,7 +1128,12 @@ function addMember(state, incoming) {
     const agentSafeInvite = incoming.data.kind === "agent"
       && Array.isArray(incoming.data.permissions)
       && !incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p));
-    if (agentSafeInvite) {
+    if (incoming.data.selfSponsorshipVersion === 1) {
+      const sponsor = requireMember(state, incoming.actorId);
+      if (sponsor.kind !== "human" || incoming.data.kind !== "agent" || incoming.data.accountableHumanId !== sponsor.id
+        || !Array.isArray(incoming.data.permissions) || incoming.data.permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !sponsor.permissions.includes(p)))
+        throw new Error("Self-sponsored agent authority must be a safe subset of its human sponsor");
+    } else if (agentSafeInvite) {
       if (!canInviteMembers(state, incoming.actorId)) throw new Error(`${incoming.actorId} lacks invite_member`);
     } else {
       requirePermission(state, incoming.actorId, "manage_members");
@@ -1042,7 +1144,7 @@ function addMember(state, incoming) {
   // AGENT_ADMIN_PERMISSIONS only when the grant event's actor is the room
   // owner. The grant is explicit, auditable (actorId on the event), and
   // marked on the event + projection via delegatedAdmin below.
-  const isOwnerGrant = !isBootstrapOwner && incoming.actorId === state.room.ownerId;
+  const isOwnerGrant = !isBootstrapOwner && canInviteCoOwners(state, incoming.actorId);
   validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner, isOwnerGrant);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
@@ -1165,20 +1267,25 @@ function validatePermissions(permissions, kind, isOwner = false, isOwnerGrant = 
 }
 
 function changeMemberAccess(state, incoming) {
-  if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
+  const sponsoredDisconnect = incoming.data.selfSponsorshipVersion === 1;
+  if (sponsoredDisconnect) {
+    const sponsor = requireMember(state, incoming.actorId), target = state.members[incoming.data.memberId];
+    if (sponsor.kind !== "human" || target?.kind !== "agent" || target.accountableHumanId !== sponsor.id || incoming.data.active !== false
+      || JSON.stringify(incoming.data.permissions) !== JSON.stringify(target.permissions)) throw new Error("A sponsor may only disconnect their own agent");
+  } else if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
   requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
   // #643: thread the owner-grant context like addMember does — the owner may
   // grant (or strip) administration on a non-owner agent.
-  const isOwnerGrant = incoming.actorId === state.room.ownerId;
+  const isOwnerGrant = canInviteCoOwners(state, incoming.actorId);
   validatePermissions(incoming.data.permissions, member.kind, false, isOwnerGrant);
   // A self-leave with unchanged permissions grants and removes no authority,
   // so the scoped-administration rule does not apply to it. Without this,
   // an invite_member-only human could not leave (account deletion: 422).
   if (incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
-    if (!isLeaveRequest(state, incoming)) requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
+    if (!sponsoredDisconnect && !isLeaveRequest(state, incoming)) requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
     throw new Error("Unsupported membership authority policy");
   }
@@ -1275,7 +1382,7 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   // Delegated agents may grant existing humans permissions they hold.
   // Delegating administrative authority onward to agents remains owner-controlled.
   // The subset check below also prevents granting or removing unheld authority.
-  if (actor.delegatedAdmin && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
+  if (actor.delegatedAdmin && !museDevelopmentAccess(state) && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
     throw new Error("Delegated administrators cannot re-delegate");
   }
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);
@@ -1472,7 +1579,7 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed", "delegated", "approval"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
 // Owner-equivalent invite mint. The invite table is the source of truth.
@@ -1581,23 +1688,13 @@ function recordDecision(state, incoming) {
   }
 }
 
-// Same path grammar as server/claim-scopes.mjs: a file, folder/** or **.
-const claimPath = value => {
-  const text = String(value).trim().replace(/^\.\//, "");
-  if (text === "**") return { path: "", subtree: true };
-  const subtree = text.endsWith("/**");
-  return { path: (subtree ? text.slice(0, -3) : text).replace(/\/+$/, ""), subtree };
-};
-const covers = (scope, other) => scope.path === other.path || (scope.subtree && (!scope.path || other.path.startsWith(`${scope.path}/`)));
 export function claimOverlaps(state, workItemId, repository, paths, at) {
-  const mine = paths.map(claimPath);
-  const repo = String(repository).trim().toLowerCase();
-  const found = [];
+  const scoped = currentRecordClaimOverlaps(state, workItemId, repository, paths, at);
+  if (scoped !== undefined) return scoped;
+  const query = prepareClaimOverlap(workItemId, repository, paths, at), found = [];
   for (const other of Object.values(state.workItems ?? {})) {
-    if (other.id === workItemId || !other.claim || !claimIsActive(other.claim, at)) continue;
-    if (String(other.claim.repository).trim().toLowerCase() !== repo) continue;
-    const shared = other.claim.paths.filter(path => { const theirs = claimPath(path); return mine.some(own => covers(own, theirs) || covers(theirs, own)); });
-    if (shared.length) found.push({ workItemId: other.id, holderId: other.claim.holderId, paths: shared.slice(0, 16) });
+    const overlap = matchClaimOverlap(query, other);
+    if (overlap) found.push(overlap);
     if (found.length >= 10) break;
   }
   return found;
@@ -1623,7 +1720,11 @@ export function hasConfirmedIndependentPass(item) {
     verification.verifierId === item.verifierMemberId &&
     matchesReceipt(verification, receipt) &&
     receiptHasKnownProducer(receipt) &&
-    receipt.producerId !== verification.verifierId;
+    receipt.producerId !== verification.verifierId &&
+    // Independence is also against the decision-maker: where an owner
+    // decision is required, the designated verifier's PASS does not
+    // confirm independence when the verifier is the deciding human.
+    (!item.ownerDecisionRequired || verification.verifierId !== item.humanDecisionMakerId);
 }
 
 function requireMember(state, memberId) {
@@ -1749,3 +1850,15 @@ const { postMessage, editMessage, deleteMessage, redactMessage, recordEvidenceWi
 
 // Compose work transitions once with the same authority guards as other domains.
 const { proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision } = createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource });
+
+function transferMemberSponsor(state,incoming) {
+ requireFields(incoming.data,["requestId","requestDigest","memberId","expectedMemberRevision","toMemberId","expectedHumanRevision","previousSponsorId","identityId"]);
+ if(!ownerLevel(state,incoming.actorId))throw Error("Owner required");
+ const m=ownMember(state.members,incoming.data.memberId),human=ownMember(state.members,incoming.data.toMemberId);
+ if(!m||m.kind!=="agent"||m.active!==true||m.id===state.room.ownerId||!human||human.kind!=="human"||human.active!==true||m.id===human.id)throw Error("Unknown member");
+ if(m.revision!==incoming.data.expectedMemberRevision||human.revision!==incoming.data.expectedHumanRevision||m.accountableHumanId!==incoming.data.previousSponsorId||m.identityId!==incoming.data.identityId)throw Error("Stale revision");
+ if(!/^[a-f0-9]{64}$/.test(incoming.data.requestDigest))throw Error(uiText("agentSponsor.invalidConsent"));
+ const actor=ownMember(state.members,incoming.actorId);
+ if(incoming.actorId!==state.room.ownerId&&m.permissions.some(p=>!actor.permissions.includes(p)))throw Error(uiText("agentSponsor.permissionsNotHeld"));
+ m.accountableHumanId=human.id;m.sponsorAdoptionId=incoming.data.requestId;m.sponsorAdoptionDigest=incoming.data.requestDigest;m.revision+=1;
+}

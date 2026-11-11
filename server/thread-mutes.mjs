@@ -1,3 +1,5 @@
+import{isCurrentRoom,withCurrentReadContext,readCurrentMessage,currentMessageMayBeVisible,readCurrentHistoryFloor}from'./current-room-repository.mjs';
+import{messageInHistory}from'./history-visibility.mjs';
 // Per-thread mutes.
 //
 // A member can mute a thread: the thread's activity stops surfacing for
@@ -86,9 +88,14 @@ export class ThreadMutes {
   }
 
   // Read model: the caller's own muted thread-root ids. Pure read — no writes.
-  list(token, roomId, binding = null) {
+  list(token, roomId, binding = null,{threadIds=null}={}) {
     const auth = this._auth(token, roomId, binding);
     return this.store.readTransaction(() => {
+      if(isCurrentRoom(this.db,roomId)){
+        if(!Array.isArray(threadIds)||threadIds.length>16||threadIds.some(id=>typeof id!=='string'||!id||id.length>384))fail(422,'thread_mute_selection_required','Select up to16 visible threads; this read is not a complete mute registry');
+        const ids=[...new Set(threadIds)],muted=ids.filter(id=>this.db.prepare('SELECT 1 FROM thread_mutes WHERE room_id=? AND member_id=? AND thread_id=?').get(roomId,auth.member.id,id));
+        return Object.freeze({roomId,threadIds:Object.freeze(muted),coverage:{kind:'selected-threads',complete:true,selectedThreadIds:ids},...this._viewer(auth)});
+      }
       this._roomState(roomId); // 404 on unknown room before leaking rows.
       const rows = this.db.prepare("SELECT thread_id FROM thread_mutes WHERE room_id=? AND member_id=? ORDER BY thread_id")
         .all(roomId, auth.member.id);
@@ -111,6 +118,25 @@ export class ThreadMutes {
     const auth = this._auth(token, roomId, binding);
     const memberId = auth.member.id;
     return this.store.transaction(() => {
+      if(isCurrentRoom(this.db,roomId))return withCurrentReadContext(this.db,roomId,()=>{
+        const visited=new Set(),floor=readCurrentHistoryFloor(this.db,roomId,memberId);let id=data.threadId,rootId='';
+        for(let depth=0;id;depth++){
+          if(depth>=32)fail(409,'thread_context_too_large','Thread ancestry exceeds bounded selection');
+          if(visited.has(id))fail(409,'thread_context_invalid','Thread ancestry is cyclic');visited.add(id);
+          if(!currentMessageMayBeVisible(this.db,roomId,id,memberId,undefined,floor)){
+            if(!rootId||this.db.prepare('SELECT 1 FROM messages WHERE room_id=? AND message_id=?').get(roomId,id))fail(404,'message_not_found','No such thread in this room');
+            break;
+          }
+          const message=readCurrentMessage(this.db,roomId,id)?.value;
+          if(!message){if(!rootId)fail(404,'message_not_found','No such thread in this room');break;}
+          if(!messageInHistory(message,floor))fail(404,'message_not_found','No such thread in this room');
+          if(message.toMemberId&&message.authorId!==memberId&&message.toMemberId!==memberId)fail(404,'message_not_found','No such thread in this room');
+          rootId=message.id;id=message.replyToId;
+        }
+        if(data.muted)this.db.prepare('INSERT OR IGNORE INTO thread_mutes(room_id,member_id,thread_id,created_at) VALUES(?,?,?,?)').run(roomId,memberId,rootId,this.store.now());
+        else this.db.prepare('DELETE FROM thread_mutes WHERE room_id=? AND member_id=? AND thread_id=?').run(roomId,memberId,rootId);
+        return Object.freeze({roomId,memberId,threadId:rootId,muted:data.muted,...this._viewer(auth)});
+      });
       const messages = this._roomState(roomId).messages;
       const rootId = threadRootOf(messages, data.threadId);
       // A DM thread exists only for its parties: answering a bystander would

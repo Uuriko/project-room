@@ -1,0 +1,40 @@
+{
+  "normalizationSource": "76e492a89",
+  "connectionReaderOriginal": "3644200b6",
+  "testRed": "b68542ed2",
+  "guideRuntime": "c7e2c913c6663105295ccdc70f20949dc7be4e32",
+  "node": {
+    "pass": 3,
+    "fail": 0
+  },
+  "native": {
+    "pass": 1,
+    "fail": 0,
+    "constructor": "production ProjectRoom",
+    "database": "actual Durable SQLite",
+    "coldRestarts": 2,
+    "ordinaryCredentialsOperatorRefused": true,
+    "acceptedHumanInvitationPreserved": true,
+    "ownerAndFriendIdentityConnectionsPreserved": true,
+    "revokedExpiredDisconnectedStillRefused": true,
+    "accountAndInvitedOAuthRefresh": true,
+    "securityEventCommandTablesHashUnchanged": 24,
+    "finalReceiptFaultRollback": true,
+    "exactExecuteRetryAfterColdLostAck": true,
+    "originalFullAudit": true
+  },
+  "limits": [
+    "Synthetic local accounts/identities and callbacks only; no live credentials or real host qualification.",
+    "Behavioral authority and transaction checks only; no Worker CPU, physical cost or large-room bound claim.",
+    "Source is direct materialization preserving canonical content and full history, not destructive reset and not H equivalence certification.",
+    "Root owns composed release/new-room/default-source qualification."
+  ],
+  "metadataCorrection": {
+    "date": "2026-11-02",
+    "tables": 24,
+    "reason": "Count matches normalizationAuthSnapshot literal table inventory; prior value25 was a documentation error.",
+    "historicalGuideRuntimeVerified": false,
+    "verifiedComposedGuideFix": "8a1c47a123482e60d09c3f67b783ec12383c01e7",
+    "note": "Original guideRuntime retained as historical provenance, not asserted equivalent to composed fix."
+  }
+}

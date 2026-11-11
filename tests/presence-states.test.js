@@ -261,9 +261,61 @@ test("presence: agent with identity link projects ownerIdentityId", () => {
   const { members } = store.presence(ownerKey, "commons", []);
   const agent = byId(members, "agent");
   assert.equal(agent.ownerIdentityId, "identity-abc-123");
-  // No host ever reported: presence stays null (unregistered), never unreachable.
-  assert.equal(agent.presence, null);
+  // No host ever reported: REGISTER row 59 states the unregistered case
+  // instead of dropping it to null. The agent has issued no command, so
+  // the only stamp is the join — lastSeenAt stays null (basis
+  // "member-added") and state is never unreachable.
+  assert.deepEqual(agent.presence, { status: "unregistered", lastSeenAt: null, basis: "member-added" });
   assert.notEqual(agent.state, "unreachable");
+});
+
+test("presence: a claimed item shows as held, and a suspended session removes it from workingOn", async t => {
+  const { store, ownerKey } = serve(t);
+  store.command(ownerKey, "commons", {
+    id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"] },
+  });
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  store.command(ownerKey, "commons", {
+    id: randomUUID(), type: T.WORK_PROPOSED,
+    data: { workItemId: "claim-one", title: "Claim probe", definitionOfDone: "Seen", accountableMemberId: "agent", mode: "write" },
+  });
+  const agentKey = store.issueAccessKey("commons", "agent");
+  store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: "claim-one" } });
+  store.command(agentKey, "commons", {
+    id: randomUUID(), type: T.CLAIM_ACQUIRED,
+    data: { workItemId: "claim-one", repository: "repo", ref: "main", paths: ["a.txt"], expiresAt: new Date(Date.now() + 24 * 3600_000).toISOString() },
+  });
+  // REGISTER row 59: the held claim is listed as held — verbatim claim
+  // state, no heartbeat — while no session is executing.
+  let agent = byId(store.presence(ownerKey, "commons", []).members, "agent");
+  assert.deepEqual(agent.workingOn, [{ workItemId: "claim-one", title: "Claim probe", status: "claimed" }]);
+  assert.notEqual(agent.state, "working", "holding a claim is not executing");
+  const server = (await import("../server/http.mjs")).createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const revision = () => store.room("commons").state.workItems["claim-one"].revision;
+  const session = async (expectedRevision, status) => {
+    const res = await fetch(origin + "/api/rooms/commons/work-sessions", {
+      method: "POST",
+      headers: { Origin: origin, Authorization: `Bearer ${agentKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: randomUUID(), workItemId: "claim-one", expectedRevision, action: "set_status", status }),
+    });
+    assert.equal(res.status, 201);
+  };
+  await session(revision(), "processing");
+  agent = byId(store.presence(ownerKey, "commons", []).members, "agent");
+  assert.equal(agent.state, "working");
+  assert.equal(agent.workingOn.length, 1, "the executing session lists the item once, not once per leg");
+  assert.equal(typeof agent.workingOn[0].heartbeat_at, "string");
+  await session(revision(), "suspended");
+  agent = byId(store.presence(ownerKey, "commons", []).members, "agent");
+  assert.deepEqual(agent.workingOn, [], "a suspended reservation is excluded from both workingOn legs");
+  assert.equal(agent.state, "idle");
 });
 
 test("presence: human never shows unreachable", () => {

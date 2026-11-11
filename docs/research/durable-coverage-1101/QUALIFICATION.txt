@@ -1,0 +1,60 @@
+OFFLINE FIRST SLICE ONLY — NOT COMPLETE BOUNDED RECOVERY
+
+Runtime: 4703382a6, based on privacy-format source 4aa07fa84.
+No deployment, live database adoption, schema release or rollback waiver.
+Do not land this partial recovery slice on main before the remaining census,
+replay, report digest and SQLite checks have a qualified resumable path.
+
+Five focused Node controls pass, including genuine archived old4aa warm prepared
+credential writes, cold constructor and old exact guard suspension (zero DROP
+attempts); new cold operator continuation; NULL/BLOB and Unicode canonical cells;
+checkpoint fault rollback; real process exits before and after commit; exact
+latest receipt replay; stale requests; same-source repeated-work measurements.
+One actual production Native Worker control passes: 49 coverage calls, 6,056
+payload rows, maximum128 rows per call; repeated runtime disposal/cold restart;
+held prepared credential UPDATE refused; readiness503 until separate full audit;
+final cold readiness and exact saved-command retry pass. Targeted lint is clean.
+
+The schema45/full-v2 original complete source is validated and then sealed.
+All imported business/authority/audit/credential tables are frozen by exact
+code-owned triggers, including lazy/unfenced tables. Only explicit target-owned
+operational controls remain writable. The target restore ID, source seal, rowid
+cursor, canonical bag, revision and latest receipt commit atomically. API202
+always says verified:false; coverage completion alone does not admit access.
+Final required audit200 says verified:true and clears pending admission.
+
+Same original source comparison (600 messages +512KiB BLOB;2,459,365 input bytes):
+  Old4aa two processes each stopped after128 checked rows repeat identical prefix.
+  They send the entire2.46MB snapshot each time; durable coverage advance is zero.
+  Returned payload rows3,129/3,762; UTF8/BLOB bytes795,522/1,608,684.
+  New processes each send186 bytes, check128 rows and durably advance128 rows.
+  Returned payload bytes22,687/22,912. Each also reads2,301 metadata rows,
+  roughly855KB of schema/control strings: this is measured remaining overhead.
+  Initial original-source loading/sealing is measured separately and still full.
+  Final unbounded audit reads10,883 payload rows/2,923,053 payload bytes and
+  10,170 metadata rows/1,833,596 metadata bytes for this small fixture.
+  See comparison.json for exact run clocks; single observed local clock values
+  are neither CPU measurements nor latency guarantees. These Node metrics count
+  returned cells after constructor, not SQLite physical reads. Native control
+  separately qualifies actual runtime behavior, not production CPU limits.
+  Final full audit passes; independently hashed application rows equal the
+  original source except target-owned restore admission/receipt; BLOB is exact.
+
+Remaining costs/limits:
+- Source parsing, crypto/trailer and manifest construction still process the
+  complete original input before sealing. Loading is not fully restartable work.
+- Coverage limits128 payload rows and uses4MiB as a work quantum. The first legal
+  row may exceed4MiB up to the sealed source/restore limit, avoiding permanent
+  stalls on previously accepted rows. Scalar admission precedes payload reads.
+- Exact freeze/schema verification performs catalog/control work each call.
+- Current fixed code-owned schemas use stable rowid. WITHOUT ROWID or shadowed
+  rowid layouts refuse explicitly until a reviewed pager exists; no bulk fallback.
+- Full audit remains synchronous/unbounded: census, replay, subsystem checks,
+  SQLite/FK checks and sorted application table report digests. The intentional
+  bulk red remains reproduced in full-audit-still-red.log:1,206 records/proofs
+  and602 events materialized in a single .all(). Passing small restores does not
+  clear this acceptance gate.
+- Old4aa source transition in the control is an explicit test-only offline update
+  of a verified-empty target. It does not authorize migrating populated artifacts.
+- The default library path remains synchronous for old callers. Strict45 API
+  returns202 pending; callers must check verified:true, not merely HTTP success.

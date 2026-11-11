@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { exportNdjsonText } from '../server/room-export.mjs';
+import { replayNdjsonInto } from '../server/restore-ndjson.mjs';
+import { operatorWakeIndex } from '../server/operator-wake-index.mjs';
+import { WAKE_INDEXES, WAKE_INDEX_RECEIPT, wakeIndexState, boundedWakeDeliveryActive } from '../server/wake-delivery-window.mjs';
+test('logical restore preserves activation receipt and explicitly reinstalls admitted indexes without replacing it', t => {
+  const source = new RoomStore(':memory:'); source.initialize(initialRoom());
+  const target = new RoomStore(':memory:'); t.after(() => { source.close(); target.close(); });
+  const reason = 'Synthetic original installation';
+  const plan = operatorWakeIndex(source, { reason });
+  const originalInput = { reason, requestId: 'original', planHash: plan.planHash };
+  const first = operatorWakeIndex(source, originalInput, true);
+  const bytes = source.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json;
+  const restored = replayNdjsonInto(exportNdjsonText(source.db), target); assert.equal(restored.verified, true);
+  assert.equal(wakeIndexState(target.db), 'absent');
+  assert.throws(() => boundedWakeDeliveryActive(target.db), { code: 'storage_unavailable' });
+  assert.equal(target.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json, bytes);
+  const repairReason = 'Synthetic explicit post-restore index reinstallation';
+  const repair = operatorWakeIndex(target, { reason: repairReason, reinstall: true });
+  const input = { reason: repairReason, reinstall: true, requestId: 'restore-install', planHash: repair.planHash };
+  target.db.exec("CREATE TRIGGER reject_reinstall BEFORE INSERT ON operator_actions WHEN NEW.action='wake_delivery_indexes_reinstall' BEGIN SELECT RAISE(ABORT,'synthetic repair interruption'); END");
+  assert.throws(() => operatorWakeIndex(target, input, true), /synthetic repair interruption/);
+  assert.equal(wakeIndexState(target.db), 'absent');
+  assert.equal(target.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json, bytes);
+  target.db.exec('DROP TRIGGER reject_reinstall');
+  const installed = operatorWakeIndex(target, input, true); assert.equal(installed.duplicate, false);
+  assert.equal(boundedWakeDeliveryActive(target.db), true);
+  assert.equal(target.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json, bytes);
+  assert.deepEqual(operatorWakeIndex(target, input, true), { ...installed, duplicate: true });
+  assert.deepEqual(operatorWakeIndex(target, originalInput, true), { ...first, duplicate: true });
+  assert.throws(() => target.transaction(() => target.db.prepare('DELETE FROM operator_actions WHERE id=?').run(WAKE_INDEX_RECEIPT)), /operator audit is append-only/);
+  // Deliberately bypass the audit guard in this synthetic corruption fixture.
+  // Ordinary runtime SQL cannot remove the original activation authority.
+  target.db.exec('DROP TRIGGER operator_actions_append_only_delete');
+  target.transaction(() => target.db.prepare('DELETE FROM operator_actions WHERE id=?').run(WAKE_INDEX_RECEIPT));
+  assert.throws(() => operatorWakeIndex(target, input, true), { code: 'wake_index_conflict' });
+});
+test('reinstall is separate explicit intent, refuses partial pair and retains original bytes', t => {
+  const store = new RoomStore(':memory:'); t.after(() => store.close()); store.initialize(initialRoom());
+  assert.throws(() => operatorWakeIndex(store, { reason: 'Synthetic reinstall', reinstall: true }), { code: 'wake_index_conflict' });
+  const plan = operatorWakeIndex(store, { reason: 'Synthetic original' });
+  operatorWakeIndex(store, { reason: 'Synthetic original', requestId: 'original', planHash: plan.planHash }, true);
+  const original = store.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json;
+  store.db.exec('DROP INDEX agent_work_wakes_ordered_pending');
+  assert.throws(() => operatorWakeIndex(store, { reason: 'Synthetic reinstall', reinstall: true }), { code: 'wake_index_conflict' });
+  for (const index of WAKE_INDEXES) if (store.db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(index.name)) store.db.exec('DROP INDEX ' + index.name);
+  const repair = operatorWakeIndex(store, { reason: 'Synthetic reinstall', reinstall: true });
+  assert.throws(() => operatorWakeIndex(store, { reason: 'Synthetic reinstall', reinstall: true, requestId: 'original', planHash: repair.planHash }, true), { code: 'idempotency_conflict' });
+  store.transaction(() => store.db.prepare("INSERT INTO agent_wake_signals VALUES(?,'agent','mention','commons','m',1,NULL)").run('x'.repeat(4 * 1024 * 1024 + 1)));
+  assert.throws(() => operatorWakeIndex(store, { reason: 'Synthetic reinstall', reinstall: true }), { code: 'wake_index_budget_exceeded' });
+  assert.equal(wakeIndexState(store.db), 'absent');
+  assert.equal(store.db.prepare('SELECT counts_json FROM operator_actions WHERE id=?').get(WAKE_INDEX_RECEIPT).counts_json, original);
+});

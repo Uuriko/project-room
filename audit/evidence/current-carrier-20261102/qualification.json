@@ -1,0 +1,28 @@
+{
+  "base": "daeb44cae",
+  "changes": [
+    "One shared fixed-size normalized carrier serializer used by prepare, commit and independent head comparison; bytes unchanged.",
+    "Two missing projection-cap diagnostics now direct room owner to review storage capacity."
+  ],
+  "beforePins": {
+    "pass": 0,
+    "fail": 2
+  },
+  "afterProjectionFile": {
+    "pass": 18,
+    "fail": 0
+  },
+  "normalizedServingInviteDm": {
+    "pass": 27,
+    "fail": 0
+  },
+  "lint": {
+    "errors": 0,
+    "existingWarnings": 39
+  },
+  "limitations": [
+    "No production deployment.",
+    "Does not qualify the complete storage migration.",
+    "Initial projection test command included a nonexistent extra filename; only18 projection checks ran. Corrected separate command ran27 actual normalized tests."
+  ]
+}

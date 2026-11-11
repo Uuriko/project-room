@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickWorkAction } from "./room-chrome.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
@@ -18,7 +19,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: "human-reviewer", displayName: "Test human reviewer", kind: "human", permissions: ["verify"] } });
     const reviewerKey = fixture.store.issueAccessKey("commons", "human-reviewer");
-    const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+    // Each work card step refreshes the room with its side panels, which is
+    // wider than the production credential burst. This browser fixture keeps
+    // the previous 600-read and 600-write windows; production stays on the burst.
+    const server = createRoomServer({ store: fixture.store, streamInterval: 60, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;
@@ -103,6 +107,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       };
       await mutate("producer", T.WORK_ACCEPTED);
       await mutate("producer", T.WORK_COMPLETED, { summary: "The source supports this small finding.", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding or review it as requested." });
+      await openSearch(page); await page.locator("#message-search").fill(title);
+      await page.locator(`#search-list [data-open-work="${id}"]`).click();
       const card = page.locator(`[data-work-record-id="${id}"]`);
       const status = async (step, text, tone) => {
         await card.locator(`[data-next-step="${step}"]`).waitFor({ state: "attached" });
@@ -162,6 +168,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const reviewer = await reviewerContext.newPage();
     reviewer.on("pageerror", error => errors.push(error.message));
     await login(reviewer, reviewerKey);
+    await openSearch(reviewer); await reviewer.locator("#message-search").fill(items()[reviewedId].title);
+    await reviewer.locator(`#search-list [data-open-work="${reviewedId}"]`).click();
     await clickWorkAction(reviewer.locator(`[data-work-record-id="${reviewedId}"]`), "verify");
     await reviewer.locator('#action-fields select[name="result"]').selectOption("fail");
     await reviewer.locator('#action-fields textarea[name="summary"]').fill("The source has a correction. Revise the finding.");

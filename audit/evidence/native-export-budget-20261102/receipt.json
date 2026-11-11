@@ -1,0 +1,66 @@
+{
+  "source": "96ddd29a348ba900c5e813160131bf82a79e3e3e",
+  "base": "2ebce68b3",
+  "beforeNativeExport": {
+    "exit": 1,
+    "status": 409,
+    "code": "current_room_context_unavailable"
+  },
+  "probe": {
+    "16": {
+      "ok": false,
+      "records": 201,
+      "bytes": 99126
+    },
+    "8": {
+      "ok": true,
+      "records": 157,
+      "bytes": 77615
+    },
+    "4": {
+      "ok": true,
+      "records": 133,
+      "bytes": 66219
+    },
+    "1": {
+      "ok": true,
+      "records": 115,
+      "bytes": 57928
+    }
+  },
+  "nodeAfter": {
+    "command": "node --test tests/normalized-owner-export.test.mjs tests/room-export.test.js",
+    "exit": 0,
+    "passed": 17,
+    "failed": 0,
+    "skipped": 0
+  },
+  "nativeAfter": {
+    "command": "cd cloudflare && node --test normalized-owner-export.check.mjs",
+    "exit": 0,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0
+  },
+  "node": "24.22.1",
+  "miniflare": "4.20260730.0",
+  "workerd": "1.20260730.1",
+  "logs": {
+    "before": {
+      "bytes": 34927,
+      "sha256": "10b65f0c1699fd32a833ab8a270fe5990db7fdb61192259208ed9b0fac52c67d"
+    },
+    "budget": {
+      "bytes": 1510,
+      "sha256": "65f578bd493b105463dffc527941ab5eb1e2bccda6eba5a04c3849111ce25404"
+    },
+    "node-after": {
+      "bytes": 13047,
+      "sha256": "a92a7a452eb7d7bd728c6338ddf7b718405597e22086896a4371fccca12a071d"
+    },
+    "native-after": {
+      "bytes": 5481,
+      "sha256": "f478a2344e880d86e870a4710c98ac0af4c5baec9e2207732446d97adfa88757"
+    }
+  }
+}

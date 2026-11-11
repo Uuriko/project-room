@@ -1,0 +1,57 @@
+{
+  "baseRevision": "c2c4424d96690764314ede316e91e9dbfe4ccbd9",
+  "sourceHashes": {
+    "AGENTS.md": "56d02bde6e79da4a9fd7a7dd74a4a87d4b1d792eebe2c2f8c6f39edf58de45f7",
+    "README.md": "25b09a1c2c45243d4ae7efefa526d7073676bf548828649aea54fa217d7446a9",
+    "about.html": "41e7ce2536ed00eac281d405eac6daae68bff02eebda77d73c0bfc318a2e8302",
+    "docs/AGENT-QUICKSTART.md": "209355e710b55404320641c7897d6b06ebd761e52c25a450884db5f00c10084d",
+    "docs/AGENT-START-HERE.md": "d8d01e347b59fbbe25c2f1b88930b70325bc3b9f7544309e68cddeaa1b9358e9",
+    "docs/SWARM-PLUG-IN.md": "553e0a68556387c859ebf5598e04621d95028f9e11a908b07aef19e46661a3c4",
+    "docs/agents/index.md": "afcfa934f6e9a862c9dcde34db5042a2defb8cbfcfe99f6abac266689b219d23",
+    "docs/agents/paste.md": "1c7cb88217a4144074b4428196372a325e674819981351cfb878f08a7cb9c941",
+    "index.html": "74156b91e403a17483dfcb401831c14a9f884b21c7ca00b41af267cff6e51e04",
+    "scripts/CANDIDATE-MANIFEST.json": "bc33bdb26188dc6ef16965b1314fc0ea60cf3263178e8341ff722aa2db3c3baa",
+    "scripts/build-agent-docs.mjs": "5fe2e07be06b653bcf82b6f3f900a17c2a8451390c37b9d3579c428b76e04c43",
+    "scripts/join-next-browser-check.mjs": "582788f4f695c3a84a9b3f18d00dafd2bce7ce40f4e675ba3cb6c52e0959e360",
+    "server/agent-discovery.mjs": "c05c2e8c1f5c205100664fb44a7c5c5e9338224cc4104aad301876aee51f04bb",
+    "server/discoverability.mjs": "53d4f68632a430296d8ab69154cb931e5a2158274138f521c61958ab49255e5e",
+    "tests/agent-discovery.test.js": "fa008d44dd7c33e59a17d02148aaae5d501bde4043ccb0a230fd869e85c37b57",
+    "tests/agent-skill-post-step.test.js": "d960377b4fc5024c91df9f2b373e3f78ea40f3041b4482041ca52462b4ffbfd9",
+    "tests/agent-connect-discovery-journey.test.mjs": "45c1071042e82d9874e67cf118481c127f68a366ef62bb77b9c9773b6392c403"
+  },
+  "node": {
+    "pass": 185,
+    "fail": 0,
+    "skip": 0
+  },
+  "browser": {
+    "mobileKeyboardJoin": {
+      "pass": 3,
+      "fail": 0
+    },
+    "publicPagesAccessibility": {
+      "pass": 1,
+      "viewports": [
+        390,
+        1280
+      ]
+    },
+    "earlierFailure": "First composed browser run: wrong textarea locator -0; fixed to generated -1 and all 3 join checks passed on rerun."
+  },
+  "checks": [
+    "full ESLint: 0 errors (366 existing warnings)",
+    "preflight",
+    "design-token ratchet",
+    "i18n ratchet without baseline growth",
+    "generated catalog consistency",
+    "reachability",
+    "diff whitespace"
+  ],
+  "boundaries": [
+    "No membership/auth/schema changes",
+    "No private maintainer room advertised as open",
+    "Global Dot publication and actual outside-account installation not established",
+    "Search ranking/index refresh not guaranteed"
+  ],
+  "publicRepoMetadata": "GitHub About description updated to existing-agent shared context/tasks/results, MCP/HTTP; homepage unchanged"
+}

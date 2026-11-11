@@ -1,0 +1,125 @@
+{
+  "receipts": [
+    {
+      "n": 32,
+      "eventId": "5b0f50e4-77c2-4161-a86e-83778be4c3a5",
+      "cost": {
+        "statements": 189,
+        "rowsRead": 7015,
+        "rowsWritten": 44,
+        "unknown": 0,
+        "sourceRows": 5,
+        "sourceBytes": 936
+      },
+      "rawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "clockMs": 16,
+      "retry": {
+        "statements": 110,
+        "rowsRead": 4184,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "sourceRows": 0,
+        "sourceBytes": 0
+      },
+      "retryRawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "sourceQueries": 2
+    },
+    {
+      "n": 1000,
+      "eventId": "d6f5a018-514b-4451-97d0-d409b29a208b",
+      "cost": {
+        "statements": 199,
+        "rowsRead": 7077,
+        "rowsWritten": 44,
+        "unknown": 0,
+        "sourceRows": 5,
+        "sourceBytes": 936
+      },
+      "rawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "clockMs": 17,
+      "retry": {
+        "statements": 110,
+        "rowsRead": 4184,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "sourceRows": 0,
+        "sourceBytes": 0
+      },
+      "retryRawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "sourceQueries": 2
+    },
+    {
+      "n": 5000,
+      "eventId": "e868c375-d99f-4b48-b033-d16da665e17c",
+      "cost": {
+        "statements": 199,
+        "rowsRead": 7077,
+        "rowsWritten": 44,
+        "unknown": 0,
+        "sourceRows": 5,
+        "sourceBytes": 936
+      },
+      "rawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "clockMs": 16,
+      "retry": {
+        "statements": 110,
+        "rowsRead": 4184,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "sourceRows": 0,
+        "sourceBytes": 0
+      },
+      "retryRawPermit": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "sourceQueries": 2
+    }
+  ],
+  "recoverySteps": 61,
+  "sourceBytes": 104695,
+  "fullOracle": true,
+  "coldReady": true,
+  "wholePrivacyPurgeBounded": false,
+  "base": "997eb09ede48546a79480ab679907becf81f11ab",
+  "runtime": "a115104e7",
+  "format": "normalized-current-v1-native-work-4",
+  "nodeTests": {
+    "passed": 13,
+    "failed": 0
+  },
+  "nativeTests": {
+    "passed": 1,
+    "failed": 0
+  },
+  "historicalPrefixErasure": "explicit refusal before mutation; separate historical privacy transition remains required",
+  "costScope": "adapter cursor counters plus separately observed raw native runtime permits; instrumentation storage identity introduces fixed cold catalog requalification; not complete raw SQL or CPU totals",
+  "deployment": "offline only"
+}

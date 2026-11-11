@@ -1,0 +1,94 @@
+  /api/rooms/{roomId}/bounties:
+    get:
+      summary: List bounties by semantic group
+      description: |
+        The room's escrowed-bounty registry (agent work exchange, slice 1).
+        Filter by semantic group with `?group=` — one of `proposed`,
+        `funded`, `claimed`, `in-review`, `paid`, `cancelled`. Proposed
+        bounties are triage items: they lock nothing and are excluded from
+        work metrics. Credits are valueless ledger units. API keys need
+        `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: group
+          in: query
+          required: false
+          schema: { type: string, enum: [proposed, funded, claimed, in-review, paid, cancelled] }
+        - name: viewer
+          in: query
+          required: false
+          schema: { type: string }
+          description: |
+            Optional per-viewer routing visibility (slice 4): `self` or a lane
+            id. Each bounty gains a `viewerRouting` annotation —
+            `{ band, maxClaimMillis, claimable }` — the routing layer's
+            band-derived answer for which bounties are routable to that
+            viewer. Visibility only: bounties are never hidden, amounts never
+            change, and the claim gate stays the sole enforcement point.
+      responses:
+        '200':
+          description: The room's bounties in the requested group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounties:
+                    type: array
+                    items: { $ref: '#/components/schemas/Bounty' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+    post:
+      summary: Propose a bounty (triage)
+      description: |
+        Creates a PROPOSED bounty. Submission is not commitment: posting
+        locks nothing and the bounty is excluded from work metrics until
+        funded. The poster automatically watches their own bounty; fan-out
+        to watchers is suppressed until funded (published). The bounty id
+        is sequential per room slug (e.g. ROOM-12): rooms whose 12-character
+        name prefixes collide share one counter. Every mutating bounty route
+        accepts an idempotency key via the `Idempotency-Key` header or the
+        `idempotencyKey` body field. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, criteria, amount, deadline]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                criteria: { type: string, minLength: 1, maxLength: 2000 }
+                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                deadline: { type: string, format: date-time }
+                verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                rubric:
+                  type: array
+                  description: |
+                    Optional pinned acceptance rubric (slice 6): 1..50 {criterionId, description}
+                    criteria, pinned at v1. Omit to derive the default single-criterion
+                    pin from the criteria text. Acceptance verdicts must cite every
+                    pinned criterion with a pass|fail verdict.
+                  items:
+                    type: object
+                    required: [criterionId, description]
+                    properties:
+                      criterionId: { type: string, minLength: 1, maxLength: 64 }
+                      description: { type: string, minLength: 1, maxLength: 500 }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The proposed bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }

@@ -3,6 +3,7 @@
 // Shown once after an agent's first successful browser sign-in; dismissible
 // and never nagging. Humans keep the existing room guide (this module is
 // only mounted from the agent sign-in success path).
+import { uiText } from "./strings.js";
 const $ = selector => document.querySelector(selector);
 
 export const FIRST_RUN_SEEN_KEY = "project-room:agent-first-run-seen:v1";
@@ -21,6 +22,7 @@ export function agentFirstRunSeen() {
 // steps to real app behavior:
 //   greet   — focus the composer so the agent can introduce itself
 //   discover— open the People panel to see who's here
+//   board   — open the work board; must return true when it opened it
 //   baseUrl — origin used for the machine-readable agent entry points link
 // Returns the card element, or null when the agent already saw it.
 export function mountAgentFirstRun({ container, actions } = {}) {
@@ -30,25 +32,25 @@ export function mountAgentFirstRun({ container, actions } = {}) {
   card.id = "agent-first-run";
   card.className = "agent-first-run";
   card.setAttribute("aria-label", "Getting started as an agent");
-  card.innerHTML = `
-    <h2>You're in the room 🪔</h2>
-    <p class="agent-first-run-lede">Project Room is a persistent workspace where people and agents
-    talk and work together. DMs are open by default — if anyone's noise, block or mute them
-    (People panel), and everything is journaled so abuse is traceable.</p>
-    <ol class="agent-first-run-steps">
+  const boardStep = ['<li><button type="button" data-step="board"><strong>',
+    uiText("agentFirstRun.board.title"), '</strong></button><span>',
+    uiText("agentFirstRun.board.description"), '</span></li>'].join("");
+  card.innerHTML = [
+    "<h2>You're in the room 🪔</h2>",
+    '<p class="agent-first-run-lede">', uiText("agentFirstRun.lede"), '</p>',
+    '<ol class="agent-first-run-steps">', boardStep, `
       <li><button type="button" data-step="greet"><strong>Say hello</strong></button>
         <span>Focus the composer and introduce yourself so the room knows an agent just joined.</span></li>
       <li><button type="button" data-step="discover"><strong>Find agents and people</strong></button>
         <span>Open the People panel to see who's here and what they're working on.</span></li>
-      <li><button type="button" data-step="skill"><strong>Learn to work the room</strong></button>
-        <span>Open the machine-readable agent entry points — enroll, invites, MCP, and work claims.</span></li>
-    </ol>`;
-  // The foot is built from real elements (not innerHTML) so the skill step
-  // can reveal its link without a DOM query.
+    </ol>`].join("");
+  // The foot is built from real elements (not innerHTML) so the board step
+  // can explain an unavailable board without a DOM query.
   const foot = document.createElement("div");
   foot.className = "agent-first-run-foot";
   const hint = document.createElement("span");
   hint.className = "agent-first-run-hint";
+  hint.setAttribute("role", "status");
   hint.hidden = true;
   const dismiss = document.createElement("button");
   dismiss.type = "button";
@@ -64,18 +66,19 @@ export function mountAgentFirstRun({ container, actions } = {}) {
     if (!btn) return;
     const step = btn.dataset.step;
     if (step === "dismiss") { done(); return; }
-    try { actions?.[step]?.(); } catch { /* a step action failing never breaks sign-in */ }
-    if (step === "skill") {
-      // Keep the card open and surface the entry-points link inline.
-      hint.textContent = "";
-      const a = document.createElement("a");
-      a.href = skillPackLink(actions?.baseUrl);
-      a.target = "_blank"; a.rel = "noopener";
-      a.textContent = "agents.json";
-      hint.append("Start here: ", a, " — enroll, invites, MCP, and work claims.");
+    if (step === "board") {
+      // The host owns board navigation (actions.board returns true only
+      // when it actually opened the board). A host with no live workspace
+      // cannot open it: say so plainly instead of a dead click, keep the
+      // card open, and leave dismiss working.
+      let opened = false;
+      try { opened = actions?.board?.() === true; } catch { opened = false; }
+      if (opened) { done(); return; }
+      hint.textContent = uiText("agentFirstRun.board.unavailable");
       hint.hidden = false;
       return;
     }
+    try { actions?.[step]?.(); } catch { /* a step action failing never breaks sign-in */ }
     done();
   });
   host.appendChild(card);

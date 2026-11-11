@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // PRODUCT-200 B7: a dropped ownership-transfer response retried by the old
 // owner used to 403 (owner_required), because the transfer had already
@@ -24,9 +25,7 @@ function setup(t) {
   });
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Owning Agent");
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, rooms, ownerToken, identity };
 }
@@ -58,9 +57,7 @@ test("retrying a landed transfer answers duplicate:true, not 403", t => {
 test("a non-owner asking for the current owner still gets 403", t => {
   const { store, rooms, ownerToken, identity } = setup(t);
   const intruder = store.identities.create("Intruder");
-  store.identities.link(ownerToken, "commons", {
-    identityId: intruder.identityId, displayName: "Intruder", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", intruder, { displayName: "Intruder", permissions: ["accept_work"] });
   rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId });
 
   // The intruder is not the previous owner: naming the current owner is not

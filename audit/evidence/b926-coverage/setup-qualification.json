@@ -1,0 +1,17 @@
+{
+  "scope": "Coverage CI dependency setup only, no production runtime/permissions/threshold changes",
+  "node": "24.22.1",
+  "before": {
+    "pass": 0,
+    "fail": 1,
+    "case": "coverage Native dependency provision order"
+  },
+  "after": {
+    "pass": 17,
+    "fail": 0,
+    "command": "node --test tests/coverage-thresholds.test.js"
+  },
+  "lintErrors": 0,
+  "dependencySetup": "Exact same pinned pnpm/cache/frozen-lockfile ignore-scripts install as passing unit job",
+  "fullCoverage": "Not rerun yet; no threshold success claim"
+}

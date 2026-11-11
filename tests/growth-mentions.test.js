@@ -46,12 +46,24 @@ test("C4 repeated mentions of one agent collapse into a single envelope with a c
   assert.equal(found[0].fields.mentionCount, 2);
 });
 
-test("C4 exact member id is a valid mention label", () => {
+test("C4 member id is NOT a mention label: the room recognises only @displayName", () => {
   const { state } = fresh();
-  // Agent "codex" has displayName "Codex"; the lowercase "@codex" matches its id exactly.
+  // Agent "codex" has displayName "Codex"; the lowercase "@codex" matches only
+  // its id. messageMentionsMember (the room's own detection) would not flag
+  // this message, so analytics must not count it either.
   const found = detectMentions(post("e4", "maya", "ping @codex when ready"), { members: membersOf(state) });
+  assert.deepEqual(found, []);
+});
+
+test("C4 a displayName shared by two agents is counted once, not once per agent", () => {
+  const members = [
+    { id: "agent-a", displayName: "Codex", kind: "agent", active: true },
+    { id: "agent-b", displayName: "Codex", kind: "agent", active: true },
+  ];
+  const found = detectMentions(post("e4b", "maya", "hey @Codex please"), { members });
   assert.equal(found.length, 1);
-  assert.equal(found[0].fields.mentionedAgentId, "codex");
+  assert.equal(found[0].fields.mentionCount, 1);
+  assert.equal(found[0].fields.mentionedAgentId, "agent-a");
 });
 
 test("C4 matching is exact: prefixes and punctuation boundaries do not match", () => {

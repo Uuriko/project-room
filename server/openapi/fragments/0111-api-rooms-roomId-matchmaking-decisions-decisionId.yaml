@@ -1,0 +1,22 @@
+  /api/rooms/{roomId}/matchmaking/decisions/{decisionId}:
+    get:
+      summary: Read one decision and its answer
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The decision, with the recorded answer when there is one
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  decision: { type: object }
+                  answer: { type: object, nullable: true }
+        '401': { description: unauthenticated }
+        '404': { description: decision_not_found }

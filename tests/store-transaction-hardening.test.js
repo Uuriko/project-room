@@ -119,3 +119,19 @@ test("close() re-entered from within the database close is a no-op", t => {
   store.close();
   assert.equal(calls, 1);
 });
+
+test('isolated append rollback retains prior room appends and discards only the failed room',t=>{
+  const store=fixture(t),rooms=['prior','failed','later'],keys=new Map();
+  for(const roomId of rooms){store.initialize(initialRoom(roomId));keys.set(roomId,store.issueAccessKey(roomId,'owner'));}
+  const heads=new Map(rooms.map(roomId=>[roomId,store.headSequence(roomId)])),notifications=[];
+  store.onEventAppended(roomId=>notifications.push({roomId,inTransaction:store.db.isTransaction,head:store.headSequence(roomId)}));
+  const append=roomId=>store.command(keys.get(roomId),roomId,{id:'append-'+roomId,type:'message.posted',data:{messageId:'message-'+roomId,body:'Synthetic append'}});
+  store.transaction(()=>{
+    append('prior');
+    assert.throws(()=>store.transaction(()=>{append('failed');throw Error('rollback isolated append');},{isolated:true}),/rollback isolated append/);
+    assert.deepEqual(notifications,[]);
+    append('later');assert.deepEqual(notifications,[]);
+  });
+  assert.deepEqual(notifications, ['prior','later'].map(roomId=>({roomId,inTransaction:false,head:heads.get(roomId)+1})));
+  assert.equal(store.headSequence('failed'),heads.get('failed'));
+});

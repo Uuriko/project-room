@@ -1,0 +1,30 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":27700864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":43,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ final recovery digest does not materialize an entire unbounded payload table in one call (261.758917ms)
+ℹ {"pin":"1c36aee6a","completeAuditPassed":true,"largestBulk":[{"sql":"SELECT * FROM current_room_records","rows":1206,"textBytes":223275},{"sql":"SELECT * FROM current_room_record_proofs","rows":1206,"textBytes":221534},{"sql":"SELECT * FROM events","rows":602,"textBytes":189426},{"sql":"SELECT * FROM messages","rows":600,"textBytes":224560},{"sql":"SELECT * FROM operator_actions","rows":12,"textBytes":146626}]}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 364.193625
+
+✖ failing tests:
+
+test at tests/recovery-finalization-continuation-contract.test.mjs:17:1
+✖ final recovery digest does not materialize an entire unbounded payload table in one call (261.758917ms)
+  AssertionError [ERR_ASSERTION]: complete recovery must page target digest work; current audit uses whole-table .all()
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-restore-durable-coverage-1101/tests/recovery-finalization-continuation-contract.test.mjs:18:786)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

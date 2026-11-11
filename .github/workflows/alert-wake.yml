@@ -1,0 +1,41 @@
+name: alert-wake
+
+# When the production deploy (its post-deploy smoke included) or the 6-hourly
+# production live smoke fails, post a signed event to a room inbound hook
+# (#5878). The room opens a Board task tagged post-deploy-regression with the
+# failing run as evidence and wakes the hook's assigned agent.
+# Off until the owner adds the Actions secrets ROOM_ALERT_HOOK_URL and
+# ROOM_ALERT_HOOK_SECRET (from POST /api/rooms/{roomId}/inbound-hooks).
+on:
+  workflow_run:
+    workflows: [deploy-prod, live-smoke]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  alert:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Post the alert to the room
+        env:
+          ROOM_ALERT_HOOK_URL: ${{ secrets.ROOM_ALERT_HOOK_URL }}
+          ROOM_ALERT_HOOK_SECRET: ${{ secrets.ROOM_ALERT_HOOK_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          failed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" -q '[.jobs[] | select(.conclusion=="failure") | .name + ": " + ([.steps[] | select(.conclusion=="failure") | .name] | join(", "))] | join("; ")' 2>/dev/null || true)
+          node scripts/alert-wake.mjs --source "$RUN_NAME" --title "$RUN_NAME failed on ${RUN_SHA:0:7}" \
+            --url "$RUN_URL" --sha "$RUN_SHA" --summary "Failed: ${failed:-see run}" --event-id "alert-$RUN_ID-$RUN_ATTEMPT"

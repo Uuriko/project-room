@@ -1,0 +1,53 @@
+{
+  "base": "ff8462d87",
+  "runtime": "87c302461",
+  "syntheticOnly": true,
+  "originalBefore": {
+    "tests": 6,
+    "pass": 2,
+    "fail": 4
+  },
+  "genuineRuntimeRed": "New guard-aware current-body drift control in selected-runs-first.log:5pass/1fail because pickup did not validate its selected canonical message even when it returned no body. Original raw SQL mutation was correctly refused, not evidence of reader validation.",
+  "after": {
+    "command": "node --test tests/agent-work-selected-runs.test.js tests/agent-work-sessions-http.test.js",
+    "tests": 9,
+    "pass": 9,
+    "skipped": 0
+  },
+  "runtimeChange": "Existing currentRunContext reused by narrow validateSelectedRunOpenings; authenticated viewer and exact selected protected request fields/opening/witness/entity checked before indexed run observation. Current combined v1 selects at most4 source rows and refuses partial lists rather than silently truncating; caller is directed to existing paged request reads. Legacy path unchanged.",
+  "tests": {
+    "representations": "Original historical hydration/canonical corruption specs use existing genuine historical producer; current selected observations have zero blob hydration.",
+    "fault": "Raw unpermitted mutation refused; scoped synthetic save fault rolls back exact messages/head/proofs/audit rows; actual scoped body drift then refuses selected read; exact body restoration preserves original hash/witness, exact guard DDL, working run and full recovery.",
+    "sessions": "Original historical HTTP next[] assertions retained. New native HTTP room creates canonical starter, refuses old session/board APIs and outsider, consumes actual returned work.started template, exact retry and protected context/list read without whole room. No parallel session engine."
+  },
+  "limits": "No Native cost or cold restart qualification claimed for this narrow change. No real account, authorization, production or deployment changes.",
+  "lint": {
+    "errors": 0,
+    "warnings": 1,
+    "inherited": "request-runs.mjs:127 raw members index"
+  },
+  "logs": {
+    "selected-work-session-before": {
+      "sha256": "0b1324847e1a33435d152442485e8b45ecc1d90c37fc88c996cbea8f360bc085",
+      "bytes": 7827
+    },
+    "selected-runs-first": {
+      "sha256": "4345865f45156df9dbc1f00ce3f5058b65d187e45b1a1df02f4ef17657d354ce",
+      "bytes": 4774
+    },
+    "selected-work-session-after-first": {
+      "sha256": "b87733f86a0c39368abb6f4cfa1b9fff134ed27ffb7403babdae9ccfcf5f3ada",
+      "bytes": 6358
+    },
+    "selected-work-session-lint": {
+      "sha256": "cfe6f36a4e36814f5776eea010aeb64f4d927f1c9995b3ffc68cde8ace4ed572",
+      "bytes": 329
+    }
+  },
+  "sourceSha256": {
+    "server/request-runs.mjs": "240c6b3d09bc4ecf9125dfe73fd13cf518db09e6f582a68e19e62c2347d0d86e",
+    "server/routes/agent-work.mjs": "a216585c99fe149b8b9b0514bfbf61179b5e4e968829cc8e6d6516f718a45d4f",
+    "tests/agent-work-selected-runs.test.js": "de2f3ad93e3ef82d17e0e9db4561487591d9c7c3f4146fa630710a439c8798e7",
+    "tests/agent-work-sessions-http.test.js": "b59243444c269b991498ecdc29f1122c09fe814446cc0e6381edf6984b2dfd84"
+  }
+}

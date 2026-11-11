@@ -70,7 +70,9 @@ export class ReturnBrief {
             if (item.sequence <= previous || item.sequence > history.evaluatedThrough) throw new Error("The catch-up page is out of order. Refresh to continue.");
             previous = item.sequence;
           }
-          if (page.history.hasMore && (!page.history.items.length || page.history.continuation?.after !== previous)) throw new Error("The catch-up page did not advance. Refresh to continue.");
+          if(page.contractVersion===2){
+            const examined=page.history.examinedThrough;if(!Number.isSafeInteger(examined)||examined<=continuation.after||examined>history.evaluatedThrough||previous>examined||page.history.hasMore&&page.history.continuation?.after!==examined)throw new Error("The catch-up page did not advance. Refresh to continue.");
+          }else if (page.history.hasMore && (!page.history.items.length || page.history.continuation?.after !== previous)) throw new Error("The catch-up page did not advance. Refresh to continue.");
           this.brief = { ...page, history: { ...page.history, items: [...history.items, ...page.history.items] } };
         } else this.brief = page;
         this.message = "";

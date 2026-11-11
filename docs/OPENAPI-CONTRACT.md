@@ -11,20 +11,25 @@ node scripts/openapi-gen.mjs --check
 ```
 
 It is also wired into the repo-wide gate as the **Route documentation gate
-(batch RT)** step of `node scripts/check.mjs`, and runs in CI on every PR.
+(batch RT)** step of `node scripts/check.mjs`, and the contract job runs it.
+
+`server/openapi/fragments/` is the edit surface. `scripts/openapi-document.mjs`
+concatenates those fragments into the OpenAPI document. `--check` and
+`--write` refresh `docs/openapi.yaml` when the rendered bytes differ, then
+check the rendering. They do not `git diff` the snapshot.
 
 The check reads three sources of truth and compares them:
 
 | Source | What it provides |
 |---|---|
-| `docs/openapi.yaml` | every operation key under `paths:` (extracted line-based by `scripts/open-routes.mjs`) |
+| `server/openapi/fragments/` | the rendered document: every operation key under `paths:` (extracted line-based by `scripts/open-routes.mjs`) |
 | `server/routes/table.mjs` (+ legacy routes inventory) | routes the server actually serves |
 | `scripts/routes-legacy-allowlist.json` | routes still documented by hand while migration to the table is in flight |
 
 ## What it asserts
 
 1. **The document parses** — strict YAML, unique keys. A merge conflict
-   left in the file fails here first.
+   left in a fragment fails here first.
 2. **Template gate** (`routeDocsDrift`) — every served route template must be
    documented, and the document must not describe a route the server no
    longer serves. Path parameters are normalized (`{id}`, `:id` → `{}`) so
@@ -55,10 +60,15 @@ output, not the number.
 
 ## Who owns it
 
-The gate was introduced by **batch RT**. It stays a check (not a
-generator) until the legacy allowlist is empty; when it is, byte-for-byte
-generation of `docs/openapi.yaml` from the route table begins (**RT-final**),
-because hand edits and generation would fight over the document.
+The gate was introduced by **batch RT**. The document is now assembled from
+`server/openapi/fragments/`. Pull requests edit the fragment for the path
+they change. CI regenerates the workspace copy and checks that rendering
+against the route table, the legacy allowlist, and the MCP request schemas
+(`tests/mcp-openapi-drift.test.js`).
+
+Generating the document from `server/routes/table.mjs` schemas (**RT-final**)
+still waits until the legacy allowlist is empty. Until then the fragments
+hold the operation text, and the gate still fails if the allowlist is empty.
 
 Related, but separate, checks:
 
@@ -70,10 +80,16 @@ Related, but separate, checks:
 - `tests/invite-only-boundary.test.js` — the open-route inventory matches
   what the server actually serves anonymously.
 
-## For editors of `docs/openapi.yaml`
+## For editors
 
-Run the check before you push. If it fails after your edit, the fix is in
-your edit (documented-but-unserved, unserved-but-undocumented, or a parse
-error) — not in the checker. The checker changes only when the route table
-or the allowlist genuinely moved; if you suspect that, re-run the check
-against `origin/main` first to isolate it.
+Edit the fragment under `server/openapi/fragments/` for the path you are
+changing. Then run:
+
+```sh
+node scripts/openapi-gen.mjs --write
+```
+
+That refreshes `docs/openapi.yaml` and runs the route gate. Commit the
+fragment. The snapshot is a published copy; CI checks the rendering against
+the routes, not a diff of the snapshot. If the check fails, the fix is in
+the fragment, the route table, or the allowlist.

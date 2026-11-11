@@ -1,0 +1,153 @@
+{
+  "runtimeSource": "6dd3567a911f9f100a8f170da4ea66b7d520bd21",
+  "testReconciliationSource": "21782bcd2d3be18a55391e449985d018ae0a40fa",
+  "productionCalls": false,
+  "deployed": false,
+  "defaultOracleRemainsMandatory": true,
+  "fingerprintScope": "Explicit T0 snapshot: captured exact admission row plus proven-empty scratch, all other applicationTables literal. Not equivalence to later literal live control.",
+  "native": {
+    "source": "6dd3567a911f9f100a8f170da4ea66b7d520bd21",
+    "actualNative": true,
+    "actualCLI": true,
+    "seedMessages": 32,
+    "postCount": 385,
+    "coveragePosts": 339,
+    "cleanupPosts": 46,
+    "cleanupRevision": 45,
+    "cleanupTotal": 663,
+    "zeroGuards": 0,
+    "zeroWorkspace": 0,
+    "exactT0Fingerprint": true,
+    "lostAckExactRetry": true,
+    "coldCleanupResume": true,
+    "publicationRetryImmutable": true,
+    "coldUsefulWorkMessageRetry": true,
+    "lostRequestSha256": "5585777954481e748a5361e33f046572500950c307ac917a283c82ca716b5448"
+  },
+  "reportRequestMaxima": {
+    "statements": 472,
+    "rowsRead": 58533,
+    "rowsWritten": 53,
+    "bytes": 1387228,
+    "drops": 6,
+    "unknown": 0,
+    "requests": 260,
+    "totalRowsRead": 14673677
+  },
+  "nodeResults": [
+    {
+      "scope": "own composed focused",
+      "tests": 46,
+      "pass": 46,
+      "exit": 0
+    },
+    {
+      "scope": "root four failures targeted reconciliation only",
+      "tests": 15,
+      "pass": 15,
+      "exit": 0,
+      "command": "/opt/homebrew/bin/node --test tests/recovery-report-source.test.mjs tests/recovery-reminder-continuation.test.mjs"
+    }
+  ],
+  "artifacts": [
+    {
+      "original": "/tmp/report19-composed-node-final-1102.log",
+      "artifact": "report19-composed-node-final-1102.log.gz",
+      "bytes": 36280,
+      "sha256": "83c18d5b0de1b99e686f8530dd11c6b9477e4c1b893e90b67e33c2ccfd17bf86",
+      "gzipSha256": "d5bb262e7580489681c250e46dfaadb0974539e16f298cabac6b14839b0b753f"
+    },
+    {
+      "original": "/tmp/report19-composed-four-fixes-final-1102.log",
+      "artifact": "report19-composed-four-fixes-final-1102.log.gz",
+      "bytes": 12448,
+      "sha256": "d4f57c69dfaafce3c3e1ffd0332831bba3b0919f7b1cc3b2234626123ac75e76",
+      "gzipSha256": "a694867bb61296bec85533aec10fda026d2c9b7b8ddd2eae023ea69151918586"
+    },
+    {
+      "original": "/tmp/report19-correctness-native-1102.log",
+      "artifact": "report19-correctness-native-1102.log.gz",
+      "bytes": 69075,
+      "sha256": "3d47e0b44a38fbe58d0f9132941f560e165c9b935a8923c723c417aa9125a806",
+      "gzipSha256": "a47be7c0c592e5e18ca0978a21a3f7bf0c06ee629592d0e81c1d4872acb84914"
+    },
+    {
+      "original": "/tmp/report-production-source-native-1102.log",
+      "artifact": "report-production-source-native-1102.log.gz",
+      "bytes": 1292,
+      "sha256": "0158877858fe1442e21470be01277ceff0d13cad19c424cfbc884593569b5cd3",
+      "gzipSha256": "a788ec0ef1084b78c98c62df182aea7e1de7646c01bbae6ea831bd5c5cfd01d9"
+    },
+    {
+      "original": "/tmp/report19-driver-node-1102.log",
+      "artifact": "report19-driver-node-1102.log.gz",
+      "bytes": 1096,
+      "sha256": "bac7a58a217cd868d854f7db2bd41e960aa2b10689a068e48ad509f3965d9c09",
+      "gzipSha256": "32d2d8a113899eee87ec8e3ccd7c193d4db0af0787bb1f9366ecee5160d17885"
+    },
+    {
+      "original": "/tmp/report19-driver-workspace-node-1102.log",
+      "artifact": "report19-driver-workspace-node-1102.log.gz",
+      "bytes": 617,
+      "sha256": "62394584e61123627ce77df9b39bb65d06ee03f0f21a56d209e746f6a65a3133",
+      "gzipSha256": "92d3bf3f4ec654b29f823bdb988b68e7de7015323f7b72527acc28b8d4b32b3e"
+    },
+    {
+      "original": "/tmp/report19-operator-cleanup-node-1102.log",
+      "artifact": "report19-operator-cleanup-node-1102.log.gz",
+      "bytes": 21615,
+      "sha256": "8950fb5bc5cc9a3f8fba48fedf12cfd9a6f2a485ca522ea188e6d41a7403b2dc",
+      "gzipSha256": "83a757e78af2f9142c8a3f5d3b20edff3ae77319cc1cf0a08971cf2c3c9d08a7"
+    },
+    {
+      "original": "/tmp/report19-restore-relocation-node-1102.log",
+      "artifact": "report19-restore-relocation-node-1102.log.gz",
+      "bytes": 2467,
+      "sha256": "f53aa2dfa94e4b6d9b06d526c486bc13adde6e7c044bf1c7a5c2771a818fdf11",
+      "gzipSha256": "680e2b5601ceb80919a5332d1573582168ed13b1f9f95654a129678d7165d306"
+    },
+    {
+      "original": "/tmp/report19-correctness-lint-final-1102.log",
+      "artifact": "report19-correctness-lint-final-1102.log.gz",
+      "bytes": 72408,
+      "sha256": "7b1a5b571b180c3b911ddd6320a263299c0fe2f3a7eac79c2f686fbc0b21b30c",
+      "gzipSha256": "3e84743e0cc073d8bdc2663ac2f54e3b6542774db295aed3aabddd595105a7b7"
+    },
+    {
+      "original": "/tmp/report19-scan-final-1102.log",
+      "artifact": "report19-scan-final-1102.log.gz",
+      "bytes": 53,
+      "sha256": "8d1197f362ad83578123d0b0807503fdb7c1d3fa4a12f3452e8ec8cb8b017d1a",
+      "gzipSha256": "7a7669731820675c769cf1de89074d3f6ea19483eb1061493548dd50509ae481"
+    },
+    {
+      "original": "/tmp/report-production-source-native-controller-red-1102.log",
+      "artifact": "report-production-source-native-controller-red-1102.log.gz",
+      "bytes": 1686,
+      "sha256": "5f63c8bd31758a1825e7d595fc467d34821b0ec503d4dae8bc8e2ddab76df8d4",
+      "gzipSha256": "d998e53dfa78d3042b1776a709d40ff7eddfbe6080f61257f6058fa0be196b13"
+    },
+    {
+      "original": "/tmp/report-continuation-native-initial-guard-red-1102.log",
+      "artifact": "report-continuation-native-initial-guard-red-1102.log.gz",
+      "bytes": 1044,
+      "sha256": "c08f6f154b6ec4b7fccae3b919ceb5853137af78811007224a614175bebe9aa8",
+      "gzipSha256": "30cb85bc1b1bca389281834443008a9be9c0c0e77533db87c1f539741961f5fc"
+    },
+    {
+      "original": "/tmp/report19-native-operator-1102/result.json",
+      "artifact": "result.json.gz",
+      "bytes": 2790541,
+      "sha256": "7540eccaeda43fa4e3f9c8aa85e23ba1af4d2564d15752708ea7b4fed507c669",
+      "gzipSha256": "c695799dda238d8bbeb0a3e0a5e96b9561e6eab1f5ca1cc2447eb35db7a97e53"
+    },
+    {
+      "original": "/tmp/report19-evidence-scan-1102.log",
+      "artifact": "report19-evidence-scan-1102.log.gz",
+      "bytes": 53,
+      "sha256": "8d1197f362ad83578123d0b0807503fdb7c1d3fa4a12f3452e8ec8cb8b017d1a",
+      "gzipSha256": "7a7669731820675c769cf1de89074d3f6ea19483eb1061493548dd50509ae481"
+    }
+  ],
+  "evidenceSecretScanExit": 0
+}

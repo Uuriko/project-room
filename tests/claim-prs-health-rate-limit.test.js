@@ -35,6 +35,6 @@ test("an old claim-prs error under a live degraded status is marked not current"
   stored = applyOutcomes(stored, [{ job: "claim-prs", ok: true, at: NOW - 60_000, summary: { checked: 0, updated: 0, rateLimited: true } }]);
   row = jobHealthView(stored, NOW).jobs.find(job => job.name === "claim-prs");
   assert.equal(row.status, "degraded");
-  assert.match(row.lastError, /repo must be/);
+  assert.equal(row.lastError, "Job failed", "public health does not expose the historical exception text");
   assert.equal(row.lastErrorCurrent, false);
 });

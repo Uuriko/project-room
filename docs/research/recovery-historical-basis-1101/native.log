@@ -1,0 +1,233 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":49,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8306},"plugin":{"ms":21,"rowsRead":41018},"fence":{"ms":12,"rowsRead":46451},"verifies":{"ms":3,"rowsRead":21320},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":49,"clockSemantics":"io-bound","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":44,"integrity":"deferred","phases":{"schema":{"ms":11,"rowsRead":8306},"plugin":{"ms":20,"rowsRead":41018},"fence":{"ms":11,"rowsRead":46451},"verifies":{"ms":2,"rowsRead":21320},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":7}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":69}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":13}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":7}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":10}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":10}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":17}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":9}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":7}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":5,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":12}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":11}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":13}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":13}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":13}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":7}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":12}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":12}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":12}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":5,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":12}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":1}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":3}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":6,"storeInitializationMs":2}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":13}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":6}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":202,"appMs":4}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":503,"appMs":0}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":200,"appMs":53}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/operator/restore","status":200,"appMs":0}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":887},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":1,"sequences":12,"projectionBytes":131}
+{"event":"room.store_initialized","initializationMs":4,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.do_initialized","clockSemantics":"io-bound","cpuMeasured":false,"initializationMs":7,"storeInitializationMs":4}
+{"event":"room.cold_start","phase":"first_request","clockSemantics":"io-bound","cpuMeasured":false,"constructMs":3,"firstRequestMs":5,"storeInitializationMs":4,"durableObjectInitializationMs":7,"rooms":1,"sequences":12,"projectionBytes":131,"phases":{"schema":{"ms":1,"rowsRead":887},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":0,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}}}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"GET","path":"/api/ready","status":200,"appMs":5}
+{"event":"room.do_request","clockSemantics":"io-bound","cpuMeasured":false,"method":"POST","path":"/api/rooms/legacy-room/commands","status":200,"appMs":5}
+HISTORICAL_RECOVERY_NATIVE {"auditProtocol":10,"writerFormat":"normalized-current-v1-native-work-3","sourcePrefix":9,"modernTail":3,"steps":58,"interruptedLoad":true,"partialImportedEvents":0,"coldResume":true,"readinessBarrier":true,"originalHistoricalBasis":true,"replayDeferred":0,"requiredFullOracle":true,"exactResultRetry":true,"wholeRecoveryBounded":false}
+✔ actual Native cold restore consumes original historical receipt and preserves useful result (10802.161458ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10936.569167

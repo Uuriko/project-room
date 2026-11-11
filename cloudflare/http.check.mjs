@@ -168,7 +168,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
+    assert.deepEqual(leftoverHealth, { status: 'degraded', liveness: 'ok', jobs: { status: 'stale' }, mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
@@ -213,8 +213,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
     // Work delivery crosses the actual HTTP + Durable Object SQLite boundary.
+    const workLinkCode = await json(await call(`/api/identities/${identity.identityId}/link-code`, { headers: identityHeaders,
+      data: { roomId: 'commons' } }), 201);
     await json(await call('/api/rooms/commons/identity-links', { headers: ownerHeaders,
-      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'] } }), 201);
+      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'], identityLinkCode: workLinkCode.linkCode } }), 201);
     const beatWork = () => call('/api/agent-heartbeats', { headers: identityHeaders,
       data: { hostId: 'worker-work-test', mode: 'pull-only', workWakes: true } });
     assert.equal((await json(await beatWork())).host.workWakes, true);
@@ -470,6 +472,15 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal((await call('/api/rooms/commons')).status, 401);
     assert.equal((await call('/api/health', { headers: { Origin: 'https://other.example.test' } })).status, 403);
     assert.equal((await call('/api/ready', { headers: { Origin: 'https://other.example.test' } })).status, 403);
+    // Conditional context covers the composed Board read on real Workers too.
+    const cachedContext = await json(await call('/api/rooms/commons/context', { headers: ownerHeaders }));
+    await json(await call('/api/rooms/commons/work-claims', { headers: ownerHeaders,
+      data: { id: 'worker-context-new-task', title: 'A newly available Worker task' } }), 201);
+    const freshContext = await json(await call('/api/rooms/commons/context?since_version=' + cachedContext.context_version, { headers: ownerHeaders }));
+    assert.notEqual(freshContext.not_modified, true);
+    assert.notEqual(freshContext.context_version, cachedContext.context_version);
+    assert.equal(freshContext.orient.availableClaims.some(item => item.id === 'worker-context-new-task'), true);
+    assert.equal((await json(await call('/api/rooms/commons/context?since_version=' + freshContext.context_version, { headers: ownerHeaders }))).not_modified, true);
     // Untrusted forwarding headers must not select a rate-limit identity.
     for (let n = 0; n < 20; n++) await json(await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': `198.51.100.${n + 1}` } }));
     assert.equal((await call('/api/account-session', { ip: '192.0.2.9', headers: { 'X-Room-Visitor-IP': '198.51.100.99' } })).status, 429);
@@ -673,8 +684,11 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
     const { ownerKey } = await json(await call('/__test-provision'));
     const peer = await json(await call('/api/agent-identities', { displayName: 'Workers wake agent' }), 201);
     const ownerHeaders = { Authorization: `Bearer ${ownerKey}` }, identityHeaders = { Authorization: `Bearer ${peer.secret}` };
+    const peerLinkCode = await json(await call(`/api/identities/${peer.identityId}/link-code`, {
+      roomId: 'commons'
+    }, identityHeaders), 201);
     await json(await call('/api/rooms/commons/identity-links', {
-      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: []
+      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: [], identityLinkCode: peerLinkCode.linkCode
     }, ownerHeaders), 201);
     const key = await json(await call('/api/agent-keys', { scopes: ['heartbeats:report', 'heartbeats:read'] }, identityHeaders), 201);
     const peerHeaders = { Authorization: `Bearer ${key.credential}` };

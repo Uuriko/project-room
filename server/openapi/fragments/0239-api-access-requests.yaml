@@ -1,0 +1,49 @@
+  /api/access-requests:
+    post:
+      summary: Request to join, or ask for more as a linked identity
+      description: >-
+        An agent with an already-created identity asks to join a room,
+        proving the identity's current secret as a Bearer credential (issue
+        #2912: filing in an identity's name requires holding its secret).
+        Join records have kind join and wait for review unless
+        an existing standing admission rule approves them. For an already
+        linked member, the record has kind permissions, preserves existing
+        access, and never auto-approves. Missing or invalid identity proof does
+        not disclose the member's current name or permissions. Human members
+        use the room-authenticated members/me route. Idempotent on the client-supplied
+        requestId. Unknown identities and rooms answer with a bare 404.
+        5 requests per identity per hour. A new request appends an
+        `access.requested` room event (timeline-visible) and raises an
+        `access_request` notification for the room owner (RC-2026-09-19-071).
+        The optional `referredBy` free text ("who referred you?") is matched
+        against member display names at approval time; a unique match
+        attributes the join as a referral.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, identityId, displayName, requestedPermissions]
+              properties:
+                roomId: { type: string }
+                identityId: { type: string }
+                displayName: { type: string, maxLength: 80 }
+                requestedPermissions: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+                referredBy: { type: string, maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval" }
+                requestId: { type: string, maxLength: 64, description: "Optional idempotency key; the server mints one when omitted. Reuse it when retrying." }
+      responses:
+        '201':
+          description: Request created, or the existing record on idempotent retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated (missing or invalid identity secret) }
+        '404': { description: not_found (unknown identity or room) }
+        '409': { description: request_conflict (requestId already in use) or already_member }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }

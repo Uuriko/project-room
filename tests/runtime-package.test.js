@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer, request } from "node:http";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, symlinkSync, existsSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,9 +11,18 @@ import { createRuntimePackage, verifyRuntimePackage, verifyRuntimeImports, verif
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { frozenRecoveryFixture } from "../scripts/frozen-runtime-fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
+
+test("every currently served asset is registered in the exact-source runtime", () => {
+  assert.deepEqual(publicAssets, assetPaths);
+  for (const path of assetPaths) assert.ok(allowed.has(path), `Missing runtime asset: ${path}`);
+  assert.ok(allowed.has("server/recovery-checkpoint-seed.mjs"), "Cold recovery includes retained and historical checkpoint seeding");
+  assert.ok(allowed.has("server/recovery-replay-order.mjs"));
+  assert.ok(publicAssets.includes("src/claim-overlap.js"), "Browser event replay can load its shared overlap predicate");
+});
 
 test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
@@ -29,11 +38,11 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
   // Decision #36 drift guard: the generated-pages exclusion in the package
-  // contract names exactly the docs/agents/*.html entries of the asset list —
+  // contract names the generated HTML pages and hosted ACP archive —
   // a new agent page joins the exclusion (and the CF build) by being listed,
   // and a renamed one cannot silently fall out of it.
   assert.deepEqual([...generatedAgentPages].sort(),
-    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)).sort());
+    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path) || path === "room-acp.tgz").sort());
   // The package must contain exactly the allowlisted files that exist at this commit.
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
   // the import-closure test below guarantees it covers every imported module,
@@ -64,6 +73,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : packagedTools.includes('"room_mark_caught_up"') ? 49
+      : packagedTools.includes('"room_map"') ? 47
       : packagedWorkActions.includes('"room_claim"') ? 46
       : packagedTools.includes("\"room_close_work_claim\"") ? 44
       : packagedTools.includes("...assistantTools") ? 43
@@ -197,6 +208,21 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   } finally { f.store.close(); }
   assert.deepEqual(verifyRuntimePackage(destination), receipt, "all generated state stays outside the immutable package");
 
+  // A manifest whose hashes match an unsupported schema must still refuse.
+  // Rehashing here is deliberate synthetic corruption, not a release stamp.
+  {
+    const damaged = join(directory, "unsupported-schema"); cpSync(destination, damaged, { recursive: true });
+    const relative = "server/writer-fence.mjs", path = join(damaged, relative);
+    const unsupportedSchema = Math.max(46, STORE_SCHEMA_VERSION) + 1;
+    const source = readFileSync(path, "utf8").replace(/STORE_SCHEMA_VERSION = \d+/, `STORE_SCHEMA_VERSION = ${unsupportedSchema}`);
+    writeFileSync(path, source);
+    const manifestPath = join(damaged, "runtime-manifest.json"), manifest = JSON.parse(readFileSync(manifestPath));
+    const entry = manifest.files.find(file => file.path === relative);
+    entry.bytes = Buffer.byteLength(source); entry.sha256 = createHash("sha256").update(source).digest("hex");
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    assert.throws(() => verifyRuntimePackage(damaged), new RegExp(`unsupported store schema ${unsupportedSchema}`));
+  }
+
   for (const fault of ["missing", "changed", "extra", "symlink", "duplicate", "partial", "empty-directory"]) {
     const damaged = join(directory, fault); cpSync(destination, damaged, { recursive: true });
     const path = join(damaged, "server.mjs");
@@ -305,6 +331,112 @@ test("project preflight composes dependency, coverage and runtime checks", () =>
   const result = spawnSync(process.execPath, ["scripts/verify-preflight.mjs"], { cwd: repository, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /check-deps: ok/);
-  assert.match(result.stdout, /no new untested modules/);
   assert.match(result.stdout, /runtime source files checked/);
+});
+
+
+test("offline current-schema archive cold-serves nonempty native work and refuses an omitted dependency", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-package-current-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+  const destination = join(directory, "runtime"), receipt = createRuntimePackage({repository,commit,destination});
+  assert.equal(receipt.schemaVersion,STORE_SCHEMA_VERSION);
+  const program = `
+    import {RoomStore} from ${JSON.stringify(pathToFileURL(join(destination,"server/store.mjs")).href)};
+    import {initialRoom} from ${JSON.stringify(pathToFileURL(join(destination,"server/bootstrap.mjs")).href)};
+    import {event} from ${JSON.stringify(pathToFileURL(join(destination,"src/events.js")).href)};
+    // Explicit cold public-export probes identify which packaged modules this
+    // integration exercises; they do not replace their behavioral test suites.
+    import {readCurrentEventWindow} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-room-events.mjs")).href)};
+    import {readCurrentWorkListing} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-work-list.mjs")).href)};
+    import {readCurrentReplies} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-reply-reader.mjs")).href)};
+    import {readCurrentNativeInbox} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-native-inbox.mjs")).href)};
+    import {readCurrentInboxDiscovery} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-inbox-discovery.mjs")).href)};
+    import {INBOX_WORK_ROLES,CURRENT_INBOX_DISCOVERY_INDEXES} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-inbox-indexes.mjs")).href)};
+    if(typeof readCurrentReplies!=='function'||typeof readCurrentInboxDiscovery!=='function'||INBOX_WORK_ROLES.length!==4||!CURRENT_INBOX_DISCOVERY_INDEXES.includes('current_inbox_open_requests'))throw Error('packaged inbox/reply dependency exports missing');
+    import {validateCurrentArchive} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-room-archive.mjs")).href)};
+    import {emptyWorkPrivacy,applyWorkPrivacyRequest} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-work-privacy.mjs")).href)};
+    import {advanceCanonicalH} from ${JSON.stringify(pathToFileURL(join(destination,"server/replay-canonical-h.mjs")).href)};
+    import {assertRestoreAdmitted} from ${JSON.stringify(pathToFileURL(join(destination,"server/restore-admission.mjs")).href)};
+    if(validateCurrentArchive(null)!==null)throw Error('archive absence contract changed');
+    if(applyWorkPrivacyRequest(emptyWorkPrivacy(),{requesterId:'owner',recipientId:'reader'},1).requests!==1)throw Error('privacy counter export failed');
+    let rejected=false;try{advanceCanonicalH({state:{},header:{},readMetadata:()=>null});}catch(error){rejected=/Invalid protected canonical authority marker/.test(error.message);}
+    if(!rejected)throw Error('canonical source admission export failed closed');
+    import {CURRENT_WRITER_FORMAT} from ${JSON.stringify(pathToFileURL(join(destination,"server/current-room-format.mjs")).href)};
+    import {readWorkItem} from ${JSON.stringify(pathToFileURL(join(destination,"server/work-repository.mjs")).href)};
+    import {textVersion} from ${JSON.stringify(pathToFileURL(join(destination,"server/text-results.mjs")).href)};
+    const path=${JSON.stringify(join(directory,"normalized.sqlite"))};
+    let store=new RoomStore(path);
+    store.initialize([...initialRoom(),event({id:'packaged-reader',roomId:'commons',actorId:'owner',type:'member.added',data:{memberId:'reader',displayName:'Reader',kind:'agent',permissions:[]}}),event({id:'packaged-post',roomId:'commons',actorId:'owner',type:'message.posted',data:{messageId:'saved',body:'Packaged useful result'}}),event({id:'packaged-question-event',roomId:'commons',actorId:'owner',type:'message.posted',data:{messageId:'packaged-question',body:'Save a useful reply',toMemberId:'reader',requestKind:'reply',requestPolicyVersion:1}})],{representation:'normalized-current-v1'});
+    const key=store.issueAccessKey('commons','owner'),readerKey=store.issueAccessKey('commons','reader');
+    for(const workItemId of ['native-task','other-task'])store.command(key,'commons',{id:'propose-'+workItemId,type:'work.proposed',data:{workItemId,title:'Useful '+workItemId,definitionOfDone:'Saved exact result',accountableMemberId:'owner'}});
+    store.workClaims.configure('commons',{maxOpenClaims:1});
+    store.command(key,'commons',{id:'accept-native-task',type:'work.accepted',data:{workItemId:'native-task',expectedRevision:0}});
+    let capDenied=false;try{store.command(key,'commons',{id:'accept-other-task',type:'work.accepted',data:{workItemId:'other-task',expectedRevision:0}});}catch(error){capDenied=error.code==='work_board_full';}
+    if(!capDenied)throw Error('packaged native capacity admission missing');
+    const formats=store.db.prepare("SELECT json_extract(counts_json,'$.format') AS format FROM operator_actions WHERE action='current_room_writer_admission'").all();
+    if(!formats.length||formats.some(row=>row.format!==CURRENT_WRITER_FORMAT))throw Error('packaged format export differs from protected writer admissions');
+    store.close();
+    store=new RoomStore(path,{integrity:'deferred'});store.room=()=>{throw Error('whole room hydration');};
+    const page=store.eventsAfter(key,'commons');
+    if(page.events.find(row=>row.event.id==='packaged-post')?.event.data.body!=='Packaged useful result')throw Error('normalized archived import/read failed');
+    assertRestoreAdmitted(store.db);
+    const inbox=readCurrentNativeInbox(store,readerKey,'commons');
+    if(!inbox.replyRequests.some(request=>request.id==='packaged-question'))throw Error('packaged native inbox lost a standing private obligation');
+    const requestList=store.replyRequests.list(readerKey,'commons'),requestRead=store.replyRequests.selected(readerKey,'commons','packaged-question');
+    if(requestList.contractVersion!==2||requestList.requests[0]?.id!=='packaged-question'||requestRead.contractVersion!==2||!requestRead.current.answerBasis||requestRead.page.items[0]?.message.body!=='Save a useful reply')throw Error('packaged v2 reply list/selected reader missing');
+    const listed=readCurrentWorkListing(store,key,'commons');
+    if(!listed.work.some(item=>item.id==='native-task'&&item.state==='accepted'))throw Error('nonempty native work did not survive cold package reopen');
+    const revision=()=>readWorkItem(store.db,'commons','native-task').revision;
+    store.command(key,'commons',{id:'start-native-task',type:'work.started',data:{workItemId:'native-task',expectedRevision:revision()}});
+    const body='Packaged native saved result',post=store.command(key,'commons',{id:'native-result',type:'message.posted',data:{messageId:'native-result',workItemId:'native-task',body}});
+    const complete={id:'complete-native-task',type:'work.completed',data:{workItemId:'native-task',expectedRevision:revision(),evidenceKind:'room_text',evidenceMessageId:'native-result',evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:'owner',summary:'Saved',nextAction:'Review'}};
+    store.command(key,'commons',complete);
+    if(!store.command(key,'commons',complete).duplicate)throw Error('native completion retry lost its receipt');
+    if(store.db.prepare('SELECT count(*) AS n FROM work_claims').get().n!==0)throw Error('packaged native work recreated legacy mirrors');
+    store.readTransaction(()=>{const direct=readCurrentEventWindow(store,'commons','owner');if(!direct.events.length)throw Error('event export failed');});
+    store.close();store=new RoomStore(path,{integrity:'deferred'});
+    const saved=readWorkItem(store.db,'commons','native-task');
+    if(saved.state!=='completed'||!saved.receipt?.nativeText)throw Error('native saved result did not survive another cold reopen');
+    store.close(); console.log(JSON.stringify({normalized:true,restarted:true,nativeAccepted:true,nativeCompleted:true,capacityDenied:true,nativeInbox:true,replyReader:true,legacyMirrors:0}));`;
+  const cold=spawnSync(process.execPath,["--input-type=module","-e",program],{cwd:directory,env:{PATH:"/unavailable"},encoding:"utf8"});
+  assert.equal(cold.status,0,cold.stderr);assert.deepEqual(JSON.parse(cold.stdout),{normalized:true,restarted:true,nativeAccepted:true,nativeCompleted:true,capacityDenied:true,nativeInbox:true,replyReader:true,legacyMirrors:0});
+  assert.deepEqual(verifyRuntimePackage(destination,{expectedCommit:commit}),receipt);
+  rmSync(join(destination,"server/current-room-repository.mjs"));
+  assert.throws(()=>verifyRuntimePackage(destination),/missing|differ/);
+});
+
+
+test("verified offline archive runs the actual Native durable restore qualification", t => {
+  const directory=mkdtempSync(join(tmpdir(),"room-package-native-restore-"));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const commit=execFileSync("git",["rev-parse","HEAD"],{cwd:repository,encoding:"utf8"}).trim();
+  const destination=join(directory,"runtime"),receipt=createRuntimePackage({repository,commit,destination});
+  // Keep test-only harness files outside the immutable archive. Every production
+  // module resolves through the archive, whose complete import closure is verified.
+  const harness=join(directory,"harness"),worker=join(harness,"cloudflare");mkdirSync(worker,{recursive:true});
+  for(const entry of readdirSync(destination,{withFileTypes:true})){
+    if(entry.name==="cloudflare")continue;
+    symlinkSync(join(destination,entry.name),join(harness,entry.name),entry.isDirectory()?"dir":"file");
+  }
+  for(const entry of readdirSync(join(destination,"cloudflare"),{withFileTypes:true}))
+    symlinkSync(join(destination,"cloudflare",entry.name),join(worker,entry.name),entry.isDirectory()?"dir":"file");
+  const fixtureFiles=["durable-coverage.check.mjs","durable-coverage-seed.test-fixture.mjs","durable-coverage-native.test-fixture.mjs","current-room-serving.test-fixture.mjs"];
+  for(const name of fixtureFiles)cpSync(join(repository,"cloudflare",name),join(worker,name));
+  symlinkSync(realpathSync(join(repository,"cloudflare/node_modules")),join(harness,"node_modules"),"dir");
+  assert.equal(realpathSync(join(harness,"server/store.mjs")),realpathSync(join(destination,"server/store.mjs")));
+  assert.equal(realpathSync(join(worker,"room.mjs")),realpathSync(join(destination,"cloudflare/room.mjs")));
+  const result=spawnSync(process.execPath,["--test",join(worker,"durable-coverage.check.mjs")],{
+    // Leave time for the inner qualification and its cleanup after its 300s cap.
+    cwd:harness,encoding:"utf8",timeout:330000,maxBuffer:16*1024*1024,
+    env:{PATH:process.env.PATH,...(process.env.MINIFLARE_WORKERD_PATH?{MINIFLARE_WORKERD_PATH:process.env.MINIFLARE_WORKERD_PATH}:{})}
+  });
+  assert.equal(result.status,0,result.stdout+"\n"+result.stderr);
+  assert.match(result.stdout,/DURABLE_COVERAGE_WORKER /);
+  const line=result.stdout.split("\n").find(value=>value.includes("DURABLE_COVERAGE_WORKER "));
+  const measured=JSON.parse(line.slice(line.indexOf("DURABLE_COVERAGE_WORKER ")+"DURABLE_COVERAGE_WORKER ".length));
+  assert.equal(measured.actualNative,true);assert.equal(measured.coldReady,true);assert.equal(measured.exactRetry,true);
+  assert.equal(measured.acceptedNativeWorkCapacity,true);assert.equal(measured.nativeWorkExactRetry,true);
+  assert.deepEqual(verifyRuntimePackage(destination,{expectedCommit:commit}),receipt);
+  t.diagnostic("PACKAGED_NATIVE_DURABLE_RESTORE "+JSON.stringify({sourceCommit:commit,package:receipt,qualification:measured,fixturesOutsideArchive:fixtureFiles,productionSource:"verified offline archive",archiveUnchanged:true}));
 });

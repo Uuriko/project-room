@@ -1,0 +1,180 @@
+✔ runtime and schema pins are exact and deterministic (2.869292ms)
+✔ file pins change when bytes change and are sorted (3.420291ms)
+✔ CI runtime must satisfy engines.node (1.668041ms)
+✔ schema pin refuses a missing version marker (1.858583ms)
+✔ drift names the changed file, added file and removed file (1.919959ms)
+✔ drift refuses malformed manifests without reading sections (0.085625ms)
+✔ frozen deployment manifest pins the recovery helper and production workflow bytes (0.846458ms)
+✖ committed candidate manifest has zero drift from the tree (21.041666ms)
+✔ every currently served asset is registered in the exact-source runtime (0.984417ms)
+✖ exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data (6587.214417ms)
+✖ every module in the server import closure is in the runtime-package allowlist (22.113584ms)
+✖ uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies (6045.21275ms)
+✖ Codex host entrypoint and every dependency ship without scratch demo fixtures (4.257625ms)
+✔ runtime preflight catches unregistered client imports before cold packaging (0.503458ms)
+✖ runtime preflight checks the working source without making a package (43.362333ms)
+✖ project preflight composes dependency, coverage and runtime checks (444.815459ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 9
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13205.673792
+
+✖ failing tests:
+
+test at tests/candidate-manifest.test.js:89:1
+✖ committed candidate manifest has zero drift from the tree (21.041666ms)
+  AssertionError [ERR_ASSERTION]: candidate manifest drift (run: node scripts/candidate-manifest.mjs --write): storeSchemaVersion, assets:src/events.js, assets:src/reply-requests.js, deployment:cloudflare/room.mjs, deployment:cloudflare/storage.mjs
+  + actual - expected
+  
+  + [
+  +   'storeSchemaVersion',
+  +   'assets:src/events.js',
+  +   'assets:src/reply-requests.js',
+  +   'deployment:cloudflare/room.mjs',
+  +   'deployment:cloudflare/storage.mjs'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/candidate-manifest.test.js:100:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'storeSchemaVersion', 'assets:src/events.js', 'assets:src/reply-requests.js', 'deployment:cloudflare/room.mjs', 'deployment:cloudflare/storage.mjs' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/runtime-package.test.js:23:1
+✖ exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data (6587.214417ms)
+  Error: Runtime package does not match its exact allowlisted contract: unsupported store schema 45 or missing package.json engines.node
+      at check (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:472:25)
+      at runtimeMetadata (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:483:3)
+      at createRuntimePackage (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:627:19)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:28:17)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/runtime-package.test.js:223:1
+✖ every module in the server import closure is in the runtime-package allowlist (22.113584ms)
+  AssertionError [ERR_ASSERTION]: Imported but not allowlisted for the runtime package. Add to scripts/runtime-package.mjs: server/current-legacy-work-gate.mjs, server/current-room-archive.mjs, server/current-room-repository.mjs, server/current-work-list.mjs, server/current-work-privacy.mjs, server/current-work-summary.mjs, server/replay-canonical-h.mjs, server/replay-canonical-plan.mjs, server/restore-admission.mjs, src/current-record-context.js
+  + actual - expected
+  
+  + [
+  +   'server/current-legacy-work-gate.mjs',
+  +   'server/current-room-archive.mjs',
+  +   'server/current-room-repository.mjs',
+  +   'server/current-work-list.mjs',
+  +   'server/current-work-privacy.mjs',
+  +   'server/current-work-summary.mjs',
+  +   'server/replay-canonical-h.mjs',
+  +   'server/replay-canonical-plan.mjs',
+  +   'server/restore-admission.mjs',
+  +   'src/current-record-context.js'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:231:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'server/current-legacy-work-gate.mjs', 'server/current-room-archive.mjs', 'server/current-room-repository.mjs', 'server/current-work-list.mjs', 'server/current-work-privacy.mjs', 'server/current-work-summary.mjs', 'server/replay-canonical-h.mjs', 'server/replay-canonical-plan.mjs', 'server/restore-admission.mjs', 'src/current-record-context.js' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/runtime-package.test.js:235:1
+✖ uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies (6045.21275ms)
+  Error: Runtime package does not match its exact allowlisted contract: unsupported store schema 45 or missing package.json engines.node
+      at check (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:472:25)
+      at runtimeMetadata (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:483:3)
+      at createRuntimePackage (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:627:19)
+      at candidateRuntimeFixture (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/candidate-runtime-fixture.mjs:11:3)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:238:21)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+
+test at tests/runtime-package.test.js:280:1
+✖ Codex host entrypoint and every dependency ship without scratch demo fixtures (4.257625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'src/current-record-context.js'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:283:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'src/current-record-context.js' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/runtime-package.test.js:303:1
+✖ runtime preflight checks the working source without making a package (43.362333ms)
+  Error: Runtime package does not match its exact allowlisted contract: server/store.mjs imports "./restore-admission.mjs" (resolves to server/restore-admission.mjs), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs
+      at check (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:472:25)
+      at verifyRuntimeImports (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:589:7)
+      at verifyRuntimeSource (file:///Users/johnpotter/src/pr-current-events-reader-1101/scripts/runtime-package.mjs:602:3)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:304:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at tests/runtime-package.test.js:310:1
+✖ project preflight composes dependency, coverage and runtime checks (444.815459ms)
+  AssertionError [ERR_ASSERTION]: New server modules without any test reference (add tests, do not extend the grandfather list):
+    current-room-archive.mjs
+    current-room-events.mjs
+    current-work-list.mjs
+    current-work-privacy.mjs
+    replay-canonical-h.mjs
+    restore-admission.mjs
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-current-events-reader-1101/tests/runtime-package.test.js:312:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

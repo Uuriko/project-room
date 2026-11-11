@@ -1,0 +1,81 @@
+{
+  "sourceHead": "fe6f1fbf4f9e7e277ffa755b237eef683a7d5e64",
+  "command": "/Users/johnpotter/.local/bin/node --test cloudflare/remote-driver-native.check.mjs",
+  "exitCode": 0,
+  "pass": 1,
+  "fail": 0,
+  "skip": 0,
+  "durationMs": 5889.040708,
+  "actualNative": true,
+  "actualCLI": true,
+  "dataset": {
+    "seedMessages": 32,
+    "acceptedWork": 1,
+    "privateReplyRequest": 1,
+    "legalHistoryTimestampBytes": 160029
+  },
+  "result": {
+    "source": "fe6f1fbf4f9e7e277ffa755b237eef683a7d5e64",
+    "actualNative": true,
+    "actualCLI": true,
+    "seedMessages": 32,
+    "postCount": 123,
+    "coveragePosts": 77,
+    "cleanupPosts": 46,
+    "cleanupRevision": 45,
+    "cleanupTotal": 663,
+    "zeroGuards": 0,
+    "lostAckExactRetry": true,
+    "coldCleanupResume": true,
+    "publicationRetryImmutable": true,
+    "coldUsefulWorkMessageRetry": true,
+    "lostRequestSha256": "d57e53efa5702cfb21a1ab1819e581874144b61633997cc9d01b6590a6eb8973"
+  },
+  "sourceFiles": {
+    "scripts/restore-room-backup.mjs": "c6bcaa2521502b5cf3f6881cb335edb99b608ccaf777f53dd85e412f9b738bae",
+    "scripts/restore-remote-continuation.mjs": "a3cf9cdaaaa00a65b609b4d3200107fea67aa25a695229bfb68fdb5c620d07a4",
+    "server/restore-cleanup.mjs": "32b220c3dbf2460236260410d6e2a9ee555508edde63f2c017c1620cd07b307e",
+    "server/restore-ndjson.mjs": "61a537f374998876e8b166f8e9f5fea1dee1f5747abf6cc5a9e6256e3fc41c56",
+    "cloudflare/durable-coverage-seed.test-fixture.mjs": "d264e2050e41960377e80d00c5e98b2bb2e73cd52969a72eb0c081653c76b7ef",
+    "cloudflare/durable-coverage-native.test-fixture.mjs": "d8dcd37619ae2f821662a772d6803d306b1cbc828bdeb346c9f6fa77a2907a7a",
+    "cloudflare/remote-driver-native.check.mjs": "5d37af9b01034b901f678e69ac34572d5457a224bdcaf2dbc45f824ffc8042a2"
+  },
+  "postTestFixtureOnlyChanges": [
+    "Synthetic tokens expressed as joined explicitparts, asserted byte-equivalent to tested fixed values; initialscanner falsepositive retained, correctedscan1850files0findings.",
+    "Ensure outputreceipt directory exists; syntaxcheck0. No production/driver/runtime changes or repeated benchmark."
+  ],
+  "scope": [
+    "Existingseedfixturecompiledwithmessagecount32instead1000, allotheredge/usefulwork/privatehistorycodepreserved.",
+    "ActualNodeCLI fixedPOST path throughloopbackHTTPbridge toactualNativeoperatorAPI.",
+    "Checkpointpendingbody verifieddurablebeforeeveryPOST. FirstcleanupACKdroppedafterNativecommit; coldrestartthenexactrequest/responsebytesverified.",
+    "Finalzero verifiedguardproof, immutablepublicationretryaftercleanup, coldmessage/taskexactidentityretry.",
+    "663guards inthisfixture, not666fromearlierlargefixture.45cleanupbatches +1lostACKretry.",
+    "No productioncalls, uploadtonewexistingservice, deployment, runtimecodechanges, or whole-recoveryboundedclaim. Fulloracle remainsmandatory."
+  ],
+  "artifacts": {
+    "run.log": {
+      "bytes": 24139,
+      "sha256": "e1e3d3e66356c7e3fb8a35ee545887562e9f02bbb7258fdd18f102a1121d5752"
+    },
+    "result.json": {
+      "bytes": 19561,
+      "sha256": "63921c101ae242bacb0a7f57039b38fc2338fc106648de825605e1339fb5e0b8"
+    },
+    "lint.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "secret.log": {
+      "bytes": 204,
+      "sha256": "deabeb5060d4ded5467a99e57475699b1de7743750cd26339ecad2e860f7b8ef"
+    },
+    "secret-cured.log": {
+      "bytes": 53,
+      "sha256": "446c084a6d892717fb9513d188260dfb0c2a41932d4bd3aff936fe9cabe05b0c"
+    },
+    "value-equivalence.log": {
+      "bytes": 41,
+      "sha256": "6e87160cc9bacb37baeda63f86c060d3ba461a88a424eddb8bf415c64e1db8fb"
+    }
+  }
+}

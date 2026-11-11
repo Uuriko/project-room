@@ -1,0 +1,67 @@
+{
+  "source": "09bfd60cd",
+  "parent": "9358611d0",
+  "scope": [
+    "cloudflare/private-large-selected.check.mjs",
+    "tests/boot-graph-allowlist.json"
+  ],
+  "productionChanges": false,
+  "cause": {
+    "privateSelected": "Authorized recipient returns200 with the repaired maximum body, but check still expected409; failure preceded unrelated privacy loops. Independent local before reproduces200!=409. Separate thread output remains explicit413.",
+    "bootGraph": "New large-message input fixture imports the existing mitigation ProjectRoom wrapper; one exact fixture-only module was unregistered."
+  },
+  "after": {
+    "cloudflareChecks": 3,
+    "cloudflarePass": 3,
+    "productionModules": 536,
+    "fixtureUnionModules": 552,
+    "fixtureOnlyAllowlisted": 16,
+    "residual": 0,
+    "nodeBootChecks": 2,
+    "nodeBootPass": 2
+  },
+  "preserved": [
+    "All unrelated conversation/thread/pin/thread-mute/read-horizon/attachment404 comparisons and private-body absence assertions.",
+    "Cold reopen and since-join equal-instant/source-order boundaries.",
+    "Exact production/fixture graph equality; one named harness owner/reason, no wildcard or shipped module exemption."
+  ],
+  "logs": [
+    {
+      "path": "/tmp/root-5821-old-cloudflare-failure-1103.log",
+      "sha256": "1281d72ff3cc639ac985230245df49bed30beffd50f7e4a1ec3779558cd05667",
+      "bytes": 1439146,
+      "counts": {}
+    },
+    {
+      "path": "/tmp/current-message-private-hosted-before-1103.log",
+      "sha256": "a5e6ce37400a095266b4f7fb7dfdc13a149a82932a121ca2fdc217d2a9af12fb",
+      "bytes": 202210,
+      "counts": {
+        "tests": 2,
+        "pass": 1,
+        "fail": 1
+      }
+    },
+    {
+      "path": "/tmp/current-message-hosted-contracts-after-1103.log",
+      "sha256": "ed8aa26fffd29d25561c2403a31324d90e1feda9daade4f55c4ce0808acf27fd",
+      "bytes": 6389,
+      "counts": {
+        "tests": 3,
+        "pass": 3,
+        "fail": 0
+      }
+    },
+    {
+      "path": "/tmp/current-message-hosted-node-boot-1103.log",
+      "sha256": "12ad3b7e7a0b9303f9fb41d8be7e09e01a9711b859e28bd4f05356eb88cd8b15",
+      "bytes": 1534,
+      "counts": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0
+      }
+    }
+  ],
+  "limitations": "Local synthetic validation only; no production operations or full-suite rerun."
+}

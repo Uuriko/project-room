@@ -1,0 +1,122 @@
+{
+  "base": "e5ef9f7dcb6c2ccb8816072a914b2c2e9ac5a015",
+  "runtime": "e7e4e4d0db09530b1bf7c078f4ad90270d5449e2",
+  "finalSourceTests": "c13949d96901b5e71790959f7833c9ea246d7b26",
+  "sourceSha256": {
+    "cloudflare/current-work-supersession.check.mjs": "7667d0fcf16bc9f96418d1fc6b4d10373388fa826bf06e26b28df6296b90f2e9",
+    "cloudflare/current-work-supersession.test-fixture.mjs": "5f8358bfff1642b183bd0623539049bfd2b9dedf69b01b46ea0b8d413bbe814b",
+    "server/current-room-repository.mjs": "ccbdb76db8caaef32ad14af39ec68d4ba6a33a0830ea5abf3dc302e4f9372a54",
+    "tests/current-work-supersession.test.mjs": "0d7385b8197c97fb567ccfbdb1ea51d9291afdc6b160614eefaad37a9dad6cab",
+    "tests/helpers/current-work-supersession.mjs": "2084c752c382755ee4b6df0640e5d2f50f89f49fe7b997c4857cc219e1cd185a"
+  },
+  "logs": [
+    {
+      "name": "before",
+      "bytes": 5293,
+      "sha256": "6e49be66709c6f21e3725a099da238d8185772b6c0686e5e4c074de45dab8a7f"
+    },
+    {
+      "name": "after",
+      "bytes": 1375,
+      "sha256": "3f632f9c561433eec97e7edd553090e145ee52ecb44de5dc1cf1aea12767dbb7"
+    },
+    {
+      "name": "final-node",
+      "bytes": 4330,
+      "sha256": "8ee91399152fc8529a62c3acef78d34ecfa252f34a0be746e0e53ceaa1ba8d1d"
+    },
+    {
+      "name": "neighbors",
+      "bytes": 22971,
+      "sha256": "9f765cb5b6f57fe9a0e50afa1e26605cc3e4d482a3f193d2bb2976219cc65a9c"
+    },
+    {
+      "name": "native",
+      "bytes": 1917,
+      "sha256": "dc9233df298549e8fb50b158c43a7c641cb27f965fb641859c30f80365ace2ab"
+    },
+    {
+      "name": "native-final",
+      "bytes": 9674,
+      "sha256": "9f3b6b2f39c2f6163a6d6efe2027022d9ed00e62927209a4c79c41296b35bd4d"
+    },
+    {
+      "name": "secret",
+      "bytes": 202,
+      "sha256": "31d51d1113360a80d04eaf0fea284b4449b74858d8e350e2e8d90e186a8349fd"
+    }
+  ],
+  "checks": [
+    {
+      "command": "node --test tests/current-work-supersession.test.mjs (initial two controls, base source)",
+      "exit": 1,
+      "pass": 0,
+      "fail": 2
+    },
+    {
+      "command": "node --test tests/current-work-supersession.test.mjs (early two controls, runtime e7)",
+      "exit": 0,
+      "pass": 2,
+      "skip": 0
+    },
+    {
+      "command": "node --test tests/current-work-supersession.test.mjs (final seven controls)",
+      "exit": 0,
+      "pass": 7,
+      "skip": 0
+    },
+    {
+      "command": "node --test tests/current-work-handoff.test.mjs tests/current-work-review.test.mjs tests/current-project-continuity.test.mjs tests/workitems-migration-census.test.js tests/work-item-session.test.js",
+      "exit": 0,
+      "pass": 45,
+      "skip": 0
+    },
+    {
+      "command": "node --test cloudflare/current-work-supersession.check.mjs (initial attempted-write assertion)",
+      "exit": 1,
+      "fail": 1,
+      "reason": "Test incorrectly required zero observed attempted writes on rolled-back unauthorized command; actual6 attempts. Corrected to verify unchanged persisted ledger/commands/head; runtime unchanged."
+    },
+    {
+      "command": "node --test cloudflare/current-work-supersession.check.mjs (final persisted-effects assertions)",
+      "exit": 0,
+      "pass": 1,
+      "skip": 0
+    },
+    {
+      "command": "node scripts/secret-scan-check.mjs",
+      "exit": 1,
+      "findings": 1,
+      "path": "server/recovery-census-continuation.mjs:21",
+      "inherited": true,
+      "sameBaseBlob": "ed3b29a26d2c78da9e9d83b3e9acced639adb0ae"
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "native": "Real native SQLite Durable Object via existing DurableDatabase/RoomStore fixture, not installed desktop/native macOS client or live production.",
+  "nativeRetry": {
+    "adapterObservedRowsWritten": 0,
+    "rawRuntimePermitRowsWritten": 2
+  },
+  "nativeDenied": {
+    "attemptedAdapterRowsWritten": 6,
+    "attemptedRawPermitRowsWritten": 1,
+    "committedLedgerBefore": 3,
+    "committedLedgerAfter": 3,
+    "committedCommandsBefore": 0,
+    "committedCommandsAfter": 0,
+    "roomSequenceBefore": 13,
+    "roomSequenceAfter": 13
+  },
+  "limits": [
+    "No new grants, key rotation semantics, owner succession, account deletion or orphan protocol",
+    "Replacement contract is separately proposed and authorized by existing steer policy; no automatic assignment or acceptance",
+    "New principal does not inherit original DM-source access",
+    "Independent verifier and owner decision qualified in Node; native Worker reaches completed/pending review honestly",
+    "Current per-command 200unit/256KiB budget retained; no claim that two maximum-size work payloads always fit",
+    "No broad scaling, full production integrity, packaging, deployment or live schema45 activation claimed"
+  ]
+}

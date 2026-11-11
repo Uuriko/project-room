@@ -1,0 +1,27 @@
+{
+  "base": "2bf4cfb7d15265d6b6f690e0659a0c38a88ca25e",
+  "runtimeSource": "6edf968e1691ce9c3bc88df77dd5886f1b3911f8",
+  "affectedNodeAndPackage": {
+    "pass": 51,
+    "fail": 0
+  },
+  "nativeInvitationAndScale": {
+    "pass": 3,
+    "fail": 0
+  },
+  "browserInvitation": {
+    "pass": 3,
+    "fail": 0,
+    "widths": [
+      390,
+      1280
+    ]
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 365
+  },
+  "secretScan": "clean",
+  "productionVerified": false,
+  "fleetCutoverComplete": false
+}

@@ -19,6 +19,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { identityIdForWakeMember, memberIdForWakeIdentity } from "../server/wake-identity-resolution.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -69,9 +70,7 @@ test("a trial seat's webhook subscription receives room events; the DM fence bin
 
   // Control: a linked member identity in the same room.
   const linked = f.store.identities.create("hook-linked");
-  f.store.identities.link(ownerKey, "commons", {
-    identityId: linked.identityId, memberId: "hook-linked", displayName: "HookLinked", permissions: [],
-  });
+  linkWithProof(f.store, ownerKey, "commons", linked, { memberId: "hook-linked", displayName: "HookLinked", permissions: [] });
   // Non-member control: an identity seated in neither table.
   const stranger = f.store.identities.create("hook-stranger");
 

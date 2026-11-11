@@ -205,3 +205,29 @@ test("local time parsing rejects invalid dates and DST gaps, shows offsets and s
     assert.equal(reminderTime("hour", now), now + 3600000);
   } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });
+
+test("custom reminders choose the first future occurrence of a repeated local minute", () => {
+  const previous = process.env.TZ; process.env.TZ = "America/Los_Angeles";
+  try {
+    const custom = "2026-11-01T01:06", first = Date.parse("2026-11-01T08:06:00Z"), second = Date.parse("2026-11-01T09:06:00Z");
+    assert.equal(reminderTime("custom", Date.parse("2026-11-01T07:59:00Z"), custom), first);
+    const chosen = reminderTime("custom", Date.parse("2026-11-01T09:03:20Z"), custom);
+    assert.equal(chosen, second, "the first occurrence is past but the second is still future");
+    assert.match(formatReminderTime(chosen), /UTC−08:00/);
+    assert.equal(reminderTime("custom", first, custom), second, "an occurrence exactly at now is not future");
+    assert.ok(reminderTime("custom", second + 1, custom) <= second, "past choices are not moved to another date");
+    assert.ok(Number.isNaN(reminderTime("custom", Date.parse("2026-03-08T09:00:00Z"), "2026-03-08T02:30")), "spring gaps remain invalid");
+    assert.equal(reminderTime("custom", Date.parse("2026-11-01T09:03:20Z"), "2026-11-01T02:06"), Date.parse("2026-11-01T10:06:00Z"));
+    assert.equal(localReminderTime(custom), first, "parsing without a scheduling clock retains the first occurrence");
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+});
+
+test("custom reminder fold resolution also supports a thirty-minute offset change", () => {
+  const previous = process.env.TZ; process.env.TZ = "Australia/Lord_Howe";
+  try {
+    const chosen = reminderTime("custom", Date.parse("2026-04-04T15:03:20Z"), "2026-04-05T01:36");
+    assert.equal(chosen, Date.parse("2026-04-04T15:06:00Z"));
+    assert.match(formatReminderTime(chosen), /UTC\+10:30/);
+    assert.ok(Number.isNaN(reminderTime("custom", Date.parse("2026-10-03T15:00:00Z"), "2026-10-04T02:15")));
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+});

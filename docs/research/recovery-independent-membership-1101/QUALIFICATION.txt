@@ -1,0 +1,39 @@
+EARLY OFFLINE CHECKPOINT ONLY — runtime312b81ad6 + shared leaf f0dc0b26b.
+18 focused Node controls and one actual production Native Worker control pass.
+Native runs97 calls versus prior49 because this partial phase independently
+checks proof/payload membership then deletes its bounded working units before
+running the still-required full original audit. It is deliberately extra work
+until later census/replay/subsystem/report phases replace repeated monolithic
+checks with the SAME invariant predicates. Do not ship partial slice to main.
+
+One target-owned scratch relation; fixed source skip/export/fence inventory;
+exact guard token includes native format, audit scratch1 and planned report2.
+No new principal, credential, authorization scope, source certificate or service.
+Working units/cursor/revision/latest receipt are one synchronous transaction.
+Metadata proof keyset and independent actual-record keyset both checked; current
+receipt/hash/membership predicates come from the SAME scoped current audit reader.
+128 units/4MiB estimated quantum; source unit bounds remain. Metadata values are
+queued in a bounded batch, then only exact scratch guards suspend AFTER all
+independent reads, and are reinstalled before control checkpoint. Current schema
+cache invalidates after known owned guard recreation. Source tables stay frozen.
+Working-state cleanup is also paged. Full source/replay/audit remains required.
+
+Controls: process exit after checkpoint SQL but before commit rolls back working
+rows and cursor; committed response lost/replayed in a new process is exact;
+cold continuation advances; retained/async callback readers expire/cache clears;
+unknown SQL scratch mutations refuse; validly sealed target subsequently given
+an explicit synthetic orphan payload with exact DDL restored is refused by the
+independent membership predicate, not source equality or catalog mismatch.
+Old4aa,625 and native2-aware7a cold/warm/request-replay/exact-guard tests refuse,
+zero old suspension DROP attempts. Verified-empty experimental transitions install
+all new code-owned fences explicitly; no populated automatic adoption inference.
+Native useful accepted task/open capacity, interrupted source import, cold runtime,
+ordinary503, final required fullaudit, coldready and exact task/message retries pass.
+
+Remaining: full independent derived metadata/work/message/archive/history census;
+strict retained-checkpoint/event replay and backfill comparisons; all history and
+subsystem validators; versioned streaming report digest; durable mandatory table
+engine-check phases. Original source ingestion/seal still full-work and buffered
+64MiB route has Worker memory risk; complete objective must also qualify existing
+KV/stream immutable-manifest/parts resumability using portable SHA continuation.
+No claim that this membership phase makes whole recovery bounded or completes MVP.

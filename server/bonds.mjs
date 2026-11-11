@@ -232,8 +232,8 @@ export class Bonds {
   }
 
   _isRoomOwner(roomId, memberId) {
-    const room = this.store.room(roomId);
-    return memberId === room?.state?.room?.ownerId;
+    const authority = this.store.roomAuthority(roomId, { memberId });
+    return memberId === authority.ownerId;
   }
 
   _canRevoke(roomId, memberId, identityId, row) {
@@ -259,6 +259,52 @@ export class Bonds {
       ).all(roomId)) rows.set(row.id, row);
     }
     return Object.freeze([...rows.values()].map(row => this._public(row)));
+  }
+
+  // Native inbox uses bounded indexed source windows, before residual TTL
+  // and room filters. Existing complete inspection APIs stay independent.
+  nativeInboxForMember(roomId, memberId, limit, charge) {
+    const identityId = this.identityForMember(roomId, memberId);
+    if (!identityId) return { bondProposals: [], peerMessages: [], coverage: { bonds: { complete: true, examined: 0 }, peerMessages: { complete: true, examined: 0 } } };
+    const bound = 32, now = this.store.now(), candidates = new Map();
+    let bondsComplete = true, examinedBonds = 0;
+    for (const column of ['agent_a', 'agent_b']) {
+      const rows = this.db.prepare(`SELECT CASE WHEN length(CAST(id AS BLOB))<=200 THEN id END id,
+        length(CAST(id AS BLOB))+length(CAST(agent_a AS BLOB))+length(CAST(agent_b AS BLOB))+length(CAST(proposed_by AS BLOB))+length(CAST(proposed_scopes AS BLOB))+length(CAST(accepted_scopes AS BLOB))+length(CAST(note AS BLOB))+length(CAST(reason AS BLOB))+coalesce(length(CAST(revoked_by AS BLOB)),0)+coalesce(length(CAST(room_hint AS BLOB)),0)+512 AS bytes
+        FROM agent_bonds WHERE ${column}=? AND state='proposed' LIMIT ?`).all(identityId, bound + 1);
+      charge(rows.length * 256, rows.length);
+      if (rows.length > bound) bondsComplete = false;
+      for (const scalar of rows.slice(0, bound)) {
+        examinedBonds++;
+        if (typeof scalar.id !== 'string' || !Number.isSafeInteger(scalar.bytes) || scalar.bytes > 16384)
+          fail(409, 'current_room_context_unavailable', 'Selected bond metadata requires bounded recovery');
+        charge(scalar.bytes, 1);
+        const row = this._byId(scalar.id);
+        if (!row || row[column] !== identityId || row.state !== 'proposed') fail(409, 'current_room_corrupt', 'Selected bond source changed');
+        if (row.proposed_by !== identityId && this._effectiveState(row, now) === 'proposed') candidates.set(row.id, row);
+      }
+    }
+    const bondProposals = [...candidates.values()].sort((a,b)=>b.proposed_at-a.proposed_at).map(row => Object.freeze({
+      kind:'bond.proposal', bondId:row.id, fromIdentityId:row.proposed_by, scopes:Object.freeze(parseScopes(row.proposed_scopes)), note:row.note || null, at:row.proposed_at, roomHint:row.room_hint
+    }));
+    const source = this.db.prepare(`SELECT CASE WHEN length(CAST(message_id AS BLOB))<=200 THEN message_id END id,
+      CASE WHEN length(CAST(room_id AS BLOB))<=200 THEN room_id END room_id,
+      length(CAST(body AS BLOB))+length(CAST(room_id AS BLOB))+length(CAST(thread_id AS BLOB))+length(CAST(event_id AS BLOB))+length(CAST(from_identity_id AS BLOB))+length(CAST(to_identity_id AS BLOB))+length(CAST(message_id AS BLOB))+1024 AS bytes
+      FROM peer_dm_messages WHERE to_identity_id=? ORDER BY created_at DESC LIMIT ?`).all(identityId,bound + 1);
+    charge(source.length * 256,source.length);
+    const peerMessages=[];
+    for(const scalar of source.slice(0,bound)) {
+      if(typeof scalar.id!=='string'||typeof scalar.room_id!=='string'||!Number.isSafeInteger(scalar.bytes)||scalar.bytes>32768)
+        fail(409,'current_room_context_unavailable','Selected peer message requires bounded recovery');
+      if(scalar.room_id!==roomId||peerMessages.length>=limit)continue;
+      charge(scalar.bytes,1);
+      const row=this.db.prepare('SELECT * FROM peer_dm_messages WHERE message_id=?').get(scalar.id);
+      if(!row||row.to_identity_id!==identityId)fail(409,'current_room_corrupt','Selected peer message source changed');
+      if(row.room_id===roomId&&peerMessages.length<limit)peerMessages.push(this._publicMessage(row));
+    }
+    return {bondProposals:Object.freeze(bondProposals),peerMessages:Object.freeze(peerMessages),coverage:{
+      bonds:{complete:bondsComplete,examined:examinedBonds},peerMessages:{complete:source.length<=bound&&peerMessages.length<limit,examined:Math.min(source.length,bound)}
+    }};
   }
 
   pendingProposalsFor(identityId) {

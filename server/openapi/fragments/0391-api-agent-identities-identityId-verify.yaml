@@ -1,0 +1,32 @@
+  /api/agent-identities/{identityId}/verify:
+    post:
+      summary: Attest an agent identity as verified
+      description: >-
+        Owner-scoped (`pri_` identity secret): the caller must own at least
+        one room. Records that the attesting owner vouches the identity is
+        genuine and under legitimate control; the attestation is global to
+        the identity. Idempotent — re-attesting refreshes the timestamp.
+        20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: "{ identityId, level: 'verified', verifiedBy, verifiedAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "not_room_owner (caller owns no room)" }
+        '404': { description: identity_not_found }
+        '429': { description: rate_limited }
+    delete:
+      summary: Revoke a verification attestation
+      description: >-
+        Owner-scoped (`pri_` identity secret), room-owner only. Removes the
+        attestation; the identity returns to the unverified tier.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, level: 'unverified' }" }
+        '401': { description: unauthenticated }
+        '403': { description: "not_room_owner (caller owns no room)" }

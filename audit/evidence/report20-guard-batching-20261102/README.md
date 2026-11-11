@@ -1,0 +1,13 @@
+# Protocol 20 exact guard batching
+
+Baseline `d721a7a03fe71aa1003acb6ea3ddad7a89452bab` includes protocol20 plus envelope cure a10. Candidate `8a4bac05688a8d26a5dd88cc3d8ddfa863433dec` adds only c143 guard batching. Root already owns b1f93/a10: adopt **c14365b81d40e112ceacedd4b60bfa8ebb669640 only**, then this evidence commit; do not replay equivalent envelope commits.
+
+Both executions used the same existing synthetic32-message Native/CLI fixture with accepted work, private request and160KB atom. Each seed regenerates synthetic timestamps/credentials; this is a matched workload, not a byte-identical backup or clean elapsed-time benchmark. Both passed exact T0 whole-oracle parity, lost ACK, cold restart, zero guard/workspace cleanup, immutable publication retry, readiness and saved work/message retry. No production calls.
+
+Across260 report requests each: maximum physical reads58,533→30,957 (-47.1%); total14,673,653→7,706,107 (-47.5%); maximum statements472→454. Maximum writes53 and DROP6 unchanged. Maximum materialized JSON bytes1,390,626→1,395,394 increased slightly because batched validation returns exact tuples. Request-time raw cursor counters exclude constructor/seed/export/reference oracle; bytes are consumed JSON representation, not heap/IO/CPU. All counters known. Full route remains expensive; no speed/SLA claim.
+
+Exact mutable guard checks remain on every use. Schema binding compares type/name/table/SQL for every expected guard; suspension still checks definitions before and after DDL. Repeated single-name scans are one bounded IN query per expected set. No schema-cookie reliance, persisted admission shortcut or cross-request cache. New causal test fails6-vs2 probes on baseline and passes candidate; missing/changed/wrong-table guard refusal happens before any DROP, and save-fault rollback reinstates guards.17focusedNode tests pass,0skip; both actualNative runs1/1pass.
+
+The initial protocol20 Native failure is retained: source-only lazy skipped table metadata was rejected before any optimization. Owner's a10 cure admits the known skip contract and retains unknown-key refusal. Diagnostic output is synthetic-only. This is separate from guard performance.
+
+Commands: bundled Node `--test cloudflare/recovery-report-operator-native.check.mjs` in the exact baseline and candidate trees; Node `--test tests/restore-guard-batching.test.mjs tests/restore-schema-relocation.test.mjs tests/recovery-report-operator.test.mjs tests/recovery-report-protocol.test.mjs tests/restore-result-envelope.test.mjs tests/restore-result-envelope-protocol.test.mjs`. Exact digests and per-request counters are in receipt.json and compressed artifacts.

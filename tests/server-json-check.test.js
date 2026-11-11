@@ -19,7 +19,7 @@ test("the shipped server.json passes the offline check", () => {
   const result = checkServerJson(manifest);
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.ok(manifest.description.length <= 100);
-  assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.version, "1.2.0");
 });
 
 test("a different description of a legal length still passes", () => {
@@ -60,7 +60,7 @@ test("a non-semver version fails with version_semver", () => {
 test("the publish check refuses a version that does not increase", () => {
   const registry = {
     servers: [{
-      server: { name: manifest.name, version: "1.1.0", description: "older wording" },
+      server: { name: manifest.name, version: manifest.version, description: "same version" },
       _meta: { "io.modelcontextprotocol.registry/official": { isLatest: true } }
     }]
   };
@@ -69,6 +69,6 @@ test("the publish check refuses a version that does not increase", () => {
   assert.ok(codes(same).includes("version_not_greater"));
   const older = checkVersionIncreases({ ...manifest, version: "1.0.0" }, registry);
   assert.ok(codes(older).includes("version_not_greater"));
-  const newer = checkVersionIncreases({ ...manifest, version: "1.2.0" }, registry);
+  const newer = checkVersionIncreases({ ...manifest, version: "9999.0.0" }, registry);
   assert.equal(newer.ok, true);
 });

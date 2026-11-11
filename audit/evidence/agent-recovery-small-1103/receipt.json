@@ -1,0 +1,57 @@
+{
+  "base": "9b7eee36f9ca1c05b2629647f8a16fd2d1779fce",
+  "source": "592e709cee571b06e48e2986f71a636f43329138",
+  "heads": {
+    "5865": "5d20a28d6e0e4baf3d8c3a3e001a39ee80f020dc",
+    "5863": "99c5b7bb6a62e8cecb053907da57799051f15e68",
+    "5860": "6e4bd9864ff54e361d085f235dbfbb2603ad09e6",
+    "5852": "029f073bf98b744a6982ef094bc0653d4ee5a7f0",
+    "5847": "855303e333b2a639ff6c0be6e0ab12c65425db2f"
+  },
+  "provenance": "Five no-ff merges preserve exact author heads; no runtime conflicts. Own narrow intent correction c4b5e4c394046f1e67fb8db39b473317e7d2dfe4, manifest-only592e.",
+  "review": {
+    "5865": "Actual fullcatalog helper produced wrongwrites for send_invoice/write_file/close_connection/read_reply/get_review. Anchored four intent rows tosupported verb/object shapes; now allnull. Claim/release rows unchanged.",
+    "5863": "Qualifies open lobby vs approval-required; preserves sameidentity/nativehost approval/accessverification and no replacement-seat bypass.",
+    "5860": "Rendering only: lobby available gets primary, reconnect secondary; reconnect primary if lobby unavailable/invitation/proof. Approval/grant/nonce/scope logic unchanged.",
+    "5852": "Recovery guidance only, invalidcursor remains failure. No automatic reset/retry/checkpoint substitution; no partial answer.",
+    "5847": "Request coverage now existing open incomingrequest tool, retains completefalse and explains rooms:read scope. Followthrough and inbox-only denial tested."
+  },
+  "tests": {
+    "node": "24.22.1",
+    "pass": 119,
+    "fail": 0,
+    "skip": 1,
+    "skipReason": "Separate-host-process test requires Linux bubblewrap isolation",
+    "command": "TMPDIR=$PWD/.tmp /Users/johnpotter/.local/bin/node --test --test-concurrency=1 tests/mcp-intent-suggestions.test.js tests/agent-guide-doc.test.js tests/agent-paste-selection.test.mjs tests/agent-paste-copy.test.mjs tests/mcp-invite-oauth.test.js tests/oauth-reconnect-ux.test.mjs tests/reply-cursor-recovery.test.mjs tests/reply-agent.test.js tests/current-reply-reader.test.mjs tests/current-scoped-inbox.test.mjs",
+    "causal": "Actual fullcatalog intent control red before correction;greenafter. Initialmanifest check found onlypaste.md hashdrift; regenerated andcmpgreen.",
+    "sourceDiffCheck": "pass"
+  },
+  "limits": [
+    "No browser/Native/newprovider/livewrite/deploy; no externalhost consent qualification",
+    "No entire repository suite or package archive qualification; Root owns release gates",
+    "Small regex change intentionally favors nohint on unfamiliar verb/object combinations",
+    "Standalone PR5863 missingmanifest corrected only in owncomposition"
+  ],
+  "metadataIssue": "Prior39b entry worker health email label relaxed-no-mailer differscanonical; both DOready enforced. Metadata discrepancy only, no demonstratedauthbypass; no mail/envpolicychange.",
+  "mergeBases": {
+    "5865": "b4dfa57c19b029b19cd9391c4d3ef213096673e8",
+    "5863": "7d2609f6c086a342af68799fff5aa38dcc1574d9",
+    "5860": "e0b8309b80885fb6835e308186fcc19e004f038a",
+    "5852": "e36b384338c8c22e91d1b20ae14e86dfe6efc4e6",
+    "5847": "e1402952942a804a6e354b8d4a6b7087700e2e6e"
+  },
+  "rootQualified": {
+    "nodePass": 120,
+    "fail": 0,
+    "existingSkip": 1,
+    "nativePass": 2,
+    "nativeFail": 0,
+    "extraNegative": "Actualclaim-object control fails on peer source; anchorsreject drop_database/release_payment/take_money while preserving claim/release multiplexer.",
+    "nativeRegistration": "reply-cold-local check registered alongside current account-confirm-capacity and prior tests.",
+    "mainComposition": "cbd96ce9734b778d3c2f7a77761b93cbb6e30d4c; package script conflict preserves both Native registrations, manifest regenerated.",
+    "limits": [
+      "Node providergrant fixtures and actualMiniflare only; no newrealhostconsent oractualprovidercredentials.",
+      "Expired cursors explicitly refuse and tell caller reconcile; no persistentcursor fix orautomaticreset claimed."
+    ]
+  }
+}

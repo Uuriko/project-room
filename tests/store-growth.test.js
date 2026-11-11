@@ -77,3 +77,21 @@ test("the job returns the gauges as its summary and fails by name on a breach", 
   assert.equal(breached.maxProjectionBytes, 3_600_000);
   assert.ok(breached.rooms >= 1);
 });
+
+
+test("projection warning counts UTF-8 bytes at the exact boundary across rooms", t => {
+  const store = fixtureStore(t);
+  store.initialize(initialRoom("unicode"));
+  const limit = STORE_GROWTH_LIMITS.maxProjectionBytes;
+  // The ASCII room has more characters; the Unicode room has more bytes.
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run("a".repeat(limit - 1), "commons");
+  const prefix = "😀".repeat(Math.floor(limit / 4));
+  const atLimit = prefix + "x".repeat(limit - Buffer.byteLength(prefix));
+  for (const [projection, expectedBreach] of [[atLimit, null], [atLimit + "é", "maxProjectionBytes"]]) {
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(projection, "unicode");
+    const gauges = measureStoreGrowth(store);
+    assert.equal(gauges.maxProjectionBytes, Buffer.byteLength(projection));
+    assert.equal(storeGrowthBreach(gauges, STORE_GROWTH_LIMITS), expectedBreach);
+    assert.equal(gauges.rooms, 2);
+  }
+});

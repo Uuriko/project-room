@@ -1,0 +1,49 @@
+  /api/rooms/{roomId}/agent-grants:
+    get:
+      summary: List per-agent capability grant edges
+      description: >-
+        UFO-steal slice 1: per-agent capability grant edges. Owner or
+        grants:issue delegate (403 otherwise). Returns every grant edge in
+        the room — live, revoked, and expired — so the audit trail is
+        visible. Edges are room-local; resolution is per request, so this
+        read always reflects the latest issues and revocations.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, grants: [...], evaluatedThrough }" }
+        '403': { description: owner_required }
+    post:
+      summary: Issue a per-agent capability grant edge
+      description: >-
+        UFO-steal slice 1: per-agent capability grant edges. Owner or
+        grants:issue delegate (tier-gated, guest-denied; 403 otherwise).
+        Body is { agentId, capability, scope?, expiresAt? }. The capability
+        must be in the closed registry (422 unknown_capability otherwise).
+        Guests can never hold edges (422 grant_guest_forbidden — a grant
+        can never widen a guest beyond its pass scope). Re-issue upserts:
+        it refreshes scope/expiry and clears revoked_at. The tier matrix
+        stays the coarse gate: a t1_readonly agent's writes stay refused
+        regardless of its edges, and #1166 guest-scope denials stay
+        authoritative over grants.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, capability]
+              additionalProperties: false
+              properties:
+                agentId: { type: string, description: The agent member receiving the edge. }
+                capability: { type: string, description: "Closed-vocabulary capability name (e.g. grants:issue)." }
+                scope: { type: string, description: "Optional narrowing qualifier (colon-separated, optional :* wildcard)." }
+                expiresAt: { type: integer, description: Optional future unix-ms expiry; null means no expiry. }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ roomId, grant, evaluatedThrough }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_grant | unknown_capability | grant_guest_forbidden }

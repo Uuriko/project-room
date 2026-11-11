@@ -1,0 +1,26 @@
+{
+  "runtime": "36cf89b86",
+  "squads": {
+    "tests": 14,
+    "pass": 14,
+    "fail": 0,
+    "before": "2 hosted MCP failures; source loaded whole normalized room",
+    "coverage": [
+      "selected authority without whole-room hydration",
+      "squad mention fanout",
+      "private channel refusal",
+      "inactive member refusal",
+      "owner controls",
+      "archive write refusal",
+      "archived public channel retained"
+    ]
+  },
+  "deletionFixtureSource": "062c96733",
+  "deletionTests": 17,
+  "deletionPass": 17,
+  "limitations": [
+    "already-archived normalized erasure intentionally still refused",
+    "not full-suite or production qualification"
+  ],
+  "productionChanged": false
+}

@@ -22,6 +22,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const roundOf = c => ({ expectedClaimedAt: (c.claim ?? c).claimedAt,
   expectedHistoryLength: ((c.claim ?? c).history?.length ?? 0) + ((c.claim ?? c).historyOmitted ?? 0) });
@@ -44,8 +45,7 @@ async function fixture(t) {
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerKey });
   const enroll = name => {
     const identity = store.identities.create(name);
-    store.identities.link(ownerKey, "commons", { identityId: identity.identityId,
-      memberId: name, displayName: name, permissions: ["accept_work", "complete_work"] });
+    linkWithProof(store, ownerKey, "commons", identity, { memberId: name, displayName: name, permissions: ["accept_work", "complete_work"] });
     return { ...identity, memberId: name };
   };
   const post = async (path, body, secret) => {

@@ -12,6 +12,8 @@
 //   reverse         Per-lane reverse migration herdr -> legacy for one claim.
 //   drain-status    Open herdr sessions vs flag state (the §2 matrix, live).
 //   force-release   Operator-gated forced release of herdr sessions (claims -> unclaimed).
+//                   The operator token must belong to the claim owner, the room
+//                   owner, or a manage_claims holder — the route 403s otherwise (#2009).
 //   reap-orphans    Mark orphans per §4.4 (mark by default; kill needs --confirm).
 //   status          Overall migration state: per-room counts, cursor, last errors.
 //
@@ -682,6 +684,9 @@ Commands:
   reverse         Per-lane reverse migration herdr -> legacy for one claim.
   drain-status    Open herdr sessions vs flag state (the §2 matrix, live).
   force-release   Operator-gated forced release of herdr sessions (claims -> unclaimed).
+                  Authority: the --token operator must be the claim owner, the room
+                  owner, or hold manage_claims; the release route refuses (403)
+                  anyone else. --execute/--confirm/--reason do not grant authority.
   reap-orphans    Mark orphans per §4.4 (mark by default; kill needs --confirm).
   status          Overall migration state: per-room counts, cursor, last errors.
 
@@ -1256,11 +1261,27 @@ async function cmdDrainStatus(flags, deps) {
   return EXIT_OK;
 }
 
+
+// #2009: the release route enforces authority server-side (authorityOver in
+// server/work-claim-routes.mjs): the claim owner releases their own claim on
+// the ordinary path; anyone else must be the room owner or hold
+// manage_claims. This script cannot pre-validate that — the claim read
+// carries only the claim's `owner`, and no room-API surface returns the
+// caller token's member id or permissions, so there is nothing trustworthy
+// to compare before POSTing. What the tool can do is refuse to surface a
+// raw 403: translate it into the missing authority, named. (Tier 1 of the
+// #2009 pricing; a caller-identity surface would unlock a true pre-check.)
+export function forceReleaseAuthorityError(err, claim) {
+  if (err?.status !== 403) return null;
+  const owner = claim?.owner ? ` (held by ${claim.owner})` : "";
+  return `force-release refused (403): operator lacks authority over claim ${claim?.id ?? "?"}${owner} \u2014 release requires the operator token to belong to the claim owner, the room owner, or a member holding manage_claims. Nothing was released and nothing was journaled; re-run with an authorised operator token. Route detail: ${err.message}`;
+}
+
 async function cmdForceRelease(flags, deps) {
   if (flags.room.length === 0) failExit("force-release needs --room <id>");
   if (!flags.claim) failExit("force-release needs --claim <id>");
   if (!flags.execute) failExit("force-release is destructive: re-run with --execute --confirm --reason <text>", EXIT_SYSTEMIC);
-  if (!flags.confirm) failExit("force-release needs --confirm (operator gate)", EXIT_SYSTEMIC);
+  if (!flags.confirm) failExit("force-release needs --confirm (operator gate: attests the operator token belongs to the claim owner, the room owner, or a manage_claims holder \u2014 the release route 403s anyone else)", EXIT_SYSTEMIC);
   if (!flags.reason || !flags.reason.trim()) failExit("force-release needs --reason <text> (journaled + stamped on claim history)", EXIT_SYSTEMIC);
   const roomId = flags.room[0];
   const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
@@ -1276,7 +1297,13 @@ async function cmdForceRelease(flags, deps) {
   }
   // The normal release path (compat-plan §4.1/§4.2): claims return to unclaimed,
   // history notes the release. Never a silent drop.
-  const released = await api.releaseClaim(roomId, claim.id, flags.reason);
+  const released = await api.releaseClaim(roomId, claim.id, flags.reason).catch((err) => {
+    // #2009: a 403 here is an authority refusal, not a raw route failure —
+    // name the missing authority instead of surfacing it verbatim.
+    const authorityError = forceReleaseAuthorityError(err, claim);
+    if (authorityError) failExit(authorityError, EXIT_SYSTEMIC);
+    throw err;
+  });
   const entry = appendJournalEntry(journalPath, {
     kind: "force_release", room_id: roomId, claim_id: claim.id,
     idempotency_key: idempotencyKey(roomId, claim.id),

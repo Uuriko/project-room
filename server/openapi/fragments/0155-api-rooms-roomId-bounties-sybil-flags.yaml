@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/bounties/sybil-flags:
+    get:
+      summary: List sybil-cluster flags (slice 10)
+      description: |
+        Arbiter review queue for correlated-submission (Sybil) clusters. A
+        flag is raised when above-threshold correlation is detected between
+        submissions: >= 2 distinct lanes submitting the byte-identical
+        normalized fingerprint (copy-paste), or one lane's submissions
+        sharing submitters/evidence fingerprints with another lane across
+        >= 3 distinct bounties (claim-graph). REVIEW-ONLY: flags never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — an
+        arbiter dismisses (honest coincidence: same template, same trivial
+        task) or confirms each flag with a recorded reason. Filter by
+        lifecycle with `?status=`. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, dismissed, confirmed] }
+      responses:
+        '200':
+          description: The room's sybil flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flags:
+                    type: array
+                    items: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }

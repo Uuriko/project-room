@@ -2,6 +2,27 @@
 
 PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row keeps the head SHA, so the work can be restored with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
 
+## G2 combined
+
+Heads recorded when this work was combined into the G2 auth, identity and abuse limits pull request. Restore a source with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #4132 | C2: bind identity link codes to room + sponsor | `jill/secfix-c2-link-code-binding` | `7955a03732a6eec3e5c7eecb57f5e094ddeaf68b` | combined into the G2 auth, identity and abuse limits pull request |
+| #4140 | C3: holder proof for direct identity link | `jill/secfix-c3-link-holder-proof` | `411d5e10977e40f52d15d2c7f67b8adb4d5f8331` | combined into the G2 auth, identity and abuse limits pull request |
+| #4820 | Replay room create without minting, and rotate the onboarding token explicitly | `cursor/agent-room-token-replay-da81` | `7fbd4234f8084510350c0cab998dee4cb3dc58f8` | combined into the G2 auth, identity and abuse limits pull request |
+| #4851 | Do not mint a room token when an agent invite is redeemed again | `cursor/invite-redeem-replay-da81` | `c75421d0029ce553763e87167e30bb46a66c35ff` | combined into the G2 auth, identity and abuse limits pull request |
+| #4854 | Warn once when identity mint returns the private key | `cursor/identity-mint-private-key-da81` | `632e11e389dda6d232961cd3a2c4e2ad096ae00f` | combined into the G2 auth, identity and abuse limits pull request |
+| #4849 | Return 403 no_access when a valid identity lacks the room | `cursor/no-access-403-da81` | `7748f0b52406e6c7631dc63f133bd4b798935e68` | combined into the G2 auth, identity and abuse limits pull request |
+| #4828 | Refuse a paused agent's own writes | `cursor/pause-blocks-agent-writes-da81` | `30bbdd32cf233fe51c560e45ff57cd89c521c923` | combined into the G2 auth, identity and abuse limits pull request |
+| #4894 | Cap public agent asks per caller before the agent-wide caps | `cursor/public-ask-client-cap-102b` | `8694f14e9d812ba8785cc334fd76587c8c58c585` | combined into the G2 auth, identity and abuse limits pull request |
+| #4838 | Limit each credential's read and write bursts | `cursor/token-rate-limits-da81` | `9d8acb8be022285901204dfac9daa0c311751e59` | combined into the G2 auth, identity and abuse limits pull request |
+| #4925 | Rate-limit /sitemap.xml and cap the public room sitemap list | `jill/cure-fc5-2-sitemap-rate` | `e1c3eb9735a6ccb5120ce3c7a5f7d66d31700e5a` | combined into the G2 auth, identity and abuse limits pull request |
+| #3620 | Redact first-party credential prefixes at feedback intake | `jill/fix-feedback-scrub-first-party` | `99de5b1fd2b932064d7be8f2192396a6122f95d4` | combined into the G2 auth, identity and abuse limits pull request |
+| #4834 | Hide test agents and internal ids on the public directory | `cursor/agent-directory-cards-b7de` | `2789558690f4b0ba3161e98743f104c29b97586a` | combined into the G2 auth, identity and abuse limits pull request |
+| #4926 | Filter directory listings in SQL before LIMIT | `jill/cure-fc5-1-directory-sql` | `31a4af6af1eabb52d056be9c07f0ba819eb94d7b` | combined into the G2 auth, identity and abuse limits pull request |
+| #4749 | herdr-migrate force-release: name the missing authority on 403 | `jill/backlog-do-2009` | `e5a65228fbda567f03884e587b1dc1e8d9df7703` | combined into the G2 auth, identity and abuse limits pull request |
+
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
 | #3393 | build(deps-dev): bump wrangler from 4.116.0 to 4.149.0 in /cloudflare in the minor-and-patch group across 1 directory | `dependabot/npm_and_yarn/cloudflare/minor-and-patch-d746ffe52c` | `8e3b9430ee3ccbd011c1684b51f008abbb36128e` | stale (no commits in 24h+) and red; idea recorded in docs/ARCHIVED-WORK.md |
@@ -436,6 +457,21 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4853 | Scope webhook subscriptions to one room | `cursor/webhook-room-scope-da81` | `f976c57272b2982ee03110f1f1f9ba5bd0334332` | duplicate of #4844 |
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
+
+## G10 combined
+
+PRs folded into the G10 owner-cockpit and operator read-model pull request. Each row keeps the head SHA the combined branch was ported from.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #4008 | Owner inbox #3340: account-home Needs Attention badge + per-room deep links from overview Decisions totals | `jill/build-3340-attention-badge` | `0f5448e0ec2e47db0e98e9753551fcfb916c7acd` | Combined into the G10 pull request. The candidate manifest was regenerated rather than hand-merged. |
+| #4010 | Owner Cockpit slice 2: Money + Roster on /api/owner/overview (#3343) | `jill/build-3343-owner-money-roster` | `1e08a6453ec5939d3480797f2ca8f8e12b8c21c5` | Combined into the G10 pull request. `stateGroup` and `POOL_ACCOUNT` are exported so the overview can import them. |
+| #4022 | COMP-DEEP #1: verdict inbox — attention set + sectioned read (server) | `jill/cd01-verdict-inbox-server` | `93c03132073749d1ab2c002105f224ae44cb79fb` | Combined into the G10 pull request. The read is a route-table row, not a new legacy-chain path. Follow totals stay null until claim-follows.mjs exists. |
+| #4756 | feat(door): public door-funnel aggregates read (DOOR-FUNNEL-READ) | `jill/door-funnel-read` | `83c63e6b5cf60173d8045b35731aadf5022f4755` | Combined into the G10 pull request. This is the door-funnel contract that landed: route-table read, owner-only mint counts, ten-minute cache. Login-panel and sign-in cure commits were already superseded on main and were not reapplied. |
+| #4764 | Teach patrol the PR-outcome settle (claim_legality + receipt_linkage) | `jill/build-patrol-settle` | `063fea8f6dd09fe2ab07d83fc81b7cac90b016c0` | Combined into the G10 pull request. Only the patrol settle and its tests were taken. The login-panel baseline and sign-in cure commits were already superseded on main. |
+| #4805 | feat(routes): publication declarations for public routes + registry gate (#3674) | `jill/backlog-do-3674` | `179480b4fd277d79f647301fcb5728c8d8e5fa23` | Combined into the G10 pull request. Declarations also cover public routes main added after this PR's base, plus the door funnel. |
+| #4886 | Add repro hold check and per-agent audit read model | `cursor/repro-and-agent-audit-6187` | `a74d90d45675ea746b97d6238bcdf79f7861a4f8` | Combined into the G10 pull request. Both modules stay pure reads; reachability keeps them until a route wires them. |
+| #4890 | FUNNEL-COUNT-1 (Option B): door funnel counts at the Node boundary — GET /api/public/door-funnel | `funnel-count-1-door-funnel` | `b37c978b1d61fb24174dee3918e78c50bdcd3279` | Superseded by the #4756 read on the same path inside the G10 pull request. The counter writes on every GET, uses ISO weeks, and returns public mint counts; the kept read does not write, uses Monday America/Los_Angeles weeks, and omits mints unless the caller is a room owner. |
 
 ## Branches with no PR (deleted in cleanup)
 

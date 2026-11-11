@@ -77,7 +77,7 @@ export function planBegin(item, member, { scope = null, now = Date.now() } = {})
     return { stage: stage("room_accept_work", item, item.revision), reason: null, next: "accept" };
   }
   if (item.mode === "write" && !ownClaim && ["accepted", "working"].includes(item.state)) {
-    if (!can("write_external")) return { stage: null, reason: "permission", next: "claim" };
+    if (!can("write_external") && !(item.externalWriteGrantBy && item.externalWriteGrantFor === member.id)) return { stage: null, reason: "permission", next: "claim" };
     if (!validScope(scope)) {
       return { stage: null, reason: "exact_scope_required", next: "claim",
         resume: { action: "room_acquire_claim", needs: [...SCOPE_NEEDS] } };

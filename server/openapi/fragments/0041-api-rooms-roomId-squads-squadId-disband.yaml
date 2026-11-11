@@ -1,0 +1,28 @@
+  /api/rooms/{roomId}/squads/{squadId}/disband:
+    post:
+      x-room-permission: squad_owner
+      summary: Disband a squad
+      description: |
+        plan-squads. Owner only. A disbanded squad stays listed with state
+        `disbanded`, no longer fans out `@squad/<name>` mentions, and cannot
+        be targeted by new work offers.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: squadId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Squad id or squad name
+      responses:
+        '200':
+          description: Disbanded squad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SquadResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Only the squad owner can disband it (squad_owner_required)
+        '404':
+          description: No such squad in this room (squad_not_found)

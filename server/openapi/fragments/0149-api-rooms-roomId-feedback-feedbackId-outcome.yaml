@@ -1,0 +1,44 @@
+  /api/rooms/{roomId}/feedback/{feedbackId}/outcome:
+    post:
+      summary: Record an outcome
+      description: |
+        Records merged/adopted for the promoted work (the loop-closer):
+        the original reporter earns +10 Mark, and the item's promotion
+        stops going stale. Any lane may record; guests cannot. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [merged, adopted] }
+                ref: { type: string, description: "External reference (PR number, doc URL, commit)" }
+      responses:
+        '200':
+          description: Outcome attributions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attributions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lane: { type: string }
+                        amount: { type: integer }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: feedback_not_found }
+        '409': { description: invalid_transition }
+        '422': { description: invalid_outcome }

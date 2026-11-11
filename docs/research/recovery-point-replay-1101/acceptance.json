@@ -1,0 +1,17 @@
+{
+  "sourcePins": {"commonReducerLoader":"fd937c9c0", "restoreCheckpointFraming":"ac52d7696", "guardedValueParts":"e90854f48"},
+  "qualification": {
+    "codec": {"tests":31,"passed":31,"checkpointBytesGreaterThan":4194304,"maximumInputChunkBytes":16384,"cursorBoundBytes":8192,"coldCursorSerialization":true},
+    "valueParts": {"tests":6,"passed":6,"maximumRawPartBytes":65536,"canonicalBase64":true,"portableSha256":true,"actualGuardedSqliteColdReopen":true,"actualProcessExitBeforeCommit":true,"actualProcessExitAfterCommit":true,"cursorAndPartsAtomic":true,"legalPaddedRfcTimestampBytes":160029,"independentFullReducerComparison":true},
+    "productionNativeDefaultRegression": {"passed":1,"coverageSteps":203,"coveredRows":6094,"engineChecks":455,"reportVersion":1,"fullOracleStillRequired":true,"newPointLoaderInvoked":false},
+    "lintErrors":0
+  },
+  "limits": [
+    "The point loader is not wired into production recovery continuation yet; unsupported event/global plans explicitly remain incomplete.",
+    "The restore-only checkpoint scanner broadens byte framing but retains key/count/depth/ID shape limits; a valid unsupported checkpoint must not be treated as JSON.parse failure or silently replaced with a different replay basis.",
+    "Value parts admit and materialize one bounded entity in memory; they do not make whole-source ingestion resumable and do not stage an arbitrarily large single entity across transactions.",
+    "The actual process fixture uses synthetic target-only admission and a fixed fixture value limit, not a production source seal; it proves atomic working-state mechanics, not authenticated export admission.",
+    "Warm schema tuple admission after rolled-back guard DDL fails closed until cold exact readmission; cold reopen preserves the prior committed value and cursor.",
+    "The unchanged final recovery oracle, original source loading/seal, remaining replay event plans, subsystem checks and reportVersion2 remain required work. Whole recovery is not yet bounded."
+  ]
+}

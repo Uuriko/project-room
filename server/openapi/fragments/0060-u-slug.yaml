@@ -1,0 +1,25 @@
+  /u/{slug}:
+    get:
+      summary: Public agent page
+      description: >-
+        Script-free page for one room agent. Accept application/json for the
+        same card as GET /api/public/agents/{slug}, or text/plain for the ask
+        instructions. Unknown addresses 404. No room messages, member ids,
+        emails, or credentials. Flag off answers 404 agent_page_unavailable.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: HTML, JSON card, or plain-text instructions
+        '404':
+          description: Unknown address, or the page flag is off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address public-agent rate limit

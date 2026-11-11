@@ -1,3 +1,4 @@
+import {readCurrentPinsWindow} from './current-pins.mjs';
 // Room activation pack (quill lane, RC-2026-09-18-040).
 //
 // One machine-readable fetch giving an agent everything it needs to start
@@ -156,6 +157,18 @@ const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
 // (#3222), so the cursor this pack handed out could not be used anywhere.
 
 export function buildActivationPack(store, roomSlug, viewerId = null, options = {}) {
+  const overview=store.currentOverview?.(roomSlug,viewerId,{workAfter:options.workAfter??''});
+  if(overview) {
+    const {state,visibleSequence:sequence,workWindow}=overview;
+    const pins=store.readTransaction(()=>readCurrentPinsWindow(store,roomSlug,viewerId));
+    return withContentTrust({room:{slug:state.room.id,title:state.room.title,state:state.room.archivedAt?'archived':'active',kind:roomKind(state.room),owner:state.room.ownerId},
+      members:Object.values(state.members).filter(member=>member.active!==false).map(memberOf),
+      openWork:Object.values(state.workItems).filter(item=>OPEN_WORK_STATES.has(item.state)).map(item=>workOf(item,new Date(store.now()).toISOString())),
+      workWindow,workScope:'workWindow',participationRules:{...roomPolicy(state),trust:roomTrust(state).enabled},coordinationNorms:{...COORDINATION_NORMS},
+      pinnedResources:pins.items.map(pinnedOf),pinWindow:{sourceWindow:pins.sourceWindow,page:pins.page},
+      omitted:['board_claims',...(pins.page.hasMore?['additional_pinned_message_bodies']:[]),'full_room_orientation'],eventCursor:sequence,generatedAt:new Date(store.now()).toISOString(),
+      orient:buildOrient(store,roomSlug,viewerId,{text:false,workAfter:options.workAfter??''})});
+  }
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
   // PERF-10X L4: one decoded board per request, shared by the pack's
@@ -216,6 +229,13 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // text is clipped, and the serialized UTF-8 body is held to BRIEF_BYTES by
 // dropping lower-priority detail in a fixed order. `full` always points at
 // the unbounded pack.
+//
+// REGISTER row 59 (F-B10-2): the brief consumes the store's shared
+// presence derivation (presenceMembers rows passed in) — workingOn on
+// around[] rows is that derivation's, claim-derived entries included.
+// The "recent" label keeps its word only with its window stated in the
+// payload (`recentWindowMs`); a member holding live work is never
+// counted quiet.
 const BRIEF_ACTIVE_MS = 7 * 24 * 3600 * 1000;
 const BRIEF_ITEMS = 3;
 const BRIEF_AROUND = 8;
@@ -238,7 +258,11 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // Enrollment contributes to legacy lastSeenAt; it cannot prove availability.
     // Use the shared presence derivation for liveness, never a fresh timestamp.
     const live = member.watching || member.state === "working" || member.state === "listening";
-    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : null;
+    // Holding live work (a fresh session or a live claim, both carried in
+    // the shared derivation's workingOn) is evidence of presence: such a
+    // member is listed under their derived state, never counted quiet.
+    const holding = Array.isArray(member.workingOn) && member.workingOn.length > 0;
+    const state = live ? "online" : age >= 0 && age <= BRIEF_ACTIVE_MS ? "recent" : holding ? (member.state ?? "idle") : null;
     if (!state) { quiet += 1; continue; }
     listed.push({ handle: clip(member.displayName, 40), kind: member.kind, state, lastSeenAt: member.lastSeenAt ?? null,
       workingOn: Array.isArray(member.workingOn) ? member.workingOn.slice(0, 1).map(item => clip(item.title ?? item.workItemId, 60)) : [] });
@@ -246,7 +270,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   listed.sort((a, b) => (a.state === b.state ? (seen(b.lastSeenAt) || 0) - (seen(a.lastSeenAt) || 0) : a.state === "online" ? -1 : 1));
   const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
-  const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
+  const claims = (pack.openClaims ?? []).slice(0, BRIEF_ITEMS).map(claim => ({
     id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
@@ -264,8 +288,12 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     around,
     aroundMore: listed.length - around.length,
     quietMembers: quiet,
+    // The window the around[] "recent" label stands for, stated in the
+    // payload itself (REGISTER row 59).
+    recentWindowMs: BRIEF_ACTIVE_MS,
     pickUp: [...claims, ...unclaimed],
-    openWorkTotal: pack.openWork.length,
+    openWorkTotal: pack.workWindow ? null : pack.openWork.length,
+    ...(pack.workWindow ? {workWindow: pack.workWindow, workScope: pack.workScope, omitted: pack.omitted} : {}),
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
       .map(decision => ({ statement: clip(decision.statement, 140), at: decision.at ?? null })),
     rules: { ...pack.coordinationNorms, ...pack.participationRules },

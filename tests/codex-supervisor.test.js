@@ -152,3 +152,35 @@ test("deleted owned source blocks successor work and later Stop reconciles witho
   assert.equal((await f.owner.assistant()).runs.find(r => r.id === "first").status, "cancelled");
   assert.equal(f.runtime().starts, 1);
 });
+
+
+for (const unknown of ["request", "runtime"]) test(`shared mode refuses unresolved directed ${unknown} before provider connection`, async t => {
+  const f = await fixture(t); await f.invoke("queued");
+  if (unknown === "request") f.db.prepare("INSERT INTO request_runs(id,attempt_id) VALUES(?,?)").run("directed", "prior");
+  else {
+    f.db.exec("CREATE TABLE codex_runtime_attempts (id TEXT PRIMARY KEY,binding TEXT,thread_id TEXT,turn_id TEXT,state TEXT,result TEXT)");
+    f.db.prepare("INSERT INTO codex_runtime_attempts(id,binding,state) VALUES(?,?,?)").run("prior", JSON.stringify({
+      origin: f.connection.origin, roomId: f.connection.roomId, memberId: f.connection.memberId, attemptId: "prior"
+    }), "inProgress");
+  }
+  const controller = new AbortController(), events = []; let connections = 0;
+  await f.run({ signal: controller.signal, connectOnStart: true,
+    connect: async () => { connections++; throw Error("Should not connect"); },
+    emit: e => { events.push(e); if (e.code === "directed_request_reconciliation_required") controller.abort(); } });
+  assert.equal(connections, 0); assert.equal(f.runtime().starts, 0);
+  assert.ok(events.some(e => e.status === "recovery_pending"));
+  assert.equal((await f.owner.assistant()).runs[0].status, "queued");
+});
+
+test("shared mode may proceed after directed result is saved and execution terminal", async t => {
+  const f = await fixture(t); await f.invoke("queued");
+  f.db.prepare("INSERT INTO request_runs(id,response,attempt_id) VALUES(?,?,?)").run("directed", JSON.stringify({ body: "Saved reply" }), "prior");
+  f.db.exec("CREATE TABLE codex_runtime_attempts (id TEXT PRIMARY KEY,binding TEXT,thread_id TEXT,turn_id TEXT,state TEXT,result TEXT)");
+  f.db.prepare("INSERT INTO codex_runtime_attempts(id,binding,state) VALUES(?,?,?)").run("prior", JSON.stringify({
+    origin: f.connection.origin, roomId: f.connection.roomId, memberId: f.connection.memberId, attemptId: "prior"
+  }), "completed");
+  const controller = new AbortController();
+  await f.run({ signal: controller.signal, emit: e => { if (e.status === "settled") controller.abort(); } });
+  assert.equal(f.runtime().starts, 1);
+  assert.equal((await f.owner.assistant()).runs[0].status, "done");
+});

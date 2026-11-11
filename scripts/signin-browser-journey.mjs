@@ -1,8 +1,9 @@
 // Since the #3341 one-email-field merge there is a single email form:
 // email + optional password. Email-link ("magic") sign-in is that same
 // form submitted with the password left blank, so opening it is just
-// reaching the form — callers fill the email and submit.
-export async function openMagicSignin(page) {
+// reaching the form. Recovery callers supply their synthetic email so a
+// real uniform credential rejection unlocks the email-link alternative.
+export async function openMagicSignin(page, recoveryEmail = null) {
   const controller = page.locator("#auth-signin-ui");
   await controller.waitFor({ state: "visible" });
   if (await controller.locator('[data-password-mode="login"]').isVisible()) await controller.locator('[data-password-mode="login"]').click();
@@ -13,6 +14,12 @@ export async function openMagicSignin(page) {
   // straight into the form.
   const email = form.locator('[name="email"]');
   if (await email.evaluate(node => node !== document.activeElement)) await email.focus();
+  if (recoveryEmail) {
+    await email.fill(recoveryEmail);
+    await form.locator('[name="password"]').fill('deliberately-wrong-recovery-password');
+    await form.locator('button[type="submit"]').click();
+    await form.locator('[name="method"][value="email"]').waitFor({ state: 'visible' });
+  }
   return form;
 }
 export async function backToPasswordSignin(page) {

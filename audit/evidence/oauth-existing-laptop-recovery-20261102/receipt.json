@@ -1,0 +1,36 @@
+{
+  "baseRevision": "41276bbee5891955c43cae86e041e1f7d52743d3",
+  "sourceHashes": {
+    "cloudflare/wrangler.jsonc": "fb298c415e846fde5cdf2ca65788484caf99122435dd688c77be91751eebdb48",
+    "scripts/CANDIDATE-MANIFEST.json": "db5b6f75e663988b4b334568a689993f013aad3ee7a8720b0c4e86c4eb1aa51c",
+    "server/http.mjs": "72a4b93c2f8771a5a3b64a5286c92a8a11ee5dba32a301e5e595783181025919",
+    "server/oauth-provider.mjs": "03f5aa9d3fe708ed0174b2b29ab3dcaf59d2daef6526a5d37ba9028b48a2b6bb",
+    "tests/mcp-oauth-http.test.js": "8cf69186e2d9587ffff83ce6228796a48426384c118edcd3c4167891cd8f290f",
+    "tests/mcp-oauth.test.js": "e523343a832ec95fcafdadcc309207120d2268ee13f5b7803db68a226184b587"
+  },
+  "reproduction": "Resource-omitted refresh of a bound grant fails invalid_target in both Map and SQLite before change; explicit wrong targets remain refused. Reproduces a compatibility defect, not proof of the inaccessible historical host refresh request.",
+  "node": {
+    "pass": 113,
+    "fail": 0,
+    "skip": 0,
+    "scenarios": "wrong targets/clients, removed identity, revoked grant, refresh replay, repeated 29-day expiry/restart refresh with and without resource, unchanged member/identity counts"
+  },
+  "workersNative": {
+    "pass": 4,
+    "fail": 0,
+    "skip": 0,
+    "checks": [
+      "OAuth bounded authority context",
+      "36 metadata probes with throwing/hanging Room; no Room calls"
+    ]
+  },
+  "liveDiagnosis": "Existing Member 2 is active in MVP, identity unchanged, sponsored by owner. Current reconnect UI only offers Claude; ChatGPT pilot client is configured to prefer its existing Member 2 seat, using unchanged account-control validation. No global agent substitution.",
+  "observability": "OAuth token rejections emit grant kind and fixed refusal reason only; no raw token, resource parameter, user id, IP or arbitrary error text.",
+  "boundaries": [
+    "1h access/30d sliding refresh lifetimes unchanged",
+    "No broadened scopes or grants",
+    "No disabled refresh replay detection",
+    "No raw token recovery cache",
+    "Host reconnect and live round-trip still to verify after deploy"
+  ]
+}

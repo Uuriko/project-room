@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import {parse} from 'acorn';
+import {thinWorkForContext} from '../server/current-work-summary.mjs';
+import {currentResult} from '../src/work-selectors.js';
+const source=readFileSync(new URL('../src/result-reader.js',import.meta.url),'utf8');
+let fn;function visit(v){if(!v||typeof v!=='object')return;if(v.type==='FunctionDeclaration'&&v.id?.name==='readResult')fn=v;for(const c of Object.values(v))if(Array.isArray(c))c.forEach(visit);else if(c&&typeof c==='object')visit(c);}visit(parse(source,{ecmaVersion:'latest',sourceType:'module'}));
+const full={id:'saved-task',title:'Useful result',state:'completed',independentVerificationRequired:false,ownerDecisionRequired:false,receipt:{eventId:'exact-completion',evidenceVersion:'sha256:exact',summary:'Saved body',nativeText:{messageId:'result-message'}}};
+function fixture(item,{busy=false}={}){const opened=[],saved=[],state={workItems:{[item.id]:item}},control={dataset:{readResult:item.id},closest:()=>true},ctx={getState:()=>state,isBusy:()=>busy,currentResult,client:{generation:7},getSession:()=>({roomId:'native',member:{id:'owner'}}),workRecord:()=>null,forgetSelection(){},saveSelection:v=>saved.push(v),openResult:(v,title)=>opened.push({v,title})};return{read:vm.runInNewContext(source.slice(fn.start,fn.end)+';readResult',ctx),event:{target:{closest:()=>control}},opened,saved};}
+test('actual compact native receipt click opens exact selected result loader and preserves binding',()=>{const item=thinWorkForContext(full),f=fixture(item);assert.equal(item.receipt.nativeText,undefined);assert.equal(f.read(f.event),true);assert.equal(f.opened.length,1);const v=f.opened[0].v;assert.equal(v.workItemId,item.id);assert.equal(v.receipt.completionEventId,full.receipt.eventId);assert.equal(v.receipt.evidenceVersion,full.receipt.evidenceVersion);assert.equal(v.previousCompletionEventId,undefined);assert.equal(v.roomId,'native');assert.equal(v.memberId,'owner');assert.equal(f.saved[0],v);});
+test('full external receipt remains unopened; busy and noncurrent cards do not open',()=>{const external={...full,receipt:{...full.receipt,nativeText:undefined,evidenceUrl:'https://example.test/proof'}},f=fixture(external);assert.equal(f.read(f.event),true);assert.equal(f.opened.length,0);const busy=fixture(thinWorkForContext(full),{busy:true});assert.equal(busy.read(busy.event),false);assert.equal(busy.opened.length,0);const stale=fixture(thinWorkForContext({...full,state:'working'}));assert.equal(stale.read(stale.event),true);assert.equal(stale.opened.length,0);});
+test('full native previous completion pointer is retained',()=>{const f=fixture({...full,receipt:{...full.receipt,nativeText:{previousCompletionEventId:'prior'}}});f.read(f.event);assert.equal(f.opened[0].v.previousCompletionEventId,'prior');});
+
+test('actual thin external receipt never opens the text reader',()=>{const external={...full,receipt:{eventId:'external-event',evidenceVersion:'external-sha',summary:'External proof',evidenceUrl:'https://example.test/proof'}},f=fixture(thinWorkForContext(external));assert.equal(f.read(f.event),true);assert.equal(f.opened.length,0);assert.equal(f.saved.length,0);});

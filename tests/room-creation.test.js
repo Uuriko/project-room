@@ -2,6 +2,7 @@
 // An account with zero memberships may always create one room and becomes its
 // owner; the membership-administration requirement stands for every further
 // room (conversation-only guests and plain members are still denied).
+import {currentInviteContext} from "../server/current-room-repository.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -28,7 +29,7 @@ test("a fresh account with zero memberships creates its first room and becomes o
   assert.equal(created.duplicate, false);
   assert.equal(created.room.id, "room-fresh");
   assert.equal(created.room.memberId, "owner", "the creator becomes member owner");
-  const state = f.store.room("room-fresh").state;
+  const state = currentInviteContext(f.store,"room-fresh",{memberIds:["owner"]}).room.state;
   assert.equal(state.room.ownerId, "owner");
   assert.deepEqual(state.members.owner.permissions, [...PERMISSIONS], "the owner holds every permission");
   assert.equal(state.members.owner.displayName, "New user");

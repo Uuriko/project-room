@@ -1,0 +1,132 @@
+{
+  "sourceHead": "1b986d532d7ed8ace11ec61e92b4f6e1eaa51f33",
+  "runtimeVersion": "normalized-current-v1-native-work-5",
+  "storeSchema": 45,
+  "composedRoot": "fd1944767",
+  "redactionParent": "06af4213d0b8fe1dc228ea35b04b50cec7ddb15e",
+  "sourceHashes": {
+    "server/agent-invites.mjs": "cea6ce170c6da6d8fb649d6be526e631afe52fb8b7d2c1ff8e281ecb935fcfb4",
+    "server/current-room-format.mjs": "533ae02fdad342e4050fe319e31cd9d3ce5c5ab51ad9bfcd7b2dc4a8caa62872",
+    "server/current-room-repository.mjs": "6684e07866466596536603ee906048a51045213c9c74842dc1d30bf24c6e54f0",
+    "server/history-visibility.mjs": "7f9a34d0aa0a7b1e34e5d5a93f5bb65b0c1928ee71374c7a430bf2464781d543",
+    "server/recovery-census-continuation.mjs": "efdaa38c7d1f58fc1c3e4f4750c82be7580500eb259a92e0672ee200117a115f",
+    "server/replay-cutover.mjs": "65ed23083206123e4ce90afee2193c7c7a5e87b7c1d05f75410cf0443f6089cf",
+    "server/referrals.mjs": "11fc2310f48ff12bba89f3f756444f949a9094338a7cc7b7e0f00ab5b42537a0",
+    "server/store.mjs": "c7a7ad7000e10f66a1969ad2093bce17c48a0193481ea920fcade87c1d0084d9",
+    "cloudflare/package.json": "1144de0de8989f049a0497dd159b4e402e4129ee5a8b148e3dd88fddf973aecb",
+    "scripts/CANDIDATE-MANIFEST.json": "77eb31007c0623543640860ec27d3f142bcbd12f20a40fc6f3472c5030772e0c"
+  },
+  "results": {
+    "originalEquivalentOffset": {
+      "exit": 1,
+      "failure": "pre-join equivalent instant leaked"
+    },
+    "originalHConversion": {
+      "exit": 1,
+      "failure": "Since-join member requires bounded historical floor qualification"
+    },
+    "composedNode": {
+      "exit": 0,
+      "pass": 44,
+      "skip": 0,
+      "note": "Before final additive missing-source sentinel refusal"
+    },
+    "composedActualNative": {
+      "exit": 0,
+      "pass": 3,
+      "skip": 0,
+      "note": "Before final additive missing-source sentinel refusal; all fixtures have qualified activation sources"
+    },
+    "finalAffectedMissingSourceAndHNode": {
+      "exit": 0,
+      "pass": 6,
+      "skip": 0
+    },
+    "manifest": {
+      "exit": 0,
+      "pass": 8,
+      "skip": 0
+    },
+    "secretScan": {
+      "exit": 0,
+      "files": 1816
+    },
+    "ciModeCheck": {
+      "exit": 1,
+      "reason": "Inherited fd194 tests/restore-durable-coverage.test.mjs local withRestoreTransaction shadow gate at194/215; reported to root, no exemption"
+    }
+  },
+  "nativeFacts": {
+    "invitationRetryObservedAdapterWrites": 0,
+    "rawRuntimeWrites": "not separately instrumented; no total-zero claim",
+    "saveFault": "attempted writes roll back; persisted business counts unchanged",
+    "hostConnections": 0,
+    "HConversionEvents": 70,
+    "HConversionVisits": 154,
+    "HMaximumAdmittedInputBytes": 257097,
+    "HInputLimitBytes": 262144,
+    "HFirstAdvanceObservedRowsRead": 257,
+    "HFirstAdvanceObservedRowsWritten": 3,
+    "durableRestoreContinuations": 55,
+    "coldReadiness": true,
+    "preJoinSelectedMessageStatus": 404,
+    "postJoinSelectedMessageStatus": 200
+  },
+  "remainingLimits": [
+    "Existing new-room initialization and full independent oracle may enumerate history; serving requests and conversion advances do not hydrate history/rooms.",
+    "H fixture preparation loops existing qualification operations and final full oracle; its setup route is not a bounded production route.",
+    "Large admitted member profiles/individual timestamp/event payloads can still exhaust existing fixed byte budget and refuse honestly.",
+    "Legacy unnormalized v1 comparison behavior preserved; v2 interpretation protected by native5 old4 cold/warm/prepared-reader refusal.",
+    "No live format activation, migration, grants or deployment. Parent owns final packaging and publication."
+  ],
+  "logs": {
+    "current-history-equivalent-instant-frozen-red": {
+      "bytes": 1495,
+      "sha256": "5682a92b1600d9f54c95f0575a2488bad91b626c594f78120d1410f618f3ec8a"
+    },
+    "current-invite-native-initial": {
+      "bytes": 3221,
+      "sha256": "e2203d94ae8aae2b7cc5fcb21d850dd07ecf64252a8a0ce59bebf92c5de7a195"
+    },
+    "current-invite-v2-composed-node": {
+      "bytes": 28190,
+      "sha256": "df5d1b1ecda4d81e721d70511113e9e0be04b93be99751e0b2633881fb719d90"
+    },
+    "current-invite-v2-composed-native": {
+      "bytes": 18527,
+      "sha256": "8b71dbadddb6c4240c5dbc71961cb8d1faf3664d04fc49e0958ee5d10128de71"
+    },
+    "current-invite-v2-missing-source-final": {
+      "bytes": 4209,
+      "sha256": "d4ec2382baf2d2f1469cdc5c203de81ea24f968aba42ee640589df5506cf81d6"
+    },
+    "current-history-H-original-red": {
+      "bytes": 2078,
+      "sha256": "3eb8c816c4f00316d3ba7cdcde3e07fcc5f958607b7d82ce53c199f3581fa3c8"
+    },
+    "current-history-H-fixed": {
+      "bytes": 723,
+      "sha256": "171ed5695b31f5248470bc91ff7ba4a2c9c7cd1cf294ea34f26fbb6b4781b478"
+    },
+    "current-history-v2-H-neighbors": {
+      "bytes": 10245,
+      "sha256": "fcaccb23c02fd5a679ef15777d435a4d4b9cb112806c34c5ca481d05a53dc854"
+    },
+    "current-history-v2-H-neighbors-fixed": {
+      "bytes": 7547,
+      "sha256": "5814e172973e7e18f0a8fbbbab477d922c217f092d14036a52cafec0520e97e8"
+    },
+    "current-invite-v2-secret-final": {
+      "bytes": 53,
+      "sha256": "82d7f7ac3bc3b735360ca0bc780de2b038898669d0b4324d67de2cd72017458b"
+    },
+    "current-invite-v2-ci-check": {
+      "bytes": 426,
+      "sha256": "83a5d84152745afd6b65115464c6e5c0e1df08786b5b3d0ddae8b3f9eb759283"
+    },
+    "current-invite-v2-manifest": {
+      "bytes": 684,
+      "sha256": "3eced83ac8a3b7473c2241b314593790d485abc7d3aab5836b79efbc19aab859"
+    }
+  }
+}

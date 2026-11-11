@@ -1,3 +1,4 @@
+import { clipboard } from "./clipboard.js";
 // Public agent-invite join page: consent screen + self-serve join.
 // The page is unauthenticated and stateless. It previews the invite
 // (POST /api/agent-invites/preview, code in the body), collects a display name, then mints
@@ -9,10 +10,11 @@
 // Pure helpers are exported for unit tests; the DOM boot below runs only
 // in a browser.
 
+import { agentInviteHandoff } from "./agent-invite-ui.js";
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
-import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
+import { submitGeneralAccessRequest, approvedAccountRequestRoom, readHumanAccessRequest, retireHumanAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 
@@ -106,9 +108,8 @@ export function joinRoomHint(search) {
 
 // Which room the request-access door files against, and whether the
 // visitor may change it. The room's own address fixes the room; a ?room=
-// hint prefills an editable field; the bare entry page defaults to the
-// open community room (the account panel door's behavior, consolidated
-// onto this page — human-map §8.1: one request-access door).
+// hint prefills an editable field; the bare entry page leaves the
+// destination empty so the visitor chooses the intended room.
 export function requestDoorRoom(pathname, search) {
   const pathRoom = joinRoomIdFromPath(pathname);
   if (pathRoom) return { roomId: pathRoom, fixed: true };
@@ -187,9 +188,21 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
   return `in ${days} day${days === 1 ? "" : "s"}`;
 }
 
+// The server's suggested replacement for a refused display name is only
+// echoed when it is itself clean: the guard strips hidden/bidi marks when
+// it builds the suggestion, and this keeps a marked string from ever being
+// presented as the fix (F-U1C3-1).
+function cleanNameSuggestion(value) {
+  if (typeof value !== "string") return null;
+  const suggestion = value.trim();
+  if (!suggestion || suggestion.length > 80) return null;
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]/u.test(suggestion)) return null;
+  return suggestion;
+}
+
 // Maps a failed preview/join call to a message with a next step.
 // Every branch names what happened and what to do — no dead ends.
-export function joinErrorMessage({ status, code, action = "join" } = {}) {
+export function joinErrorMessage({ status, code, action = "join", detail = null } = {}) {
   const again = "Check your connection and try again.";
   if ((code === "request_timeout" || code === "preview_timeout") && action === "join") {
     return { title: uiText("join.timedOut.title"), message: uiText("join.timedOut.message"), retry: true };
@@ -213,6 +226,27 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
     case "invalid_invite_name":
     case "invalid_join":
       return { title: "Check the name", message: "Enter a name of 1–80 characters to join.", retry: true };
+    case "display_name_unavailable": {
+      // The server refused the name itself (reserved, already used,
+      // confusable, or carrying hidden/bidi marks a pasted name often
+      // brings) and sent its reason plus a cleaned suggestion in the
+      // error detail. Name that cause and present the suggestion as a
+      // suggestion — the name in the form is never changed silently.
+      const nameErrorKeys = {
+        reserved: ["join.nameUnavailable.reserved.message", "join.nameUnavailable.reserved.suggested"],
+        duplicate: ["join.nameUnavailable.duplicate.message", "join.nameUnavailable.duplicate.suggested"],
+        confusable: ["join.nameUnavailable.confusable.message", "join.nameUnavailable.confusable.suggested"],
+        control_characters: ["join.nameUnavailable.control_characters.message", "join.nameUnavailable.control_characters.suggested"],
+        unavailable: ["join.nameUnavailable.unavailable.message", "join.nameUnavailable.unavailable.suggested"],
+      };
+      const keys = Object.hasOwn(nameErrorKeys, detail?.displayNameReason) ? nameErrorKeys[detail.displayNameReason] : nameErrorKeys.unavailable;
+      const suggestion = cleanNameSuggestion(detail?.suggestion ?? detail?.displayName);
+      return {
+        title: uiText("join.nameUnavailable.title"),
+        message: uiText(keys[suggestion ? 1 : 0], { suggestion }),
+        retry: true,
+      };
+    }
     case "rate_limited":
       return { title: "Too many tries", message: "Slow down and try again in a minute.", retry: true };
     default:
@@ -254,6 +288,7 @@ function fail({ title, message, retry }) {
   if (titleEl) titleEl.textContent = title;
   if (messageEl) messageEl.textContent = message;
   if (retryEl) retryEl.hidden = !retry;
+  titleEl?.focus();
 }
 
 // Every apiFetch call is bounded by this deadline so a stalled network can
@@ -284,7 +319,22 @@ export async function apiFetch(url, { method = "GET", data, timeoutMs = API_TIME
       if (controller.signal.aborted) return { ok: false, status: 0, error: { code: "request_timeout" } };
       /* non-JSON body */
     }
-    if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
+    if (!response.ok) {
+      const error = body?.error ?? { code: "request_failed" };
+      // The server merges error detail onto the TOP LEVEL of the error
+      // body, not inside `error` (mergeErrorDetail in src/agent-error.mjs):
+      // for display_name_unavailable that is the reason and the suggested
+      // replacement name. Keep those fields reachable for the mapper
+      // instead of dropping them here (F-U1C3-1).
+      if (error && typeof error === "object" && body && typeof body === "object") {
+        const detail = {};
+        for (const key of ["displayNameReason", "suggestion", "displayName"]) {
+          if (typeof body[key] === "string") detail[key] = body[key];
+        }
+        if (Object.keys(detail).length) error.detail = detail;
+      }
+      return { ok: false, status: response.status, error };
+    }
     return { ok: true, status: response.status, body };
   } finally {
     clearTimeout(timer);
@@ -310,7 +360,7 @@ function renderConsent(preview) {
   const expiryEl = $("join-expiry");
   if (expiryEl) expiryEl.textContent = `Invite expires ${formatInviteExpiry(preview.expiresAt)}`;
   show("join-consent");
-  $("join-name")?.focus();
+  ($("join-existing-agent-copy") ?? $("join-name"))?.focus();
 }
 
 // Retry starts a newer boot(); an older boot resolving late must not clobber
@@ -365,15 +415,23 @@ function renderEnter() {
   }
   renderRequestDoor();
   show("join-enter");
-  $("join-enter-code")?.focus();
+  // MI-011: no focus seizure on load; a screen reader starts at the top of
+  // the page and the field is one Tab away. Focus moves only after an error.
 }
 
 // The consolidated request-access door (human-map §8.1): the join page is
 // the one place a human without a code asks a room owner in. Submission
-// reuses the existing flow (src/request-access.js): mint a self-serve
-// identity (an identity alone grants nothing), file POST
-// /api/access-requests with its secret as proof, stash for idempotent
-// retries. Wired once-only, like the entry form.
+// preserves a signed human account; agent identity proof stays separate.
+// Wired once-only, like the entry form.
+let admissionEpoch = 0;
+let stopAdmissionWatch = null;
+function beginAdmissionOperation() {
+  admissionEpoch++;
+  stopAdmissionWatch?.();
+  stopAdmissionWatch = null;
+  return admissionEpoch;
+}
+
 function renderRequestDoor() {
   const card = $("join-request");
   if (!card) return;
@@ -410,22 +468,36 @@ function renderRequestDoor() {
     form.dataset.requestWired = "1";
     form.addEventListener("submit", async event => {
       event.preventDefault();
+      const operation = beginAdmissionOperation();
       const statusEl = $("join-request-status");
       const submitEl = $("join-request-submit");
       if (submitEl) submitEl.disabled = true;
       if (statusEl) { statusEl.textContent = uiText("join.request.sending"); statusEl.classList.add("visible"); statusEl.classList.remove("error"); }
       try {
+        const client = new AccountClient();
         const result = await submitGeneralAccessRequest({
-          client: new AccountClient(),
+          client,
+          requireHuman: true,
           storage: globalThis.sessionStorage,
           roomId: fixed ? roomId : $("join-request-room")?.value,
           displayName: $("join-request-name")?.value,
           note: $("join-request-note")?.value,
           referredBy: $("join-request-referred")?.value,
         });
+        if (operation !== admissionEpoch) return;
         form.hidden = true;
         if (statusEl) statusEl.textContent = uiText("join.request.sent", { roomId: result.roomId, requestId: result.requestId });
+        if (result.principalKind === "account") {
+          if (globalThis.history) {
+            const target = new URL(globalThis.location.href);
+            target.searchParams.set("room", result.roomId);
+            target.searchParams.set("access-request", "pending");
+            globalThis.history.replaceState(globalThis.history.state, "", target.href);
+          }
+          watchHumanAdmission(client, result, statusEl, operation);
+        }
       } catch (error) {
+        if (operation !== admissionEpoch) return;
         if (submitEl) submitEl.disabled = false;
         const message = error?.code === "rate_limited" || error?.status === 429
           ? uiText("join.request.rateLimited")
@@ -433,11 +505,133 @@ function renderRequestDoor() {
             ? uiText("join.request.alreadyMember")
             : typeof error?.message === "string" && error.message ? error.message : uiText("join.request.failed");
         if (statusEl) { statusEl.textContent = message; statusEl.classList.add("visible", "error"); }
+        if (statusEl && error?.code === "account_session_required") {
+          const link = document.createElement("a");
+          const destination = new URL(roomEntryHref(error.roomId ?? roomId));
+          destination.searchParams.set("request", error.roomId ?? roomId);
+          link.href = destination.href;
+          link.textContent = uiText("join.request.signin");
+          statusEl.append(" ", link);
+        }
         $("join-request-name")?.focus({ preventScroll: true });
       }
     });
   }
   card.hidden = false;
+  if (new URLSearchParams(globalThis.location?.search).get("access-request") === "pending" && !card.dataset.resumeStarted) {
+    card.dataset.resumeStarted = "1";
+    void resumeHumanAdmission(roomId, card, form);
+  }
+}
+
+async function resumeHumanAdmission(roomId, card, form) {
+  const operation = beginAdmissionOperation();
+  const submitEl = $("join-request-submit");
+  if (submitEl) submitEl.disabled = true;
+  const statusEl = $("join-request-status");
+  card.open = true;
+  if (statusEl) { statusEl.textContent = uiText("join.request.checking"); statusEl.classList.add("visible"); }
+  const client = new AccountClient();
+  try {
+    const session = await client.restore();
+    if (operation !== admissionEpoch) return;
+    if (!session?.authenticated || !session.account?.id) throw new Error(uiText("join.request.signinCheck"));
+    const saved = readHumanAccessRequest(globalThis.sessionStorage, session.account.id, roomId, session.account.authEpoch ?? 0);
+    if (!saved) throw new Error(uiText("join.request.noSaved"));
+    form.hidden = true;
+    watchHumanAdmission(client, { requestId: saved.requestId, roomId }, statusEl, operation);
+  } catch (error) {
+    if (operation !== admissionEpoch) return;
+    if (submitEl) submitEl.disabled = false;
+    if (statusEl) { statusEl.textContent = error.message; statusEl.classList.add("error"); }
+  }
+}
+
+// The pending request is an actual account operation. Check while this
+// page is visible, stop on terminal decisions or navigation, and verify
+// discovery before entering. No identity secret/session is installed.
+function watchHumanAdmission(client, request, statusEl, operation) {
+  if (operation !== admissionEpoch) return;
+  if ($("join-enter")) $("join-enter").hidden = true;
+  const card = $("join-request");
+  if (card) {
+    card.open = true;
+    const title = card.querySelector?.("summary");
+    if (title) title.textContent = uiText("join.request.title", { roomId: request.roomId });
+    const description = card.querySelector?.(":scope > p:not(#join-request-status)");
+    if (description) description.hidden = true;
+  }
+  const session = client.session, generation = client.generation;
+  let timer, stopped = false, checking = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(timer);
+    globalThis.removeEventListener("pagehide", leave);
+    globalThis.document.removeEventListener("visibilitychange", visible);
+  };
+  const leave = event => {
+    stop();
+    // A frozen page retains its hidden form. Re-enter through boot so
+    // the current account and its saved request are restored afresh.
+    if (event.persisted) globalThis.addEventListener("pageshow", event => {
+      if (event.persisted) globalThis.location.reload();
+    }, { once: true });
+  };
+  const visible = () => { if (!globalThis.document.hidden) { clearTimeout(timer); void check(); } };
+  const check = async () => {
+    if (stopped || checking || operation !== admissionEpoch) return;
+    if (globalThis.document.hidden) return;
+    checking = true;
+    try {
+      const result = await approvedAccountRequestRoom(client, request.requestId, request.roomId);
+      if (stopped || operation !== admissionEpoch || !client.owns(generation, session)) { stop(); return; }
+      if (result.room) {
+        stop();
+        globalThis.location.assign(roomEntryHref(result.room.id));
+        return;
+      }
+      if (["denied", "cancelled", "expired", "unavailable"].includes(result.status)) {
+        stop();
+        if (statusEl) statusEl.textContent = result.status === "denied" ? uiText("join.request.denied")
+          : result.status === "cancelled" ? uiText("join.request.cancelled")
+          : result.status === "unavailable" ? uiText("join.request.unavailable") : uiText("join.request.expired");
+        if (statusEl && result.status !== "denied") {
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.textContent = uiText("join.request.again");
+          retry.addEventListener("click", async () => {
+            retry.disabled = true;
+            try {
+              if (!await client.confirm()) throw new Error(uiText("join.request.accountChanged"));
+              if (operation !== admissionEpoch) return;
+              if (!retireHumanAccessRequest(globalThis.sessionStorage, session, request.roomId, request.requestId)) {
+                throw new Error(uiText("join.request.changed"));
+              }
+              const target = new URL(globalThis.location.href);
+              target.searchParams.delete("access-request");
+              globalThis.location.assign(target.href);
+            } catch (error) { statusEl.textContent = error.message; }
+          });
+          statusEl.append(" ", retry);
+        }
+        return;
+      }
+      if (statusEl) {
+        statusEl.classList.remove("error");
+        statusEl.textContent = result.status === "approved" ? uiText("join.request.membershipPending") : uiText("join.request.waiting");
+      }
+    } catch (error) {
+      if (stopped || operation !== admissionEpoch) return;
+      if (statusEl) statusEl.textContent = client.session ? uiText("join.request.reconnecting") : uiText("join.request.accountChanged");
+      if (!client.session) { stop(); return; }
+    } finally { checking = false; }
+    if (!stopped) timer = setTimeout(check, 5000);
+  };
+  stopAdmissionWatch = stop;
+  globalThis.addEventListener("pagehide", leave, { once: true });
+  globalThis.document.addEventListener("visibilitychange", visible);
+  void check();
 }
 
 async function boot() {
@@ -463,10 +657,36 @@ async function boot() {
   const preview = await apiFetch(`${apiBase}/agent-invites/preview`, { method: "POST", data: { code } });
   if (seq !== bootSeq) return;
   if (!preview.ok) {
-    fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
+    fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, detail: preview.error?.detail, action: "preview" }));
     return;
   }
   renderConsent(preview.body);
+  const agentInstructions = $("join-existing-agent-instructions");
+  if (agentInstructions) agentInstructions.value = agentInviteHandoff(code, { origin: globalThis.location.origin, pathname: globalThis.location.pathname.startsWith("/room/") ? "/room" : "/" }).hosted;
+  if ($("join-existing-agent-help")) $("join-existing-agent-help").textContent = uiText("invite.native.preserve");
+  const copyAgent = $("join-existing-agent-copy");
+  const copySecret = $("join-copy-secret");
+  const syncCopyButtons = () => {
+    if (copyAgent) copyAgent.disabled = clipboard.busy;
+    if (copySecret) {
+      // An older OS write may never settle. Keep the newly minted key
+      // reachable through manual selection without starting another write.
+      copySecret.textContent = uiText(clipboard.busy ? "join.key.select" : "join.key.copy");
+      copySecret.setAttribute("aria-label", uiText(clipboard.busy ? "join.key.selectLabel" : "join.key.copyLabel"));
+    }
+  };
+  clipboard.subscribe(syncCopyButtons);
+  syncCopyButtons();
+  if (copyAgent) copyAgent.onclick = async () => {
+    const message = $("join-existing-agent-status");
+    try {
+      if (await clipboard.copy(agentInstructions.value) !== "copied") throw new Error("clipboard");
+      message.textContent = uiText("invite.copy.015");
+    } catch {
+      agentInstructions.focus(); agentInstructions.select();
+      message.textContent = uiText("invite.native.select");
+    }
+  };
 
   const form = $("join-form");
   form?.addEventListener("submit", async event => {
@@ -487,7 +707,7 @@ async function boot() {
     if (!joined.ok) {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
-      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
+      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, detail: joined.error?.detail, action: "join" });
       if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
@@ -518,15 +738,14 @@ async function boot() {
     if (secretEl) secretEl.value = identitySecret;
     const openEl = $("join-open-room");
     if (openEl) openEl.href = joinNextHref(roomId);
+    $("join-success-title")?.focus();
   });
 
   $("join-copy-secret")?.addEventListener("click", async () => {
     const secretEl = $("join-secret");
     const statusEl = $("join-copy-status");
     try {
-      const write = navigator.clipboard?.writeText?.(secretEl?.value ?? "");
-      if (!write) throw new Error("clipboard");
-      await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 1500))]);
+      if (await clipboard.copy(secretEl?.value ?? "") !== "copied") throw new Error("clipboard");
       if (statusEl) { statusEl.textContent = "Copied. Save it somewhere safe."; statusEl.classList.add("visible"); }
     } catch {
       secretEl?.select?.();

@@ -131,14 +131,11 @@ Prints no secrets and writes nothing to the room.`);
           detail: `credential_accepted as ${identity ? "agent identity" : "member"} ${access.memberId} in room ${access.roomId}; permissions: ${(access.permissions ?? []).join(",") || "none"}` });
       } catch (error) {
         const status = error instanceof RoomClientError ? error.status : 0;
-        const identitySecret = typeof config.token === "string" && config.token.startsWith("pri_");
-        if (status === 401 && identitySecret) {
-          // The server deliberately conflates invalid identity secrets with
-          // missing/inactive room access. A token prefix proves neither cause.
-          fail("access", "credential_or_membership_rejected",
-            `This room rejected the configured identity credential; this response cannot distinguish an invalid or revoked secret from missing room access. Verify the saved connection for ${config.memberId ?? "<identity-id>"}, then use that identity's GET /api/agent-rooms to check existing rooms or ask the owner to confirm access. Do not create another identity to repair this failure.`);
-        } else if (status === 401) fail("access", "credential_rejected", "The configured key was not accepted. Restore the active saved credential or ask its operator to repair access for the existing member.");
-        else if (status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code)) {
+        if (status === 401) fail("access", "credential_rejected", "The configured key was not accepted. Restore the active saved credential or ask its operator to repair access for the existing member. Do not create another identity to repair this failure.");
+        else if (status === 403 && error.code === "no_access") {
+          fail("access", "no_access",
+            `The configured identity ${config.memberId ?? "<identity-id>"} is valid and has no access to this room. Use that identity's GET /api/agent-rooms to check existing rooms, or ask the owner to confirm access. Do not create another identity to repair this failure.`);
+        } else if (status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code)) {
           fail("access", error.code, "The service rejected the request host, origin or proxy path. Verify the configured service origin and deployment routing, then retry the same saved connection. This does not establish a missing membership.");
         } else if (status === 403) fail("access", "access_denied", "The service denied this request. Check the configured room and the existing member's access with its owner; do not replace the identity or assume its secret is invalid.");
         else if (error.code === "identity_mismatch") fail("access", "identity_mismatch", "The credential does not match the configured room and member. Re-check ROOM_AGENT_ROOM and ROOM_AGENT_MEMBER. Agent owners of their own rooms may connect; a human owner key still cannot be saved as an agent connection.");

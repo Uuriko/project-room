@@ -93,6 +93,22 @@ async function beginFlow(origin, slotToken) {
 const callback = (origin, authorize, code = "code-fixture") =>
   fetch(`${origin}${GITHUB_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=${code}`, { redirect: "manual" });
 
+test("GitHub sign-in renews an old slot and rotates the cookie", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { githubAuth: githubAuth() });
+  f.store.now = () => Date.now() - 29 * 86400000;
+  const slot = f.store.createAccountSessionSlot();
+  f.store.now = () => Date.now();
+  const authorize = await beginFlow(origin, slot.token);
+  const res = await callback(origin, authorize);
+  assert.equal(res.status, 200);
+  const fresh = accountCookie(res);
+  assert.ok(fresh && fresh !== slot.token);
+  assert.ok(Number(/Max-Age=(\d+)/i.exec(res.headers.get("set-cookie") ?? "")?.[1]) > 29 * 86400);
+  assert.ok(f.store.authenticateAccountSession(fresh).expiresAt - f.store.now() > 29 * 86400000);
+  assert.throws(() => f.store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+});
+
 test("start redirects to GitHub with PKCE bound to the session slot", async t => {
   const f = createAcceptanceFixture();
   const fetchFn = githubFetch();

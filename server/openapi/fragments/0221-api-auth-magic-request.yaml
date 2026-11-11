@@ -1,0 +1,31 @@
+  /api/auth/magic/request:
+    post:
+      summary: Issue a magic-link sign-in code
+      description: >-
+        Passwordless sign-in, step 1. The anonymous slot cookie from `GET
+        /api/account-session` plus `Origin` and `X-CSRF-Token` are required.
+        When a mail provider is configured, a single-use 15-minute code is
+        issued and handed to the mailer (the code is never in the response);
+        issuing a new code burns every prior unconsumed code for the email,
+        so only the newest code is ever live. When no provider is configured
+        the route answers honestly with
+        `mail_not_configured` and issues nothing. The response shape is
+        identical whether or not the email already has an account, so nothing
+        reveals account existence. 5 per address per minute, 3 per email per
+        hour.
+      security:
+        - accountSession: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required: [email]
+              properties:
+                email: { type: string }
+                returnTo: { type: string, description: "Optional local root path with room/account query and validated invite/join fragment; external URLs and other parameters are refused." }
+      responses:
+        '200': { description: "{ status: 'sent' } — or { status: 'unavailable', reason: 'mail_not_configured', message } when email delivery is not configured" }
+        '401': { description: account_session_required (no slot cookie) }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: "invalid_email_request, invalid_email, or invalid_return_target" }
+        '429': { description: rate_limited }

@@ -1,3 +1,5 @@
+import { modernMcpRequest, dispatchModernMcp } from './mcp-modern.mjs';
+import { mcpOAuthChallenge } from './mcp-oauth.mjs';
 import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 // Streamable HTTP MCP. Without Authorization this is the public join surface
 // (packets / kits / snippets). With Authorization: Bearer pri_… the Room
@@ -126,7 +128,7 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+async function dispatchLegacyRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress, signal } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -150,17 +152,25 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
       ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
-  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
+  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress, signal });
 }
 
-export function mcpRpcStatus(reply) {
+export async function dispatchRoomMcp(message, options = {}) {
+  const modern = modernMcpRequest(message, options.headers);
+  if (!modern) return dispatchLegacyRoomMcp(message, options);
+  if (Object.hasOwn(modern, 'reply')) return modern.reply;
+  return dispatchModernMcp(message, options, dispatchLegacyRoomMcp);
+}
+
+export function mcpRpcStatus(reply, modern = false) {
   if (!reply) return 202;
-  return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : 200;
+  return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : modern && [-32600, -32602, -32020, -32022].includes(reply.error?.code) ? 400 : 200;
 }
 
 // RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
-export function mcpAuthHeaders(reply) {
+export function mcpAuthHeaders(reply, metadataUrl = null) {
   if (mcpRpcStatus(reply) !== 401) return {};
+  if (metadataUrl) return mcpOAuthChallenge(metadataUrl);
   return { "WWW-Authenticate": "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
 }
 
@@ -168,7 +178,7 @@ export function mcpJoinCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, Deprecation, Link",
     "MCP-Protocol-Version": MCP_VERSION
   };
@@ -236,29 +246,33 @@ export async function roomMcpFetchPost(request, options = {}) {
       status: 400, headers
     });
   }
+  const modern = modernMcpRequest(message, request.headers);
+  if (modern) headers['MCP-Protocol-Version'] = modern.version;
   let reply;
   try {
     reply = await dispatchRoomMcp(message, {
+      headers: request.headers,
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
       searchParams: url.searchParams,
-      userAgent: request.headers.get("user-agent")
+      userAgent: request.headers.get("user-agent"),
+      signal: request.signal
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
+    reply = mcpTransportError(-32603, "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.", {
       reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
+      hint: "No success is claimed. Reconcile the request's effect before any retry; if it repeats, report the operation id.",
+      next: [{ command: "Re-read the affected state to reconcile the request's effect, then retry once; if it repeats, report the operation id" }],
       category: "unavailable",
       status: "failed",
     });
   }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply, Boolean(modern)), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, oauthMetadataUrl, signal, connectFunnel = null } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -297,33 +311,61 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       category: "input",
     })));
   }
+  // The authenticated entry point must challenge at initialization so hosted
+  // clients start OAuth. Explicit discovery remains available without a grant.
+  if (oauthMetadataUrl && message?.method === "initialize" && (!req.headers.authorization || /^(?:bearer)?\s*$/i.test(req.headers.authorization))
+    && url.searchParams.get("auth") !== "discovery") {
+    console.info(JSON.stringify({event:"room.mcp_auth",reason:"missing_bearer",method:"initialize",status:401}));
+    const reply = {jsonrpc:"2.0",id:message.id ?? null,error:{code:MCP_AUTH_REQUIRED,message:"Connect your existing agent with OAuth"}};
+    res.writeHead(401,{...cors,...mcpAuthHeaders(reply,oauthMetadataUrl),"Content-Type":"application/json","Cache-Control":"no-store"});
+    return res.end(JSON.stringify(reply));
+  }
+  const modern = modernMcpRequest(message, req.headers);
+  if (modern) cors['MCP-Protocol-Version'] = modern.version;
   let reply;
+  const cancellation = new AbortController();
+  const cancel = () => cancellation.abort();
+  // IncomingMessage.close also fires for a normally consumed POST body.
+  // Response.close tracks the client going away while the tool is pending.
+  const responseClosed = () => { if (!res.writableEnded) cancel(); };
+  req.once('aborted', cancel);
+  res.once('close', responseClosed);
+  signal?.addEventListener('abort', cancel, {once: true});
+  if (signal?.aborted || req.aborted || res.destroyed) cancel();
   try {
     reply = await dispatchRoomMcp(message, {
+      headers: req.headers,
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
       roomMcp,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
-      remoteAddress
+      remoteAddress,
+      signal: cancellation.signal
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
+    reply = mcpTransportError(-32603, "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.", {
       reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
+      hint: "No success is claimed. Reconcile the request's effect before any retry; if it repeats, report the operation id.",
+      next: [{ command: "Re-read the affected state to reconcile the request's effect, then retry once; if it repeats, report the operation id" }],
       category: "unavailable",
       status: "failed",
     });
+  } finally {
+    req.removeListener('aborted', cancel);
+    res.removeListener('close', responseClosed);
+    signal?.removeEventListener('abort', cancel);
   }
+  if (cancellation.signal.aborted) return;
+  connectFunnel?.observe({ authorization: req.headers.authorization, message, reply });
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();
   }
   const bytes = Buffer.from(JSON.stringify(reply));
-  res.writeHead(mcpRpcStatus(reply), {
+  res.writeHead(mcpRpcStatus(reply, Boolean(modern)), {
     ...cors,
-    ...mcpAuthHeaders(reply),
+    ...mcpAuthHeaders(reply, oauthMetadataUrl),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,

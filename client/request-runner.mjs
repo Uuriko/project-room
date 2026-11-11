@@ -18,6 +18,20 @@ export function openRequestJournal(filename) {
   try {
     if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "attempt_id"))
       db.exec("ALTER TABLE request_runs ADD COLUMN attempt_id TEXT");
+    if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "delivery_refused"))
+      db.exec("ALTER TABLE request_runs ADD COLUMN delivery_refused INTEGER NOT NULL DEFAULT 0");
+    // reported tracks the service run report separately from local delivery:
+    // 0 pending, 1 reported, 2 terminally refused. Older delivered rows are not
+    // proof the service saw the report, so rows with an attempt stay pending and
+    // are reconciled by an idempotent report. Rows without an attempt have none.
+    if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "reported")) {
+      db.exec("ALTER TABLE request_runs ADD COLUMN reported INTEGER NOT NULL DEFAULT 0");
+      db.exec("UPDATE request_runs SET reported=1 WHERE delivered=1 AND attempt_id IS NULL");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS request_runs_retryable_delivery ON request_runs(delivered, delivery_refused) WHERE response IS NOT NULL");
+    // The recovery scan's real predicate includes reported=0 rows; the partial
+    // index above cannot serve the OR, so give the scan its own matching index.
+    db.exec("CREATE INDEX IF NOT EXISTS request_runs_unsettled ON request_runs(delivery_refused) WHERE response IS NOT NULL AND (delivered=0 OR reported=0)");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -26,12 +40,23 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
+  if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
+  if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
+  const checkExecution = request => {
+    if (selectRequest && selectRequest(request) !== true)
+      throw Object.assign(new Error("Request is not selected for execution"), { code: "request_not_selected" });
+  };
+  const checkSelection = request => {
+    if (allowRequest && allowRequest(request) !== true)
+      throw Object.assign(new Error("Requester is not enabled for this host"), { code: "requester_not_allowed" });
+  };
   const client = new RoomAgentClient(connection);
   let context = await client.replyContext(requestMessageId, { limit: 50, signal });
   if (context.viewerId !== connection.memberId || context.request.recipientId !== connection.memberId)
     throw new Error("Request must be addressed to the configured member");
+  checkSelection(context.request);
   const id = "host-" + createHash("sha256").update(JSON.stringify([
     connection.origin, connection.roomId, connection.memberId, requestMessageId,
     context.roomCreatedEventId, context.request.openingEventId
@@ -43,22 +68,53 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     let receipt;
     try { receipt = await client.replyAction("room_respond_to_request", input, { signal }); }
     catch (error) {
-      if (record.attempt_id && [409, 422].includes(error?.status))
-        await report(record.attempt_id, "needs_attention", {}, AbortSignal.timeout(5000)).catch(() => {});
+      if ([409, 422].includes(error?.status)) {
+        // Closed requests are absent from agentWork: retain a local attention
+        // fence across restarts without changing the saved answer or operation.
+        db.prepare("UPDATE request_runs SET delivery_refused=1 WHERE id=?").run(id);
+        if (record.attempt_id) await report(record.attempt_id, "needs_attention", {}, AbortSignal.timeout(5000)).catch(() => {});
+      }
       throw error;
     }
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
-    db.prepare("UPDATE request_runs SET delivered=1 WHERE id=?").run(id);
-    if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
-    return { status: "delivered", requestId: id, receipt, hostExecuted: false };
+    db.prepare("UPDATE request_runs SET delivered=1, delivery_refused=0 WHERE id=?").run(id);
+    return reportDelivered(record, { status: "delivered", requestId: id, receipt, hostExecuted: false });
   };
+  // The reply is recorded; a lost run report must not be hidden. Retryable
+  // failures keep reported=0 and surface to the queue's backoff; a terminal
+  // refusal (e.g. 404/409 missing or owned run) is recorded so it stops retrying.
+  const reportDelivered = async (record, result) => {
+    if (!record.attempt_id) { db.prepare("UPDATE request_runs SET reported=1 WHERE id=?").run(id); return { ...result, runReported: true }; }
+    try { await report(record.attempt_id, "delivered"); }
+    catch (error) {
+      // Only a definite 4xx refusal is terminal. Timeouts (408), throttling, auth,
+      // 5xx, transport errors and an unreadable 2xx leave the outcome unconfirmed:
+      // keep it pending so the next pass reconciles the same attempt.
+      const definite = error?.status >= 400 && error.status < 500 && ![401, 408, 425, 429].includes(error.status)
+        && !["TypeError", "TimeoutError", "AbortError"].includes(error?.name);
+      if (!definite) throw Object.assign(error, { runReportPending: true, requestId: id });
+      db.prepare("UPDATE request_runs SET reported=2 WHERE id=?").run(id);
+      return { ...result, runReported: "refused", reportStatus: error.status };
+    }
+    db.prepare("UPDATE request_runs SET reported=1 WHERE id=?").run(id);
+    return { ...result, runReported: true };
+  };
+  if (savedRequestId !== undefined && savedRequestId !== id)
+    throw Object.assign(new Error("Saved reply identity changed; reconcile the original attempt"), { code: "saved_reply_identity_mismatch" });
   const prior = db.prepare("SELECT * FROM request_runs WHERE id=?").get(id);
+  if (savedRequestId !== undefined && !prior?.response)
+    throw new Error("Saved reply is unavailable; reconcile the original attempt");
   if (prior) {
     if (!prior.response) throw new Error("Host outcome is unknown; reconcile the original attempt before proceeding");
+    // A known local delivery whose run report is pending only reports; the saved
+    // reply is not replayed again.
+    if (prior.delivered === 1 && prior.reported === 0)
+      return reportDelivered(prior, { status: "delivered", requestId: id, hostExecuted: false, reportOnly: true });
     // Even an already delivered response is reconciled through the service's
     // idempotent command path, never a stale local assertion of current access.
     return deliver(prior);
   }
+  checkExecution(context.request);
   const messages = [...context.page.items];
   let pages = 1;
   while (context.page.hasMore) {
@@ -68,6 +124,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       throw new Error("Request identity changed while preparing");
     messages.push(...context.page.items);
   }
+  checkSelection(context.request);
   if (!context.current.answerBasis || !context.preparation) throw new Error("Request is not ready or service lacks prepared context");
   if (context.preparation.work && context.request.workItemId) {
     const selected = await client.workContext(context.request.workItemId, { signal });
@@ -82,10 +139,12 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   // before recording a new intent, so unavailable tools cannot strand a request.
   await preflight?.();
   signal?.throwIfAborted();
+  checkExecution(context.request);
   // Preparation is only for new work: a saved answer must remain deliverable
   // even when its original execution backend is no longer available.
   if (execute.prepare) await execute.prepare({ signal });
   signal?.throwIfAborted();
+  checkExecution(context.request);
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
@@ -168,18 +227,50 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs, connectionUnavailable = false, pendingStatement;
-  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
+  let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
+  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE (delivered=0 OR reported=0) AND delivery_refused=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
   while (!signal?.aborted) {
-    let cursor = null;
+    let cursor = null, reportPending = false;
     try {
       const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
+      onPoll();
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => isRequestEligible(request, {
+      const recovering = new Set();
+      // agentWork deliberately lists open requests only. A reply may already be
+      // committed while its acknowledgement was lost, so enumerate local saved
+      // deliveries independently. Rotate the bounded scan past refused records.
+      const scanSaved = after => db.prepare(`SELECT rowid AS recovery_row, id, response FROM request_runs
+        WHERE (delivered=0 OR reported=0) AND delivery_refused=0 AND response IS NOT NULL AND rowid > ?
+        ORDER BY rowid LIMIT 50`).all(after);
+      let saved = scanSaved(recoveryRow);
+      if (!saved.length && recoveryRow) { recoveryRow = 0; saved = scanSaved(0); }
+      for (const record of saved) {
+        signal?.throwIfAborted();
+        recoveryRow = record.recovery_row;
+        let requestMessageId;
+        try {
+          requestMessageId = JSON.parse(record.response).responseToRequestId;
+          if (typeof requestMessageId !== "string" || !requestMessageId) throw new Error("Saved reply has no request identity");
+          // Preserve explicit attention fences for requests still being worked.
+          if (runs[requestMessageId]?.state === "needs_attention") continue;
+          emit(await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
+            allowRequest, selectRequest, savedRequestId: record.id }));
+          recovering.add(requestMessageId);
+        } catch (error) {
+          if (requestMessageId && error?.code !== "saved_reply_identity_mismatch") recovering.add(requestMessageId);
+          // The reply is saved; only its run report is unconfirmed. Report that
+          // distinctly, back off, and keep serving unrelated work.
+          if (error?.runReportPending) { reportPending = true; emit({ status: "report_pending", requestMessageId }); continue; }
+          emit({ status: "needs_attention", ...(requestMessageId ? { requestMessageId } : {}) });
+          if ([401, 429].includes(error?.status) || error?.status >= 500
+            || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
+        }
+      }
+      const eligible = requests.filter(request => !recovering.has(request.id) && (!allowRequest || allowRequest(request) === true) && (!selectRequest || selectRequest(request) === true || owned(request) && Boolean(pending(request))) && isRequestEligible(request, {
         owned: owned(request),
         blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
@@ -190,15 +281,18 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
+          if (error?.runReportPending) { reportPending = true; emit({ status: "report_pending", requestMessageId: request.id }); continue; }
           emit({ status: "needs_attention", requestMessageId: request.id });
           if ([401, 429].includes(error?.status) || error?.status >= 500
             || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
         }
       }
-      delay = intervalMs;
+      // A pending run report backs off like a transient failure without
+      // claiming the connection is unavailable.
+      delay = reportPending ? Math.min(delay * 2, 60000) : intervalMs;
       connectionUnavailable = false;
     } catch (error) {
       if (error?.code === "host_isolation_unavailable") throw error;

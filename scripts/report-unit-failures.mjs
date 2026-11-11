@@ -9,6 +9,7 @@
  *
  * Usage: node scripts/report-unit-failures.mjs --shard=1/3 [--body-file=path]
  *        node scripts/report-unit-failures.mjs --all [--body-file=path]
+ *        node scripts/report-unit-failures.mjs --affected [--body-file=path]
  * Env: GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID (for the run link).
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,7 +45,7 @@ function latestReceipt(dir, index, total) {
   return best ? JSON.parse(readFileSync(best, "utf8")) : null;
 }
 
-function latestAllReceipt(dir) {
+function latestMatchingReceipt(dir, pattern) {
   let best = null;
   let bestAttempt = -1;
   let names;
@@ -54,7 +55,7 @@ function latestAllReceipt(dir) {
     return null;
   }
   for (const name of names) {
-    const match = /^unit-all-attempt-(\d+)\.json$/.exec(name);
+    const match = pattern.exec(name);
     if (!match) continue;
     const attempt = Number(match[1]);
     if (attempt > bestAttempt) {
@@ -67,11 +68,14 @@ function latestAllReceipt(dir) {
 
 function main() {
   const all = process.argv.includes("--all");
+  const affected = process.argv.includes("--affected");
   const shardArg = arg("--shard");
-  if (all === Boolean(shardArg)) throw new Error("Usage: report-unit-failures.mjs --shard=1/3 | --all [--body-file=path]");
+  const modes = Number(all) + Number(affected) + Number(Boolean(shardArg));
+  if (modes !== 1) throw new Error("Usage: report-unit-failures.mjs --shard=1/3 | --all | --affected [--body-file=path]");
   let comment;
-  if (all) {
-    const receipt = latestAllReceipt("test-results");
+  if (all || affected) {
+    const pattern = all ? /^unit-all-attempt-(\d+)\.json$/ : /^unit-affected-attempt-(\d+)\.json$/;
+    const receipt = latestMatchingReceipt("test-results", pattern);
     comment = {
       failures: Array.isArray(receipt?.failures) ? receipt.failures : [],
       title: "## Unit test failures\n",

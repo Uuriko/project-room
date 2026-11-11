@@ -5,28 +5,30 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 
 async function scenario(t, mutate) {
   const store = new RoomStore(':memory:'), rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen'), worker = store.identities.create('Worker'), other = store.identities.create('Riley');
   rooms.create(owner.secret, { roomId: 'commons', title: 'Work view', purpose: 'Test', kind: 'personal' });
   for (const identity of [worker, other]) {
-    store.identities.link(owner.secret, 'commons', { identityId: identity.identityId, displayName: identity === worker ? 'Worker' : 'Riley', permissions: [] });
+    linkWithProof(store, owner.secret, 'commons', identity, { displayName: identity === worker ? 'Worker' : 'Riley', permissions: [] });
     store.dmConsents.request('commons', owner.identityId, identity.identityId, 'Fixture');
     store.dmConsents.decide('commons', identity.identityId, owner.identityId, 'approve');
   }
   const ask = (from, id) => store.command(from.secret, 'commons', { id, type: 'message.posted', data: { messageId: id, toMemberId: worker.identityId, requestKind: 'reply', body: 'q' } });
   ask(owner, 'q-owner'); ask(other, 'q-other');
   mutate?.({ store, owner, worker, other });
-  const sequenceBeforeRead = store.room('commons').sequence;
+  const sequenceBeforeRead = store.headSequence('commons');
   const server = createRoomServer({ store });
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(r => server.close(r)); store.close(); });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/agent-work`, { headers: { Authorization: `Bearer ${worker.secret}` } });
   assert.equal(response.status, 200);
   const view = await response.json();
-  assert.equal(store.room('commons').sequence, sequenceBeforeRead, 'the read wrote nothing');
-  assert.equal(view.evaluatedThrough, sequenceBeforeRead);
+  assert.equal(store.headSequence('commons'), sequenceBeforeRead, 'the read wrote nothing');
+  assert.equal(view.evaluatedThrough, store.replyRequests.list(worker.secret,'commons',{direction:'incoming',status:'open'}).evaluatedThrough, 'use the same viewer-visible horizon; private authority events must not expose the raw head');
+  assert.ok(view.evaluatedThrough <= sequenceBeforeRead);
   const refused = {};
   for (const request of view.requests) {
     try {

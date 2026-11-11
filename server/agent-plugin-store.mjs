@@ -32,6 +32,8 @@ import {
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { DM_FOLLOW_UP_TYPES, dmEventVisibility } from "./dm-event-visibility.mjs";
+import { selectedMessageRecord } from "./message-repository.mjs";
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -40,6 +42,12 @@ import {
 } from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
+
+function sameScopeSet(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const have = new Set(actual);
+  return expected.every(scope => have.has(scope));
+}
 
 // Purely additive, intentionally outside the writer fence (see
 // unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
@@ -112,6 +120,9 @@ export const agentPluginSchema = `
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_retention
+    ON agent_webhook_deliveries(created_at, delivery_id)
+    WHERE state IN ('delivered','dead_letter');
   CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_due
     ON agent_webhook_deliveries(state, next_attempt_at);
   CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_agent
@@ -217,6 +228,9 @@ export class AgentPluginError extends Error {
 }
 
 export class AgentPluginStore {
+  #protectedOnboardingKeyIds = new Set();
+  #onboardingRotationDepth = 0;
+
   constructor(store) {
     this.store = store;
     this.db = store.db;
@@ -422,18 +436,65 @@ export class AgentPluginStore {
     }
   }
 
+  onboardingMcpScopes(roomId) {
+    // CX5-FIX: heartbeats:report/read let the saved credential run the
+    // room-scoped wake listener (createHeartbeatActor binds it to this
+    // room via the mcp:room: scope below). Without them the standard
+    // setup credential 403'd on its own listener surface.
+    return [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
+  }
+
   issueOnboardingMcpToken({ identityId, roomId, label }) {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      // CX5-FIX: heartbeats:report/read let the saved credential run the
-      // room-scoped wake listener (createHeartbeatActor binds it to this
-      // room via the mcp:room: scope below). Without them the standard
-      // setup credential 403'd on its own listener surface.
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
+      scopes: this.onboardingMcpScopes(roomId),
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
+    return this.#onboardingTokenView(issued);
+  }
+
+  // POST /api/agent-rooms/{id}/token/rotate. One transaction revokes the
+  // onboarding keys already live for this room and inserts the replacement.
+  // A key minted by an overlapping rotate is claimed before the insert
+  // returns, so this rotation does not revoke it. A wider key, or an
+  // onboarding bundle for another room, is not in the revoke set. Room-create
+  // replay does not call this.
+  rotateOnboardingMcpToken({ identityId, roomId, label }) {
+    const outermost = this.#onboardingRotationDepth === 0;
+    this.#onboardingRotationDepth += 1;
+    try {
+      return this.mutate(() => {
+        const expected = this.onboardingMcpScopes(roomId);
+        const priorIds = [];
+        for (const record of this.apiKeys.keysForIdentity(identityId)) {
+          if (record.revoked || !sameScopeSet(record.scopes, expected)) continue;
+          if (this.#protectedOnboardingKeyIds.has(record.keyId)) continue;
+          priorIds.push(record.keyId);
+        }
+        const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
+        const issued = this.#issueProtectedOnboardingKey({
+          identityId,
+          scopes: expected,
+          expiresAt: this.store.now() + 30 * 86400000,
+          label: host
+        });
+        for (const keyId of priorIds) {
+          const current = this.keys.get(keyId);
+          if (!current || current.revoked || this.#protectedOnboardingKeyIds.has(keyId)) continue;
+          this.apiKeys.revoke(keyId);
+          this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
+        }
+        return this.#onboardingTokenView(issued);
+      });
+    } finally {
+      this.#onboardingRotationDepth -= 1;
+      if (outermost) this.#protectedOnboardingKeyIds.clear();
+    }
+  }
+
+  #onboardingTokenView(issued) {
     return {
       credential: API_KEY_PREFIX + issued.secret,
       scopes: [...issued.scopes],
@@ -441,6 +502,32 @@ export class AgentPluginStore {
       label: issued.label,
       keyId: issued.keyId
     };
+  }
+
+  // Claim the key id before Map.set returns. An overlapping retry that
+  // starts from that insert then sees the id and leaves the key live.
+  #issueProtectedOnboardingKey(request) {
+    const previous = this.keys.set.bind(this.keys);
+    this.keys.set = (keyId, record) => {
+      this.#protectedOnboardingKeyIds.add(keyId);
+      return previous(keyId, record);
+    };
+    try {
+      const issued = this.apiKeys.issue(request);
+      const record = this.keys.get(issued.keyId);
+      this.#persistApiKey(record);
+      return issued;
+    } finally {
+      this.keys.set = previous;
+    }
+  }
+
+  #persistApiKey(record) {
+    this.db.prepare(`INSERT INTO agent_api_keys
+      (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
+      .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
+        record.label, record.createdAt, record.expiresAt);
   }
 
   notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {
@@ -459,12 +546,7 @@ export class AgentPluginStore {
   issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
     return this.mutate(() => {
       const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
-      const record = this.keys.get(issued.keyId);
-      this.db.prepare(`INSERT INTO agent_api_keys
-        (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
-        .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
-          record.label, record.createdAt, record.expiresAt);
+      this.#persistApiKey(this.keys.get(issued.keyId));
       return issued;
     });
   }
@@ -906,7 +988,7 @@ export class AgentPluginStore {
         const link = linkOf.get(roomId, member.id);
         if (!link) { skipped.push({ memberId: member.id, reason: "no linked identity" }); continue; }
         if (liveCardOf.get(link.identityId)) { skipped.push({ memberId: member.id, reason: "card already published" }); continue; }
-        let slug = String(member.displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const slug = String(member.displayName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!/^[a-z][a-z0-9-]*$/.test(slug)) { skipped.push({ memberId: member.id, reason: "display name has no usable slug" }); continue; }
         let agentId = slug, n = 2;
         while (taken.has(agentId)) agentId = `${slug}-${n++}`;
@@ -953,21 +1035,38 @@ export class AgentPluginStore {
   // with the cron tick as the restart-safe backstop; the agent sees each
   // delivery in its journal. No subscription, no delivery — the heartbeat
   // queue alone carries the wake.
-  deliverWakePing({ identityId, signal }) {
+  deliverWakePing({ identityId, signal, rewake = null }) {
     // R282-1: a revoked identity's secret is dead, so its wake must be too.
     if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
+    // Wake adapters (ROOM_WAKE_ADAPTERS, default off): a burst of signals for
+    // the same agent and room inside the window rides the pending wake.
+    const adapters = this.wakeAdapters;
+    let wakeCount = 1;
+    if (rewake) wakeCount = rewake.count;
+    else if (adapters?.enabled) {
+      const offer = adapters.coalescer.offer(identityId, signal ?? {});
+      if (!offer.send) return Object.freeze({ deliveries: Object.freeze([]), coalesced: true });
+      wakeCount = offer.count;
+    }
     const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
       const deliveries = [];
       const wakePing = buildWakePing({ agentId: identityId, signal });
       const eventId = signal?.signalId ?? null;
+      // Each bounded retry is a new delivery, while replaying that same
+      // signal/attempt still deduplicates against its durable journal row.
+      const retrySuffix = rewake ? `rewake:${rewake.attempt}` : null;
+      // T2-L03a-C1: journal the signal's real room, not null. The drain's
+      // dispatch-time membership re-check only fires for rows with a
+      // room_id, so a null room disarmed it for every agent.wake delivery.
+      const roomId = typeof signal?.roomId === "string" && signal.roomId ? signal.roomId : null;
       for (const row of rows) {
         let events = [];
         try { events = JSON.parse(row.eventsJson); } catch { continue; }
         if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
         deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
-          { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null }));
+          { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId, idempotencySuffix: retrySuffix }));
       }
       // Event-push: when the agent registered wakeable hosts with wakeUrls,
       // the same wake ping is also POSTed to each distinct wakeUrl via the
@@ -979,9 +1078,13 @@ export class AgentPluginStore {
       if (deliveries.length > 0) {
         for (const wake of this.wakeUrlTargets(identityId)) {
           try {
+            const kind = adapters?.enabled ? adapters.inferAdapterKind(wake.wakeUrl) : null;
+            const data = kind && kind !== "generic"
+              ? adapters.buildAdapterBody({ kind, agentId: identityId, signal, count: wakeCount, attempt: rewake?.attempt ?? 0 })
+              : wakePing;
             deliveries.push(this.buildWebhookDelivery(deliveries[0].subscriptionId,
-              { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null,
-                url: wake.wakeUrl, idempotencySuffix: `wake-url:${wake.hostId}` }));
+              { eventType: WAKE_PING_EVENT, data, eventId, roomId,
+                url: wake.wakeUrl, idempotencySuffix: `wake-url:${wake.hostId}${retrySuffix ? `:${retrySuffix}` : ""}` }));
           } catch { /* skip invalid wakeUrl; the subscription-URL delivery still stands */ }
         }
       }
@@ -1249,6 +1352,23 @@ export class AgentPluginStore {
       .run(JSON.stringify(sub.deliveries), subscriptionId);
   }
 
+  // Message/request follow-ups carry no toMemberId, but are as private as their
+  // opening message. Reuse the read-path audience rule at enqueue AND send:
+  // older releases may already have queued an unauthorized payload.
+  requestEventVisible(roomId, memberId, event) {
+    if (!DM_FOLLOW_UP_TYPES.has(event?.type)) return true;
+    const id = event.data?.messageId ?? event.data?.requestMessageId;
+    if (!roomId || !memberId || typeof id !== "string" || !id || id.length > 128) return false;
+    try {
+      const message = selectedMessageRecord(this.store, roomId, id, true);
+      if (!message) return false;
+      return dmEventVisibility(memberId, [message])(event);
+    } catch {
+      // Missing/unreadable authority never permits a private delivery.
+      return false;
+    }
+  }
+
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
   // subscription whose event filter matches. RC-2026-09-24 fanout scope:
   // delivery is scoped to room membership — only subscriptions whose
@@ -1304,6 +1424,7 @@ export class AgentPluginStore {
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
         if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
       }
+      if (!this.requestEventVisible(roomId, memberId, event)) continue;
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
           data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
@@ -1479,8 +1600,15 @@ export class AgentPluginStore {
     // (identity_links first, guest_members fallback) — the same one the
     // fan-out uses (#3777) — so a trial seat's queued delivery is not
     // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
-    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
+    const memberId = row.room_id ? memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now) : null;
+    if (row.room_id && !memberId) return skip();
     const payload = JSON.parse(row.payload_json);
+    if (!this.requestEventVisible(row.room_id, memberId,
+      { type: row.event_type, data: payload?.data })) {
+      const changed = this.mutate(() => this.markDeadLetter(row.delivery_id,
+        "request audience unavailable or excludes subscriber", now, null, claimExpiresAt));
+      return changed ? "deadLettered" : "skipped";
+    }
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
     // object without an object data) reaches signDelivery's own check
@@ -1533,7 +1661,7 @@ export class AgentPluginStore {
         SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
             signature=?, payload_json=?, claim_expires_at=NULL, updated_at=?
         WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
-        .run(attempts, result.error, now + backoffDelayMs(attempts), signature,
+        .run(attempts, result.error, now + Math.max(backoffDelayMs(attempts), Number(result.retryAfterMs) || 0), signature,
           JSON.stringify(envelope), now, row.delivery_id, claimExpiresAt).changes;
       return changed ? "retried" : "skipped";
     });
@@ -1544,6 +1672,33 @@ export class AgentPluginStore {
   // drain after a commit journals deliveries; the cron tick and manual
   // drain remain the restart-safe backstop. kickDispatch never throws, so
   // the command that triggered the fan-out cannot fail from the kick.
+  // Install wake adapters (server/wake-adapters.mjs). Absent or disabled
+  // means deliverWakePing behaves exactly as before.
+  setWakeAdapters(adapters) { this.wakeAdapters = adapters ?? null; }
+
+  nextRewakeAt() {
+    return this.wakeAdapters?.enabled ? this.wakeAdapters.coalescer.nextRewakeAt() : null;
+  }
+
+  // Re-send wakes whose inbox is still unread (ROOM_WAKE_ADAPTERS only).
+  sweepRewakes() {
+    const adapters = this.wakeAdapters;
+    if (!adapters?.enabled) return 0;
+    let sent = 0;
+    for (const due of adapters.coalescer.dueRewakes()) {
+      if (!due.signal?.signalId) continue;
+      sent += this.deliverWakePing({ identityId: due.agentId, signal: due.signal, rewake: due }).deliveries.length;
+    }
+    return sent;
+  }
+
+  // Explicit whole-room read; signal acknowledgements use the separate API below.
+  noteWakeRead(identityId, roomId) { this.wakeAdapters?.coalescer?.markRead(identityId, roomId ?? null); }
+
+  noteWakeAcknowledged(identityId, roomId, signalIds) {
+    this.wakeAdapters?.coalescer?.markAcknowledged(identityId, roomId ?? null, signalIds);
+  }
+
   setDispatchKick(fn) {
     this.dispatchKick = typeof fn === "function" ? fn : null;
     return this;
@@ -1558,48 +1713,66 @@ export class AgentPluginStore {
   // Drop delivered and dead-letter rows that are both outside the newest
   // WEBHOOK_DELIVERY_KEEP per subscription and older than the retention
   // window. Pending and failed rows stay: they can still be attempted.
-  // One cron tick deletes at most WEBHOOK_DELIVERY_PRUNE_BATCH rows; the
-  // next tick continues. The cache drops any id this batch removed.
-  pruneWebhookDeliveries({ now = this.store.now() } = {}) {
+  // One cron tick examines at most WEBHOOK_DELIVERY_PRUNE_BATCH terminal
+  // candidates and up to 100 indexed history entries per distinct subscription.
+  // The cursor passes protected histories; the cache drops only deleted ids.
+  pruneWebhookDeliveries({ now = this.store.now(), cursor = this.webhookRetentionCursor ?? null } = {}) {
     if (!Number.isSafeInteger(now)) throw new Error("Invalid webhook delivery retention clock");
     const cutoff = now - WEBHOOK_DELIVERY_RETENTION_MS;
-    return this.mutate(() => {
-      const doomed = this.db.prepare(
-        `SELECT delivery_id FROM (
-           SELECT delivery_id, state, created_at,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY subscription_id
-                    ORDER BY created_at DESC, rowid DESC
-                  ) AS rn
-           FROM agent_webhook_deliveries
-         )
-         WHERE state IN ('delivered', 'dead_letter')
-           AND rn > ?
-           AND created_at < ?
-         ORDER BY created_at ASC, delivery_id ASC
-         LIMIT ?`
-      ).all(WEBHOOK_DELIVERY_KEEP, cutoff, WEBHOOK_DELIVERY_PRUNE_BATCH);
-      const remove = this.db.prepare(
-        "DELETE FROM agent_webhook_deliveries WHERE delivery_id=? AND state IN ('delivered','dead_letter')");
-      const gone = new Set();
-      let deleted = 0;
-      for (const { delivery_id } of doomed) {
-        deleted += remove.run(delivery_id).changes;
-        gone.add(delivery_id);
-      }
-      if (gone.size) {
-        for (const sub of this.subs.values()) {
-          if (!Array.isArray(sub.deliveries) || sub.deliveries.length === 0) continue;
-          const next = sub.deliveries.filter(delivery => !gone.has(delivery.deliveryId));
-          if (next.length !== sub.deliveries.length) sub.deliveries = next;
+    // A malformed or missing checkpoint restarts a safe, idempotent sweep.
+    const after = cursor && Number.isSafeInteger(cursor.createdAt) && cursor.createdAt >= 0
+      && typeof cursor.deliveryId === "string" && cursor.deliveryId.length > 0 && cursor.deliveryId.length <= 256
+      ? cursor : null;
+    const previousArrays = new Map();
+    let result;
+    try {
+      result = this.store.transaction(() => {
+        // Pin the bounded order: the general state/due index otherwise lets
+        // SQLite scan and sort every terminal row before applying LIMIT.
+        const candidates = this.db.prepare(`SELECT delivery_id, subscription_id, created_at, rowid AS row_id
+          FROM agent_webhook_deliveries INDEXED BY agent_webhook_deliveries_retention
+          WHERE state IN ('delivered','dead_letter') AND created_at < ?
+            ${after ? "AND (created_at, delivery_id) > (?, ?)" : ""}
+          ORDER BY created_at, delivery_id LIMIT ?`).all(cutoff,
+          ...(after ? [after.createdAt, after.deliveryId] : []), WEBHOOK_DELIVERY_PRUNE_BATCH);
+        const thresholds = new Map();
+        const threshold = this.db.prepare(`SELECT created_at, rowid AS row_id FROM agent_webhook_deliveries
+          INDEXED BY agent_webhook_deliveries_sub_created WHERE subscription_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1 OFFSET ?`);
+        const remove = this.db.prepare("DELETE FROM agent_webhook_deliveries WHERE delivery_id=? AND state IN ('delivered','dead_letter')");
+        const gone = new Map();
+        let deleted = 0;
+        for (const row of candidates) {
+          if (!thresholds.has(row.subscription_id)) thresholds.set(row.subscription_id,
+            threshold.get(row.subscription_id, WEBHOOK_DELIVERY_KEEP - 1) ?? null);
+          const keep = thresholds.get(row.subscription_id);
+          if (!keep || row.created_at > keep.created_at
+            || (row.created_at === keep.created_at && row.row_id >= keep.row_id)) continue;
+          deleted += remove.run(row.delivery_id).changes;
+          if (!gone.has(row.subscription_id)) gone.set(row.subscription_id, new Set());
+          gone.get(row.subscription_id).add(row.delivery_id);
         }
-      }
-      return Object.freeze({
-        deleted,
-        moreMayRemain: doomed.length === WEBHOOK_DELIVERY_PRUNE_BATCH,
-        batchLimit: WEBHOOK_DELIVERY_PRUNE_BATCH,
+        // Only these bounded subscription arrays change. Do not clone every
+        // credential/card/subscription just to discover an empty prune batch.
+        for (const [id, removed] of gone) {
+          const sub = this.subs.get(id);
+          if (!Array.isArray(sub?.deliveries)) continue;
+          previousArrays.set(sub, sub.deliveries);
+          sub.deliveries = sub.deliveries.filter(delivery => !removed.has(delivery.deliveryId));
+        }
+        const moreMayRemain = candidates.length === WEBHOOK_DELIVERY_PRUNE_BATCH;
+        const last = candidates.at(-1);
+        return Object.freeze({ deleted, examined: candidates.length, moreMayRemain,
+          batchLimit: WEBHOOK_DELIVERY_PRUNE_BATCH,
+          nextCursor: moreMayRemain ? { createdAt: last.created_at, deliveryId: last.delivery_id } : null });
       });
-    });
+    } catch (error) {
+      for (const [sub, deliveries] of previousArrays) sub.deliveries = deliveries;
+      throw error;
+    }
+    // Worker persists this returned checkpoint after the SQL commit. Node also
+    // progresses across ticks; a process restart simply repeats a safe prefix.
+    this.webhookRetentionCursor = result.nextCursor;
+    return result;
   }
 
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).
@@ -1741,6 +1914,10 @@ export class AgentPluginStore {
         within3 += row.within3 ?? 0;
       }
       const terminal = byState.delivered + byState.dead_letter;
+      const deadLetterReasons = { subscription_removed: 0, receiver_rejected: 0, url_not_public: 0, retries_exhausted: 0, not_attemptable: 0, other: 0 };
+      const reasonRows = this.db.prepare(
+        "SELECT last_error FROM agent_webhook_deliveries WHERE agent_id = ? AND state = 'dead_letter'").all(identityId);
+      for (const row of reasonRows) deadLetterReasons[deadLetterReason(row.last_error)] += 1;
       return Object.freeze({
         claim: "signed webhook dispatch delivers \u226599% of events within 3 attempts",
         totalTerminal: terminal,
@@ -1752,6 +1929,10 @@ export class AgentPluginStore {
         failedAwaitingRetry: byState.failed,
         maxAttempts: MAX_DELIVERY_ATTEMPTS,
         byState: Object.freeze({ ...byState }),
+        // Fixed buckets only. The raw journal text can carry receiver hosts
+        // and is already available per delivery to the owner; the summary
+        // never echoes it.
+        deadLetterReasons: Object.freeze(deadLetterReasons),
       });
     });
   }
@@ -1761,4 +1942,16 @@ export class AgentPluginStore {
   pluginManifest(serviceOrigin) {
     return buildPluginManifest({ serviceOrigin, roomId: null });
   }
+}
+
+// Buckets a dead-letter journal reason (written by markDeadLetter callers in
+// this file) into a fixed, non-identifying category for metrics.
+export function deadLetterReason(lastError) {
+  const text = String(lastError ?? "");
+  if (/^subscription removed/.test(text)) return "subscription_removed";
+  if (/not_public|not public|private address|ssrf/i.test(text)) return "url_not_public";
+  if (/^receiver rejected the delivery/.test(text)) return "receiver_rejected";
+  if (/^gave up after \d+ attempts/.test(text)) return "retries_exhausted";
+  if (/^stored delivery cannot be attempted/.test(text)) return "not_attemptable";
+  return "other";
 }

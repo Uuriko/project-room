@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { OutsideAgents } from "../server/outside-agents.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
@@ -127,7 +128,7 @@ test("outside-agent HTTP and hosted MCP preserve scope, readonly and self-link b
   assert.equal((await api(f.keys.producer, { action: "introduce", externalRef: "bus:blocked", displayName: "Blocked", origin: "bus" })).status, 403);
   assert.deepEqual(Object.keys(f.members()), originalMembers);
   const identity = f.store.identities.create("MCP reader");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "MCP reader", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "MCP reader", permissions: [] });
   const mcp = async (name, args = {}) => {
     const response = await fetch(origin + "/room/mcp", { method: "POST", headers: { Authorization: `Bearer ${identity.secret}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { roomId: "commons", ...args } } }) });
     return response.json();
@@ -142,4 +143,45 @@ test("outside-agent HTTP and hosted MCP preserve scope, readonly and self-link b
   const recorded = await mcp("room_introduce_outside_agent", { externalRef: "bus:mcp", displayName: "MCP", origin: "mcp" });
   assert.equal(recorded.result.structuredContent.grantsAccess, false);
   assert.equal(recorded.result.structuredContent.recorded, "introduce");
+});
+
+
+test("outside agent summaries honor the viewer history floor at the same instant", async t => {
+  const f = fixture(t);
+  f.store.now = () => Date.parse("2026-10-29T08:00:00.000Z");
+  f.net.record(f.keys.owner, "commons", { externalRef: "bus:before-join", displayName: "Earlier private history", origin: "bus" });
+  const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
+  send("room.history_visibility_set", { historyVisibility: "since_join" });
+  send("member.added", { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [] });
+  const key = f.store.issueAccessKey("commons", "late-agent");
+  f.net.record(f.keys.owner, "commons", { externalRef: "bus:after-join", displayName: "Visible introduction", origin: "bus" });
+  assert.deepEqual(f.net.list(key, "commons").agents.map(agent => agent.externalRef), ["bus:after-join"]);
+  assert.equal(f.net.list(f.keys.owner, "commons").agents.length, 2);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/outside-agents`, { headers: { Authorization: `Bearer ${key}` } });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).agents.map(agent => agent.externalRef), ["bus:after-join"]);
+  t.mock.method(f.store, "historyFloor", () => { throw Error("unavailable floor"); });
+  assert.deepEqual(f.net.list(key, "commons").agents, [], "missing visibility evidence fails closed");
+});
+
+
+test("hidden link history cannot permit a conflicting link or misattribute later approval", t => {
+  const f = fixture(t), externalRef = "bus:canonical-link";
+  f.net.record(f.keys.owner, "commons", { externalRef, displayName: "Canonical agent", origin: "bus" });
+  f.net.link(f.keys.producer, "commons", { externalRef, memberId: "producer" });
+  const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
+  send("room.history_visibility_set", { historyVisibility: "since_join" });
+  send("member.added", { memberId: "late-linker", displayName: "Late linker", kind: "agent", permissions: [] });
+  const key = f.store.issueAccessKey("commons", "late-linker");
+  setTier(f.store.db, "commons", "late-linker", "t2_standard");
+  f.net.record(key, "commons", { externalRef, displayName: "A newer sighting", origin: "bus" });
+  assert.throws(() => f.net.link(key, "commons", { externalRef, memberId: "late-linker" }), error => error.code === "outside_agent_changed");
+  f.net.verify(f.keys.owner, "commons", { externalRef, decision: "approved" });
+  const canonical = f.net.list(f.keys.owner, "commons").agents.find(agent => agent.externalRef === externalRef);
+  assert.equal(canonical.linkedMemberId, "producer");
+  assert.equal(canonical.verified, true);
+  assert.deepEqual(f.net.list(key, "commons").agents, [], "partial history must not reinterpret canonical identity or approval");
 });

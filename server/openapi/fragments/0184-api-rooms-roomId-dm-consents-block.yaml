@@ -1,0 +1,27 @@
+  /api/rooms/{roomId}/dm-consents/block:
+    post:
+      summary: Block DMs from a member
+      description: >-
+        Proactively refuse DMs from another active member without waiting for
+        a pending request: exactly { peerId }. Directional and sticky: the
+        blocked member's requests are refused with 403 dm_blocked, and a
+        pending request from them becomes blocked. The reverse direction (you
+        DMing them) is untouched. Lift with POST .../dm-consents/unblock.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [peerId]
+              properties:
+                peerId: { type: string }
+      responses:
+        '200':
+          description: Block recorded
+        '401':
+          description: unauthenticated
+        '422':
+          $ref: '#/components/responses/InvalidInput'

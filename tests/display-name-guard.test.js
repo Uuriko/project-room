@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAgentDisplayName, assessMemberDisplayName, displayNameSkeleton } from '../server/display-name-guard.mjs';
 import { isReservedRoleName, assertNotReservedRoleName } from '../server/display-name-guard.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const check = (name, activeNames = []) => checkAgentDisplayName(name, { activeNames });
 
@@ -70,25 +71,19 @@ test('integration: identity mint and room link enforce names at the write bounda
   assert.throws(() => store.identities.create('ＣＯＰ'), { status: 422, code: 'invalid_identity' },
     'fullwidth visual clone cannot bypass mint collision detection');
   const relay = store.identities.create('Relay');
-  store.identities.link(ownerKey, 'commons', { identityId: relay.identityId, permissions: [] });
+  linkWithProof(store, ownerKey, 'commons', relay, { permissions: [] });
   const second = store.identities.create('Other');
   const count = () => store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE room_id=?').get('commons').n;
   const linkedBefore = count();
   for (const name of ['Ｒｅｌａｙ', 'Rеlay', 'B\u200dot']) {
-    assert.throws(() => store.identities.link(ownerKey, 'commons', {
-      identityId: second.identityId, displayName: name, permissions: []
-    }), { status: 422, code: 'invalid_identity' });
+    assert.throws(() => linkWithProof(store, ownerKey, 'commons', second, { displayName: name, permissions: [] }), { status: 422, code: 'invalid_identity' });
   }
   assert.equal(count(), linkedBefore, 'failed links do not leave a membership');
   const duplicate = store.identities.create('Another');
-  assert.throws(() => store.identities.link(ownerKey, 'commons', {
-    identityId: duplicate.identityId, displayName: 'Relay', permissions: []
-  }), error => error.status === 422 && error.code === 'display_name_unavailable',
+  assert.throws(() => linkWithProof(store, ownerKey, 'commons', duplicate, { displayName: 'Relay', permissions: [] }), error => error.status === 422 && error.code === 'display_name_unavailable',
   'a live room link refuses an exact display-name duplicate');
   assert.equal(count(), linkedBefore, 'a refused duplicate link writes no membership');
-  const linked = store.identities.link(ownerKey, 'commons', {
-    identityId: second.identityId, displayName: 'Helpful Agent', permissions: []
-  });
+  const linked = linkWithProof(store, ownerKey, 'commons', second, { displayName: 'Helpful Agent', permissions: [] });
   assert.equal(linked.identityId, second.identityId);
   assert.equal(store.room('commons').state.members[linked.memberId].displayName, 'Helpful Agent');
 });

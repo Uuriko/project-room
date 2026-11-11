@@ -143,6 +143,11 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   assert.equal(state().workItems[workItemId].verification.independenceConfirmed, true);
   assert.deepEqual(state().workItems[sourceId], original);
 
+  // Work created without a conversation is discovered deliberately, rather
+  // than appearing as another full card in the human chat timeline.
+  await openSearch(page);
+  await page.locator('#message-search').fill('Next telescope session');
+  await page.locator(`#search-list [data-open-work="${workItemId}"]`).click();
   await page.locator(`[data-work-id="${workItemId}"][data-action="decide"]`).click();
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, finalBody);
   assert.equal(await page.locator('#action-fields [name="decision"]').inputValue(), '');

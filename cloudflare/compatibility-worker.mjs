@@ -25,10 +25,14 @@ export class CompatibilityRoom {
         // Not a migration of a live database or a silent relaxation of its guards.
         sql.exec('CREATE TABLE room_runtime_version (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)');
         sql.exec('INSERT INTO room_runtime_version VALUES(1,?)', this.env.SCHEMA_VERSION);
-        for (const statement of JSON.parse(this.env.SCHEMA)) sql.exec(statement);
+        // Synthetic fixture hydration only: install EVERY original guard before
+        // the same transaction commits, after seeding its legitimate control rows.
+        const statements=JSON.parse(this.env.SCHEMA),isTrigger=statement=>/^\s*CREATE\s+TRIGGER\b/i.test(statement);
+        for (const statement of statements.filter(statement=>!isTrigger(statement))) sql.exec(statement);
         for (const { table, columns, values } of JSON.parse(this.env.FIXTURE)) {
           sql.exec(`INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`, ...values);
         }
+        for (const statement of statements.filter(isTrigger)) sql.exec(statement);
       });
       return Response.json({ tables: sql.exec("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name NOT LIKE '_cf_%'").one().n });
     }

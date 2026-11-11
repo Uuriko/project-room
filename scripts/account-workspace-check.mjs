@@ -173,7 +173,7 @@ test("invitation account replacement warns about an account-only draft and clear
   await p.evaluate(hash => { location.hash = hash; }, "#invite/" + token);
   await p.locator("#invitation-accept").click();
   await p.locator("#invitation-email").click();
-  const requestForm = await openMagicSignin(p);
+  const requestForm = await openMagicSignin(p, email);
   await requestForm.locator('[name="email"]').fill(email);
   await requestForm.locator('button[type=submit]').click();
   await p.locator('#invitation-methods [data-magic-manual-code]').click();
@@ -225,7 +225,7 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
   await p.locator("#join-link-form").waitFor();
   assert.equal(await p.locator("#join-link-submit").textContent(), "Continue as guest");
   if (await p.locator("#join-account-signin").isVisible()) await p.locator("#join-account-signin").click();
-  const form = await openMagicSignin(p);
+  const form = await openMagicSignin(p, email);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
   await p.locator('#join-account-auth').getByText(/Check .* for your sign-in link/).waitFor();

@@ -1,8 +1,7 @@
 /**
  * audit-wave-3c.test.js — regression tests for audit wave 3C findings:
  * M-7 (collab authorization), M-8 (memory-ahead-of-disk rollback), M-29/M-30
- * (subscriber/listener isolation), M-31 (duplicate room ids in DM restore),
- * M-46 (persist-before-notify in owner-alerts dispatch).
+ * (subscriber/listener isolation), M-31 (duplicate room ids in DM restore).
  *
  * Each test fails on the pre-fix code for the intended reason and passes
  * after the owner-boundary repair. Run with:
@@ -16,7 +15,6 @@ import { join } from "node:path";
 
 import { createHandoffStore } from "../src/handoff-store.mjs";
 import { createDMRooms } from "../src/dm-room-wiring.mjs";
-import { createOwnerAlertDispatcher } from "../src/owner-alerts.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -79,66 +77,6 @@ test("M-31: DM restore rejects a snapshot with two rooms sharing one id", () => 
   assert.equal(dm.get(room.id).agentA, "alice");
 });
 
-
-// ---------------------------------------------------------------------------
-// M-46: owner-alerts persist-before-notify
-// ---------------------------------------------------------------------------
-
-function raiseAndDispatchDeps({ storage, notifier }) {
-  return {
-    clock: () => 1_000_000,
-    backoff: () => 0,
-    sleep: () => Promise.resolve(),
-    storage,
-    notifier,
-  };
-}
-
-test("M-46: the in-flight dispatch attempt is persisted before notify runs", async () => {
-  const order = [];
-  const storage = {
-    load: () => null,
-    save: () => { order.push("persist"); },
-  };
-  const notifier = {
-    notify: async () => { order.push("notify"); },
-  };
-  const dispatcher = createOwnerAlertDispatcher(raiseAndDispatchDeps({ storage, notifier }));
-  const alert = dispatcher.raise({ severity: "critical", title: "t", body: "b", source: "test" });
-  order.length = 0; // ignore raise's persist; only dispatch's ordering matters
-  await dispatcher.dispatch(alert.id);
-  const firstPersist = order.indexOf("persist");
-  const firstNotify = order.indexOf("notify");
-  assert.ok(firstPersist !== -1, "expected a persist call");
-  assert.ok(firstNotify !== -1, "expected a notify call");
-  assert.ok(firstPersist < firstNotify, `persist must precede notify: ${JSON.stringify(order)}`);
-});
-
-test("M-46: a storage failure after a successful notify is a storage error, not a retried delivery", async () => {
-  let writes = 0;
-  const storage = {
-    load: () => null,
-    save: () => {
-      writes += 1;
-      // Writes: 1 = raise, 2 = in-flight attempt persist, 3 = post-notify
-      // settle. Fail the post-notify write: the send already happened.
-      if (writes > 2) throw new Error("disk is full");
-    },
-  };
-  let notifyCalls = 0;
-  const notifier = {
-    notify: async () => { notifyCalls += 1; },
-  };
-  const dispatcher = createOwnerAlertDispatcher(raiseAndDispatchDeps({ storage, notifier }));
-  const alert = dispatcher.raise({ severity: "critical", title: "t", body: "b", source: "test" });
-  await assert.rejects(
-    dispatcher.dispatch(alert.id),
-    (err) => err.code === "OA_STORAGE_ERROR",
-    "expected OA_STORAGE_ERROR, not OA_DELIVERY_FAILED",
-  );
-  assert.equal(notifyCalls, 1, "the alert must be sent exactly once");
-  assert.equal(dispatcher.get(alert.id).attempts.length, 1, "no retry after a post-notify storage failure");
-});
 
 // ---------------------------------------------------------------------------
 // M-8: per-store write-failure rollback

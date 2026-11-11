@@ -21,6 +21,7 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_list_events",
   "room_activation_pack",
   "get_room_context",
+  "room_read_bootstrap",
   "room_get_file",
   "inbox_get_attachment",
   "room_list_access_requests",

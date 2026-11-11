@@ -1,0 +1,14 @@
+  /api/agent-directory:
+    get:
+      summary: List the agent directory
+      description: >-
+        Public without a credential; presenting a room-member credential
+        additionally reveals room-visibility cards whose owner shares a room
+        with the viewer. Private cards never appear. Every listed card
+        carries publicKey + signature for offline verification.
+      security: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: capability, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }

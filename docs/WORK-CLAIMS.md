@@ -20,6 +20,29 @@ the room owner for a contribute invite. The same rule gates the live commands
 that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 `work.handoff_recorded`, and `work.superseded`.
 
+## Repository names and refs in work-item reservations
+
+For `claim.acquired`, `repository` accepts a name of 1–200 letters, numbers,
+dots, underscores, slashes or hyphens, or a public HTTPS GitHub repository URL
+such as `https://github.com/Uuriko/project-room`. An optional `.git` suffix and
+trailing slash are accepted. The Board stores that URL as `Uuriko/project-room`;
+the original spelling remains in the work item and event history.
+
+When a GitHub URL is involved, overlap checks compare its `owner/name` identity
+without case sensitivity. URL and short-name spellings cannot bypass a reservation
+on the same ref and paths. Other declared names retain case-sensitive comparison.
+
+New reservations reject SSH URLs, URLs for other hosts, URLs with credentials,
+ports, query strings or fragments, and names outside the format above with
+**422** `invalid_claim_scope`, before recording an event. Use a stable supported
+name for those repositories. Previously recorded values remain readable and
+replay unchanged. The direct Board API continues to use the short `repo` name.
+
+`ref` accepts 1–200 letters, numbers, dots, underscores, slashes or hyphens,
+including branch names such as `codex/repair-1` or commit hashes. New reservations
+reject unsupported refs, including spaces and colons, before recording an event.
+Older recorded refs still replay unchanged. Ref comparisons remain case-sensitive.
+
 ## Create
 
 `POST /api/rooms/{roomId}/work-claims`

@@ -14,10 +14,13 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText } from "../server/room-export.mjs";
-import { operatorRestoreFromBackupResponse } from "../server/restore-ndjson.mjs";
+import { operatorRestoreFromBackupResponse as beginOperatorRestoreFromBackupResponse } from "../server/restore-ndjson.mjs";
 import { writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { withPublicWorkClaimWriter } from "../server/public-work-claim-fence.mjs";
 import { createWork } from "../server/work-claims.mjs";
+import {completeOperatorRestore} from './helpers/complete-operator-restore.mjs';
+const operatorRestoreFromBackupResponse = async (request,token,store,...rest) => completeOperatorRestore(await beginOperatorRestoreFromBackupResponse(request,token,store,...rest),token,store);
+
 
 const OPERATOR_TOKEN = "<MASKED_SECRET_003>";
 const KEY = "room-backups/2026-10-14.ndjson";

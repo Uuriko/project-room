@@ -1,0 +1,42 @@
+{
+  "base": "5a95037e86d8d6c5bcfcfe4713414e9d41f72a0f",
+  "node": "v24.22.1",
+  "before": {
+    "validSourceControls": "One automatic overview call and actual normalized owner false403; selected native task card already green.",
+    "tests": 3,
+    "pass": 1,
+    "fail": 2,
+    "initialHarnessCorrection": "First extraction searched only top-level function declarations; corrected recursive Acorn search before recording causal baseline."
+  },
+  "after": {
+    "focusedExisting": 33,
+    "finalAdditionalLoaderAssertions": 3,
+    "fail": 0,
+    "skip": 0
+  },
+  "commands": [
+    "node --test tests/account-rooms-attention-scope.test.mjs tests/needs-attention-viewer.test.js tests/owner-overview.test.js",
+    "node --test tests/account-rooms-attention-scope.test.mjs",
+    "node scripts/build-ui-strings.mjs",
+    "node scripts/openapi-gen.mjs --write",
+    "node scripts/i18n-harness.mjs"
+  ],
+  "scope": [
+    "Automatic account-home cockpit caller and money/roster shell removed; no cross-room empty-obligations claim.",
+    "Same existing room button path and first-room creation control preserved.",
+    "Actual production loader executed against DOM controls; actual normalized selected owner card renders canonical task through existing attentionReport.",
+    "Actual HTTP normalized owner409 explicit unavailable; no whole-room hydration permitted. Legacy advanced overview API remains explicit and legacy test controls stay green.",
+    "No browser sweep or actual Native claim. Fo lane remains reserved.",
+    "Parent must regenerate candidate manifest after composition."
+  ],
+  "logs": {
+    "account-attention-before-1102.log": "c465f5e80258d444ac10539a0c76450f1ec136d799e6ad26ce72c828b7acd95e",
+    "account-attention-before-fixed-1102.log": "b523b010ec9312ee3b8442162925f14fa4f5a128387a01c5845614d95d3685e1",
+    "account-attention-final-1102.log": "ec10322160f649edf61408e03c7b6df18a8ca066d09e2c03fb4412a06c00ef9b",
+    "account-attention-controls-final-1102.log": "0722d22aec3ce9203b195e04ad4939dd0b05d2f999737cb8334b400f21fba08c",
+    "account-attention-openapi-1102.log": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e",
+    "account-attention-lint-final-1102.log": "c7ea86860208a918e7736b8b6bb30024da9e536f7f8ebefd1dc2cf677b95a0de",
+    "account-attention-secret-1102.log": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+    "account-attention-i18n-1102.log": "64b9894618fd3764ae6085cc9420e63a1489fcaca32692819d3de2aac2c45ca9"
+  }
+}

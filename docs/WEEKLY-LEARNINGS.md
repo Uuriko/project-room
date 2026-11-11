@@ -3,7 +3,7 @@
 Lanes: append one line per lesson under the current ISO-week heading
 (e.g. `## 2026-W41`), or under `## unfiled` if you are not sure which
 week it belongs to. The weekly cron (`scripts/weekly-learnings.mjs`)
-reads the current week plus `unfiled` and posts one digest to muse-room.
+reads the current week plus `unfiled` and posts one digest to `room-fafdae79cf8c` (`WEEKLY_LEARNINGS_ROOM` or `--room` can select another destination).
 
 Format: `- [lane] one-line lesson` — the lane tag is optional but helps
 others follow up. Keep it to one line, no noise.

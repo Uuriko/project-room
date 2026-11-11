@@ -1,0 +1,111 @@
+  /api/rooms/{roomId}/public-work/receipts/{receiptId}:
+    get:
+      operationId: "inspectPublicWorkReview"
+      summary: "Owner or currently designated reviewer: inspect exact review revision and authority."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWorkReviewResult"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []
+    head:
+      operationId: "headPublicWorkReview"
+      summary: "Owner or currently designated reviewer: inspect exact review revision and authority."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied."
+      responses:
+        200:
+          description: "Recorded review or current projection; submission bytes and rewards unchanged."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        403:
+          $ref: "#/components/responses/Forbidden"
+          description: "Owner/current designated review standing required."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this room or submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "Stale receipt/review revision, final decision or required current PASS absent."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "roomId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "auth"
+          in: "query"
+          required: false
+          schema:
+            enum:
+              - "room"
+              - "account"
+            default: "room"
+          description: "Cookie selector, never a credential. Header selector is an alternative."
+      security:
+        - bearerAuth: []
+        - queryAuth: []
+        - accountBrowserSession: []

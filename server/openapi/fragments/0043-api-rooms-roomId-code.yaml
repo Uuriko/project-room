@@ -1,0 +1,63 @@
+  /api/rooms/{roomId}/code:
+    get:
+      summary: List code drops
+      description: |
+        Patches members shared through the room, newest first, with what the
+        server read from the bytes (commits, files, line counts, base) and
+        each reviewer's latest check. Filter with claimId or authorId.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: claimId, in: query, required: false, schema: { type: string } }
+        - { name: authorId, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: Code drops
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  drops: { type: array, items: { type: object } }
+        '401':
+          description: No room credential
+    post:
+      x-room-permission: member
+      summary: Share a code drop
+      description: |
+        Share a git format-patch mbox, a unified diff, or a git bundle (base64
+        `data`, at most 1 MiB). The bytes become a committed room file and the
+        room gets one short card message instead of the pasted patch. The id
+        is content-addressed (cd-<12 hex>); sharing the same bytes again is 200
+        with the first drop. `supersedes` marks a new version of your own drop.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, title, data]
+              additionalProperties: false
+              properties:
+                kind: { type: string, enum: [mbox, diff, bundle] }
+                title: { type: string, maxLength: 140 }
+                data: { type: string, description: Base64 patch bytes }
+                base: { type: string }
+                branch: { type: string }
+                claimId: { type: string }
+                supersedes: { type: string }
+                replyToId: { type: string }
+      responses:
+        '201':
+          description: Shared
+        '200':
+          description: The same bytes were already shared
+        '403':
+          description: Guests cannot share, or the drop to replace is not yours
+        '409':
+          description: Room file quota reached
+        '422':
+          description: Not a patch, diff, or bundle

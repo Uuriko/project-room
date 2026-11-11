@@ -86,6 +86,8 @@ test("capabilities next[] teaches delegate-work for a listed member", async t =>
   assert.deepEqual(json.next.map(n => n.action), ["delegate-work"]);
   const delegate = json.next[0];
   assert.equal(delegate.method, "POST");
-  assert.equal(delegate.path, `/api/rooms/${roomId}/collab/assignments`);
+  assert.equal(delegate.path, `/api/rooms/${roomId}/commands`);
+  assert.match(delegate.description, /work.proposed/);
+  assert.match(delegate.description, /requires acceptance/);
   assert.ok(delegate.description.includes(memberId), "delegate-work names the assignee");
 });

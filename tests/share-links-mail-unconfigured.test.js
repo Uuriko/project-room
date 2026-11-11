@@ -42,7 +42,7 @@ async function createLink(t, mailer) {
   const headers = { Cookie: `account_session=${token}`, "X-CSRF-Token": session.csrf, "X-Session-Binding": session.sessionBinding, "X-Project-Room-Auth": "account" };
   const roomId = `share${n}`;
   assert.equal((await post(origin, "/api/account-rooms", { roomId, title: "Share", purpose: "Links", kind: "personal", displayName: "Owner" }, headers)).status, 201);
-  const member = f.store.room(roomId).state.members;
+  const member = f.store.roomAuthority(roomId).members;
   const owner = Object.values(member).find(m => m.kind === "human");
   return post(origin, `/api/rooms/${roomId}/share-links`, {
     requestId: `req-${n}`, linkToken: randomBytes(32).toString("base64url"),

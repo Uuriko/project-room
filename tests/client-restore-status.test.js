@@ -37,3 +37,18 @@ test("a failed restore() never paints Connecting", async t => {
   await assert.rejects(() => client.restore());
   assert.ok(!statuses.includes("Connecting to room service…"));
 });
+
+test('HTTP failures expose bounded-readable Retry-After metadata without retrying writes', async () => {
+  const date = new Date(Date.now() + 60000).toUTCString();
+  for (const [header, expected] of [['2', 2000], ['0', 0], [date, 'date'], ['invalid', undefined], ['-1', undefined], ['', undefined]]) {
+    let requests = 0;
+    const client = new RoomClient({ fetcher: async () => { requests++; return { ...response({ error: { code: 'rate_limited', message: 'Wait' } }, 429), headers: new Headers({ 'Retry-After': header }) }; } });
+    await assert.rejects(client.request('/api/rooms/commons/commands', { method: 'POST', data: {} }), error => {
+      assert.equal(error.status, 429);
+      if (expected === 'date') assert.ok(error.retryAfterMs > 55000 && error.retryAfterMs <= 60000);
+      else assert.equal(error.retryAfterMs, expected);
+      return true;
+    });
+    assert.equal(requests, 1, 'metadata extraction never retries a mutation');
+  }
+});

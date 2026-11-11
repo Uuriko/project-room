@@ -37,7 +37,7 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   assert.doesNotMatch(page.url(), /start=room/, "the intent leaves the address bar");
 
   const email = "start-room@example.invalid";
-  await openMagicSignin(page);
+  await openMagicSignin(page, email);
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email);
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/request");
@@ -55,7 +55,7 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   await page.waitForFunction(() => /[?&]room=personal-/.test(location.search));
   const rooms = f.store.db.prepare("SELECT room_id FROM member_accounts WHERE room_id LIKE 'personal-%'").all();
   assert.equal(rooms.length, 1, "exactly one room was created");
-  const members = Object.values(f.store.room(rooms[0].room_id).state.members);
+  const members = Object.values(f.store.roomAuthority(rooms[0].room_id).members);
   assert.equal(members.length, 1);
   assert.ok(members[0].displayName, "room owner has a display name");
   assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-start-room")), null, "the intent is used once");

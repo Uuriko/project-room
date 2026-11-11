@@ -47,9 +47,9 @@ function stand(overrides = {}) {
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-async function smoke(server) {
+async function smoke(server, smokeEnv = {}) {
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const env = { ...process.env, ROOM_SMOKE_ORIGIN: origin, ROOM_SMOKE_GITHUB_API: origin, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "" };
+  const env = { ...process.env, ROOM_SMOKE_ORIGIN: origin, ROOM_SMOKE_GITHUB_API: origin, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "", ROOM_SMOKE_ISOLATED: "", ROOM_SMOKE_EXPECTED_REVISION: undefined, ...smokeEnv };
   try {
     const { stdout } = await run(process.execPath, ["scripts/live-smoke.mjs"], { env });
     return { code: 0, report: JSON.parse(stdout) };
@@ -128,4 +128,18 @@ test("public-page CSP regressions remain hard failures after the analytics repai
   assert.equal(report.ok, false);
   assert.deepEqual(report.findings.filter(f => f.code === "csp_console").map(f => [f.detail.split("@")[0], f.severity, f.known]),
     paths.map(path => [path, "fail", undefined]));
+});
+
+
+test("CLI isolated expected revision verifies a non-main candidate exactly", async () => {
+  const main = [200, "application/json", JSON.stringify({ sha: MAIN })];
+  const comparePath = `/repos/Uuriko/project-room/compare/${LIVE}...${MAIN}`;
+  const candidate = await smoke(await stand({ "/repos/Uuriko/project-room/commits/main": main, [comparePath]: [200, "application/json", JSON.stringify({status:"diverged",ahead_by:1,behind_by:1})] }), {ROOM_SMOKE_ISOLATED:"1",ROOM_SMOKE_EXPECTED_REVISION:LIVE});
+  assert.equal(candidate.code,0);assert.equal(candidate.report.deploy.status,"expected");assert.equal(candidate.report.deploy.expectedRevision,LIVE);assert.deepEqual(failures(candidate.report),[]);
+  const wrong = await smoke(await stand(),{ROOM_SMOKE_ISOLATED:"1",ROOM_SMOKE_EXPECTED_REVISION:MAIN});
+  assert.equal(wrong.code,1);assert.deepEqual(failures(wrong.report),["deploy_revision_mismatch"]);
+});
+test("CLI expected revision cannot replace production deploy-lag checks", async () => {
+  const server=await stand(),origin=`http://127.0.0.1:${server.address().port}`;
+  try{await assert.rejects(run(process.execPath,["scripts/live-smoke.mjs"],{env:{...process.env,ROOM_SMOKE_ORIGIN:origin,ROOM_SMOKE_ISOLATED:"",ROOM_SMOKE_EXPECTED_REVISION:LIVE,GITHUB_STEP_SUMMARY:""}}),error=>error.code===1&&/only available for isolated/.test(error.stderr));}finally{server.close();}
 });

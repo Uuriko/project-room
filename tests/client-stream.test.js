@@ -98,10 +98,23 @@ test('a queued reconnect rechecks account ownership without signing out the repl
   assert.equal(account.session, replacement);
 });
 
+test('a stream error while the browser is still retrying does not read; open does', async t => {
+  const { client, streams } = fixture(t);
+  let reads = 0; const healthy = client.fetcher;
+  client.fetcher = async (...args) => { reads++; return healthy(...args); };
+  client.connect(); streams[0].emit('error', 0);
+  await Promise.resolve();
+  assert.equal(reads, 0);
+  assert.equal(client.flight ?? null, null);
+  streams[0].emit('open', 1); await client.flight?.promise;
+  assert.ok(reads > 0);
+});
+
 test('a late stream-refresh rejection cannot clear a replacement session', async t => {
   const { client, streams } = fixture(t);
   client.fetcher = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Old session ended' } }) });
-  client.connect(); streams[0].emit('error', 0);
+  // An HTTP refusal leaves EventSource CLOSED (2); that error is the one that reads.
+  client.connect(); streams[0].emit('error', 2);
   const oldFlight = client.flight.promise;
   // Let request/refresh reject, but switch identity before the stream's outer catch.
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
@@ -154,7 +167,7 @@ function postEvent(stream, sequence) {
   }));
 }
 
-test('a later successful read clears an interrupted open stream without replacing it', async t => {
+test('a later successful read after cooldown clears an interrupted open stream without replacing it', async t => {
   const { client, streams, statuses, emit } = fixture(t);
   client.connect();
   await emit('open', 1);
@@ -165,6 +178,8 @@ test('a later successful read clears an interrupted open stream without replacin
   assert.equal(client.sequence, 7);
   client.fetcher = async () => followUpSnapshot(client, 9);
   postEvent(streams[0], 9);
+  assert.equal(client.flight, null, 'another event cannot bypass the recovery backoff');
+  t.mock.timers.tick(1000);
   await client.flight.promise;
   assert.equal(streams.length, 1, 'the live stream stays open');
   assert.equal(client.sequence, 9);
@@ -214,4 +229,27 @@ test('a dm.consent_changed stream receipt fires onConsentChange; other receipts 
   }));
   await client.flight.promise.catch(() => {});
   assert.equal(fires.length, 1, 'other receipts leave the hook alone');
+});
+
+test('bond receipts refresh selected bonds, unrelated and obsolete streams do not', async t => {
+  const { client, streams, emit } = fixture(t);
+  let changes = 0;
+  client.onBondChange = () => { changes++; };
+  client.connect();
+  await emit('open', 1);
+  let sequence = 7;
+  for (const type of ['bond.proposed', 'bond.activated', 'bond.revoked', 'message.posted']) {
+    sequence++;
+    client.fetcher = async () => followUpSnapshot(client, sequence);
+    streams[0].dispatchEvent(new MessageEvent('room-event', {
+      data: JSON.stringify({ sequence, event: { type, roomId: 'commons' } }),
+    }));
+    await client.flight?.promise;
+  }
+  assert.equal(changes, 3);
+  client.generation++;
+  streams[0].dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence: ++sequence, event: { type: 'bond.proposed', roomId: 'commons' } }),
+  }));
+  assert.equal(changes, 3, 'an obsolete stream cannot refresh another session');
 });

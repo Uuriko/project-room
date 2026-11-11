@@ -1,0 +1,33 @@
+✔ runtime and schema pins are exact and deterministic (2.918875ms)
+✔ file pins change when bytes change and are sorted (2.094417ms)
+✔ CI runtime must satisfy engines.node (1.777041ms)
+✔ schema pin refuses a missing version marker (1.900125ms)
+✔ drift names the changed file, added file and removed file (1.654083ms)
+✔ drift refuses malformed manifests without reading sections (0.061375ms)
+✔ frozen deployment manifest pins the recovery helper and production workflow bytes (0.225417ms)
+✔ committed candidate manifest has zero drift from the tree (4.906667ms)
+✔ every currently served asset is registered in the exact-source runtime (0.995667ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":47,"heapBytes":47053904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":50,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":46,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":4,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":52831520,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.store_initialized","initializationMs":56,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":18,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":2,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":25,"heapBytes":46865984,"rooms":2,"sequences":56,"projectionBytes":6352,"events":56}
+{"event":"room.store_initialized","initializationMs":18,"legacyColdStartMs":18,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data (14260.065ms)
+✔ every module in the server import closure is in the runtime-package allowlist (21.248167ms)
+✔ uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies (11695.501083ms)
+✔ Codex host entrypoint and every dependency ship without scratch demo fixtures (2.239584ms)
+✔ runtime preflight catches unregistered client imports before cold packaging (0.176709ms)
+✔ runtime preflight checks the working source without making a package (113.046084ms)
+✔ project preflight composes dependency, coverage and runtime checks (475.513584ms)
+✔ offline schema45 archive cold-serves nonempty native work and refuses an omitted dependency (6379.528625ms)
+✔ verified offline archive runs the actual Native durable restore qualification (14173.151875ms)
+ℹ PACKAGED_NATIVE_DURABLE_RESTORE {"sourceCommit":"d663baecae57146fc1cbfee50b7996c599ea1130","package":{"verified":true,"sourceCommit":"d663baecae57146fc1cbfee50b7996c599ea1130","sourceTree":"7b3cf428f8b3ce34397d4eed4216d6d73efe4397","schemaVersion":45,"files":689,"assets":142,"manifestSha256":"00075a650f27d55d8782ab71cfe76c88bdcf93d2e434136e8a124b485cc3f033"},"qualification":{"runtimeSource":"751f786639+native-work-2-restore-gate","actualNative":true,"importedPartialEvents":1000,"sourceSeal":true,"coverageSteps":49,"coverageRows":6075,"maxPayloadRowsPerStep":128,"coldDuringCoverage":true,"preopenedPreparedDenied":true,"ordinaryReady503UntilAudit":true,"finalUnboundedAuditRequired":true,"coldReady":true,"exactRetry":true,"wholeRecoveryBounded":false,"acceptedNativeWorkCapacity":true,"nativeWorkExactRetry":true},"fixturesOutsideArchive":["durable-coverage.check.mjs","durable-coverage-seed.test-fixture.mjs","durable-coverage-native.test-fixture.mjs","current-room-serving.test-fixture.mjs"],"productionSource":"verified offline archive","archiveUnchanged":true}
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47172.737167

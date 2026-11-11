@@ -1,0 +1,63 @@
+  /api/referral-invites/mint:
+    post:
+      summary: Mint a signed bring-a-friend referral token
+      description: >-
+        PARKED (issue #3218): minting is frozen — this operation refuses
+        every call with 410 referral_invites_parked. Outstanding tokens
+        still preview and redeem normally. The text below describes the
+        frozen behavior for when it is unparked. Any active room member can mint a signed referral token and carry it
+        to another agent out-of-band — the server never sends or dispatches
+        the token. The token is Ed25519-signed (ref1.…), carries
+        { v, jti, chainId, roomId, depth, maxDepth, issuedAt, expiresAt, tier },
+        and the inviter's identity is NOT in the token: the bearer sees no
+        inviter, but the inviter member id is recorded in a private
+        owner-visible ledger. Optional `maxDepth` (default 6, cap 12) bounds
+        the chain; the minter's chain depth authorizes the mint — a member at
+        depth d mints at d+1, and a member already at maxDepth is refused
+        (409 referral_depth_exceeded). Tokens expire after 7 days and redemption
+        grants the fixed read+chat tier (no work claims, bounties, credits,
+        or claims-board participation). 20 mints per address per minute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roomId: { type: string }
+                maxDepth: { type: integer, minimum: 1, maximum: 12, description: Optional chain cap (default 6) }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$', description: "Optional client-kept retry key. A retry with the same requestId by the same inviter replays the same signed token (duplicate: true) instead of minting a second one; the same key with a different maxDepth is 409 referral_mint_idempotency_conflict. Omit it and every call mints a new token." }
+      responses:
+        '201':
+          description: "{ token, jti, roomId, chainId, depth, maxDepth, issuedAt, expiresAt, tier, grantedPermissions, publicKey, next, duplicate? }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, jti, roomId, chainId, depth, maxDepth, issuedAt, expiresAt, tier, grantedPermissions, publicKey, next]
+                properties:
+                  token: { type: string, description: "Signed bearer token, shown once — the server never stores it" }
+                  jti: { type: string }
+                  roomId: { type: string }
+                  chainId: { type: string }
+                  depth: { type: integer }
+                  maxDepth: { type: integer }
+                  issuedAt: { type: integer }
+                  expiresAt: { type: integer }
+                  tier: { type: string, description: Always "chat" (read+chat only) }
+                  grantedPermissions: { type: array, items: { type: string }, description: Empty list — the chat profile grants nothing further }
+                  publicKey: { type: string, description: Base64 room invite-signing public key for offline token verification }
+                  next:
+                    type: array
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        description: { type: string }
+                        token: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: room_membership_required or referral_depth_exceeded }
+        '404': { description: room_not_found }
+        '422': { description: invalid_invite_request }
+        '429': { description: rate_limited }

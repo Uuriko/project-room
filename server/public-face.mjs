@@ -1,7 +1,9 @@
 import { messageRepository } from "./message-repository.mjs";
+import {isCurrentRoom} from './current-room-repository.mjs';
+import {currentPublicMetadata,readCurrentPublicFace} from './current-public-face.mjs';
 // Public read-only face for rooms.
 //
-// Rooms are private by default. The room owner may explicitly opt a room
+// This legacy public-face listing is opt-in. The room owner may opt a room
 // into a public, no-login, read-only face: a sanitized snapshot (title,
 // purpose, member handles, recent non-DM messages) served as HTML at
 // /p/{code} and JSON at /api/public/rooms/{code} (+ paginated
@@ -56,6 +58,18 @@ const handleOf = (state, memberId) => {
   return name || null;
 };
 
+// Resolve only authors of the already selected public page. Mentioning an
+// arbitrary active member must not publish the raw ID-to-name association.
+const MENTION_TOKEN = /<@([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})>/g;
+const publicAuthorHandles = (state, messages) => new Map(messages
+  .filter(message => !message.deletedAt)
+  .map(message => [message.authorId, handleOf(state, message.authorId)])
+  .filter(([, handle]) => handle));
+const publicBody = (authors, body) => {
+  const named = body.replace(MENTION_TOKEN, (_, id) => `@${authors.get(id) ?? "member"}`);
+  return named.length > MAX_BODY_CHARS ? named.slice(0, MAX_BODY_CHARS) + " …" : named;
+};
+
 export class PublicFace {
   constructor(store) {
     if (!store || !store.db) fail(500, "face_store_missing", "PublicFace requires a store with a db handle");
@@ -64,6 +78,8 @@ export class PublicFace {
   }
 
   _roomState(roomId) {
+    const current=currentPublicMetadata(this.store,roomId);
+    if(current)return current;
     const room = this.store.room(roomId);
     if (!room) fail(404, "room_not_found", "No such room");
     return room.state;
@@ -87,7 +103,7 @@ export class PublicFace {
          ON CONFLICT(room_id) DO UPDATE SET enabled=1, public_code=excluded.public_code,
            created_at=CASE WHEN room_public_settings.public_code IS NULL THEN excluded.created_at ELSE room_public_settings.created_at END`
       ).run(roomId, 1, code, at);
-      refreshListedRoom(this.store, roomId);
+      if(typeof this.store.readTransaction!=='function'||!isCurrentRoom(this.db,roomId))refreshListedRoom(this.store, roomId);
       return Object.freeze({ roomId, enabled: true, publicCode: code });
     });
   }
@@ -101,7 +117,7 @@ export class PublicFace {
          VALUES (?,0,NULL,?,NULL)
          ON CONFLICT(room_id) DO UPDATE SET enabled=0, public_code=NULL`
       ).run(roomId, nowMs());
-      refreshListedRoom(this.store, roomId);
+      if(typeof this.store.readTransaction!=='function'||!isCurrentRoom(this.db,roomId))refreshListedRoom(this.store, roomId);
       return Object.freeze({ roomId, enabled: false, publicCode: null });
     });
   }
@@ -162,14 +178,15 @@ export class PublicFace {
       .map(id => handleOf(state, id))
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
-    const messages = (Array.isArray(state?.messages) ? state.messages : [])
+    const publicMessages = (Array.isArray(state?.messages) ? state.messages : [])
       // v1 channel caveat: the core projection has no channel field, so
       // every non-DM message is treated as public. Per-channel public
       // flags are explicitly out of v1 (see DESIGN.md).
       .filter(m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0)
-      .slice(-messageLimit)
-      .map(m => {
-        const body = m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body;
+      .slice(-messageLimit);
+    const authors = publicAuthorHandles(state, publicMessages);
+    const messages = publicMessages.map(m => {
+        const body = publicBody(authors, m.body);
         return Object.freeze({
           at: m.createdAt ?? null,
           from: handleOf(state, m.authorId) ?? "unknown",
@@ -188,9 +205,12 @@ export class PublicFace {
     });
   }
 
-  faceByCode(code) {
+  faceByCode(code, {before=null,includeOlderCursor=false}={}) {
     const row = this._resolveCode(code);
     const state = this._publicState(row);
+    const current=readCurrentPublicFace(this.store,row.room_id,{latest:true,before});
+    if(current)return Object.freeze({...this.sanitize(current),coverage:current.coverage,...(includeOlderCursor?{olderCursor:current.hasMore&&current.messages.length?current.messages[0].id:null}:{})});
+    if(before!==null)fail(422,'invalid_feed_cursor','Older public history is unavailable');
     const messages = messageRepository(this.store, row.room_id, state).recent(MAX_FACE_MESSAGES, m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
     return this.sanitize({ ...state, messages });
   }
@@ -202,6 +222,24 @@ export class PublicFace {
     let n = Number(limit);
     if (!Number.isSafeInteger(n) || n < 1) n = 50;
     n = Math.min(n, MAX_FEED_LIMIT);
+    if(after!==null&&(!after||after.length>200))fail(422,'invalid_feed_cursor','Unknown public message cursor; reload the public view');
+    const current=readCurrentPublicFace(this.store,row.room_id,{after,limit:n});
+    if(current){
+      const authors=publicAuthorHandles(current,current.messages);
+      const messages=current.messages.map(m=>Object.freeze({
+        id:m.id,
+        at:m.createdAt??null,
+        from:handleOf(current,m.authorId)??'unknown',
+        body: publicBody(authors, m.body)
+      }));
+      return Object.freeze({
+        messages:Object.freeze(messages),
+        next:current.messages.at(-1)?.id??after,
+        hasMore:current.hasMore,
+        fetchedAt:nowMs(),
+        coverage:current.coverage
+      });
+    }
     const repository = messageRepository(this.store, row.room_id, state);
     const visible = message => message && message.toMemberId == null && typeof message.body === 'string' && message.body.length > 0;
     if (after !== null && !visible(repository.get(after))) fail(422, 'invalid_feed_cursor', 'unknown feed cursor — re-fetch from the start');
@@ -212,12 +250,13 @@ export class PublicFace {
       if (page.length === n) { hasMore = true; break; }
       page.push(message);
     }
+    const authors = publicAuthorHandles(state, page);
     return Object.freeze({
       messages: Object.freeze(page.map(m => Object.freeze({
         id: m.id,
         at: m.createdAt ?? null,
         from: handleOf(state, m.authorId) ?? "unknown",
-        body: m.body.length > MAX_BODY_CHARS ? m.body.slice(0, MAX_BODY_CHARS) + " …" : m.body
+        body: publicBody(authors, m.body)
       }))),
       next: page.length ? page[page.length - 1].id : after,
       hasMore,
@@ -225,29 +264,50 @@ export class PublicFace {
     });
   }
 
-  faceHtml(code) {
-    const face = this.faceByCode(code);
+  faceHtml(code,{joinHref='/docs/agents/paste',lobbyHref=null,before=null,paginate=false}={}) {
+    const face = this.faceByCode(code,{before,includeOlderCursor:paginate});
     const esc = s => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-    const items = face.messages.map(m =>
-      `<article><header><strong>${esc(m.from)}</strong><time>${esc(m.at ?? "")}</time></header><p>${esc(m.body)}</p></article>`
-    ).join("\n");
+    // Render the common emphasis used in agent updates without interpreting
+    // untrusted HTML or changing literal text inside code spans and fences.
+    const renderBody = body => String(body).split(/(```[\s\S]*?```|`[^`\n]+`)/g)
+      .map((part, i) => i % 2 ? esc(part) : esc(part).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>'))
+      .join('');
+    const readableTime=value=>{
+      const date=new Date(value);
+      return value!=null&&Number.isFinite(date.getTime())
+        ?new Intl.DateTimeFormat('en',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'UTC'}).format(date)+' UTC':'';
+    };
+    const items = face.messages.map(m => {
+      // Keep the feed scannable while retaining every published message in
+      // the native disclosure. Collapse whitespace only in the preview.
+      const compact = m.body.replace(/\s+/gu, ' ').trim();
+      const preview = Array.from(compact);
+      let excerpt = preview.slice(0, 160).join('');
+      if (preview.length > 160 && excerpt.lastIndexOf(' ') > 100) excerpt = excerpt.slice(0, excerpt.lastIndexOf(' '));
+      const body = preview.length > 160 || m.body.length > 400 || m.body.split('\n').length > 3
+        ? `<details><summary><span class="preview">${renderBody(excerpt)}${preview.length > 160 ? '…' : ''} </span><span class="show-more">Show more</span><span class="show-less">Show less</span></summary><p>${renderBody(m.body)}</p></details>`
+        : `<p>${renderBody(m.body)}</p>`;
+      return `<article><header><strong>${esc(m.from)}</strong><time datetime="${esc(m.at ?? '')}">${esc(readableTime(m.at))}</time></header>${body}</article>`;
+    }).join("\n");
     const members = face.members.map(h => `<li>${esc(h)}</li>`).join("");
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <meta name="robots" content="noindex,nofollow"><title>${esc(face.room.title || "Project Room")}</title>
 <style>:root{color-scheme:dark;--bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--line-control:#8a8a96;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--control-min-target-coarse:2.75rem;--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 [data-theme="light"]{color-scheme:light;--bg:#f4f3f8;--panel:#fffbff;--panel-raised:#e8e7ef;--panel-hover:#dddce6;--line:#c9c8d4;--line-soft:#dddce6;--line-control:#6e6e7a;--text:#1c1b22;--muted:#5c5b6a;--blue:#33339a;--blue-strong:#3f3fad;--blue-strong-hover:#33338f;--on-accent:#ffffff;--amber:#8a4b00;--green:#0f6b45;--red:#a32020;--violet:#5b3d99;--card:#fffbff;--border:#c9c8d4;--shadow:0 16px 40px rgb(28 27 34 / 12%)}
 body{font-family:var(--font-sans);max-width:44rem;margin:2rem auto;padding:0 1rem;background:var(--bg);color:var(--text)}
 a{color:var(--blue)}a:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.page-actions{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}.connect-agent{display:inline-flex;align-items:center;min-height:2.75rem;padding:0 1rem;border-radius:var(--radius-md);background:var(--blue-strong);color:var(--on-accent);font-weight:600;text-decoration:none}.connect-agent:hover{background:var(--blue-strong-hover)}
 header.page{border-bottom:1px solid var(--line);margin-bottom:1rem}article{border-bottom:1px solid var(--line-soft);padding:.6rem 0}
-article header{display:flex;gap:.75rem;font-size:.85rem;color:var(--muted)}article p{white-space:pre-wrap;margin:.3rem 0 0}
+article header{display:flex;gap:.75rem;flex-wrap:wrap;font-size:.85rem;color:var(--muted)}article p,article summary{white-space:pre-wrap;margin:.3rem 0 0;overflow-wrap:anywhere}article summary{cursor:pointer}article summary .show-more,article summary .show-less{color:var(--blue);white-space:nowrap}article .show-less,article details[open] .preview,article details[open] .show-more{display:none}article details[open] .show-less{display:inline}header.page p{overflow-wrap:anywhere}
 ul.members{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;padding:0}ul.members li{border:1px solid var(--line);border-radius:1rem;padding:.15rem .7rem;font-size:.85rem}
-footer{margin-top:2rem;font-size:.8rem;color:var(--muted)}</style></head><body>
-<header class="page"><h1>${esc(face.room.title || "Project Room")}</h1><p>${esc(face.room.purpose)}</p></header>
-<section><h2>Members</h2><ul class="members">${members}</ul></section>
-<section><h2>Recent activity</h2>${items || "<p>No public messages yet.</p>"}</section>
-<footer>Public read-only face · updates as the room works<p>${LEGAL_FOOTER_LINKS}</p></footer>
-</body></html>`;
+footer{margin-top:2rem;font-size:.8rem;color:var(--muted)}</style></head><body><main>
+<header class="page"><a href="/">Project Room</a><h1>${esc(face.room.title || "Project Room")}</h1><p>${esc(face.room.purpose)}</p><p class="page-actions"><a class="connect-agent" href="${esc(joinHref)}">Connect an agent</a>${lobbyHref?`<a href="${esc(lobbyHref)}">View open tasks</a>`:''}<a href="">Refresh</a></p></header>
+${face.coverage?'':`<section><h2>Members</h2><ul class="members">${members}</ul></section>`}
+<section><h2>Recent activity</h2>${items || "<p>No public messages yet.</p>"}${paginate&&face.olderCursor?`<p><a href="?before=${encodeURIComponent(face.olderCursor)}">Older messages</a></p>`:""}${paginate&&before!==null?`<p><a href="/watch">Latest messages</a></p>`:""}</section>
+<footer>Shared by the room owner.${face.coverage?' Only the General channel is shown.':''}<p>${LEGAL_FOOTER_LINKS}</p></footer>
+</main></body></html>`;
   }
 }

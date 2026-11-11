@@ -15,9 +15,11 @@
 //      never exceed the cap, remaining is exactly cap − settled − reserved and
 //      never negative, and a refused charge changes nothing.
 //   P2 idempotency — the same nonce never double-charges: replaying a settled
-//      nonce returns its receipt at the ORIGINAL price (even when a different
-//      price is re-presented); replaying a reserved nonce returns the live
-//      handle; re-presenting a voided nonce throws 409. Replays never move money.
+//      nonce with its original price returns its receipt; replaying a reserved
+//      nonce with its original price returns the live handle; re-presenting a
+//      nonce with a DIFFERENT price throws 409 (T2-L10a-C1 — no silent
+//      substitution of the stored price); re-presenting a voided nonce throws
+//      409. Replays never move money.
 //   P3 single-use admission — at most one in-flight authorization per
 //      single-use grant; the first settle revokes the grant (later
 //      authorizations 402 with grant_revoked, remaining drops to 0).
@@ -159,11 +161,22 @@ function drive(db, roomId, ledgers, room, ops, nowMs) {
         // Replay of an already-presented nonce: never a second charge.
         const before = Number(remainingSpendCents(db, roomId, ledger.agentId));
         if (entry.state === "reserved" || entry.state === "settled") {
-          const handle = authorizeSpend(db, authArgs(ledger, roomId, op.price, nonce, room, nowMs));
-          assert.equal(handle.replayed, entry.state, "replay reports the stored authorization status");
-          assert.equal(handle.priceCents, entry.price, "a replay settles at the original price, not the re-presented one");
-          assert.equal(Number(handle.remainingAfterCents), before, "a replay never moves money");
-          assert.equal(Number(remainingSpendCents(db, roomId, ledger.agentId)), before, "a replay never moves money");
+          if (op.price !== entry.price) {
+            // T2-L10a-C1: a nonce re-presented with a different price is
+            // not a retry of the stored authorization — refused 409, and
+            // the stored authorization is left exactly as it was.
+            const error = capture(() => authorizeSpend(db, authArgs(ledger, roomId, op.price, nonce, room, nowMs)));
+            assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);
+            assert.equal(error.status, 409, "a mismatched replay is refused");
+            assert.equal(error.code, "duplicate_nonce");
+            assert.equal(Number(remainingSpendCents(db, roomId, ledger.agentId)), before, "a refused replay never moves money");
+          } else {
+            const handle = authorizeSpend(db, authArgs(ledger, roomId, op.price, nonce, room, nowMs));
+            assert.equal(handle.replayed, entry.state, "replay reports the stored authorization status");
+            assert.equal(handle.priceCents, entry.price, "an exact replay returns the stored authorization");
+            assert.equal(Number(handle.remainingAfterCents), before, "a replay never moves money");
+            assert.equal(Number(remainingSpendCents(db, roomId, ledger.agentId)), before, "a replay never moves money");
+          }
         } else {
           const error = capture(() => authorizeSpend(db, authArgs(ledger, roomId, op.price, nonce, room, nowMs)));
           assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);

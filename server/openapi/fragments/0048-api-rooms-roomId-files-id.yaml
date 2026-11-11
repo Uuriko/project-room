@@ -1,0 +1,29 @@
+  /api/rooms/{roomId}/files/{id}:
+    get:
+      summary: Read one room file with its bytes
+      description: |
+        REST parity with MCP room_get_file. Staged files are uploader-only.
+        Normalized committed files require a protected bound message visible
+        under this viewer's current history floor and DM scope. Knowing a file
+        id never bypasses those rules. Unknown, private and pre-join files
+        return the same 404. Authorized bytes are returned as base64.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room file with base64 bytes
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Authentication required
+        '404':
+          description: File not found or not visible
+        '410':
+          description: File bytes are no longer available

@@ -58,6 +58,16 @@ async function serve(t, { receiptsEnabled = 1 } = {}) {
     id: PWR, title: "Public audit delivered", source: "public-work",
     hashes: [`sha256:${"b".repeat(64)}`], at: "2026-10-12T00:00:00.000Z",
   });
+  // A public-work mirror row is only ever a projection of a source row
+  // (A6): seed the source record too, or the fixture models the
+  // mirror-only skew the read model now fails closed on.
+  store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    PWR, "offer-proof-page", "commons", 1, "ai_public", "note", "b".repeat(64), 4,
+    JSON.stringify({
+      schema: "public-work-receipt/1", receiptId: PWR, namespaceId: "commons",
+      identityId: "ai_public", title: "Public audit delivered",
+      createdAt: "2026-10-12T00:00:00.000Z", artifact: { sha256: "b".repeat(64) },
+    }), Date.now());
   insertReceipt(store, {
     id: OTHER, title: "Another room's secret win", source: "work-claim", origin: "other-room", room: "other-room",
     pullRequest: "https://github.com/Uuriko/project-room/pull/9", mergedAt: "2026-10-12T00:00:00.000Z",

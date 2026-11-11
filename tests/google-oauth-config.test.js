@@ -55,3 +55,13 @@ test("plain http for a non-loopback host stays rejected by both googleConfig and
     "a LAN address is not loopback and must not unlock plain http"
   );
 });
+
+test("Google continuation avoids forced choice while linking and explicit switching retain it", () => {
+  const oauth = new GoogleSignIn({ clientId, clientSecret, redirectUri: "http://localhost:3210" + GOOGLE_CALLBACK_PATH });
+  for (const options of [{}, { link: true }, { selectAccount: true }]) {
+    const result = oauth.begin({ slotToken: "a".repeat(43), expectedRevision: 0, ...options });
+    const params = new URL(result.authorizationUrl).searchParams;
+    assert.equal(params.get("prompt"), options.link || options.selectAccount ? "select_account" : null);
+    assert.equal(params.get("code_challenge_method"), "S256");
+  }
+});

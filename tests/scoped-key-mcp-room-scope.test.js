@@ -48,9 +48,7 @@ async function fixture(t) {
     roomId: "scope-room", title: "Scope room", purpose: "scoped-key MCP scope test",
     kind: "personal", displayName: "Scope owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: agent.identityId, displayName: "Scope agent", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, agent, { displayName: "Scope agent", permissions: [] });
   setTier(store.db, created.roomId, agent.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const issue = scopes => API_KEY_PREFIX + store.agentPlugin.issueApiKey({ identityId: agent.identityId, scopes }).secret;
   return { origin, store, roomId: created.roomId, owner, issue };
@@ -133,9 +131,7 @@ test("write-scoped key keeps working over MCP (no regression)", async t => {
 test("onboarding MCP token keeps its full room+inbox+wake surface", async t => {
   const { origin, store, roomId, owner } = await fixture(t);
   const agent = store.identities.create("Onboard agent");
-  store.identities.link(owner.secret, roomId, {
-    identityId: agent.identityId, displayName: "Onboard agent", permissions: []
-  });
+  linkWithProof(store, owner.secret, roomId, agent, { displayName: "Onboard agent", permissions: [] });
   const token = store.agentPlugin.issueOnboardingMcpToken({ identityId: agent.identityId, roomId, label: "probe" });
   const key = token.credential;
   // CX5-FIX: heartbeats:report/read join the set so the saved onboarding
@@ -187,6 +183,7 @@ test("a room-pinned key with rooms:read and rooms:write keeps working", async t 
 
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 import { hostedStdioToolDefinitions } from "../server/mcp-full-profile.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Minimal schema-valid arguments, so a call reaches the scope gate (which runs
 // after argument validation) instead of failing on its shape.

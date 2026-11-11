@@ -1,0 +1,116 @@
+{
+  "source": "b4f72b485280481b4f3ec88a396d320f168f842e",
+  "base": "d45ed537343d64db10c0930fdcc05b850d4e416a",
+  "node": "v24.22.1",
+  "native": {
+    "miniflare": "4.20260730.0",
+    "workerd": "2026-07-30",
+    "compatibilityDate": "2026-07-30",
+    "override": false
+  },
+  "results": {
+    "node": {
+      "tests": 33,
+      "pass": 33,
+      "skip": 0,
+      "exit": 0
+    },
+    "native": {
+      "tests": 1,
+      "pass": 1,
+      "skip": 0,
+      "exit": 0
+    }
+  },
+  "sources": {
+    "server/room-attachment-bytes.mjs": "f96f3294331464140a137eb63e1ac7bd6136f64d0a2846a83d44490a29ffbd28",
+    "server/mcp-room-profile.mjs": "93a4e50ff9cf85d4f9907983c6ede08639909ca2b14a5909842a478681e0867f",
+    "server/mcp-hosted-tools.mjs": "1f11279866bd52aa8833c6bcb8f4ab3a8789ebc506842e9ed95dccdba44e79c4",
+    "server/mcp-tool-contracts.mjs": "a830e1f152f5374beb2651e6975a259da838e1a406d076899d1d4b73d4a1d349",
+    "tests/room-mcp-files.test.js": "039d5e68d5cc9570df8a6885563771ea5fcc4d76b8901df5f81ebc3d5bca5dbb",
+    "cloudflare/current-attachment-history.check.mjs": "e09e8d270eb3e86f07d02ec4905886ea55f2d63b01a8249cda3021d7441fa67c",
+    "cloudflare/current-attachment-history.test-fixture.mjs": "1a58b7688aae34349436fdfdca86456d389b9636792a4ce9f3d6e23d5c470856"
+  },
+  "logs": [
+    {
+      "label": "baseline",
+      "originalPath": "/tmp/room-mcp-files-before-1102.log",
+      "file": "baseline.log.gz",
+      "uncompressedBytes": 9505,
+      "sha256": "38d15afe5bc5fdde67be5d967d32dff2fecaf4d5c9f722afa42f825fdfea47eb",
+      "exitCode": 1
+    },
+    {
+      "label": "adapter-red",
+      "originalPath": "/tmp/room-mcp-selected-before-1102.log",
+      "file": "adapter-red.log.gz",
+      "uncompressedBytes": 1885,
+      "sha256": "19e7b19ee8d6e23b64aa8be05bb33f8ac8440458a5c616d1bb213f75c679444d",
+      "exitCode": 1
+    },
+    {
+      "label": "history-leak-red",
+      "originalPath": "/tmp/room-mcp-files-floor-before-1102.log",
+      "file": "history-leak-red.log.gz",
+      "uncompressedBytes": 2065,
+      "sha256": "177145e27e33263264e2257d6e4b3e22fc08b47cf2b38d00aa27e1fb44ff38af",
+      "exitCode": 1
+    },
+    {
+      "label": "final-node",
+      "originalPath": "/tmp/room-mcp-files-final-composed-1102.log",
+      "file": "final-node.log.gz",
+      "uncompressedBytes": 13733,
+      "sha256": "1a646980e4a6dc757c60751389bde7d36910d6e8ac32fb04e1904084c6c902f9",
+      "exitCode": 0
+    },
+    {
+      "label": "final-native",
+      "originalPath": "/tmp/room-mcp-file-history-native-1102.log",
+      "file": "final-native.log.gz",
+      "uncompressedBytes": 1137,
+      "sha256": "197af86d9e069a6d834d5bffd45a48aee34eb37d847ac05ef4a4b5f8d64294eb",
+      "exitCode": 0
+    },
+    {
+      "label": "openapi",
+      "originalPath": "/tmp/room-mcp-files-openapi-final-v2-1102.log",
+      "file": "openapi.log.gz",
+      "uncompressedBytes": 137,
+      "sha256": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e",
+      "exitCode": 0
+    },
+    {
+      "label": "lint",
+      "originalPath": "/tmp/room-mcp-files-lint-v2-1102.log",
+      "file": "lint.log.gz",
+      "uncompressedBytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    },
+    {
+      "label": "secret-scan",
+      "originalPath": "/tmp/room-mcp-files-secret-final-1102.log",
+      "file": "secret-scan.log.gz",
+      "uncompressedBytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    },
+    {
+      "label": "inherited-core-red",
+      "originalPath": "/tmp/mcp-files-contract-neighbors-1102.log",
+      "file": "inherited-core-red.log.gz",
+      "uncompressedBytes": 13969,
+      "sha256": "44670d1b9acb4757cd18106f6f2a6975abfa3d6c1463d976a727de4dd48ac9b1",
+      "exitCode": 1
+    },
+    {
+      "label": "peer-owned-lifecycle-red",
+      "originalPath": "/tmp/room-mcp-files-final-affected-1102.log",
+      "file": "peer-owned-lifecycle-red.log.gz",
+      "uncompressedBytes": 17485,
+      "sha256": "fbb9ac021f92a41a4186301863396ee2d21a7a63aebb51d7a4c60193e78386b3",
+      "exitCode": 1
+    }
+  ]
+}

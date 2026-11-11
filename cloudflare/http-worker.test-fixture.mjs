@@ -1,13 +1,45 @@
 // LOCAL TEST ONLY: public Room entrypoint never exports this provisioning route.
+import { observeSelectedRuns, requestRunSchema } from '../server/request-runs.mjs';
 import { hashPassword } from '../src/password-auth.mjs';
 import entry, { ProjectRoom } from './room.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { normalizeGraphEmail } from '../server/graph-email.mjs';
 import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-selected-run-cost') {
+      const store = this.store, db = store.db, roomId = 'selected-run-cost', now = store.now();
+      store.transaction(() => {
+        db.exec(requestRunSchema);
+        const insert = db.prepare('INSERT INTO request_runs VALUES(?,?,?,?,?,?,?)');
+        for (let i = 0; i < 5000; i++) insert.run(roomId, `event-${i}`, `request-${i}`, 'worker', `attempt-${i}`, 'working', now);
+        // Same request ID, different opening must never replace the current run.
+        insert.run(roomId, 'stale-opening', 'request-1', 'worker', 'stale-attempt', 'delivered', now);
+      });
+      const requests = [1, 2, 3].map(i => ({ id: `request-${i}`, openingEventId: `event-${i}` }));
+      const prepare = db.prepare.bind(db);
+      let selectedQueryRowsRead = 0, selectedQueries = 0;
+      // Measure only the actual helper's selected-run query, excluding the
+      // existing sqlite_master existence check and constructor work.
+      db.prepare = sql => {
+        const statement = prepare(sql);
+        if (!sql.includes('json_each') || !sql.includes('request_runs')) return statement;
+        const all = statement.all.bind(statement);
+        statement.all = (...args) => {
+          const before = db.rowsRead;
+          try { return all(...args); }
+          finally { selectedQueries++; selectedQueryRowsRead += db.rowsRead - before; }
+        };
+        return statement;
+      };
+      try {
+        const runs = observeSelectedRuns(store, roomId, requests);
+        return Response.json({ runs, selectedQueries, selectedQueryRowsRead, now, seeded: 5001 });
+      } finally { db.prepare = prepare; }
+    }
     if (url.pathname === '/__test-conversation-history-provision') {
       const store = this.store, roomId = 'history-platform';
       store.initialize(initialRoom(roomId));
@@ -54,7 +86,7 @@ export class HttpTestRoom extends ProjectRoom {
       this.store.initialize(initialRoom());
       const ownerKey = this.store.issueAccessKey('commons', 'owner');
       const identity = this.store.identities.create('Bounty observer');
-      this.store.identities.link(ownerKey, 'commons', { identityId: identity.identityId, permissions: [] });
+      linkWithProof(this.store, ownerKey, 'commons', identity, { permissions: [] });
       this.store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
         url: 'https://observer.example.test/hooks', events: ['*'] });
       return Response.json({ ownerKey });

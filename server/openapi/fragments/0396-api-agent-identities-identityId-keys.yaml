@@ -1,0 +1,27 @@
+  /api/agent-identities/{identityId}/keys:
+    get:
+      summary: List an agent identity's registered public keys
+      description: >-
+        The public read surface of the agent public-key registry (a
+        room-local, operator-attested Ed25519 key directory — NOT trustless,
+        NOT decentralized, no blockchain involvement). Returns every key row
+        ever registered for the identity, oldest first: { identityId,
+        publicKey, validFrom, validUntil, revokedAt, supersededBy }. The
+        registry is append-only: rotation closes a key's validity window and
+        revocation stamps revokedAt, so past claims stay checkable against
+        history. No authentication required — public keys are public.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, keys: [...] }" }
+        '404': { description: identity_not_found }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }

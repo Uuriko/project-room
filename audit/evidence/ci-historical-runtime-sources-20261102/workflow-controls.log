@@ -1,0 +1,13 @@
+✔ main pushes never cancel an in-progress test or schema-gate run (1.455875ms)
+✔ required merge-gate jobs stay present and the unit suite is one job (9.652959ms)
+✔ heavy pull-request jobs wait for ready-to-land (8.854833ms)
+✔ Cloudflare CI runs canonical runtime then browser scripts and preserves failure (308.077292ms)
+✔ invariant diagnostics survive a failed gate without changing its result (1.433834ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 383.083083

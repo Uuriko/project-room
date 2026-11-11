@@ -33,6 +33,11 @@ try {
   } else {
     const message = before.state.messages.find(m => m.id === targetId);
     assert.equal(message?.authorId, "helper"); assert.equal(message.workItemId, config.workItemId);
+    // Per-message actions live in the "⋯" overflow menu (UI calming #2);
+    // open this message's menu before clicking Save as result, as
+    // native-draft-browser-check and refine-draft-browser-check do.
+    const resultMenu = page.locator('[data-message-record-id="' + message.id + '"] details.message-more');
+    if (!await resultMenu.evaluate(node => node.open)) await resultMenu.locator("summary").click();
     await page.locator('[data-message-action="result"][data-message-id="' + targetId + '"]').click();
     await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
     assert.equal(await page.locator('[name="producerId"]').inputValue(), "");

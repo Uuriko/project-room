@@ -7,6 +7,7 @@ import { createIdentityVerification, VERIFIED, UNVERIFIED } from "../server/iden
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const AI = "ai_testAgentOne";
 const OWNER = "ai_roomOwnerAttester";
@@ -217,7 +218,7 @@ test("room verification-policy gates identity linking", async t => {
   // An unverified identity is denied linking while the gate is on.
   const agent = f.store.identities.create("Gated agent");
   assert.throws(
-    () => f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, permissions: ["accept_work"] }),
+    () => linkWithProof(f.store, ownerKey, "commons", agent, { permissions: ["accept_work"] }),
     err => err.code === "unverified_identity");
   assert.equal(
     await errorCode(await post(origin, "/api/rooms/commons/identity-links",
@@ -227,13 +228,13 @@ test("room verification-policy gates identity linking", async t => {
   // After a room-owner attestation the same identity links cleanly.
   const attester = makeAttester(f);
   await post(origin, `/api/agent-identities/${agent.identityId}/verify`, {}, attester.secret);
-  const linked = f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  const linked = linkWithProof(f.store, ownerKey, "commons", agent, { permissions: ["accept_work"] });
   assert.equal(linked.memberId, agent.identityId);
 
   // Relaxing the policy re-opens linking for unverified identities.
   await post(origin, policyPath, { requireVerified: false }, ownerKey);
   const other = f.store.identities.create("Ungated agent");
-  const linked2 = f.store.identities.link(ownerKey, "commons", { identityId: other.identityId, permissions: ["accept_work"] });
+  const linked2 = linkWithProof(f.store, ownerKey, "commons", other, { permissions: ["accept_work"] });
   assert.equal(linked2.memberId, other.identityId);
 });
 

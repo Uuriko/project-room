@@ -1,0 +1,38 @@
+{
+  "base": "b4dfa57c19b029b19cd9391c4d3ef213096673e8",
+  "source": "ecf97f658492e26508bc3329ba1a567cfad30a07",
+  "heads": {
+    "5867": "2ed08bd5d9cd5a904948149bb90320a19fd620fc",
+    "5890": "c3e3807c62de6fa8fbae7aecd5207140989060dc",
+    "5870": "6453520a088f5bd9bfe20493c939d8afe68a4ea0"
+  },
+  "composition": "Three no-ff merges preserve author commits. Only conflict was candidate-manifest; regenerated deterministically. No manual app resolution. Heads freshly verified open and existing Codex author branches retained.",
+  "node": "24.22.1",
+  "browser": "Chromium via installed Playwright, same shared runtime as prior151.0.7922.34; no alternate-engine claim",
+  "results": {
+    "browserPass": 7,
+    "browserFailAfterHarnessRepair": 0,
+    "rewardFocusedPass": 3,
+    "rewardFail": 0,
+    "strings": "pass",
+    "manifestByteComparison": "pass",
+    "diffCheck": "pass"
+  },
+  "matrix": [
+    "1280 delayed clipboard reject while detail shown preserves detail focus then All offers restores suggestion and manual textarea visible/copy reenabled.",
+    "320 same with browserBack.",
+    "320 immediate rejection selects visible instructions while filters collapsed (author test).",
+    "Preference stale response cursor fencing plus completed clipboard stale feedback control (two author tests).",
+    "101-task bounded empty page, continuation retry and truthful localized status (author test).",
+    "320 direct link with empty published page returns to searchheading, nextTab Filters summary."
+  ],
+  "reward": "Existing funded-volunteer exclusion+100fundedfirstpage continuation/unpaidonlyautoclaim; pattern also selected existing funded-without-submission settlement refusal.3actual tests.",
+  "failurePreserved": "Initial new harness import path went too far up; no app tests ran from that file. Existing4 passed. Originalbrowser.log retained, only harness path corrected; new3 then pass in interactions.log.",
+  "limits": [
+    "Synthetic local NodeHTTP/SQLite only; no production actions, provider calls, liveclaims, deploy, Worker or other browsers.",
+    "No broad14focus rerun; existing singlehead evidence reused only as context.",
+    "Direct empty-list is controlled published-list response; not proof of real lifecycle publication transition.",
+    "Bounded-search continuation case did not itself navigate to detail; detail-return separately exercised in first2cases."
+  ],
+  "artifactNaming": "Saved browser reproductions renamed from .test.mjs to .probe.mjs after integration, so npm test does not auto-discover browser evidence. Original logs retain historical executed filenames. Source unchanged; probes can still be invoked explicitly with node --test."
+}

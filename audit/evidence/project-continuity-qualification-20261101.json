@@ -1,0 +1,248 @@
+{
+  "sourceHead": "0cb1e3d9db0aa415db01da12f7d848e1324ad6b7",
+  "runtimeHead": "38de1cb78c372dff71de8710e0080e29211abfbc",
+  "base": "b342974b4b510f7bdace52db51dc3f682abe1b7b",
+  "scope": "Offline current-format explicit project ownership transfer and complete/fail-closed deletion inventory; no new succession policy or grant",
+  "sourceSha256": {
+    "cloudflare/project-continuity-worker.check.mjs": "9ae24c8e393da421bb03b763c922847cd0e83e93d3b3f58ca1ca96fd7aa86f54",
+    "cloudflare/project-continuity-worker.test-fixture.mjs": "c43c14659a521697f81e95aabb77a9f1aa7c0cb9cf710edd3a4bb70f71b661dd",
+    "server/account-deletion.mjs": "4d843c57da92b101cce9b2f93f85421204b1833ed7d05fd81a097a164e24437c",
+    "server/agent-rooms.mjs": "88f669bbe9632cae15ef8db3be5db5e2462b9185155c52ba4a5b2e2689a88616",
+    "server/current-room-repository.mjs": "6893d89f380758801093abd6d1cd2913e9d6d1e566d1c5644aba2b9b941b9e34",
+    "tests/current-project-continuity.test.mjs": "789781aebdff7d9cad5b3c2d4631d9074dee303a1650b05457db3fea9adc71e1"
+  },
+  "results": {
+    "affectedNode": {
+      "testedRuntime": "38de1cb78c372dff71de8710e0080e29211abfbc",
+      "pass": 66,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0
+    },
+    "ownFinal": {
+      "testedHead": "0cb1e3d9db0aa415db01da12f7d848e1324ad6b7",
+      "pass": 13,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0,
+      "note": "One additive cold agent-runtime replacement control after66-run; runtime diff is empty."
+    },
+    "actualWorker": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "exitCode": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 3,
+      "exitCode": 0
+    },
+    "secrets": {
+      "exitCode": 0
+    }
+  },
+  "evidence": {
+    "originalTwoReds": {
+      "path": "audit/evidence/project-continuity-originalTwoReds-20261101.log.gz",
+      "sha256Uncompressed": "0f6c18e43da5728f7540f9efde29ccef0ec1d84dbf28f4f7b6a15920f0bc7063",
+      "exitCode": 1
+    },
+    "finalAffected": {
+      "path": "audit/evidence/project-continuity-finalAffected-20261101.log.gz",
+      "sha256Uncompressed": "0110fb8d69c84c0944f80900827cf528624997e594194062f7950f166e060b3e",
+      "exitCode": 0
+    },
+    "finalOwn": {
+      "path": "audit/evidence/project-continuity-finalOwn-20261101.log.gz",
+      "sha256Uncompressed": "56167b9129806b737887213535dde95a2b5b52057b38f63a2eac814e93273efb",
+      "exitCode": 0
+    },
+    "actualWorker": {
+      "path": "audit/evidence/project-continuity-actualWorker-20261101.log.gz",
+      "sha256Uncompressed": "9462471d4e6462ac01e4020a9640026d71cf435b872c9074a7e4720ac3f01cdd",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/project-continuity-lint-20261101.log.gz",
+      "sha256Uncompressed": "1ad14d1d7c542eb24588ba7504fd6158fbf9ffe5372d429e70d3b2c2659b6d49",
+      "exitCode": 0
+    },
+    "secrets": {
+      "path": "audit/evidence/project-continuity-secrets-20261101.log.gz",
+      "sha256Uncompressed": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    },
+    "readOnlyGapRepro": {
+      "path": "audit/evidence/project-continuity-readOnlyGapRepro-20261101.log.gz",
+      "sha256Uncompressed": "af15c43a7b6690e92242fa4f0dbecf0c9c437d9549aa8495dd72cb4f0194c147",
+      "exitCode": 0
+    }
+  },
+  "workerSamples": [
+    {
+      "surface": "small",
+      "count": 4,
+      "coldPlan": {
+        "statements": 47,
+        "rowsRead": 1933,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 69047,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "warmPlan": {
+        "statements": 47,
+        "rowsRead": 347,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 69047,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "transfer": {
+        "statements": 136,
+        "rowsRead": 5612,
+        "rowsWritten": 22,
+        "unknown": 0,
+        "returnedSqlTextBytes": 61174,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "statements": 50,
+        "rowsRead": 236,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 45778,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "post": {
+        "statements": 96,
+        "rowsRead": 1161,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 42838,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      }
+    },
+    {
+      "surface": "large",
+      "count": 100,
+      "coldPlan": {
+        "statements": 47,
+        "rowsRead": 2029,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 88447,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "warmPlan": {
+        "statements": 47,
+        "rowsRead": 443,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 88447,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 0,
+          "rowsWritten": 0,
+          "unknown": 0
+        }
+      },
+      "transfer": {
+        "statements": 136,
+        "rowsRead": 5612,
+        "rowsWritten": 22,
+        "unknown": 0,
+        "returnedSqlTextBytes": 70406,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "statements": 50,
+        "rowsRead": 236,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 55006,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "post": {
+        "statements": 96,
+        "rowsRead": 1161,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 52062,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      }
+    }
+  ],
+  "contractsPreserved": [
+    "Only existing current owner can appoint an existing active member; current/previous owner metadata and original grant semantics are protected and persisted by the existing shared reducer.",
+    "An outgoing agent owner loses manage_members/decide; outgoing human permission snapshot remains under the established contract.",
+    "Fresh authentication precedes lost-response duplicate recognition, so revocation wins even on retry.",
+    "Owner delegate and membership delegation added_invite_member=0 grants lapse on transfer; an invite bit held independently before delegation is retained.",
+    "No work/history hydration and no changes to existing work bodies when ownership changes. Project tables remain keyed by room identity, not host process or bearer credential.",
+    "Deletion inventory reads protected room/head and selected account-member candidates; complete <=100 member-key census and early active-other selection preserve succession classification without unrelated profile bodies. The existing eligible-human/account/login policy and deterministic heir sorting remain unchanged.",
+    "Unavailable or corrupt protected inventory is an explicit error, never an empty owned-room list; genuine missing legacy404 remains skippable.",
+    "Same-principal replacement runtime uses authorized credential rotation, old credential401, exact accepted work unchanged across cold restart and subsequent work.started by the stable member."
+  ],
+  "remainingLimits": [
+    "Active membership delegation added_invite_member=1 requires a permission-strip subevent path still unported for current format. Transfer preflights and refuses atomically with current_room_context_unavailable; no silent bit carryover. Synthetic old-state dependency control qualifies refusal, not a real added1 migration.",
+    "Account deletion execution/archive/membership deactivation is not ported to current format. The original misleading preview is fixed; deletion execution remains fail closed, not qualified end-to-end. Initial read-only reproduction demonstrated accounts/member bindings roll back when the unported body path refuses.",
+    "Different-principal replacement cannot impersonate the accountable agent or designated decision-maker. Work IDs/results survive but explicit role IDs are not rewritten by owner transfer. Existing legacy work.superseded two-work replacement path remains unported to normalized commands.",
+    "Existing personal-room deletion policy archives/purges sole-owned personal rooms with no eligible human heir, even with other members. AgentRooms.create defaults personal. Organization projects block until succession. This product policy was not silently changed under a narrow continuity fix.",
+    "No automatic replacement owner when the sole owner is unreachable. Existing owner-only authorization remains; any new fallback authority needs an explicit product decision and grant.",
+    "Inventory keeps per-read256KiB and internal1024 logical-unit admission; very large legal candidate human profiles may explicitly refuse rather than omit a project. No new index/auth domain/cache or global cap increase.",
+    "ActualWorker inventory cost grows only with bounded member-key census (347\u2192443 rows for4\u2192100); transfer5612rows includes unchanged catalog/delegation-journal verification overhead and is not claimed optimal or constant in global delegation history.",
+    "ActualWorker constructor startup excluded from cold request counters; adapter counters plus raw runtime permit flips are recorded separately, not a claim to observe every native maintenance write.",
+    "No production publish/deploy/live verification, no external credential/resource access transferred or broadened."
+  ],
+  "originalReadOnlyReview": {
+    "source": "3f301bb40cd5fe5a103ee3e553db5a20fc2eb1fb",
+    "reproScriptSha256": "fadc186330e4489d5093302d8472551381d3703dc982f0cff1bbf2e1cd0881ae",
+    "outcome": "Legacy authorized transfer works; normalized original fails. Original normalized organization-owned room omitted from deletion inventory, but actual execution refuses and rolls back; no actual orphan deletion claim."
+  }
+}

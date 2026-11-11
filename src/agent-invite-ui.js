@@ -1,3 +1,4 @@
+import { canInviteCoOwners } from "./room-administration.js";
 import { uiText } from './strings.js';
 import { canInviteMembers } from "./events.js";
 import { humanJoinShareBase } from "./room-deep-link.js";
@@ -7,6 +8,8 @@ const $ = selector => document.querySelector(selector);
 // Owner-minted collaborate shape. invite_member-only issuers cannot grant steer;
 // they should mint contribute. Server profile name "collaborate" may land with
 // bootstrap-agent-room; explicit permissions work on today's live profiles.
+// The dialog offers only Guest, Member and Owner. Legacy profiles stay accepted
+// here and on the server so API callers and stored invites keep working.
 export const COLLABORATE_PERMISSIONS = Object.freeze(["steer", "accept_work", "complete_work", "verify"]);
 
 export function inviteMintBody(profile, displayName) {
@@ -15,7 +18,7 @@ export function inviteMintBody(profile, displayName) {
   const extra = name ? { displayName: name } : {};
   if (profile === "owner") return { ownerEquivalent: true, ...extra };
   if (profile === "collaborate") return { permissions: [...COLLABORATE_PERMISSIONS], ...extra };
-  if (profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
+  if (profile === "member" || profile === "guest" || profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
   throw new Error(uiText("invite.copy.002"));
 }
 
@@ -35,7 +38,9 @@ export function agentInviteHandoff(code, locationLike = globalThis.location) {
   const link = agentInviteJoinLink(code, locationLike);
   const hosted = uiText("invite.copy.005", { fragmentA: link });
   const local = uiText("invite.copy.006", { fragmentA: JSON.stringify(link) });
-  return { link, code, hosted, local, text: uiText("invite.copy.007", { fragmentA: hosted, fragmentB: local }) };
+  const mcp = new URL("mcp", `${humanJoinShareBase(locationLike).replace(/\/$/, "")}/`).href;
+  const grok = uiText("invite.copy.grok", { fragmentA: link, fragmentB: mcp });
+  return { link, code, hosted, local, grok, text: [uiText("invite.copy.007", { fragmentA: hosted, fragmentB: local }), grok].join("\n\n") };
 }
 
 // Mint one invite and build its self-serve join link. The caller loops for
@@ -47,8 +52,22 @@ export async function mintInviteLink({ requestBody, mintOne, locationLike }) {
   return { code, link: agentInviteJoinLink(code, locationLike) };
 }
 
+// One command the friend runs: room-acp served by this Room, with the real
+// invite link and the chosen name filled in. Single quotes are POSIX-escaped.
+const shellQuote = value => ["'", String(value).replace(/'/g, "'\\''"), "'"].join("");
+export function roomAcpCommand(link, name = "", locationLike = globalThis.location) {
+  const base = humanJoinShareBase(locationLike);
+  const parts = [["npx -y --allow-remote=root --package=", base, "/room-acp.tgz room-acp"].join(""), shellQuote(link)];
+  if (name?.trim()) parts.push("--name", shellQuote(name.trim()));
+  return parts.join(" ");
+}
+
 export function inviteLinksText(links) {
   return links.map(entry => entry.link).join("\n");
+}
+
+export function inviteHandoffsText(links, locationLike = globalThis.location) {
+  return links.map(entry => agentInviteHandoff(entry.code, locationLike).hosted).join("\n\n---\n\n");
 }
 
 export function installAgentInvites({ client, getState, getSession }) {
@@ -57,6 +76,11 @@ export function installAgentInvites({ client, getState, getSession }) {
   const result = $("#agent-invite-result");
   const button = $("#invite-agents-button");
   if (!dialog || !form || !button) return { sync() {}, reset() {} };
+  if ($("#agent-invite-acp-hint")) $("#agent-invite-acp-hint").textContent = uiText("invite.acp.hint");
+
+  for (const [id, key] of [["agent-invite-copy", "primary"], ["agent-invite-copy-link", "link"], ["agent-invite-copy-all", "bulk"], ["agent-invite-copy-links", "links"]]) {
+    if ($(`#${id}`)) $(`#${id}`).textContent = uiText(`invite.copy.${key}`);
+  }
 
   let owner = null, generation = null, busy = false, copying = false, minted = null;
   const member = () => getState()?.members[getSession()?.member?.id];
@@ -72,7 +96,7 @@ export function installAgentInvites({ client, getState, getSession }) {
 
   function render() {
     // The sidebar control stays in the DOM so its listener can mint a
-    // permissioned code. The Invite dialog's #growth-agent-code is the
+    // permissioned code. The #growth-agent-code in the Invite dialog is the
     // entry point that reaches it.
     button.hidden = true;
     form.hidden = Boolean(minted);
@@ -86,19 +110,23 @@ export function installAgentInvites({ client, getState, getSession }) {
       else link.removeAttribute("href");
     }
     if ($("#agent-invite-single")) $("#agent-invite-single").hidden = !single;
+    if ($("#agent-invite-acp")) $("#agent-invite-acp").textContent = single ? minted[0].acp : "";
     if ($("#agent-invite-bulk")) $("#agent-invite-bulk").hidden = !bulk;
     for (const input of form.querySelectorAll("input,select,button")) input.disabled = busy;
     const ownerChoice = $("#agent-invite-profile")?.querySelector('option[value="owner"]');
     if (ownerChoice) {
       const state = getState();
       const me = member();
-      const show = Boolean(me && me.active !== false && me.id === state?.room?.ownerId);
+      const show = canInviteCoOwners(state, me?.id);
       ownerChoice.hidden = !show;
       ownerChoice.disabled = !show;
       const select = $("#agent-invite-profile");
-      if (!show && select?.value === "owner") select.value = "contribute";
+      if (!show && select?.value === "owner") select.value = "member";
     }
     if ($("#agent-invite-copy")) $("#agent-invite-copy").disabled = copying || !single;
+    if ($("#agent-invite-copy-link")) $("#agent-invite-copy-link").disabled = copying || !single;
+    if ($("#agent-invite-copy-links")) $("#agent-invite-copy-links").disabled = copying || !bulk;
+    if ($("#agent-invite-copy-acp")) $("#agent-invite-copy-acp").disabled = copying || !single;
     if ($("#agent-invite-copy-all")) $("#agent-invite-copy-all").disabled = copying || !bulk;
     if ($("#agent-invite-another")) $("#agent-invite-another").disabled = busy;
   }
@@ -128,7 +156,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     minted = null;
     const instructions = dialog.querySelector(".agent-invite-instructions"); if (instructions) instructions.open = false;
     form.reset();
-    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
+    if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "member";
     if ($("#agent-invite-count")) $("#agent-invite-count").value = "1";
     if ($("#agent-invite-hosted")) $("#agent-invite-hosted").textContent = "";
     if ($("#agent-invite-share")) $("#agent-invite-share").textContent = "";
@@ -185,7 +213,7 @@ export function installAgentInvites({ client, getState, getSession }) {
           },
           locationLike: globalThis.location,
         });
-        links.push(link);
+        links.push({ ...link, acp: roomAcpCommand(link.link, count === 1 ? name : "") });
       }
       if (!owns()) return;
       minted = links;
@@ -228,10 +256,19 @@ export function installAgentInvites({ client, getState, getSession }) {
   dialog.addEventListener("close", () => { if (!busy) resetForm(); });
   form.addEventListener("submit", mint);
   $("#agent-invite-copy")?.addEventListener("click", () => {
-    if (minted?.length === 1) void copyText(minted[0].link, uiText("invite.copy.015"));
+    if (minted?.length === 1) void copyText(inviteHandoffsText(minted), uiText("invite.copy.015"));
+  });
+  $("#agent-invite-copy-link")?.addEventListener("click", () => {
+    if (minted?.length === 1) void copyText(minted[0].link, uiText("invite.copy.linkDone"));
+  });
+  $("#agent-invite-copy-links")?.addEventListener("click", () => {
+    if (minted?.length > 1) void copyText(inviteLinksText(minted), uiText("invite.copy.linksDone", { fragmentA: minted.length }));
+  });
+  $("#agent-invite-copy-acp")?.addEventListener("click", () => {
+    if (minted?.length === 1) void copyText(minted[0].acp, uiText("invite.copy.acp"));
   });
   $("#agent-invite-copy-all")?.addEventListener("click", () => {
-    if (minted?.length > 1) void copyText(inviteLinksText(minted), uiText("invite.copy.016", { fragmentA: minted.length }));
+    if (minted?.length > 1) void copyText(inviteHandoffsText(minted), uiText("invite.copy.016", { fragmentA: minted.length }));
   });
   $("#agent-invite-another")?.addEventListener("click", () => { if (!busy) resetForm(); });
   render();

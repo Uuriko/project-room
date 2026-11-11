@@ -1,3 +1,4 @@
+import {isCurrentRoom,readCurrentWorkItem} from './current-room-repository.mjs';
 // ACT-1a: seed a starter room and Room Guide. No new HTTP route.
 // ACT-1b (/start, landing, receipt UI, provider list) waits on S1, RT, and
 // GR2 deployed. ACT-3b humanClaimUrl waits on S1 and C. GitHub OAuth app
@@ -61,7 +62,13 @@ function putClaim(store, roomId, actorId, spec, now) {
   return item;
 }
 
-export function seedStarter(store, roomId, { templateSlug = null, intent = null, ownerMemberId, start = false } = {}) {
+export function seedStarter(store, roomId, { templateSlug = null, intent = null, ownerMemberId, start = false, token = null, binding = null } = {}) {
+  if(isCurrentRoom(store.db,roomId))return store.transaction(()=>{
+    const auth=store.authenticateAccountSession(token,roomId,binding);if(auth.member.id!==ownerMemberId||store.roomAuthority(roomId,{memberId:ownerMemberId}).ownerId!==ownerMemberId)throw new ServiceError(403,'owner_required','Only the authenticated room owner can seed a starter');
+    const workItemId='native-starter',existing=readCurrentWorkItem(store.db,roomId,workItemId);
+    if(!existing)store.command(token,roomId,{id:'native-starter-propose',type:EVENT_TYPES.WORK_PROPOSED,data:{workItemId,title:starterTitleForIntent(intent)||'First useful task',definitionOfDone:'Produce a useful saved result and record the next action.',accountableMemberId:ownerMemberId,mode:'read'}},binding);
+    return {roomId,starterWorkItemId:workItemId,nextRead:{tool:'room_read_work',arguments:{workItemId}},guide:{available:false,reason:'native_work'}};
+  });
   installGuideCommandHook(store);
   return store.transaction(() => {
     const room = store.room(roomId);
@@ -129,9 +136,9 @@ export function seedStarter(store, roomId, { templateSlug = null, intent = null,
 // Called from createAccountRoom when the request carries intent or start=1.
 // roomId and ownerMemberId are required: an account can own more than one room.
 // ACT-1b's signed-in /start redirect is the other caller, once that route exists.
-export function seedStarterForNewAccount(store, accountId, { intent = null, templateSlug = null, roomId = null, ownerMemberId = null, start = false } = {}) {
+export function seedStarterForNewAccount(store, accountId, { intent = null, templateSlug = null, roomId = null, ownerMemberId = null, start = false, token = null, binding = null } = {}) {
   void accountId;
   if (!roomId || !ownerMemberId) return null;
   if (!intent && !start && !templateSlug) return null;
-  return seedStarter(store, roomId, { templateSlug, intent, ownerMemberId, start: Boolean(start) });
+  return seedStarter(store, roomId, { templateSlug, intent, ownerMemberId, start: Boolean(start), token, binding });
 }

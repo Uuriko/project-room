@@ -1,0 +1,54 @@
+{
+  "runtimeCommit": "abd441beddc9ca17c6792810a1c2c01ba8e82391",
+  "auditProtocol": 10,
+  "schema": 45,
+  "state": "offline only",
+  "checks": {
+    "stagedIngressNode": "10/10 at0d777 before protocol10 merge",
+    "stagedIngressNative": "1/1 at0d777 before protocol10 merge",
+    "composedPackageAndSchemaNode": "22/22 atabd441 including verified archive actualNative 299-step recovery",
+    "composedNative": "historical and configuredKV ingress 2 pass; schema baseline comparison failed due mixed old verifier/new constructor",
+    "correctedNativeSchemaComparison": "1/1 after pairing historical verifier with its own historical Worker constructor; candidate runtime unchanged",
+    "schemaCost": {
+      "baselineReads": 42484,
+      "candidateColdReads": 868,
+      "candidateWarmReads": 99,
+      "baselineSqlBytes": 23784,
+      "candidateSqlBytes": 23790,
+      "note": "protocol10 guard marker adds6bytes, exact matching definitions required independently in each coherent runtime"
+    }
+  },
+  "limits": [
+    "Full independent oracle still mandatory and unbounded",
+    "No production conversion or schema45 activation",
+    "Retained-guard publication experiment62f935f is separate and not integrated",
+    "Earlier package run crossed composition edits; not counted as pinned acceptance"
+  ],
+  "logs": [
+    {
+      "artifact": "root-safe-ingress-node-1101.log.gz",
+      "bytes": 15590,
+      "sha256": "02ee3fe8e0ca9c634a9d8ee7f209139f89075a37cfa9c3621c794857a82ea6fd"
+    },
+    {
+      "artifact": "root-safe-ingress-native-1101.log.gz",
+      "bytes": 42676,
+      "sha256": "d188e41d3b5db7a75a90763fd20901ab3068134731f9fc05ec6c894b19299ef2"
+    },
+    {
+      "artifact": "root-protocol10-composed-package-1101.log.gz",
+      "bytes": 9752,
+      "sha256": "dd9881f509bc7fae450e3c3d920c3b8be62406d1c614089dfd07dc1669c44179"
+    },
+    {
+      "artifact": "root-protocol10-composed-native-1101.log.gz",
+      "bytes": 80639,
+      "sha256": "2be9be4d5165367ceecf7df99552f2f1a5f7285af68cb0ffaefa6e4e01629898"
+    },
+    {
+      "artifact": "root-protocol10-schema-native-fixed-1101.log.gz",
+      "bytes": 12351,
+      "sha256": "cf9f3e55cd3ff222823a1ae1b202219ea383d1c3be2be1e1d7666b007b9712f3"
+    }
+  ]
+}
