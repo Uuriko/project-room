@@ -162,13 +162,16 @@ export const ALLOWLIST = [
   // separators may follow an interpolation, up to a terminator, so a
   // literal tail still flags.
   /["']?(?:[\w$-]*?(?:secret|password|passwd|pwd|token)[\w$-]*?)["']?\s*[:=]\s*(?:\$\{[^{}`]*\}[\s.\-_:/+,;=&?#|]*)+([,;)\]}]|$)/i,
-  // Endpoint URLs are locators, not credentials (mirrors the docs-URL
-  // entries above): a token-URL value is the endpoint, not the token.
-  /["']?(?:[\w$-]*?(?:secret|password|passwd|pwd|token)[\w$-]*?)["']?\s*[:=]\s*["']https?:\/\//i,
   /secret-scan-diff: \$\{/, // scripts/secret-scan-diff.mjs — the diff gate's own
     // log prefix inside a template literal; the value is an interpolation
     // (a findings count), not a credential.
 
+  // Endpoint declarations (exact spans, pinned so a credential-bearing URL such as
+  // https://user:secret@host still flags): OAuth token endpoint locators, not tokens.
+  /GITHUB_TOKEN_URL = "https:\/\/github\.com\/login\/oauth\/access_token"/,
+  /tokenUrl = 'https:\/\/oauth2\.googleapis\.com\/token'/,
+  /tokenEndpoint = 'https:\/\/oauth2\.googleapis\.com\/token'/,
+  /GMAIL_TOKEN_URL = "https:\/\/oauth2\.googleapis\.com\/token"/,
   // #5689 rebase (2026-11-10): identifier-component key names newly widen generic-secret, which
   // flags these existing lines on main. Each entry pins the exact finding span and was read by hand:
   // test/check fixture placeholders (fixture-*, synthetic-*, dummy-*, *-0123456789), env var / header

@@ -81,3 +81,19 @@ test("the value-length floor still applies to affixed keys", () => {
   assert.deepEqual(scanText(`${key}: "short"`), []);
   assert.deepEqual(scanText(`{"${key}": "short"}`), []);
 });
+
+// Review repros from seq4444 (Dot/Codex, 2026-11-10): the widened rule must not
+// weaken detection versus main.
+import { ALLOWLIST as REVIEW_ALLOWLIST, SAFE_ENTROPY_TOKENS as REVIEW_SAFE } from "../scripts/secret-scan-check.mjs";
+test("a QUOTED credential that begins with '/' is still detected, an unquoted path/regex is not", () => {
+  const a = "a".repeat(16);
+  const quoted = scanText(`password = "/${a}";`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
+  assert.ok(quoted.some(f => f.rule === "generic-secret"), "quoted /-led credential flags");
+  const unquoted = scanText(`const tokenPattern = /${a}${a}/g;`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
+  assert.equal(unquoted.filter(f => f.rule === "generic-secret").length, 0, "unquoted regex literal is not a credential");
+});
+test("a credential-bearing https URL assigned to a token/secret key is still detected", () => {
+  const a = "a".repeat(16);
+  const found = scanText(`token = "https://user:${a}@test.invalid/";`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
+  assert.ok(found.length > 0, "URL carrying a credential flags");
+});

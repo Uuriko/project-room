@@ -19,10 +19,11 @@ const PATTERNS = [
   // tokenizer, passwordless and secretive stay clean. Keyword letters use
   // explicit case classes (no /i flag) so camelCase boundaries stay
   // visible to the affix alternatives. An optional quote wraps the key so
-  // JSON forms ("password": "...") match like assignment forms. A value
-  // starting with "/" is a regex literal or a path, never a credential
-  // literal, so the value side refuses it.
-  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*["']?(?!\/)[^"'\s]{12,}["']?/ },
+  // JSON forms ("password": "...") match like assignment forms. An UNQUOTED
+  // value starting with "/" is a regex literal or a path, so the value side
+  // refuses it; a QUOTED value is always scanned, including one that begins
+  // with "/" (a quoted credential is not a path because of its first char).
+  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|(?!\/)[^"'\s]{12,})/ },
   { id: "private-key", label: "private key block", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
