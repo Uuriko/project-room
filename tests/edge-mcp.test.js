@@ -124,3 +124,14 @@ test("edge answers carry the Node door's POST header shape", async t => {
   assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
   assert.ok(Number(response.headers.get("content-length")) > 0);
 });
+
+test("an oversized anonymous body falls through to the DO (which answers 413), declared or streamed", async () => {
+  const big = JSON.stringify(rpc("tools/call", { name: "room_post_message", arguments: { body: "x".repeat(17000) } }));
+  assert.ok(new TextEncoder().encode(big).byteLength > 16384);
+  assert.equal(await edge(post(big)), null, "declared length over the bound");
+  const streamed = new Request(`${ORIGIN}/mcp`, { method: "POST", headers: { "content-type": "application/json" },
+    body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(big)); c.close(); } }), duplex: "half" });
+  assert.equal(await edge(streamed), null, "streamed length over the bound");
+  const ok = JSON.stringify(rpc("tools/list"));
+  assert.ok(await edge(post(ok)), "a normal body is still answered at the edge");
+});

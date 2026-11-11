@@ -44,6 +44,26 @@ import { isPublicWorkMcpTool } from "../server/mcp-public-work.mjs";
 import { isIdentityMintMcpTool } from "../server/mcp-identity-mint.mjs";
 import { roomMcpUrlForHost } from "../src/room-mcp-join.js";
 
+// Mirrors JSON_BODY_BYTES in server/http.mjs (the anonymous MCP body bound).
+export const ANON_BODY_BYTES = 16384;
+// Text of the body if it is at most `limit` bytes, else null (stops reading at the limit).
+async function readBounded(request, limit) {
+  if (!request.body) return "";
+  const reader = request.body.getReader(), chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) { try { await reader.cancel(); } catch { /* clone is discarded */ } return null; }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
 export function edgeMcpApplies(url) {
   return isRoomMcpPath(url.pathname);
 }
@@ -61,9 +81,16 @@ export async function edgeAnonymousMcpResponse(request, url) {
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
   if (presented) return null;
   const cors = mcpJoinCorsHeaders();
+  // The DO bounds an anonymous body at 16384 bytes and answers 413. Never read or
+  // answer beyond that here: an oversized body (declared or streamed) goes to the DO
+  // untouched so the bound stays enforced at one place with one status.
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > ANON_BODY_BYTES) return null;
+  const text = await readBounded(request, ANON_BODY_BYTES);
+  if (text === null) return null;
   let message;
   try {
-    message = JSON.parse(await request.text());
+    message = JSON.parse(text);
   } catch {
     return null; // malformed body: the DO boundary owns it (see header)
   }
