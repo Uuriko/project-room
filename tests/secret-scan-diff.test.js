@@ -44,7 +44,7 @@ import {
   scanAddedUnits,
 } from "../scripts/secret-scan-diff.mjs";
 import { ALLOWLIST, SKIP_FILES, SAFE_ENTROPY_TOKENS } from "../scripts/secret-scan-check.mjs";
-import { scanText } from "../server/secret-scan.mjs";
+import { scanText, isCodeFilePath } from "../server/secret-scan.mjs";
 
 // Every temp dir this file creates is removed when the file finishes, pass
 // or fail. The HEAD-tree acceptance test extracts the whole repo (~74 MB),
@@ -105,7 +105,7 @@ const prngBytes = (seed, n) => {
   return out;
 };
 const fakeHighEntropy = () =>
-  `deploy_token = "${prngBytes(0x5EED, 32).toString("base64url")}"`;
+  `deploy_ref = "${prngBytes(0x5EED, 32).toString("base64url")}"`;
 
 const SEEDS = [
   ["aws-access-key", fakeAwsKey],
@@ -327,7 +327,7 @@ test("zero false positives against the checked-out HEAD tree", () => {
         }
         if (buf.length > 2 * 1024 * 1024) continue;
         if (buf.subarray(0, 8000).includes(0)) continue; // binary
-        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS })) {
+        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS, codeContext: isCodeFilePath(rel) })) {
           findings.push(`${rel}:${f.line} [${f.rule}]`);
         }
       }
