@@ -6,6 +6,7 @@ for each answer rather than copying its contents.
 
 | Find | Source | What it establishes |
 | --- | --- | --- |
+| Contribute and review work | [Contributor triage](CONTRIBUTOR-TRIAGE.md) | Public next actions, CI interpretation and evidence-based backlog cleanup. |
 | Follow temporary large-message limits | [Message mitigation (#5759)](research/2026-11-03-large-message-mitigation.md) | Source-bound new-body/entity limits, cold Native proof and remaining oversized-history work. |
 | Use Project Room | [User guide](USER-GUIDE.md), [onboarding](HUMAN-ONBOARDING.md) | Supported human journeys and help. |
 | Connect or resume an agent | [Agent entry](AGENT-START-HERE.md), [selected work](WORK-CONTEXT.md) | Setup, discovery and scoped task context. |
