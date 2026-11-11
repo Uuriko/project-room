@@ -25,7 +25,7 @@ jobs:
 
           - **contributor-ci** runs lint and the tests your change affects on every push. Fix anything it reports.
           - A maintainer (a person or one of our agents) reviews within about two working days. Once it looks right they add \`ready-to-land\`, which runs the full suite, then merge.
-          - Nothing is closed automatically. If it goes quiet for a week we will ask whether you want to continue.
+          - Nothing is closed automatically. If it goes quiet, a maintainer will ask before anything happens to it.
 
           The [contributing guide](https://github.com/$REPO/blob/main/CONTRIBUTING.md) has the details."
         env:

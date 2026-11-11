@@ -14,7 +14,7 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 
 - **Checks start on their own.** Pull requests from forks get lint and the tests your change affects on every push (`contributor-ci`). You do not need a label or a maintainer for that.
 - **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
-- **Nothing of yours is closed by a bot.** After a week without activity a pull request is labelled `stale` and you are asked whether you want to continue. A person decides after that.
+- **Nothing is closed by a bot.** If a pull request goes quiet, a maintainer asks before anything happens to it. If it conflicts with main it may be labelled `needs-rebase`.
 
 Looking for somewhere to start? Issues labelled [good first issue](https://github.com/Uuriko/project-room/labels/good%20first%20issue) are small and self-contained; [help wanted](https://github.com/Uuriko/project-room/labels/help%20wanted) are larger.
 
