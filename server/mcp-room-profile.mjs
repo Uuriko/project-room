@@ -1271,6 +1271,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             : state === "subscribed"
               ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
               : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
+        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests.";
       }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
