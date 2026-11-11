@@ -3,8 +3,9 @@ import { withCurrentRestoreTableRows, verifyCurrentRoomSchema, invalidateCurrent
 // Durable Object export. The on-disk server copies its sqlite file
 // (scripts/backup-room.mjs). A Durable Object cannot hand that file out, so
 // this streams the same store as NDJSON and replays it into a fresh file.
-// The secret columns named in EXPORT_SECRET_COLUMNS and raw token shapes
-// inside other cells are sha256 hex. Everything else round-trips verbatim.
+// The secret columns named in EXPORT_SECRET_COLUMNS and raw secret shapes
+// inside other cells (see the patterns at TOKEN_SOURCE) are sha256 hex.
+// Everything else round-trips verbatim.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -24,6 +25,31 @@ import { mcpEventSubscriptionsSchema } from "./mcp-event-subscriptions.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
+// L08-C5: TOKEN_SOURCE alone left every other common secret shape in an
+// export verbatim — GitHub/vendor tokens, AWS key ids, Bearer/Basic
+// credentials, JWTs, PEM blocks, credential assignments
+// (password=… / "token": "…") and Cookie/Set-Cookie header values all
+// passed through. The patterns below close those shapes; every match is
+// replaced by the sha256 hex of the secret part, the same treatment
+// TOKEN_SOURCE matches have always had, so a scrubbed export stays
+// correlatable without carrying the credential.
+const VENDOR_TOKEN_SOURCE = "(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[baprs]-|sk-(?:proj|svcacct)-|(?:sk|rk)_(?:live|test)_)[A-Za-z0-9_-]{8,}";
+const AWS_KEY_SOURCE = "(?:AKIA|ASIA)[0-9A-Z]{16}";
+const JWT_SOURCE = "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}";
+const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+const COOKIE_HEADER_RE = /\b(Set-Cookie|Cookie)(\s*:\s*)([^\r\n]+)/gi;
+const AUTH_SCHEME_RE = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
+const ASSIGNMENT_RE = /\b(password|passwd|pwd|api[_-]?key|apikey|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?id|sessionid|session|secret|token|cookie|sid)(["']?\s*[:=]\s*["']?)([^\s"',;}\]<&]{4,})/gi;
+// Key names whose string values are credentials by position, however the
+// value is shaped (a bare password or session id matches no pattern
+// above). Matched on name parts, so "author" is not a credential key
+// while "accessToken" and "session_id" are.
+const SECRET_KEY_PARTS = new Set(["password", "passwd", "pwd", "secret", "token", "credential", "credentials", "authorization", "cookie", "session", "sessionid", "apikey"]);
+
+function isSecretKey(key) {
+  const parts = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return parts.some(part => SECRET_KEY_PARTS.has(part)) || parts.join("").includes("apikey");
+}
 const FIRST = ["accounts", "rooms", "events", "commands", "member_accounts", "account_access_events", "credentials", "account_credentials", "account_session_slots", "cursors", "projection_checkpoints"];
 
 const sha256Hex = value => createHash("sha256").update(value).digest("hex");
@@ -70,22 +96,44 @@ export function isExportSecretColumn(table, column) {
 export const BACKUP_SANITIZE_POLICY = 2;
 
 function scrubTokens(value) {
-  return value.replace(new RegExp(TOKEN_SOURCE, "g"), match => sha256Hex(match));
+  let out = value.replace(PEM_RE, match => sha256Hex(match));
+  out = out.replace(COOKIE_HEADER_RE, (_match, name, separator, headerValue) => `${name}${separator}${sha256Hex(headerValue.trim())}`);
+  out = out.replace(AUTH_SCHEME_RE, (_match, scheme, separator, token) => `${scheme}${separator}${sha256Hex(token)}`);
+  out = out.replace(ASSIGNMENT_RE, (_match, name, separator, secret) => `${name}${separator}${sha256Hex(secret)}`);
+  out = out.replace(new RegExp(JWT_SOURCE, "g"), match => sha256Hex(match));
+  out = out.replace(new RegExp(`(?:${TOKEN_SOURCE}|${VENDOR_TOKEN_SOURCE}|${AWS_KEY_SOURCE})`, "g"), match => sha256Hex(match));
+  return out;
+}
+
+// Under a credential-named key the whole string value is the secret, so it
+// is hashed whole at any depth instead of being pattern-matched.
+function scrubSecretValue(value) {
+  if (typeof value === "string") return value ? sha256Hex(value) : value;
+  if (Array.isArray(value)) return value.map(item => scrubSecretValue(item));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[scrubTokens(key)] = scrubSecretValue(item);
+    return out;
+  }
+  return value;
 }
 
 // MGMT-PANEL Slice 1 (MF-7): the recursive counterpart of scrubTokens for
 // parsed event JSON. scrubTokens above works on one flat string cell of the
 // whole-store NDJSON export; an event log is nested JSON, so the operator
 // per-room export walks objects, arrays, string values and string keys and
-// applies the same TOKEN_SOURCE pattern at any depth. Coverage is exactly
-// the three token shapes in TOKEN_SOURCE (pri_…, rak_…, ga1.…); any other
-// secret pasted into a room passes through verbatim.
+// applies the same scrub at any depth. Coverage is the product's own token
+// shapes plus the common credential shapes named at TOKEN_SOURCE above
+// (vendor tokens, AWS key ids, Bearer/Basic credentials, JWTs, PEM blocks,
+// credential assignments and cookie headers), and any string value sitting
+// under a credential-named key. It is still a shape denylist, not a proof
+// that no secret remains: an unshaped secret in prose can pass through.
 export function scrubEventTokens(value) {
   if (typeof value === "string") return scrubTokens(value);
   if (Array.isArray(value)) return value.map(item => scrubEventTokens(item));
   if (value && typeof value === "object") {
     const out = {};
-    for (const [key, item] of Object.entries(value)) out[scrubTokens(key)] = scrubEventTokens(item);
+    for (const [key, item] of Object.entries(value)) out[scrubTokens(key)] = isSecretKey(key) ? scrubSecretValue(item) : scrubEventTokens(item);
     return out;
   }
   return value;

@@ -24,8 +24,8 @@ async function fixture(t, roomId='mcp-public-join') {
     const body=await response.json();
     return {value:body.result?.structuredContent,error:body.result?.isError===true,body};
   };
-  return {store,owner,roomId,command,call,origin,async list(secret){
-    const response=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${secret}`},body:JSON.stringify({jsonrpc:'2.0',id:'list',method:'tools/list'})});
+  return {store,owner,roomId,command,call,origin,async list(secret, params = {}){
+    const response=await fetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${secret}`},body:JSON.stringify({jsonrpc:'2.0',id:'list',method:'tools/list',params})});
     return (await response.json()).result.tools;
   },open(){command('room.public_page_set',{enabled:true});command('room.join_link_set',{enabled:true});}};
 }
@@ -226,4 +226,52 @@ test('destination-free MCP join self-enrolls in official public lobby and retrie
   const html=await visible.text();assert.match(html,/Ready to help with a small task\./);assert.doesNotMatch(html,/PRIVATE DIRECT MESSAGE/);
   f.store.publicFace.disable(f.roomId,f.store.authenticate(f.owner.secret,f.roomId).member.id);
   const hidden=await (await fetch(f.origin+'/watch')).text();assert.doesNotMatch(hidden,/Ready to help with a small task\.|PRIVATE DIRECT MESSAGE/);
+});
+
+test('MCP compact activation preserves guest permissions and full-context navigation', async t => {
+  const f = await fixture(t); f.open();
+  const peer = f.store.identities.create('Brief collaborator');
+  await f.call(peer.secret, 'room_join', { roomId: f.roomId });
+  const tools = await f.list(peer.secret, { profile: 'full' });
+  const schema = tools.find(tool => tool.name === 'room_activation_pack').inputSchema;
+  assert.deepEqual(schema.properties.view.enum, ['brief']);
+  assert.ok(!schema.required.includes('view'));
+  const full = await f.call(peer.secret, 'room_activation_pack', { roomId: f.roomId });
+  assert.equal(full.error, false);
+  assert.ok(Array.isArray(full.value.members));
+  assert.equal(full.value.view, undefined);
+  const brief = await f.call(peer.secret, 'room_activation_pack', { roomId: f.roomId, view: 'brief' });
+  assert.equal(brief.error, false, JSON.stringify(brief.body));
+  assert.equal(brief.value.view, 'brief');
+  assert.equal(brief.value.you.memberId, peer.identityId);
+  assert.deepEqual(brief.value.you.permissions, []);
+  assert.equal(brief.value.room.slug, f.roomId);
+  assert.equal(brief.value.full, `/api/rooms/${f.roomId}/activation-pack`);
+  assert.ok(brief.value.next);
+  assert.ok(Buffer.byteLength(JSON.stringify(brief.value)) <= 2048);
+  assert.ok(!JSON.stringify(brief.value).includes('PRIVATE BEFORE JOIN'));
+  const http = await fetch(`${f.origin}/api/rooms/${f.roomId}/activation-pack?view=brief`, { headers: { Authorization: `Bearer ${peer.secret}` } });
+  assert.equal(http.status, 200);
+  const httpBrief = await http.json();
+  for (const field of ['you', 'room', 'next', 'full', 'pickUp']) assert.deepEqual(brief.value[field], httpBrief[field]);
+  const outsider = f.store.identities.create('Outsider');
+  const denied = await f.call(outsider.secret, 'room_activation_pack', { roomId: f.roomId, view: 'brief' });
+  assert.equal(denied.error, true);
+  assert.equal(denied.value?.room, undefined);
+  for (const view of ['full', '', null]) {
+    const invalid = await f.call(peer.secret, 'room_activation_pack', { roomId: f.roomId, view });
+    assert.equal(invalid.error, true, JSON.stringify(invalid.body));
+  }
+});
+
+
+test('MCP brief refuses unavailable presence instead of inventing availability', async t => {
+  const f = await fixture(t);
+  f.store.presence = () => { throw new Error('presence unavailable'); };
+  const brief = await f.call(f.owner.secret, 'room_activation_pack', { roomId: f.roomId, view: 'brief' });
+  assert.equal(brief.error, true);
+  assert.equal(brief.value?.around, undefined);
+  const full = await f.call(f.owner.secret, 'room_activation_pack', { roomId: f.roomId });
+  assert.equal(full.error, false);
+  assert.ok(Array.isArray(full.value.members));
 });

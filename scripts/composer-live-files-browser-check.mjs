@@ -32,7 +32,7 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const errors = [];
   const open = async key => {
-    const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true })).newPage();
+    const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, serviceWorkers: "block" })).newPage();
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -65,10 +65,16 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
   assert.deepEqual(errors, []);
 });
 
-function deferred() {
+// page.route only sees requests the page makes itself. These pages block the
+// app's service worker (its respondWith re-issues fetches the route never
+// sees, seq3651), and every injected-route wait is bounded so a missed
+// interception fails with its name instead of hanging to the test timeout.
+function deferred(label = "injected route", ms = 15000) {
   let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  const settled = new Promise(done => { resolve = done; });
+  const promise = Promise.race([settled, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error(`${label} was not observed within ${ms} ms`)), ms); timer.unref?.(); settled.then(() => clearTimeout(timer)); })]);
+  promise.catch(() => {});
+  return { promise, resolve, settled };
 }
 
 async function uploadFixture(t) {
@@ -95,7 +101,7 @@ async function uploadFixture(t) {
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
   page.setDefaultTimeout(10000);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -132,12 +138,12 @@ async function freshUpload(page) {
 for (const lateFailure of [false, true]) {
   test(`composer uploads: room switch fences a batch after late ${lateFailure ? "failure" : "success"}`, { timeout: 60000 }, async t => {
     const { page, requests, rows, switchRoom, errors } = await uploadFixture(t);
-    const captured = deferred(), release = deferred(), delivered = deferred();
+    const captured = deferred("upload POST interception"), release = deferred(), delivered = deferred("held upload delivery");
     t.after(() => release.resolve());
     await page.route("**/api/rooms/room-a/files", async route => {
       if (route.request().method() !== "POST") return route.continue();
       const response = await route.fetch();
-      captured.resolve(); await release.promise;
+      captured.resolve(); await release.settled;
       if (lateFailure) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Old upload failed" } }) });
       else await route.fulfill({ response });
       delivered.resolve();
@@ -190,12 +196,12 @@ for (const leave of ["room switch", "remove"]) {
 
 test("composer uploads: a removed in-flight file cannot report a late error into its draft", { timeout: 60000 }, async t => {
   const { page, requests, rows, errors } = await uploadFixture(t);
-  const captured = deferred(), release = deferred(), delivered = deferred();
+  const captured = deferred("upload POST interception"), release = deferred(), delivered = deferred("held upload delivery");
   t.after(() => release.resolve());
   await page.route("**/api/rooms/room-a/files", async route => {
     if (route.request().method() !== "POST" || route.request().postDataJSON().filename !== "removed.txt") return route.continue();
     const response = await route.fetch(); assert.equal(response.status(), 201);
-    captured.resolve(); await release.promise;
+    captured.resolve(); await release.settled;
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Removed upload failed" } }) });
     delivered.resolve();
   });
@@ -237,12 +243,12 @@ for (const departure of ["logout", "revocation"]) {
     store.createAccountRoom(slot.token, auth.sessionBinding, {
       roomId: "room-c", title: "room-c", purpose: "Replacement identity", kind: "personal", displayName: "Replacement owner"
     });
-    const captured = deferred(), release = deferred(), delivered = deferred();
+    const captured = deferred("upload POST interception"), release = deferred(), delivered = deferred("held upload delivery");
     t.after(() => release.resolve());
     await page.route("**/api/rooms/room-a/files", async route => {
       if (route.request().method() !== "POST") return route.continue();
       const response = await route.fetch(); assert.equal(response.status(), 201);
-      captured.resolve(); await release.promise;
+      captured.resolve(); await release.settled;
       await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: { code: "session_binding_changed", message: "Old identity ended" } }) });
       delivered.resolve();
     });

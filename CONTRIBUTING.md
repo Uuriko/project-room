@@ -10,6 +10,14 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR uses the macOS private per-user temporary directory or the worktree-local `.tmp/` on Linux. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## After you open a pull request
+
+- **Checks start on their own.** Pull requests from forks get lint, a secret scan, a docs link check and the tests selected for the files you changed, on every push (`contributor-ci`). No label is needed. On your first pull request GitHub may hold the run until a maintainer approves it; after that it runs on its own.
+- **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
+- **Nothing is closed by a bot.** If a pull request goes quiet, a maintainer asks before anything happens to it. If it conflicts with main it may be labelled `needs-rebase`.
+
+Looking for somewhere to start? [github.com/Uuriko/project-room/contribute](https://github.com/Uuriko/project-room/contribute) lists issues labelled `good first issue`, which are small and self-contained. `help wanted` issues are larger.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
