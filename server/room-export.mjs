@@ -587,12 +587,20 @@ function insertOrder(names) {
 // store restarts its accounting window; the reliability STOCK (pending /
 // acked / stranded) is derived from the wake tables themselves, which do
 // replay. Replay skips these and reports the row counts; the export itself
-// still holds the rows.
+// still holds the rows. The six tables retired by PR #4975 (board_vtwo x4,
+// analytics_firsts, guest_link_exchanges) are the same shape on the import
+// side: no current store creates them, so a pre-#4975 backup naming them
+// must have those rows skipped and counted instead of failing the
+// fresh-target existence check. Upgraded databases that still carry the
+// tables themselves are admitted by RETIRED_4975_TABLES in
+// server/writer-fence.mjs (allowed, never required; nothing is dropped).
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit", "current_room_writer_permit", "current_restore_admission", "current_restore_audit_scratch",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  "board_vtwo_claims", "board_vtwo_events", "board_vtwo_idempotency",
+  "board_vtwo_mirror", "analytics_firsts", "guest_link_exchanges"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
