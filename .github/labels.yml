@@ -31,7 +31,7 @@
   description: Maintainer started the full CI gate (test.yml) on this head.
 - name: stale
   color: "ededed"
-  description: Idle for 14 days; a notice only, nothing closes automatically.
+  description: Idle (PRs 14 days, issues 60); a notice only, nothing closes automatically.
 - name: keep-open
   color: "1d76db"
   description: Exempt from stale notices and cleanup passes.
