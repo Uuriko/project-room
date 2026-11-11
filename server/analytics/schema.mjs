@@ -42,12 +42,8 @@ CREATE TABLE IF NOT EXISTS analytics_table_cursor (
   source TEXT PRIMARY KEY,
   last_key TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS analytics_firsts (
-  kind TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  at INT NOT NULL,
-  PRIMARY KEY (kind, scope)
-);
+-- analytics_firsts removed (T0 cut C-02): created but never written or
+-- read; firsts live in the in-memory accumulator (map-room-event facts).
 CREATE TABLE IF NOT EXISTS analytics_daily (
   day TEXT NOT NULL,
   metric TEXT NOT NULL,
