@@ -82,7 +82,7 @@
     "room-acp/src/private-state.mjs": "sha256:23a3a4234289746dc18119848b160f83a9effebf004d727c216afbf5c1ca032f",
     "room-acp/src/prompt.mjs": "sha256:a0bf6a01bab58425b2ffc5f588d8ffe615b047a4a3ea2261d33a966ea9b721ca",
     "room-acp/src/queue.mjs": "sha256:aa350368a9e3ab683dc585cbf93fedd50148650bcc395d7beb28bb3f2ede118e",
-    "room-acp/src/redact.mjs": "sha256:50088678973ecc01ffda58a983eaa89e76f5184c8988e7368a150fcd364c7e30",
+    "room-acp/src/redact.mjs": "sha256:037c5c17fda7640a4123be8d32f562a87bff922c4a2a6444f3fd17f41e46c893",
     "room-acp/src/render.mjs": "sha256:bbba8330664fb693a76f7f3e569b1487e0c13091de133cc6e09c765f99505e1b",
     "room-acp/src/room.mjs": "sha256:6391e83f1748903c49f9dfd8a1eca504bd99c2ebc87157b0769d582c077c140c",
     "room-acp/src/run.mjs": "sha256:b2ff4c4e32f01a720c2813b7607248472ea2d61ad04ad64d37e3a8d3a8400de0",
