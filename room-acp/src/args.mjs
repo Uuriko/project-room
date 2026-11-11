@@ -13,6 +13,7 @@ Options:
   --cwd <dir>                           working directory for the agent (default: here)
   --mode <id>                           ACP session mode to set (default: agent's own)
   --receiver-policy <respond|disabled|notify-cloud>  explicit receiver role (default respond)
+  --observe-stages                     print metadata-only timing events for run/respond (default off)
   --notify-config <file>                private existing-cloud config; required for notify-cloud
   --max-sessions <n>                    concurrent agent sessions (default 4)
   --respond-to <owner|anyone>           whose mentions start a turn (default anyone; Room policy still applies)
@@ -32,6 +33,7 @@ export function parseArgs(argv) {
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--observe-stages") { options.observeStages = true; continue; }
     if (arg === "-h" || arg === "--help") { options.help = true; continue; }
     if (VALUE.has(arg)) {
       const value = argv[++i];
@@ -57,5 +59,7 @@ export function parseArgs(argv) {
     throw new Error("--receiver-policy disabled or notify-cloud applies only to run; it does not join, import or change saved access");
   if (!options.help && (options.receiverPolicy === "notify-cloud") !== (typeof options.notifyConfig === "string"))
     throw Error("--notify-config is required only with --receiver-policy notify-cloud");
+  if (options.observeStages && !options.help && (options.command !== "run" || options.receiverPolicy !== "respond"))
+    throw Error("--observe-stages applies only to run with --receiver-policy respond");
   return options;
 }

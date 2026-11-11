@@ -36,7 +36,8 @@ test("owner lets a link-joined agent take work, then assigns it", { timeout: 900
     rmSync(directory, { recursive: true, force: true });
   });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" })).newPage();
+  // Keep the key-issued response under Playwright interception.
+  const page = await (await browser.newContext({ serviceWorkers: "block", viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" })).newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);

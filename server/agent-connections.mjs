@@ -21,8 +21,24 @@ const access = Object.freeze({
   // The older names above stay as API aliases with their original sets, so
   // nobody's existing or future access under those names changes.
   guest: [],
-  member: ["steer", "accept_work", "complete_work", "verify", "manage_claims", "write_external"],
+  // rules-p1: "member" is also INVITATION_ROLES.member (accept/complete/verify,
+  // no steer), the grant human invitations and share links issue. Two live
+  // grants shared one name with different bits, so this one is agent_member.
+  agent_member: ["steer", "accept_work", "complete_work", "verify", "manage_claims", "write_external"],
 });
+// Input alias only, never a definition: #5384 callers and stored connection
+// requests say "member" for the agent work set. It resolves to agent_member's
+// exact bits, so no existing or future grant under that word changes.
+export const AGENT_PROFILE_ALIASES = Object.freeze({ member: "agent_member" });
+export const agentProfileName = name => typeof name === "string" && Object.hasOwn(AGENT_PROFILE_ALIASES, name) ? AGENT_PROFILE_ALIASES[name] : name;
+export const isAgentProfile = name => typeof name === "string" && Object.hasOwn(access, agentProfileName(name));
+export const agentProfilePermissions = name => isAgentProfile(name) ? access[agentProfileName(name)] : undefined;
+// Connection requests are stored verbatim in immutable history and re-validated
+// on every read. The release before the rename rejects "agent_member" there, so
+// after a rollback one such row would fail the room's connection integrity
+// check. Until that release can no longer be restored, this API takes only the
+// spellings it already understood; "member" keeps the same bits via the alias.
+export const isConnectionAccess = name => isAgentProfile(name) && name !== AGENT_PROFILE_ALIASES.member;
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
 // never widen authority by renaming or editing a profile.
@@ -184,7 +200,7 @@ export class AgentConnections {
       || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
       || (action === "create" && identityId !== undefined && (typeof identityId !== "string" || !IDENTITY_ID_RE.test(identityId)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
-        || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
+        || /[\u0000-\u001f\u007f]/.test(displayName) || !isConnectionAccess(preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
     // The proof requirement is the fail-closed gate: no code, or a
     // malformed one, reads as identity_link_proof_required (never
@@ -233,7 +249,7 @@ export class AgentConnections {
       if (action !== "create" && ((!isOwner && (!friend || !ownConnection)) || (friend && action === "rotate" && !ownConnection)))
         fail(403, "sponsor_required", "Only this agent's sponsor can reconnect it");
       const authoritySequence = authority.sequence;
-      const permissions = action === "create" ? access[request.access] : ownMember(authority.members, memberId)?.permissions;
+      const permissions = action === "create" ? agentProfilePermissions(request.access) : ownMember(authority.members, memberId)?.permissions;
       if (action !== "disconnect" && friend && (!permissions || permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !auth.member.permissions.includes(p))))
         fail(403, "sponsor_scope_exceeded", "An agent can only receive working permissions its human sponsor holds");
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room access changed; refresh first");
@@ -253,7 +269,7 @@ export class AgentConnections {
       }
       let membership = null;
       if (action === "create") membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ADDED,
-        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: access[request.access], accountableHumanId: auth.member.id,
+        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: agentProfilePermissions(request.access), accountableHumanId: auth.member.id,
           ...(request.agentType ? { agentType: request.agentType } : {}),
           // RC-2026-09-24-201: stamp the identity on the member record so
           // the room state is self-describing (agent-rooms.mjs already does).
@@ -445,7 +461,7 @@ export class AgentConnections {
           if (actor?.kind !== "human" || actor.active === false || actor.revision !== state.sponsor_member_revision) invalid();
           if (request.action === "create") {
             if (receipt.membershipSequence !== receipt.authoritySequence + 1) invalid();
-            if (target || access[request.access].some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !actor.permissions.includes(p))) invalid();
+            if (target || agentProfilePermissions(request.access).some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !actor.permissions.includes(p))) invalid();
           } else if (request.action !== "disconnect" || actor.id !== historical.room.ownerId) {
             if (target?.accountableHumanId !== actor.id || previous.sponsor_account_id !== state.sponsor_account_id || previous.sponsor_member_id !== actor.id) invalid();
             if (request.action !== "disconnect" && (target.active === false || target.permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p) || !actor.permissions.includes(p)))) invalid();
@@ -467,7 +483,7 @@ export class AgentConnections {
           if (!event || linked.sequence !== receipt.membershipSequence || event.actorId !== state.sponsor_member_id || event.data.memberId !== row.member_id
             || Date.parse(event.at) !== receipt.at || event.type !== (request.action === "create" ? T.MEMBER_ADDED : T.MEMBER_ACCESS_CHANGED)
             || (request.action === "create" ? event.data.kind !== "agent" || event.data.accountableHumanId !== state.sponsor_member_id
-              || event.data.displayName !== request.displayName.trim() || JSON.stringify(event.data.permissions) !== JSON.stringify(access[request.access]) || state.member_revision !== 0
+              || event.data.displayName !== request.displayName.trim() || JSON.stringify(event.data.permissions) !== JSON.stringify(agentProfilePermissions(request.access)) || state.member_revision !== 0
               : event.data.active !== false || event.data.expectedMemberRevision !== request.expectedMemberRevision || state.member_revision !== request.expectedMemberRevision + 1)) invalid();
         }
         if (previous && previous.credential_hash !== state.credential_hash && this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(previous.credential_hash)?.revoked !== 1) invalid();

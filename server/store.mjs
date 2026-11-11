@@ -7946,7 +7946,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // against a direct @mention of the same author in the reply body;
       // humans keep their existing attention paths.
       const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
-      if (!replyDmTarget) {
+      // Human follow-ups still need attention. An agent's ordinary answer or
+      // acknowledgment is not another request: only its explicit @tags below
+      // create new mention obligations, avoiding reply/acknowledgment loops.
+      const replySender = state?.members?.[senderMemberId];
+      if (!replyDmTarget && replySender?.kind !== "agent") {
         const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
         const authorId = repliedTo?.authorId ?? "";
         const author = authorId ? (state?.members ?? {})[authorId] : null;

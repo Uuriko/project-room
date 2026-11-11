@@ -177,9 +177,9 @@ export class MachineBot {
     return this.provider;
   }
 
-  async post(roomId, body, replyToId) {
+  async post(roomId, body, replyToId, messageId) {
     const secrets = await this.secrets();
-    return this.api.post(roomId, body, { replyToId, secrets });
+    return this.api.post(roomId, body, { replyToId, secrets, messageId });
   }
 
   async reply(roomId, body, replyToId, updateId, basisToken) {
@@ -709,7 +709,7 @@ export class MachineBot {
     if (!completion.posted) {
       if (held()) return { halted: true, deliveryPending: true };
       const body = [completion.text, ...([completion.workId, completion.leaseId].includes("awaiting_review") ? ["Awaiting review."] : []), ...(receipt.blobs.length ? [`Receipt ${receipt.blobs.join(" ")}`] : [])].join("\n");
-      const posted = await this.api.post(active.roomId, body, { replyToId: active.messageId, messageId: completion.messageId });
+      const posted = await this.post(active.roomId, body, active.messageId, completion.messageId);
       if (!posted.ok) return { deliveryPending: true, stage: 'message', status: posted.status };
       completion.posted = true;
       await this.saveState();

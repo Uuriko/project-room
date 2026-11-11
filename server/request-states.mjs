@@ -1,4 +1,4 @@
-// Request lifecycle states (flag ROOM_REQUEST_STATES=1, off by default).
+// Request lifecycle states. On by default; ROOM_REQUEST_STATES=0 turns them off.
 // Pure: derives one display state for a formal request from its record and
 // optional signals, so agents and the UI read "where is this request" without
 // re-reading message history. States: pending, active, needs_input, error,
@@ -9,7 +9,11 @@ export const REQUEST_STATES = Object.freeze(["pending", "active", "needs_input",
 export const ACK_WINDOW_MS = 10_000;
 export const STALE_AFTER_MS = 30 * 60 * 1000; // 30 min: an untouched open request is stale well inside a working session
 
-export const requestStatesEnabled = (env = globalThis.process?.env) => env?.ROOM_REQUEST_STATES === "1";
+// The states follow the agent model the room adopted on 2026-11-10: an ask is
+// pending until its recipient reports progress, and reads `unresponsive` once
+// the ack window passes without one. The field is additive, so the only
+// reason to switch it off is a reader that rejects unknown keys.
+export const requestStatesEnabled = (env = globalThis.process?.env) => env?.ROOM_REQUEST_STATES !== "0";
 
 const ms = value => {
   if (typeof value !== "string" && typeof value !== "number") return null;
@@ -40,7 +44,7 @@ export function deriveRequestState(request, { now = Date.now(), ackWindowMs = AC
   return { state, unresponsive, since, thresholds };
 }
 
-// Adds `lifecycle` to a compact request only when the flag is on.
+// Adds `lifecycle` to a compact request unless the kill switch is set.
 export function withRequestState(compact, request, options = {}) {
   if (!requestStatesEnabled(options.env)) return compact;
   return { ...compact, lifecycle: deriveRequestState(request, options) };
