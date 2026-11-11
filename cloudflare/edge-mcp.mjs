@@ -64,6 +64,32 @@ async function readBounded(request, limit) {
   return new TextDecoder().decode(bytes);
 }
 
+// Edge counterpart of the Node door's rate(`mcp-join:${ip}`, 60). The Durable Object
+// counts only the requests that reach it, so the edge enforces the same 60-per-minute
+// per-IP bound on what it answers itself. Past the bound the request falls through to
+// the DO, which owns the 429 (shape, headers and its own bucket). The counter is
+// per-isolate: a best-effort bound, weaker than the DO's single global bucket.
+export const EDGE_MCP_RATE_MAX = 60;
+const EDGE_RATE_WINDOW_MS = 60000;
+const EDGE_RATE_KEYS = 4096;
+const edgeRates = new Map();
+export function edgeMcpRateAllows(address, now = Date.now()) {
+  const key = address || "unknown";
+  let entry = edgeRates.get(key);
+  if (entry && entry.until <= now) { edgeRates.delete(key); entry = undefined; }
+  if (!entry) {
+    if (edgeRates.size >= EDGE_RATE_KEYS) {
+      for (const [k, v] of edgeRates) if (v.until <= now) edgeRates.delete(k);
+      if (edgeRates.size >= EDGE_RATE_KEYS) edgeRates.delete(edgeRates.keys().next().value);
+    }
+    entry = { n: 0, until: now + EDGE_RATE_WINDOW_MS };
+    edgeRates.set(key, entry);
+  }
+  entry.n++;
+  return entry.n <= EDGE_MCP_RATE_MAX;
+}
+export function resetEdgeMcpRate() { edgeRates.clear(); }
+
 export function edgeMcpApplies(url) {
   return isRoomMcpPath(url.pathname);
 }
@@ -74,6 +100,8 @@ export function edgeMcpApplies(url) {
 // original request is forwarded to the DO with its body unread here.
 export async function edgeAnonymousMcpResponse(request, url) {
   if (!isRoomMcpPath(url.pathname)) return null;
+  // Rate bound first, as on the DO door (before any body is read).
+  if (!edgeMcpRateAllows(request.headers.get("cf-connecting-ip"))) return null;
   if (request.method !== "POST") return roomMcpFetchResponse(request);
   // Same presented-credential test as dispatchRoomMcp: an empty "Bearer"
   // (an MCP host config with an unset secret variable) is no credential.

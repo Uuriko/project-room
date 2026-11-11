@@ -11,7 +11,7 @@
 //     here — no receipt content is served or cached on this path.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { edgeAnonymousMcpResponse, edgeMcpApplies } from "../cloudflare/edge-mcp.mjs";
+import { EDGE_MCP_RATE_MAX, edgeAnonymousMcpResponse, edgeMcpApplies, resetEdgeMcpRate } from "../cloudflare/edge-mcp.mjs";
 import { dispatchRoomMcp, mcpRpcStatus, roomMcpFetchResponse } from "../server/mcp-http.mjs";
 import { roomMcpUrlForHost } from "../src/room-mcp-join.js";
 
@@ -134,4 +134,13 @@ test("an oversized anonymous body falls through to the DO (which answers 413), d
   assert.equal(await edge(streamed), null, "streamed length over the bound");
   const ok = JSON.stringify(rpc("tools/list"));
   assert.ok(await edge(post(ok)), "a normal body is still answered at the edge");
+});
+
+test("edge answers stop at the per-IP MCP bound and fall through to the DO for its 429", async () => {
+  resetEdgeMcpRate();
+  const ping = ip => post({ jsonrpc: "2.0", id: 1, method: "ping" }, { "cf-connecting-ip": ip });
+  for (let i = 0; i < EDGE_MCP_RATE_MAX; i++) assert.ok(await edge(ping("203.0.113.7")), `request ${i + 1} answered at the edge`);
+  assert.equal(await edge(ping("203.0.113.7")), null, "over the bound falls through to the DO");
+  assert.ok(await edge(ping("203.0.113.8")), "another IP has its own bucket");
+  resetEdgeMcpRate();
 });
