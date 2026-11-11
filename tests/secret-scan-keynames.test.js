@@ -112,7 +112,21 @@ test("an unquoted slash-leading dotenv password is detected; regex-literal shape
     assert.ok(scanText(dotenv, opts).some(f => f.rule === "generic-secret"), `dotenv-shaped value flags: ${dotenv}`);
     assert.ok(REVIEW_SCAN_ADDED([{ path: ".env", line: 1, text: dotenv }], []).length > 0, `PR-diff gate flags: ${dotenv}`);
   }
-  for (const literal of [`const tokenPattern = /${a}${a}/g;`, `token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`, `export const SECRET_RE = /${a}/u`, `  tokenPattern: /${a}x/g,`]) {
+  // Declaration keyword proves code in any file; spacing + terminator proves code ONLY when the caller
+  // asserts a JS/TS source file (seq4511: `password: /x{16}/;` is a valid YAML value).
+  for (const literal of [`const tokenPattern = /${a}${a}/g;`, `export const SECRET_RE = /${a}/u`]) {
     assert.equal(scanText(literal, opts).filter(f => f.rule === "generic-secret").length, 0, `regex literal stays exempt: ${literal}`);
+  }
+  for (const literal of [`token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`, `  tokenPattern: /${a}x/g,`]) {
+    assert.equal(scanText(literal, { ...opts, codeContext: true }).filter(f => f.rule === "generic-secret").length, 0, `JS/TS context exempts: ${literal}`);
+    assert.equal(REVIEW_SCAN_ADDED([{ path: "src/x.js", line: 1, text: literal }], []).length, 0, `PR-diff gate exempts in .js: ${literal}`);
+    assert.ok(scanText(literal, opts).some(f => f.rule === "generic-secret"), `no language context: flags ${literal}`);
+  }
+  // Codex seq4511 repro: spacing + terminator is valid YAML/dotenv, so config files and context-free scans flag it.
+  for (const yaml of [`password: /${a}/;`, `password = /${a}/;`, `password: /${a}/,`, `password: /${a}/)`, `password = /${a}/,`, `password: /${a}/]`]) {
+    assert.ok(scanText(yaml, opts).some(f => f.rule === "generic-secret"), `scanText flags: ${yaml}`);
+    for (const path of ["config.yaml", "config.yml", ".env", "settings.toml"]) {
+      assert.ok(REVIEW_SCAN_ADDED([{ path, line: 1, text: yaml }], []).length > 0, `scanAddedUnits flags in ${path}: ${yaml}`);
+    }
   }
 });

@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scanText } from "../server/secret-scan.mjs";
+import { scanText, isCodeFilePath } from "../server/secret-scan.mjs";
 
 // Directories never scanned (vendored code, build output, local scratch).
 export const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "runlogs-tmp", "dist"]);
@@ -322,7 +322,7 @@ function runTreeScan() {
   for (const file of filtered) {
     let text;
     try { text = readFileSync(file, "utf8"); } catch { continue; }
-    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS, codeContext: isCodeFilePath(file) });
     for (const f of findings) {
       console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
       total++;
