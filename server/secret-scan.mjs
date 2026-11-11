@@ -21,8 +21,8 @@ const PATTERNS = [
   // visible to the affix alternatives. An optional quote wraps the key so
   // JSON forms ("password": "...") match like assignment forms. An UNQUOTED
   // value that is a regex literal (/.../flags) is exempt ONLY in a proven code
-  // context (isCodeRegexLiteral: a declaration keyword before the key, or a caller-asserted
-  // JS/TS file plus a code terminator after the literal). A dotenv-style `password=/abc.../` has neither
+  // context (isCodeRegexLiteral: only in a caller-asserted JS/TS file, and then a declaration
+  // keyword before the key or a code terminator after the literal). A dotenv-style `password=/abc.../` has neither
   // and stays detected. A QUOTED value is always scanned, including one that
   // begins with "/" (a quoted credential is not a path because of its first char).
   { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*(?:["'][^"'\s]{12,}["']?|[^"'\s]{12,})/ },
@@ -66,6 +66,7 @@ const redact = value => value.length <= 8 ? "****" : `${value.slice(0, 2)}…${v
 // lastIndex) can neither skip matches nor loop forever on empty matches.
 // A regex-literal value is exempt only when the line is provably code, not config.
 const CODE_DECLARATION_PREFIX = /\b(?:const|let|var|export|static|readonly|public|private|protected)\b\s*(?:[A-Za-z0-9_$]+\s*){0,2}$/;
+// BOTH exemption branches need it: `export PASSWORD=/x{16}/` is valid dotenv/shell config.
 // Source-language context is supplied by the caller (a JS/TS file path). Without it the
 // scanner cannot tell code from config: `password: /x{16}/;` is a valid YAML value.
 export const isCodeFilePath = path => typeof path === "string" && /\.(?:[cm]?[jt]sx?)$/i.test(path);
@@ -74,7 +75,7 @@ function isCodeRegexLiteral(line, start, end, codeContext) {
   if (!m) return false;
   const [, operator, literal, terminator] = m;
   if (!/^\/\S*\/[dgimsuvy]*$/.test(literal)) return false;
-  if (CODE_DECLARATION_PREFIX.test(line.slice(0, start))) return true;
+  if (codeContext === true && CODE_DECLARATION_PREFIX.test(line.slice(0, start))) return true;
   // No declaration keyword: spacing and a terminator are NOT proof of code (YAML and spaced
   // dotenv accept them). Only a caller-asserted JS/TS source file exempts `key: /re/,` forms.
   return codeContext === true && terminator.length > 0 && /\s$/.test(operator);

@@ -89,7 +89,7 @@ test("a QUOTED credential that begins with '/' is still detected, an unquoted pa
   const a = "a".repeat(16);
   const quoted = scanText(`password = "/${a}";`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
   assert.ok(quoted.some(f => f.rule === "generic-secret"), "quoted /-led credential flags");
-  const unquoted = scanText(`const tokenPattern = /${a}${a}/g;`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE });
+  const unquoted = scanText(`const tokenPattern = /${a}${a}/g;`, { allowlist: REVIEW_ALLOWLIST, safeEntropyTokens: REVIEW_SAFE, codeContext: true });
   assert.equal(unquoted.filter(f => f.rule === "generic-secret").length, 0, "unquoted regex literal is not a credential");
 });
 test("a credential-bearing https URL assigned to a token/secret key is still detected", () => {
@@ -115,7 +115,16 @@ test("an unquoted slash-leading dotenv password is detected; regex-literal shape
   // Declaration keyword proves code in any file; spacing + terminator proves code ONLY when the caller
   // asserts a JS/TS source file (seq4511: `password: /x{16}/;` is a valid YAML value).
   for (const literal of [`const tokenPattern = /${a}${a}/g;`, `export const SECRET_RE = /${a}/u`]) {
-    assert.equal(scanText(literal, opts).filter(f => f.rule === "generic-secret").length, 0, `regex literal stays exempt: ${literal}`);
+    assert.equal(scanText(literal, { ...opts, codeContext: true }).filter(f => f.rule === "generic-secret").length, 0, `declaration form exempt in JS/TS: ${literal}`);
+    assert.equal(REVIEW_SCAN_ADDED([{ path: "src/x.mjs", line: 1, text: literal }], []).length, 0, `PR-diff gate exempts in .mjs: ${literal}`);
+    assert.ok(scanText(literal, opts).some(f => f.rule === "generic-secret"), `no language context: flags ${literal}`);
+  }
+  // Codex seq4551: `export PASSWORD=/x{16}/` is valid dotenv/shell config; a declaration keyword is not proof of code either.
+  for (const exported of [`export PASSWORD=/${a}/`, `export PASSWORD=/${a}/;`, `export password = /${a}/;`, `export const password = /${a}/;`, `let password = /${a}/;`]) {
+    assert.ok(scanText(exported, opts).some(f => f.rule === "generic-secret"), `scanText flags without context: ${exported}`);
+    for (const path of [".env", "deploy.sh", "config.yaml", "settings.toml"]) {
+      assert.ok(REVIEW_SCAN_ADDED([{ path, line: 1, text: exported }], []).length > 0, `scanAddedUnits flags in ${path}: ${exported}`);
+    }
   }
   for (const literal of [`token = /${a}\\d+/gi,`, `secretRe = /^${a}$/;`, `  tokenPattern: /${a}x/g,`]) {
     assert.equal(scanText(literal, { ...opts, codeContext: true }).filter(f => f.rule === "generic-secret").length, 0, `JS/TS context exempts: ${literal}`);
