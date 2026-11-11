@@ -300,12 +300,16 @@ export class Bridge {
   }
 
   async threadRoot(messageId, {selection = false} = {}) {
-    let selected = await this.readThread(messageId, {selected:true});
+    const selected = await this.#rootFromSelection(await this.readThread(messageId, {selected:true}));
+    return selection ? selected : selected.thread;
+  }
+
+  async #rootFromSelection(selected) {
     for (let hops = 0; selected.thread.replyToId && hops < 5; hops++) {
       if (selected.replyRequest?.recipientId === this.connection.memberId) break;
       selected = await this.readThread(selected.thread.replyToId, {selected:true});
     }
-    return selection ? selected : selected.thread;
+    return selected;
   }
 
   // Route one wake signal into the queue, or ack it as not for us.
@@ -319,7 +323,9 @@ export class Bridge {
       const message = selected.thread;
       // Routing does not authorize execution. The queued turn checks all
       // actual stored request authors against a fresh selected authority read.
-      const rootSelection = message.replyToId ? await this.threadRoot(message.id, {selection:true}) : selected;
+      // Reuse only this routing read; execution still refreshes author authority,
+      // listener fencing and complete formal request context independently.
+      const rootSelection = message.replyToId ? await this.#rootFromSelection(selected) : selected;
       const root = rootSelection.thread;
       // An "@agent allow" answer to a pending permission ask is not a new turn.
       if (this.permissions?.isPending(root.id) && decisionOf(message.body)) { await this.ack([signal.signalId]); return; }
