@@ -130,17 +130,18 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
       const response = await fetch(...args); responses.push(await response.clone().json()); return response; } });
   const result = await client.orient({ query: 'agenda', focus: 'needs_me' });
   assert.equal(result.work[0].id, 'test-handoff'); assert.equal(result.selection.shown, 1);
-  assert.deepEqual(routes, ['session', 'commons', 'session', 'reply-requests']);
-  assert.equal(responses.length, 4); assert.equal(responses[1].snapshotView, undefined); assert.ok(Array.isArray(responses[1].state.messages));
+  // #6101: the client asks the old service for ask states (422 invalid_reply_selection), then retries the plain list once.
+  assert.deepEqual(routes, ['session', 'commons', 'session', 'reply-requests', 'session', 'reply-requests']);
+  assert.equal(responses.length, 6); assert.equal(responses[3].error?.code ?? responses[3].code, 'invalid_reply_selection'); assert.equal(responses[1].snapshotView, undefined); assert.ok(Array.isArray(responses[1].state.messages));
   assert.deepEqual(result.replyRequests, []);
-  assert.equal(result.replyRequestsEvaluatedThrough, responses[3].evaluatedThrough);
+  assert.equal(result.replyRequestsEvaluatedThrough, responses[5].evaluatedThrough);
   const selected = await client.workContext('test-handoff');
   assert.equal(selected.collaboration, undefined, 'Actual retained fallback does not advertise new help guidance');
   assert.equal(selected.work.accountableMemberId, 'producer');
-  assert.equal(responses.length, 6, 'Selected read retains identity preflight without a compatibility retry');
-  assert.deepEqual(routes.slice(4), ['session', 'work-context']);
+  assert.equal(responses.length, 8, 'Selected read retains identity preflight without a compatibility retry');
+  assert.deepEqual(routes.slice(6), ['session', 'work-context']);
   await assert.rejects(client.orient({ focus: 'help_wanted' }), { code: 'help_context_unavailable' });
-  assert.equal(responses.length, 8, 'Unsupported discovery does not retry with weaker reads');
-  assert.deepEqual(routes.slice(6), ['session', 'commons']);
+  assert.equal(responses.length, 10, 'Unsupported discovery does not retry with weaker reads');
+  assert.deepEqual(routes.slice(8), ['session', 'commons']);
   assert.equal(auditRecoveryFallback(store).dataSha256, before);
 });
