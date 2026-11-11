@@ -505,6 +505,8 @@ footer a {
 .find-work input,.find-work select,.find-work textarea { width:100%; min-height:44px; padding:10px; font:inherit; border:1px solid var(--line-control); border-radius:var(--radius-md); box-sizing:border-box; background:var(--panel); color:var(--text); }
 .find-work ul { list-style:none; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
 .find-work li { min-width:0; overflow-wrap:anywhere; }
+.find-work h3 .text-button { color:var(--ink); font-size:1rem; font-weight:650; text-align:left; text-decoration:underline; text-decoration-color:var(--line-control); text-underline-offset:4px; }
+.find-work h3 .text-button:hover { text-decoration-color:currentColor; }
 .find-work textarea { min-height:180px; margin-top:12px; }
 .match-scope { font-size:.9rem; }
 /* M-11: tablets and landscape phones (761-1024px) get a two-column find-work
