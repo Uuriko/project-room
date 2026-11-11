@@ -1,0 +1,49 @@
+# Stale notices, WARN ONLY. This workflow never closes anything: days-before-close
+# is -1, so it can only add the `stale` label and one comment, and it removes the
+# label as soon as the PR or issue is updated. Labels and wording match
+# CONTRIBUTING.md and the existing repo labels (`stale`, `keep-open`).
+#
+# It ships in dry-run mode (debug-only: true), which logs what it WOULD label and
+# touches nothing. A maintainer flips it to false after the first dry run looks
+# right. Idle PRs are plentiful; the per-run cap keeps notification volume low.
+#
+# Security: this runs on `schedule` from the default branch. It checks out no code
+# and runs no PR content; its write token only labels and comments.
+name: stale-warn
+
+on:
+  schedule:
+    - cron: "41 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale-warn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          debug-only: true # flip to false after the first dry run is reviewed
+          operations-per-run: 60
+          days-before-pr-stale: 14
+          days-before-issue-stale: 60
+          days-before-close: -1 # never close
+          stale-pr-label: stale
+          stale-issue-label: stale
+          exempt-pr-labels: keep-open,ready-to-land,priority:now,shelved
+          exempt-issue-labels: keep-open,priority:now,priority:next,good first issue,help wanted,shelved
+          exempt-draft-pr: true
+          remove-stale-when-updated: true
+          stale-pr-message: >
+            This pull request has been idle for 14 days. It is still open and
+            nothing will happen to it automatically. If it is still live, push a
+            commit or comment; if it conflicts with main, rebase it. Add the
+            `keep-open` label to silence this notice.
+          stale-issue-message: >
+            This issue has had no activity for 60 days. It stays open; nothing
+            will close it automatically. A comment, a reproduction, or the
+            `keep-open` label clears this notice.

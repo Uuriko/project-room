@@ -1,0 +1,64 @@
+# First-contributor check: a fast, secret-free signal for PRs from forks, drafts,
+# and PRs that do not carry the maintainer `ready-to-land` label.
+#
+# Why this exists: `test.yml` (the full gate) only starts on a non-draft PR that a
+# maintainer has labeled `ready-to-land`, so an outside contributor otherwise sees
+# no CI at all. This workflow gives them a result on their own PR in a few minutes.
+#
+# Safety (the only hard rules here, per Potter: guidelines over gates, real-harm
+# guards only):
+# - Trigger is `pull_request`, never `pull_request_target`. For a fork PR GitHub
+#   runs this with a read-only token and NO repository secrets, so untrusted code
+#   cannot reach the Cloudflare token, the room signing key, or the deploy path.
+# - `permissions: contents: read` and nothing else.
+# - No secrets are referenced, nothing is published, nothing is deployed.
+# - `npm ci --ignore-scripts`: dependency install scripts do not run.
+# - It is advisory. It is not a required check and does not replace `test.yml`;
+#   `ready-to-land` still starts the full gate before anything merges.
+# GitHub holds the first run of a first-time contributor's PR until a maintainer
+# clicks "Approve and run workflows"; that setting is GitHub's, not this file's.
+name: contributor-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contributor-fast-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # lint's i18n ratchet compares against the PR base
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Whitespace and docs links
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git diff --check "origin/${BASE_REF}...HEAD"
+          node scripts/docs-link-check.mjs
+      - name: Secret scan (no real credentials in the tree)
+        run: node scripts/secret-scan-check.mjs
+      - name: Lint
+        run: npm run lint
+      - name: What this did and did not run
+        if: always()
+        run: |
+          {
+            echo "### contributor-check"
+            echo "This is the fast first-contributor check: whitespace, docs links, secret scan, lint."
+            echo "It does **not** run unit, browser, or Worker tests. A maintainer adds \`ready-to-land\` to start the full gate."
+          } >> "$GITHUB_STEP_SUMMARY"

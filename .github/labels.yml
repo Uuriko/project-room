@@ -1,0 +1,47 @@
+# The label scheme for contributors, people and agents alike. This file is the
+# written record only: nothing syncs it automatically (no workflow holds a token
+# that could create labels). A maintainer applies changes with `gh label create`
+# / `gh label edit`; the commands are in the PR that added this file.
+#
+# Keep it small. A label is a hint for the next person, never a gate.
+
+# Where a newcomer can start
+- name: good first issue
+  color: "7057ff"
+  description: Small, self-contained, with a clear way to check it. Safe first PR.
+- name: help wanted
+  color: "008672"
+  description: Maintainers would welcome a PR; comment before a large one.
+- name: needs-repro
+  color: "d93f0b"
+  description: Cannot act until there are steps to reproduce on synthetic data.
+- name: agent-ok
+  color: "0e8a16"
+  description: An agent may pick this up (disclose it in the PR; same review as anyone).
+
+# State of a pull request
+- name: contributor
+  color: "c5def5"
+  description: Pull request from outside the maintainer accounts.
+- name: needs-rebase
+  color: "fbca04"
+  description: Reconcile current main and overlapping changes before review.
+- name: ready-to-land
+  color: "0e8a16"
+  description: Maintainer started the full CI gate (test.yml) on this head.
+- name: stale
+  color: "ededed"
+  description: Idle for 14 days; a notice only, nothing closes automatically.
+- name: keep-open
+  color: "1d76db"
+  description: Exempt from stale notices and cleanup passes.
+- name: stale-closed
+  color: "ededed"
+  description: Closed as stale or superseded; reopen if still needed.
+
+# Kind (GitHub defaults, unchanged)
+- {name: bug, color: d73a4a, description: "Something isn't working"}
+- {name: enhancement, color: a2eeef, description: New feature or request}
+- {name: documentation, color: 0075ca, description: Improvements or additions to documentation}
+- {name: accessibility, color: 5319e7, description: Barrier affecting people with disabilities}
+- {name: question, color: d876e3, description: Further information is requested}
