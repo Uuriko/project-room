@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scanText } from "../server/secret-scan.mjs";
+import { scanText, isCodeFilePath } from "../server/secret-scan.mjs";
 
 // Directories never scanned (vendored code, build output, local scratch).
 export const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "runlogs-tmp", "dist"]);
@@ -40,12 +40,26 @@ export const ALLOWLIST = [
   // Variable/function/member references, not hardcoded secrets:
   // `secret = generateSecret()`, `token: getToken()`, `token: f.keys.producer`,
   // `token: f.keys[actor]`, `token = store.issueAccessKey('x', y)`, `password = foo`
-  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*[a-zA-Z_$][\w$]*(\s*(\.\s*[a-zA-Z_$][\w$]*|\[[^\]]+\]))*(\s*\([^)]*\))?\s*([,;)\]}]|$)/i,
-  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*["'][^"']{0,11}["']/, // short placeholders
+  // The key side matches by identifier component (the same widening as the
+  // detector's generic-secret rule) so affixed keys — my_password_value,
+  // sharedToken — get the same reference suppression bare keys have always
+  // had. The value side stays code-shaped: a structured operand (identifier
+  // or interpolation lead; member/index/call segments, private-field and
+  // optional-chained included), optionally followed by operator tails
+  // (??, ||, &&, comparisons, ternary, +/-) whose operands are themselves
+  // code-shaped — never a quoted literal — and then an ending: a
+  // terminator, an arrow-body opening, or an unterminated call at end of
+  // line (multiline arguments). There is deliberately no free-form tail:
+  // a tail that can cross an operator or end at a call's closing paren
+  // would let a conditional's literal branch inherit this exemption
+  // (R7 defect, fixed in F1W2-T7b). A quote-led literal can never inherit
+  // it either, and neither can a quoted tail operand.
+  /["']?(?:[\w$-]*?(?:secret|password|passwd|pwd|token|api[_-]?key)[\w$-]*?)["']?\s*[:=]\s*(?:[a-zA-Z_$][\w$]*|\$\{[^{}"']*\})(?:\s*(?:(?:\?\.\s*|\.\s*)#?[a-zA-Z_$][\w$]*|(?:\?\.)?\[[^\]]*\]|\((?:[^()]|\([^()]*\))*\)|\$\{[^{}"']*\}|\\.))*(?:\s*(?:\?\?|\|\||&&|===|!==|==|!=|>=|<=|>|<|\+|\?|:|AND\b|OR\b)\s*(?:[a-zA-Z_$][\w$]*|\$\{[^{}"']*\}|\d+(?:\.\d+)?|\?|\{[^{}"']*\})(?:\s*(?:(?:\?\.\s*|\.\s*)#?[a-zA-Z_$][\w$]*|(?:\?\.)?\[[^\]]*\]|\((?:[^()]|\([^()]*\))*\)|\$\{[^{}"']*\}|\\.))*)*(?:(?:\s*`)?\s*(?:[,;)\]}]|$)|(?:\s*=>\s*\{?\s*$)|(?:\s*\((?:[^()]|\([^()]*\))*$))/i,
+  /(?:[\w$-]*?(?:secret|password|passwd|pwd|token|api[_-]?key)[\w$-]*?)\s*[:=]\s*["'][^"']{0,11}["']/, // short placeholders (component keys, as above)
   // Template literals assembled at runtime: `token = `${a}.${b}``. Allowed only
   // when every character outside an interpolation is a separator, so a literal
   // run long enough to be a credential is still caught.
-  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*`(?:\$\{[^{}`]*\}|[\s.\-_:/+,;=&?#|])*`/i,
+  /(?:[\w$-]*?(?:secret|password|passwd|pwd|token|api[_-]?key)[\w$-]*?)\s*[:=]\s*`(?:\$\{[^{}`]*\}|[\s.\-_:/+,;=&?#|])*`/i,
   // Scratch OpenAPI probe: conditional random generation, never a literal
   // credential. Pin the complete expression/line so either literal branch or
   // an adjacent credential cannot inherit this exemption.
@@ -134,7 +148,78 @@ export const ALLOWLIST = [
     // credentials on the line; the query string trips the high-entropy
     // detector. Overlaps only the docs URL span, so a real secret on the
     // same line still flags (per-finding allowlist).
+  // Component-key companions to the generic-secret widening (same change):
+  // a quoted SNAKE_UPPER value containing an underscore is an env var NAME,
+  // not a value (mirrors the process.env entry above). The value side has
+  // no case-insensitive flag and is anchored to the complete quoted value
+  // plus a terminator: with /i the [A-Z] classes also matched lowercase,
+  // which exempted any snake_case credential value (sk_test_..., ghp_...,
+  // a snake_case passphrase) assigned to a component key (R7 defect, fixed
+  // in F1W2-T7b). Only a complete genuine SNAKE_UPPER name is exempt; the
+  // key side keeps lower/Upper/UPPER keyword spellings explicitly.
+  /["']?(?:[\w$-]*?(?:secret|password|passwd|pwd|token|SECRET|PASSWORD|PASSWD|PWD|TOKEN|Secret|Password|Passwd|Pwd|Token)[\w$-]*?)["']?\s*[:=]\s*["'][A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+["'](?=\s*(?:[,;)\]}]|$))/,
+  // A value led by template interpolations is assembled at runtime; only
+  // separators may follow an interpolation, up to a terminator, so a
+  // literal tail still flags.
+  /["']?(?:[\w$-]*?(?:secret|password|passwd|pwd|token)[\w$-]*?)["']?\s*[:=]\s*(?:\$\{[^{}`]*\}[\s.\-_:/+,;=&?#|]*)+([,;)\]}]|$)/i,
+  /secret-scan-diff: \$\{/, // scripts/secret-scan-diff.mjs — the diff gate's own
+    // log prefix inside a template literal; the value is an interpolation
+    // (a findings count), not a credential.
 
+  // Endpoint declarations (exact spans, pinned so a credential-bearing URL such as
+  // https://user:secret@host still flags): OAuth token endpoint locators, not tokens.
+  /GITHUB_TOKEN_URL = "https:\/\/github\.com\/login\/oauth\/access_token"/,
+  /tokenUrl = 'https:\/\/oauth2\.googleapis\.com\/token'/,
+  /tokenEndpoint = 'https:\/\/oauth2\.googleapis\.com\/token'/,
+  /GMAIL_TOKEN_URL = "https:\/\/oauth2\.googleapis\.com\/token"/,
+  // #5689 rebase (2026-11-10): identifier-component key names newly widen generic-secret, which
+  // flags these existing lines on main. Each entry pins the exact finding span and was read by hand:
+  // test/check fixture placeholders (fixture-*, synthetic-*, dummy-*, *-0123456789), env var / header
+  // NAMES, user-facing copy, SQL text, and code expressions. None is a real credential.
+  /EXPORT_TOKEN = "export-token-value-0123456789"/,
+  /RESTORE_TOKEN = "restore-token-value-0123456789"/,
+  /SHARED_TOKEN = "one-value-in-both-secrets-0123456789"/,
+  /LEGACY_TOKEN = "legacy-backup-token-value-0123456789"/,
+  /restoreToken='synthetic-redaction-restore-1101-000000'/,
+  /access_token: 'fixture-access'/,
+  /refresh_token: 'fixture-refresh'/,
+  /ROOM_GOOGLE_CLIENT_SECRET: 'synthetic-google-client-secret'/,
+  /'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123'/,
+  /clientSecret: 'dummy-github-fixture-secret'/,
+  /clientSecret: 'fixture-secret'/,
+  /clientSecret = "dummy-google-fixture-secret"/,
+  /WEBHOOK_SECRET = "fixture-webhook-secret-0123456789"/,
+  /TELEGRAM_BOT_TOKEN: "123456789:AAFakeFakeFakeFakeFakeFakeFakeFakeFa"/,
+  /TELEGRAM_WEBHOOK_SECRET: WEBHOOK_SECRET/,
+  /storedSecret: "older-fixture-secret-9876543210"/,
+  /oldPassword = 'synthetic-old-password'/,
+  /newPassword = 'synthetic-new-password'/,
+  /SECRET_DM = `qa2-private-dm-\$\{stamp\}`;/,
+  /slotToken: "recovery-slot"/,
+  /refreshToken: 'invented-recovery-token'/,
+  /password-reset-code:v1\\0\$\{account\?\.accountId/,
+  /"secret":"<saved-identity-secret>"/,
+  /fencing_token=\?`\)\.run\(agentId,/,
+  /"identity-secret": "Authorization:/,
+  /secret" : "identitySecret"/,
+  /LISTENER_TOKEN_HEADER = 'x-room-listener-token'/,
+  /joinToken: row\.join_mode/,
+  /tokenStart:0,depth:0,string:false,escape:false,messageIndex:0,kind:'/,
+  /TOKEN_SOURCE = "\(\?:pri_\|rak_\|ga1\\\\\.\)\[A-Za-z0-9_-\]\{8,\}"/,
+  /webhookSecretHeader = "x-telegram-bot-api-secret-token"/,
+  /TOKEN_DERIVATION_CONTEXT = 'herdr-bridge-v1:'/,
+  /token_hash=\?`\)\.get\(tokenHash\)\)/,
+  /initialPasswordReset = initialAuthLink\.kind/,
+  /"new-password" : "current-password"/,
+  /passwordMode = mode\.dataset\.passwordMode/,
+  /passwordRecovery = error\.status/,
+  /"password-signup" : "password-login"/,
+  /TOKEN_KEY = "roomOperatorToken"/,
+  // #6104 merge of main (2026-11-11): #5679 and #5524 added scrubber DEFINITIONS that the widened key
+  // names now see. Each pins the exact finding span, read by hand: a regex literal that the intake scrub
+  // uses to find URI passwords, and a regex SOURCE listing vendor token prefixes. Neither holds a credential.
+  /URI_PASSWORD_RE = \/\\b\(\[A-Za-z\]\[A-Za-z0-9\+\.-\]\*:/,
+  /VENDOR_TOKEN_SOURCE = "\(\?:ghp_\|gho_\|ghu_/,
 ];
 
 
@@ -242,7 +327,7 @@ function runTreeScan() {
   for (const file of filtered) {
     let text;
     try { text = readFileSync(file, "utf8"); } catch { continue; }
-    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS, codeContext: isCodeFilePath(file) });
     for (const f of findings) {
       console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
       total++;
