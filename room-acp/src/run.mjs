@@ -17,7 +17,7 @@ export async function selectAgent(options, { env = process.env, onFailure = () =
   return null;
 }
 
-export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null } = {}) {
+export async function run(options, { print, env = process.env, fetchImpl = fetch, onBridge = null, candidate: preparedCandidate = null, observeStage = null, writeStage = line => process.stderr.write(line + "\n") } = {}) {
   const receiverPolicy = options.receiverPolicy === undefined ? 'respond' : options.receiverPolicy;
   if (!['respond', 'disabled', 'notify-cloud'].includes(receiverPolicy)) throw Error('Receiver policy must be respond, disabled or notify-cloud');
   if (receiverPolicy === 'disabled') {
@@ -39,7 +39,8 @@ export async function run(options, { print, env = process.env, fetchImpl = fetch
   const candidate = preparedCandidate ?? await selectAgent({ ...options, agent: options.agent ?? connection.agent }, { env });
   if (!candidate) { print("No working ACP agent found. Run `room-acp doctor`, or pass --agent / --agent-cmd."); return 1; }
   const log = logger(line => print(line));
-  const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, maxSessions: options.maxSessions, fetchImpl, log });
+  const stageSink = observeStage ?? (options.observeStages ? event => writeStage(JSON.stringify({event: 'agent_stage', ...event})) : null);
+  const bridge = new Bridge({ connection, candidate, cwd: options.cwd ?? process.cwd(), env, mode: options.mode, respondTo: options.respondTo, maxSessions: options.maxSessions, fetchImpl, log, observeStage: stageSink });
   onBridge?.(bridge);
   const stop = () => bridge.stop();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);

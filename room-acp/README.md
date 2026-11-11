@@ -360,3 +360,35 @@ One private SQLite owner per normalized saved API base (including its trusted pa
 Quiet waits use the shipped 120-second server hold with a 135-second HTTP deadline. Catch-up requests and immediate burst follow-ups are paced at least 2.5 seconds apart and retain existing HTTP 429 cooldown. Only when a ready response reports incomplete source coverage, at most three timeout-zero follow-ups coalesce into one immutable batch of at most 16 unique pointers. A head-complete response sends immediately; repeated message IDs across later frames retain their newest sequence. Server `nextRead` and all text are discarded. Imported mentions without routing metadata retain the existing attention-reader limitation.
 
 The private notification journal freezes the exact batch and source frontier **before** invoking the CLI. Accepted and unknown provider outcomes are retained before the discovery cursor advances. Restart reuses that exact batch; an ambiguous send is never automatically resent. Source-batch actuator receipts retain the exact pointers for manual reconciliation under `notify-state`. Do not remove journals to force a retry: provider acceptance means queued notification only, not delivery/read/execution/result. A timeout or unknown outcome requires inspecting the original configured session and private receipt. No secret, session ID, message body or provider output is printed.
+
+### Optional stage observations
+
+`room-acp run --observe-stages` prints JSON lines to stderr with `event: "agent_stage"`
+for the existing respond receiver. It does not start a separate listener or
+change saved configuration. Other adapters may consume the versioned metadata
+schema through `StageObserver`; this does not provide wake support for them.
+
+Events contain adapter, process segment ID, salted signal/operation hashes,
+stage, UTC observation time and monotonic elapsed milliseconds since local wake
+observation. Message bodies, prompts, thoughts, tool arguments and raw IDs are
+excluded. Each stage is emitted once per signal in a process segment; batched
+signals retain separate start times. Observation is bounded to the first 2048
+signals per process (at most eight stages each); further signals are unmeasured.
+Observer failures do not affect work. Output is not a durable audit journal.
+
+`signal_received` means the client observed a wake, not that a host accepted it.
+`durable_queued` and `durable_result_saved` follow file-backed receipt saves;
+in-memory test receivers cannot emit these stages. `prompt_dispatch_attempt`
+means the adapter invoked the prompt request, not that the model accepted it.
+`first_observable_output` means the first nonempty model text or tool call,
+not a useful decision. Thoughts, notices, plans, empty chunks and loaded-session
+history do not count. `reply_posted` follows successful delivery and receipt save;
+it does not imply reviewer acceptance, and an ordinary pending diagnostic is
+still a post. A missing event is unknown, not success or a deadline violation.
+
+This initial implementation instruments chat/formal-request turns, not claim
+turns or notify-cloud. New/resumed session preparation is measured, but startup
+before the first observed wake is not. Compare monotonic durations only within
+one process segment; UTC timestamps across machines may have clock skew.
+Restarts and lost logs cannot establish continuity. Measure delivery failures
+and usable responses separately from time to first output.
