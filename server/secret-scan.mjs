@@ -12,7 +12,17 @@ const PATTERNS = [
   { id: "aws-secret-key", label: "AWS secret key", regex: /\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*["']?[^"'\s]{20,}["']?/i },
   { id: "github-token", label: "GitHub token", regex: /\bgh[op]_[A-Za-z0-9]{36,}\b/ },
   { id: "generic-api-key", label: "API key assignment", regex: /\b(api[_-]?key|apikey)\b\s*[:=]\s*["']?[A-Za-z0-9\-_]{20,}["']?/i },
-  { id: "generic-secret", label: "secret assignment", regex: /\b(secret|password|passwd|pwd|token)\b\s*[:=]\s*["']?[^"'\s]{12,}["']?/i },
+  // generic-secret key names match by identifier component: a keyword may
+  // carry delimited (snake_case / kebab-case) or camelCase affixes —
+  // my_password_value, passwordHash, userPassword — because real config
+  // keys rarely use the bare word. Fused words are not components, so
+  // tokenizer, passwordless and secretive stay clean. Keyword letters use
+  // explicit case classes (no /i flag) so camelCase boundaries stay
+  // visible to the affix alternatives. An optional quote wraps the key so
+  // JSON forms ("password": "...") match like assignment forms. A value
+  // starting with "/" is a regex literal or a path, never a credential
+  // literal, so the value side refuses it.
+  { id: "generic-secret", label: "secret assignment", regex: /(?<![A-Za-z0-9_-])["']?(?:(?:[A-Za-z0-9]+[_-])*(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Tt][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*|(?:[a-z0-9]+|[A-Z][a-z0-9]*)(?:[A-Z][a-z0-9]*)*(?:[S][Ee][Cc][Rr][Ee][Tt]|[P][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[P][Aa][Ss][Ss][Ww][Dd]|[P][Ww][Dd]|[T][Oo][Kk][Ee][Nn])(?:[_-][A-Za-z0-9]+|[A-Z][A-Za-z0-9]*|[0-9]+)*)["']?\s*[:=]\s*["']?(?!\/)[^"'\s]{12,}["']?/ },
   { id: "private-key", label: "private key block", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
