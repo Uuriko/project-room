@@ -220,9 +220,41 @@ test("scrubEventTokens scrubs token shapes at nesting depth, in arrays and keys,
   assert.equal(out.nested.deep[2], null);
   assert.equal(out[`key-${sha256(secret)}`], sha256("rak_87654321abcdefgh"));
   assert.ok(!JSON.stringify(out).includes(secret));
-  // Not oversold: other secret shapes pass through verbatim (MF-7).
+  // Not oversold: a string that merely resembles a prefix passes verbatim.
   assert.equal(scrubEventTokens("sk-live-not-our-shape"), "sk-live-not-our-shape");
   assert.equal(scrubEventTokens(7), 7);
+});
+
+test("scrubEventTokens scrubs the L08-C5 credential shapes, not only the product's own tokens", () => {
+  // All specimens are obviously synthetic / public documentation examples.
+  const specimens = {
+    ghp: "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+    bearer: "syntheticBearerTokenValue1234567890",
+    akia: "AKIAIOSFODNN7EXAMPLE",
+    password: "hunter2-correct-horse-synthetic",
+    jwt: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.syntheticSignatureSegment123",
+    session: "syntheticSessionCookieValue0123456789abcdef"
+  };
+  const input = {
+    ghp: `token is ${specimens.ghp} ok`,
+    bearer: `Authorization: Bearer ${specimens.bearer}`,
+    aws: `aws key ${specimens.akia} here`,
+    passwordKey: { password: specimens.password },
+    passwordProse: `password: ${specimens.password}`,
+    jwt: `jwt ${specimens.jwt} end`,
+    sessionKey: { cookie: `session=${specimens.session}; HttpOnly` },
+    sessionProse: `Cookie: sessionid=${specimens.session}; Path=/`
+  };
+  const out = JSON.stringify(scrubEventTokens(input));
+  for (const [name, specimen] of Object.entries(specimens))
+    assert.ok(!out.includes(specimen), `${name} specimen must not survive scrubbing verbatim`);
+  // Scrubbed secrets are sha256 hex, so exports stay correlatable.
+  assert.ok(out.includes(sha256(specimens.ghp)));
+  assert.ok(out.includes(sha256(specimens.password)));
+  // Plain prose that merely mentions the concepts is not a credential.
+  const prose = "the bearer of this message discussed password policy and session length";
+  assert.equal(scrubEventTokens(prose), prose);
+  assert.equal(scrubEventTokens({ author: "Jane Doe" }).author, "Jane Doe");
 });
 
 test("operatorRoomExport materialises a synthetic room whose projection is padded to the cap", { timeout: 180_000 }, async t => {

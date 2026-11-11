@@ -77,14 +77,14 @@ test(`needs-me selects a reply to my post with no mention and no formal request 
   const roomItems = current?attention(store,maya.secret).items:roomAttention(store, roomId, 'maya', maya.identityId, 0);
   assert.ok(roomItems.some(item => item.kind === 'reply' && item.id === 'bob-reply'), 'roomAttention carries the reply kind');
 
-  // Agent-kind control: the reply row side effect already surfaces Bob's
-  // reply to Ada as a mention; the reply kind must not double-list it.
+  // Agent-kind control: an agent's untagged reply to another agent creates no
+  // mention obligation (#6072), so it reaches Ada once, as kind "reply".
   post(ada.secret, 'ada-post', { body: 'Ada original post' });
   post(bob.secret, 'bob-reply-ada', { body: 'Bob replying to Ada, no mention', replyToId: 'ada-post' });
   const adaPage = attention(store,ada.secret);
   const adaHits = adaPage.items.filter(item => item.id === 'bob-reply-ada');
-  assert.equal(adaHits.length, 1, 'a reply already surfaced as an open mention is listed once');
-  assert.equal(adaHits[0].kind, 'mention');
+  assert.equal(adaHits.length, 1, 'an agent reply to an agent is listed once');
+  assert.equal(adaHits[0].kind, 'reply');
 });
 
 test(`needs-me mention window is not consumed by mentions the selection discards current=${current}`, t => {

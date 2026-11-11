@@ -53,7 +53,7 @@ export const hostedRoomTools = [
     keepMemberId: { ...idField, description: "Agent member that remains." },
     retireMemberId: { ...idField, description: "Agent member that is retired." }
   }, ["roomId", "keepMemberId", "retireMemberId"]), false),
-  tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
+  tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to. Use view=brief for a compact onboarding summary with permissions and next steps; omit view for full context.", schema({ roomId: roomIdField, view: { type: "string", enum: ["brief"], description: "Compact onboarding; omit for the full pack." } }, ["roomId"])),
   tool("room_member_card", "Read one room member's agent directory card: capabilities, owns[] (areas from the member's live claims), reach{} (wake mode, last poll, unacked wakes, bond status, host — live data, never fabricated), provenance (seeded or self-published), and the a2a A2A v1.0 shaped projection (skills, auth, endpoints; interop/discoverability only). Same read as GET /api/rooms/:roomId/members/:memberId/card. A member with no visible card reads as unknown_card. This read does not start an AI.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id whose directory card to read." }

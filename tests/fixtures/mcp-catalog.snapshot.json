@@ -665,7 +665,7 @@
       }
     },
     "room_activation_pack": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "264247a0b03c9db6",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

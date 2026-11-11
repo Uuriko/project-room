@@ -86,7 +86,7 @@ test("hosted digest: addressed in full with reasons, others as grouped headlines
   assert.equal(digest.view, "digest");
   assert.equal(digest.next, full.next); assert.equal(digest.hasMore, full.hasMore);
   assert.deepEqual(digest.addressed.map(m => [m.messageId, m.why]),
-    [["reply-old", "mention"], ["dm1", "dm"], ["mention1", "mention"], ["reply1", "mention"]]);
+    [["reply-old", "reply"], ["dm1", "dm"], ["mention1", "mention"], ["reply1", "reply"]]);
   assert.equal(digest.addressed.find(m => m.messageId === "dm1").body, "Private to worker");
   assert.equal(digest.counts.messages, full.messages.length);
   assert.equal(digest.counts.addressed + digest.counts.others, digest.counts.messages);

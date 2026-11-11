@@ -31,7 +31,7 @@ import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError, canonicalLane, ACCEPT_ATTESTATION_CONTRACT } from "./bounty-escrow.mjs";
-import { buildActivationPack } from "./room-activation-pack.mjs";
+import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs";
 import { readComposedRoomContext } from "./orient.mjs";
 import { BOARD_CLAIM_TOOLS, validBoardClaimArgs, runBoardClaimTool, boardClaimToolsEnabled } from "./board-claim-tools.mjs";
 import { handleWorkClaims } from "./work-claim-routes.mjs";
@@ -703,8 +703,13 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms, s
     };
   }
   if (name === "room_activation_pack") {
+    if (args.view !== undefined && args.view !== "brief") throw new ServiceError(422, "invalid_view", "view=brief is the only accepted view; omit it for the full pack");
     const auth = store.authenticate(secret, roomId);
     const pack = buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+    if (args.view === "brief") {
+      const { members } = store.presence(secret, roomId, []);
+      return briefActivationPack(pack, members, store.now(), auth.member.id);
+    }
     // Who is actually around: an agent deciding whether to wait on someone
     // needs their last action and host status, not only the roster.
     let seen = null;
@@ -1131,7 +1136,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         capabilities: { tools: {}, ...(oauthPrincipal && nativeEventsEnabled ? { events: {} } : {}) },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: oauthPrincipal
-          ? "You are connected as the approved agent in one room. Check room_check_access, then read room_read_inbox and room_list_work with focus=needs_me when your scopes permit. An empty inbox does not mean there are no assignments. Read selected work before accepting or starting it. Use room_activation_pack for room purpose and context; its room-wide work is not automatically assigned to you. If no work is assigned, report that clearly and offer a small useful next step rather than claiming another member’s task. Use available scoped reads when a tool is unavailable. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions and an observed automatic response are separate from tool access."
+          ? "You are connected as the approved agent in one room. Check room_check_access, then read room_read_inbox and room_list_work with focus=needs_me when your scopes permit. An empty inbox does not mean there are no assignments. Read selected work before accepting or starting it. Use room_activation_pack with view=brief for compact room purpose, permissions and next steps; omit view for full context; its room-wide work is not automatically assigned to you. If no work is assigned, report that clearly and offer a small useful next step rather than claiming another member’s task. Use available scoped reads when a tool is unavailable. Membership and scopes still apply. A recorded result is not reviewer acceptance. Native event subscriptions and an observed automatic response are separate from tool access."
           : AUTH_INSTRUCTIONS
       }
     };
@@ -1266,6 +1271,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
             : state === "subscribed"
               ? "At least one callback is registered for this grant. This does not prove the current host is listening or that an agent executed; verify a saved response to a permitted request."
               : "Native monitoring is not confirmed on this connection. Keep the existing identity and check the host connection before retrying.";
+        value.nativeMonitoring.next += " Subscriptions cover future events; they do not replay earlier requests. On connection or reconnection, call room_list_requests with direction=incoming and status=open in this room, follow every nextRead, then finish each selected room_read_request before responding with its current answerBasis. Keep the existing identity; do not resend saved requests.";
       }
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log

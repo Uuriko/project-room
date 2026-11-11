@@ -1,3 +1,4 @@
+import { safelyObserve } from './stage-observer.mjs';
 // One ACP agent process with one ACP session per Room thread.
 import { spawnAgent, initialize } from "./agents.mjs";
 import { TurnRecorder } from "./render.mjs";
@@ -74,14 +75,23 @@ export class AgentHost {
   }
 
   // Run one prompt turn on the thread's session. Returns the recorder and stopReason.
-  async prompt(threadKey, prompt, { sessionId } = {}) {
+  async prompt(threadKey, prompt, { sessionId, onDispatched = null, onFirstOutput = null } = {}) {
     if (!this.process) throw new Error("agent is not running");
     const id = sessionId ?? (await this.session(threadKey)).sessionId;
     const recorder = new TurnRecorder();
-    this.recorders.set(id, recorder);
+    let observed = false;
+    this.recorders.set(id, { update: update => {
+      recorder.update(update);
+      const kind = update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text'
+        && typeof update.content.text === 'string' && update.content.text.trim() ? 'text'
+        : update?.sessionUpdate === 'tool_call' && typeof update.toolCallId === 'string' && update.toolCallId.trim() ? 'tool' : null;
+      if (!observed && kind) { observed = true; safelyObserve(onFirstOutput, kind); }
+    } });
     const peer = this.process.peer;
     try {
-      const result = await peer.request("session/prompt", { sessionId: id, prompt });
+      const pending = peer.request("session/prompt", { sessionId: id, prompt });
+      safelyObserve(onDispatched);
+      const result = await pending;
       return { recorder, stopReason: result?.stopReason ?? "end_turn" };
     } finally { this.recorders.delete(id); }
   }
