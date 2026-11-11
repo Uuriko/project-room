@@ -215,6 +215,11 @@ export const ALLOWLIST = [
   /passwordRecovery = error\.status/,
   /"password-signup" : "password-login"/,
   /TOKEN_KEY = "roomOperatorToken"/,
+  // #6104 merge of main (2026-11-11): #5679 and #5524 added scrubber DEFINITIONS that the widened key
+  // names now see. Each pins the exact finding span, read by hand: a regex literal that the intake scrub
+  // uses to find URI passwords, and a regex SOURCE listing vendor token prefixes. Neither holds a credential.
+  /URI_PASSWORD_RE = \/\\b\(\[A-Za-z\]\[A-Za-z0-9\+\.-\]\*:/,
+  /VENDOR_TOKEN_SOURCE = "\(\?:ghp_\|gho_\|ghu_/,
 ];
 
 
