@@ -1,3 +1,5 @@
+import { boardStateForWorkItem, liveClaim } from "./work-item-state.mjs";
+export { boardStateForWorkItem, liveClaim } from "./work-item-state.mjs";
 import { terminalWork } from "../src/workflow.js";
 import { hydrateWorkItems } from "./work-repository.mjs";
 // Decision #10 (workItems -> board claims) — the migration core.
@@ -106,7 +108,6 @@ export function boardClaimId(workItemId) {
 
 const iso = ms => new Date(ms).toISOString();
 const isoOrNull = value => (typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null);
-const msOf = value => (typeof value === "string" ? Date.parse(value) : Number.NaN);
 const cleanText = (value, max) => (typeof value === "string" && value.length > 0 ? value.slice(0, max) : null);
 
 // Files a claimed work item pins, in the board's stored shape (files: path
@@ -402,25 +403,6 @@ function evidenceForWorkItem(item) {
 // A claim is live only while its status is active and its lease has not
 // expired at `nowMs` — an expired lease is exactly what the board's own
 // sweep would release.
-export function boardStateForWorkItem(item, nowMs) {
-  switch (item?.state) {
-    case "superseded": return "closed";
-    case "completed": return terminalWork(item) ? "done" : "delivered";
-    case "blocked": return "blocked";
-    case "working": return "in_progress";
-    case "accepted": return liveClaim(item, nowMs) ? "claimed" : "unclaimed";
-    default: return "unclaimed"; // proposed
-  }
-}
-
-export function liveClaim(item, nowMs) {
-  const claim = item?.claim;
-  if (!claim || claim.status !== "active") return null;
-  const expires = msOf(claim.expiresAt);
-  if (!Number.isFinite(expires) || expires <= nowMs) return null;
-  return claim;
-}
-
 // The mapped board row for one work item. `existing` is the row already
 // on the board for this item (decoded from work_claims), if any: fields
 // the board owns natively and the work item cannot express (ci, deploy

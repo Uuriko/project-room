@@ -6,6 +6,7 @@
 //   crash-mid-turn   exits during the first prompt of each process
 //   ask-permission   requests permission, replies with the chosen optionId
 //   no-loadSession   like echo but does not advertise loadSession
+//   notices          emits adapter diagnostics, structured when negotiated
 //   tools            emits a plan and tool calls before replying
 //   wrong-protocol / unauthenticated / session-permission / empty-session / session-stall
 //                    reject or hold readiness before any prompt
@@ -16,13 +17,14 @@ const mode = process.env.FAKE_ACP_MODE ?? "echo";
 const delay = Number(process.env.FAKE_ACP_DELAY_MS ?? 300);
 const sessions = new Map();
 let counter = 0;
+let supportsNotices = false;
 const textOf = prompt => (Array.isArray(prompt) ? prompt : []).filter(block => block?.type === "text").map(block => block.text).join("\n");
 
 const peer = createPeer({
   input: process.stdin, output: process.stdout,
   async onRequest(method, params) {
     if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, method + "\n");
-    if (method === "initialize") return { protocolVersion: mode === "wrong-protocol" ? 99 : 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true } }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } };
+    if (method === "initialize") { if (mode === "init-exit") { process.exit(7); } if (mode === "init-stall") return new Promise(() => {}); supportsNotices = typeof params.clientCapabilities?.session?.notices === "object" && params.clientCapabilities.session.notices !== null; return { protocolVersion: mode === "wrong-protocol" ? 99 : 1, agentCapabilities: { loadSession: mode !== "no-loadSession", promptCapabilities: { embeddedContext: true } }, authMethods: [], agentInfo: { name: "fake-acp", version: "1" } }; }
     if (method === "session/new") {
       if (mode === "unauthenticated") throw Object.assign(new Error("Authentication required"), { code: -32000 });
       if (mode === "session-stall") return new Promise(() => {});
@@ -33,11 +35,26 @@ const peer = createPeer({
       }
       const sessionId = `fake-${process.pid}-${++counter}`; sessions.set(sessionId, []); return { sessionId }; }
     if (method === "session/load") { if (mode === "no-loadSession") throw Object.assign(new Error("loadSession unsupported"), { code: -32601 }); sessions.set(params.sessionId, sessions.get(params.sessionId) ?? []); return null; }
-    if (method === "session/set_mode") return null;
+    if (method === "session/set_mode") {
+      if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, `mode:${params.modeId}\n`);
+      if (mode === "mode-rejected") throw Object.assign(new Error("Requested session mode is unavailable"), { code: -32602 });
+      if (mode === "mode-permission") {
+        const answer = await peer.request("session/request_permission", { sessionId: params.sessionId, toolCall: { toolCallId: "mode", title: "Change session permissions", kind: "execute" }, options: [{ optionId: "allow_once", kind: "allow_once", name: "Allow" }] });
+        if (process.env.FAKE_ACP_TRACE) appendFileSync(process.env.FAKE_ACP_TRACE, `permission:${answer?.outcome?.outcome}\n`);
+      }
+      return null;
+    }
     if (method === "session/prompt") {
       const text = textOf(params.prompt);
       sessions.get(params.sessionId)?.push(text);
       const say = chunk => peer.notify("session/update", { sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } } });
+      if (mode === "notices") {
+        // Matches codex-acp2.5.0 createConfigWarningEvent's negotiated branches.
+        const title = "Under-development features are enabled";
+        const description = "Config from /Users/private-owner/private-project/.codex/config.toml";
+        if (supportsNotices) peer.notify("session/update", { sessionId: params.sessionId, update: { sessionUpdate: "notice", severity: "warning", title, description } });
+        else say(`Config warning: ${title}\n\n${description}\n\n`);
+      }
       if (mode === "crash-mid-turn") { setTimeout(() => process.exit(3), 20); return new Promise(() => {}); }
       if (mode === "slow") await new Promise(resolve => setTimeout(resolve, delay));
       if (mode === "tools") {

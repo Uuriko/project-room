@@ -16,13 +16,13 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 // read and missing fields take these defaults, so rows written by older code
 // (plain JSON, no envelope) still load.
 export const WORK_CLAIM_ROW_KIND = "work-claim";
-const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
+export const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
-  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration", "claimRound"];
+  "requestOutcomes", "acceptanceCriteria", "delivery", "verification", "deliveryGeneration", "claimRound", "delegate", "approvalHold", "planning"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
@@ -30,7 +30,7 @@ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, hist
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
   kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, requestOutcomes: {},
-  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0, claimRound: 0 };
+  acceptanceCriteria: [], delivery: null, verification: null, deliveryGeneration: 0, claimRound: 0, delegate: null, approvalHold: null, planning: null };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -38,6 +38,11 @@ const decodeItem = text => {
   if (item.historyOmitted == null) delete item.historyOmitted;
   // plan-pr-autolink: deploy links are sparse; absent means never deployed.
   if (item.deploy == null) delete item.deploy;
+  // Linear-parity delegate: sparse; absent means no delegate.
+  if (item.delegate == null) delete item.delegate;
+  if (item.approvalHold == null) delete item.approvalHold;
+  // Board planning fields are sparse too (server/board-planning.mjs).
+  if (item.planning == null) delete item.planning;
   // PRODUCT-200 A4: idempotency records are sparse; absent means none seen.
   if (item.requestOutcomes == null || Object.keys(item.requestOutcomes).length === 0) delete item.requestOutcomes;
   return item;
@@ -91,7 +96,7 @@ const parse = text => {
   return value;
 };
 
-export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
+export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null, beforeSet = null, beforeWrite = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
   const statement = sql => ({
@@ -224,7 +229,9 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       return item;
     },
     set(roomId, item) {
+      if (typeof beforeWrite === "function") beforeWrite(roomId);
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
+      if(typeof beforeSet==='function')beforeSet(roomId,item);
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, capForStorage(roomId, item))), now());
       if (typeof onChange === "function") onChange(roomId);
       return item;
@@ -255,6 +262,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
+      if (typeof beforeWrite === "function") beforeWrite(roomId);
       // #1527: readyClaims treats a missing dependency as "not done", so a
       // claim depending on a deleted claim could never return to
       // queue=ready -- stranded, ownerless, invisible. Waive the deleted id
@@ -279,6 +287,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
+        if (typeof beforeWrite === "function") beforeWrite(roomId);
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
         upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
       }

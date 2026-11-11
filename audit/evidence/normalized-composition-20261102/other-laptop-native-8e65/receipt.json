@@ -1,0 +1,27 @@
+{
+  "runtime_sha": "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+  "command": [
+    "node",
+    "--test",
+    "--test-name-pattern=verified offline archive runs the actual Native durable restore qualification",
+    "tests/runtime-package.test.js"
+  ],
+  "node": "v24.22.1",
+  "miniflare": "4.20260730.0",
+  "workerd": "1.20260730.1",
+  "workerd_sha256": "b887d31d8839e80798bf3f92c416343c5db7dd9b22d7fe21bcf877f5d411936f",
+  "exit_code": 0,
+  "outer_timeout": false,
+  "wall_seconds": 126.86063229199499,
+  "reaped_child_cpu_seconds": 176.141139,
+  "existing_inner_timeout_ms": 180000,
+  "existing_native_timeout_ms": 160000,
+  "source_clean_before": true,
+  "source_clean_after": true,
+  "log_sha256": "f5516d99e516eeb334a0af617cf1a1ca2001f201f6083e42a839ae38f82b0454",
+  "log_bytes": 1859,
+  "packaged_native_marker_observed": true,
+  "actual_native_marker_observed": true,
+  "esbuild": "0.28.2",
+  "scope": "Single isolated current-pin packaged Native qualification, not whole-suite/activation/deployment certification"
+}

@@ -7,7 +7,8 @@ const permit = 'room_writer_permit';
 // isolate on the underlying storage, so every wrapper sees a write made
 // by another. A version write drops the cache. A transaction that throws
 // drops it too: transactionSync rolls the SQL back, and a cached version
-// or permit check would still describe the uncommitted write. The permit
+// or permit check would still describe the uncommitted write. A typed read-only
+// 404 with no write-shaped SQL attempt can retain its pre-body admission. The permit
 // flip inside a committed transaction ends at 0, so a passed check for
 // that value stays valid until the schema version changes.
 const runtimeCache = new WeakMap();
@@ -70,6 +71,9 @@ export class DurableDatabase {
     // Write statements that changed rows. ProjectRoom.fetch compares it before
     // and after a request to skip re-arming the job alarm when nothing changed.
     this.writeStatements = 0;
+    // Conservative attempt counter includes failed/no-op DDL and PRAGMAs;
+    // it is used only to avoid retaining runtime admission across a mutation.
+    this.mutationAttempts = 0;
     this.observeStatement = observeStatement;
   }
   // Observers receive only counters, never SQL, bindings or errors. Capture
@@ -103,7 +107,7 @@ export class DurableDatabase {
   #all(sql, args) {
     const finish = this.observeStatement ? this.#observation() : null;
     let cursor, failed = false;
-    try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
+    try { if(isWriteSql(sql))this.mutationAttempts++;cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
     catch (error) { failed = true; throw tooBig(error); }
     finally { if (finish) finish(cursor, failed); else this.#countRead(cursor); this.#countWrite(sql, cursor); }
   }
@@ -116,7 +120,7 @@ export class DurableDatabase {
       // Generator body starts on first next(), including observation capture.
       if (!db.observeStatement) {
         let cursor;
-        try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
+        try { if(isWriteSql(sql))db.mutationAttempts++;cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
         catch (error) { throw tooBig(error); }
         finally { db.#countRead(cursor); db.#countWrite(sql, cursor); }
         return;
@@ -125,7 +129,7 @@ export class DurableDatabase {
       let cursor, failed = false;
       try {
         let iterator;
-        try { cursor = db.storage.sql.exec(sql, ...args); iterator = cursor[Symbol.iterator](); }
+        try { if(isWriteSql(sql))db.mutationAttempts++;cursor = db.storage.sql.exec(sql, ...args); iterator = cursor[Symbol.iterator](); }
         catch (error) { failed = true; throw error; }
         const observed = {
           [Symbol.iterator]() { return this; },
@@ -266,6 +270,8 @@ export const durableStorage = {
         forgetRuntime(db);
       }
       if (version >= 8) verifyPermit(db, version, 0);
+      const admittedRuntime=readOnly?{...cacheOf(db)}:null;
+      const mutationAttempts=db.mutationAttempts;
       db.isTransaction = true;
       db.readOnlyTransaction = readOnly;
       try {
@@ -275,7 +281,9 @@ export const durableStorage = {
         if (this.version(db) === STORE_SCHEMA_VERSION) db.migrationSource = null;
         return result;
       } catch (error) {
-        forgetRuntime(db);
+        if(readOnly && error instanceof ServiceError && error.status===404 && db.mutationAttempts===mutationAttempts)
+          runtimeCache.set(cacheKey(db),admittedRuntime);
+        else forgetRuntime(db);
         throw error;
       } finally { db.isTransaction = false; db.readOnlyTransaction = false; }
     });

@@ -106,13 +106,13 @@ test("request-access door referrer: a ?ref= hand-off prefills, junk does not", (
   assert.equal(requestDoorReferrer(""), null);
 });
 
-test("request-access door room: address fixes it, hint prefills, bare page defaults to the community room", () => {
+test("request-access door room: address fixes it, hint prefills, bare page leaves the destination empty", () => {
   assert.deepEqual(requestDoorRoom("/rooms/johns-project-room", ""), { roomId: "johns-project-room", fixed: true });
   assert.deepEqual(requestDoorRoom("/room/rooms/commons", "?room=other"), { roomId: "commons", fixed: true });
   assert.deepEqual(requestDoorRoom("/join", "?room=team-7"), { roomId: "team-7", fixed: false });
-  assert.deepEqual(requestDoorRoom("/join", "?room=<script>"), { roomId: "muse-room", fixed: false });
-  assert.deepEqual(requestDoorRoom("/join", ""), { roomId: "muse-room", fixed: false });
-  assert.deepEqual(requestDoorRoom("/room/join", ""), { roomId: "muse-room", fixed: false });
+  assert.deepEqual(requestDoorRoom("/join", "?room=<script>"), { roomId: "", fixed: false });
+  assert.deepEqual(requestDoorRoom("/join", ""), { roomId: "", fixed: false });
+  assert.deepEqual(requestDoorRoom("/room/join", ""), { roomId: "", fixed: false });
 });
 
 test("room id comes from the /rooms/<id> address the join page is served at", () => {

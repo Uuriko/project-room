@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // W2-F9-CURE (RES-1538, Codex source review seq 25038): the reply and
 // mention-horizon scans in server/needs-me.mjs must be bounded, and a
 // budget-exhausted read must say so instead of looking complete.
@@ -30,7 +31,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -43,11 +43,10 @@ function setup(t, roomId) {
   let clock = Date.now();
   store.now = () => (clock += 2100); // stay under the chat flood guard
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
   const owner = store.identities.create('OwnerC');
-  rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Scan budgets', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Scan budgets', kind: 'personal' });
   linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });

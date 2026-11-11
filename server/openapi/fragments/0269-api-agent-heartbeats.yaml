@@ -31,6 +31,11 @@
         — contention is data, never a heartbeat failure. While a lease is
         live for a signal's room, ack for that signal requires the lease's
         `fencingToken` (see `/api/agent-heartbeats/ack`).
+        A successfully acquired selected-room lease also advertises
+        `wakeSelection:{version:1,newest:true,roomId}` when bounded wake indexes
+        are active. This capability permits an explicit newest poll in that
+        same room; it grants no new room access, execution or acknowledgement.
+        No capability is advertised for an unselected or contended lease.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
@@ -102,7 +107,7 @@
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], wakeSelection?: { version: 1, newest: true, roomId }, listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }

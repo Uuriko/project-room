@@ -1,0 +1,104 @@
+{
+  "receipts": [
+    {
+      "count": 32,
+      "warm": {
+        "statements": 92,
+        "rowsRead": 213,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 46510,
+        "eventPayloadBytes": 1512
+      },
+      "payloadBytes": 1754,
+      "cold": {
+        "statements": 92,
+        "rowsRead": 1799,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 46510,
+        "eventPayloadBytes": 1512
+      },
+      "legacy": null
+    },
+    {
+      "count": 1000,
+      "warm": {
+        "statements": 94,
+        "rowsRead": 215,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 62513,
+        "eventPayloadBytes": 1512
+      },
+      "payloadBytes": 1756,
+      "cold": {
+        "statements": 94,
+        "rowsRead": 1801,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 62513,
+        "eventPayloadBytes": 1512
+      },
+      "legacy": {
+        "cost": {
+          "statements": 81,
+          "rowsRead": 3172,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 202011,
+          "eventPayloadBytes": 0
+        },
+        "payloadBytes": 2245
+      }
+    },
+    {
+      "count": 5000,
+      "warm": {
+        "statements": 94,
+        "rowsRead": 215,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 55009,
+        "eventPayloadBytes": 1512
+      },
+      "payloadBytes": 1756,
+      "cold": {
+        "statements": 94,
+        "rowsRead": 1801,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 55009,
+        "eventPayloadBytes": 1512
+      },
+      "legacy": {
+        "cost": {
+          "statements": 81,
+          "rowsRead": 15172,
+          "rowsWritten": 0,
+          "unknown": 0,
+          "returnedSqlTextBytes": 914011,
+          "eventPayloadBytes": 0
+        },
+        "payloadBytes": 2245
+      }
+    }
+  ],
+  "historyCertified": false,
+  "syntheticRooms": true,
+  "fullTraversalQualifiedAt32": true,
+  "largerPositiveWindowsAddressedBeforeSignals": true,
+  "sourceParent": "184ad47210eae55760d4c9a42aa638c61fa59ece",
+  "nodeInboxTests": 5,
+  "nodeNeighborhoodTests": 22,
+  "workerTests": 1,
+  "deployed": false,
+  "liveVerified": false,
+  "limits": [
+    "Synthetic current and paired legacy fixtures; not onboarding or whole-room migration proof",
+    "Complete source traversal at32;1k/5k positives addressed immediately before signal window",
+    "Native work intentionally unexamined in inbox; follow independently paginated needs_me pointer",
+    "Standing ordinary mention census explicitly incomplete; no acknowledgement by read",
+    "Formal selected request context reader remains separate qualification"
+  ]
+}

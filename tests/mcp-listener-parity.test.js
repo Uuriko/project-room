@@ -93,7 +93,7 @@ test("MCP room lease validates current membership and rolls back heartbeat on re
   const linked = linkWithProof(store, owner.secret, "wake-den", foreign, { displayName: "Linked peer", permissions: [] });
   const initial = await call(origin, "heartbeat_set", args, foreign.secret);
   assert.equal(initial.value.listener.acquired, true);
-  const member = store.room("wake-den").state.members[linked.memberId];
+  const member = store.roomAuthority("wake-den", { memberId: linked.memberId }).members[linked.memberId];
   store.command(owner.secret, "wake-den", { id: crypto.randomUUID(), type: "member.access_changed", data: { memberId: member.id, expectedMemberRevision: member.revision, active: false, permissions: member.permissions } });
   const suspended = await call(origin, "heartbeat_set", { ...args, hostId: "new-host" }, foreign.secret);
   assert.equal(suspended.value.code, "room_mismatch");
@@ -116,7 +116,7 @@ test("MCP scoped lease cannot cross rooms or survive membership revocation", asy
   const first = await call(origin, "heartbeat_set", args, `rak_${key.secret}`);
   assert.equal(first.value.listener.acquired, true, first.raw);
   const signal = store.agentHeartbeats.enqueueWake({ agentId: peer.identityId, roomId: "wake-den", kind: "mention", messageId: "pending" }).signal;
-  const member = store.room("wake-den").state.members[linked.memberId];
+  const member = store.roomAuthority("wake-den", { memberId: linked.memberId }).members[linked.memberId];
   store.command(owner.secret, "wake-den", { id: crypto.randomUUID(), type: "member.access_changed", data: { memberId: member.id, expectedMemberRevision: member.revision, active: false, permissions: member.permissions } });
   const ack = await call(origin, "heartbeat_ack", { signalIds: [signal.signalId], fencingToken: first.value.listener.fencingToken }, `rak_${key.secret}`);
   assert.equal(ack.value.code, "scoped_key_room_refused");

@@ -2,6 +2,9 @@
 // The default GET /api/rooms/{id} and ?messages=recent are this window.
 // ?full=1 is the retired unbounded document, and only while
 // ROOM_SNAPSHOT_FULL_COMPAT=1. Older history pages through /messages.
+import { isCurrentRoom, withCurrentReadContext,withCurrentWorkSummaryReuse,readCurrentRecord,readCurrentHistoryFloor,chargeCurrentReadBudget } from './current-room-repository.mjs';
+import {readCurrentEventWindow} from './current-room-events.mjs';
+import { readConversation } from './conversation-sync.mjs';
 import { messageSequences } from "./message-queries.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { messageInHistory, eventInHistory } from "./history-visibility.mjs";
@@ -10,6 +13,7 @@ import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { readAgentOrientation } from "./agent-orientation.mjs";
+import { workRoleHolder } from "./work-context.mjs";
 
 export const SNAPSHOT_WINDOW_MESSAGES = 100;
 export const SNAPSHOT_WINDOW_BYTES = 30 * 1024;
@@ -120,16 +124,57 @@ function viewerFilter(store, roomId, viewerId) {
 }
 
 // The member snapshot. windowed uses the shared message window and byte budget.
-export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null } = {}) {
+export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null, workCursor = null } = {}) {
   if (view === "orientation") {
     if (helpContext || offerContext || auditView !== "full" || windowed) fail(422, "invalid_snapshot_view", "Orientation does not accept snapshot context options");
-    return readAgentOrientation(store, token, roomId, fence);
+    return readAgentOrientation(store, token, roomId, fence, {cursor:workCursor});
+  }
+  if (view === "full" && isCurrentRoom(store.db, roomId)) {
+    if (!windowed || helpContext || !["full","activity"].includes(auditView))
+      fail(409, "current_snapshot_selection_unavailable", "Use the bounded current room window and addressed detail reads");
+    return store.readTransaction(() => withCurrentReadContext(store.db, roomId, b => {
+      const auth = store.authenticate(token, roomId, fence);
+      return withCurrentWorkSummaryReuse(store,roomId,auth.member.id,()=>{
+      const overview = store.currentOverview(roomId, auth.member.id);
+      const conversation = readConversation(store, token, roomId, { limit: 8, expectedSessionBinding: fence });
+      const channelKeys=store.db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='channels' AND present=1 ORDER BY record_key LIMIT 51").all(roomId);
+      if(channelKeys.length>50)fail(409,'current_channel_catalog_unavailable','Channel catalog exceeds the supported room limit');
+      chargeCurrentReadBudget(b,channelKeys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),channelKeys.length);
+      const channels=Object.create(null);for(const {record_key:id}of channelKeys){const channel=readCurrentRecord(store.db,roomId,'channels',id,b);if(!channel||channel.id!==id)throw Error('Current channel membership differs');Object.defineProperty(channels,id,{value:channel,enumerable:true});}
+      const sourceAfter=Math.max(0,overview.sequence-16),eventPage=readCurrentEventWindow(store,roomId,auth.member.id,{after:sourceAfter,limit:16});
+      const events=eventPage.events.map(row=>row.event),eventLog=auditView==='activity'?events.filter(e=>e.type==='decision.recorded'||/^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(e.type)||e.data?.workItemId!==undefined):events;
+      const cursor=store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get(roomId,auth.member.id)?.sequence??0;
+      const floor=readCurrentHistoryFloor(store.db,roomId,auth.member.id,b),catchUpCursor=Math.max(cursor,floor?floor.sequence-1:0);
+      const replyRequests=Object.create(null),requestIds=new Set(conversation.messages.flatMap(m=>[m.id,m.responseToRequestId]).filter(Boolean));
+      for(const id of requestIds){const request=readCurrentRecord(store.db,roomId,'replyRequests',id,b);if(request&&[request.requesterId,request.recipientId].includes(auth.member.id))Object.defineProperty(replyRequests,id,{value:request,enumerable:true});}
+
+
+      // This is explicitly a partial current view. Neither omitted counts nor
+      // absent request/work records mean that the room contains no more work.
+      return {
+        snapshotVersion: 2, representation: "normalized-current-v1", roomId,
+        sequence: overview.sequence, viewerId: auth.member.id,cursor,catchUpCursor,
+        ...(auditView==='activity'?{auditView,auditVersion:1}:{}),
+        viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
+        state: { ...overview.state,channels,eventLog,replyRequests, messages: conversation.messages,
+          pins:(overview.state.pins??[]).filter(pin=>conversation.messages.some(message=>message.id===pin.messageId&&!message.deletedAt&&message.body!=null)) },
+        pinsWindow:{complete:false,coverage:'visible-conversation-records',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/pins`}},
+        channelsWindow:{complete:true,shown:channelKeys.length},
+        eventsWindow:{complete:sourceAfter===0,after:sourceAfter,examinedThrough:eventPage.next,hasOlder:sourceAfter>0,olderAfter:sourceAfter>0?Math.max(0,sourceAfter-16):null,sourceLimit:16},
+        messagesWindow: { mode: "recent", omitted: null, complete: conversation.nextCursor === null },
+        messagesPage: { cursor: conversation.nextCursor, hasMore: conversation.nextCursor !== null, contractVersion: 2, limit: 8 },
+        workWindow: overview.workWindow,
+        sections: { assistant:{available:true,coverage:'selected-run-window',maxRuns:100},requestRuns:{available:false,code:'current_request_runs_unavailable'},notifications:{available:false,code:'current_notification_aggregate_unavailable'},updates:{available:false,replacement:'needs-me',nextRead:{method:'GET',path:`/api/rooms/${encodeURIComponent(roomId)}/needs-me`}},returnBrief:{available:true,coverage:'visible-history-window',sourceLimit:16},files:{available:true,coverage:'selected-messages',complete:false},fileUploads:{available:true}, helpOffers: { available: false, code: "current_help_offers_unavailable" }, replyRequests: { available: true,complete:false,coverage:"visible-conversation-records", nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } } } }
+      };
+      });
+    }, { maxRecords: 1024 }));
   }
   // #4265: the non-windowed form is the explicit full-history contract (the
   // compat ?full=1 read; the work view returns before the messages branch),
   // so it opts in to full history at the store. The windowed default passes
   // no opt-in and stays bounded.
-  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null, !windowed);
+  const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null, !windowed, workCursor);
   if (view === "work") {
     delete snapshot.state.agentHalts;
     return snapshot;
@@ -149,18 +194,22 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   // a member party to any request on an item keeps its full record.
   // The store snapshot already applies this; repeating it here keeps
   // the boundary at this serialiser even if a snapshot source changes.
+  // The exception matches every other read site: a member the item
+  // itself names in a work role (proposer, accountable, verifier,
+  // human decision maker, or claim holder) keeps its full record —
+  // a private request on the item must not lock them out of it.
   const privatePartiesByWork = new Map();
   for (const request of Object.values(snapshot.state.replyRequests ?? {})) {
     if (!request?.workItemId) continue;
     if (!privatePartiesByWork.has(request.workItemId)) privatePartiesByWork.set(request.workItemId, new Set());
     privatePartiesByWork.get(request.workItemId).add(request.requesterId).add(request.recipientId);
   }
-  const workItemsForViewer = itemId => {
+  const workItemsForViewer = (itemId, item) => {
     const parties = privatePartiesByWork.get(itemId);
-    return parties && !parties.has(snapshot.viewerId);
+    return parties && !parties.has(snapshot.viewerId) && !workRoleHolder(item, snapshot.viewerId);
   };
   const workItems = snapshot.state.workItems ? Object.fromEntries(Object.entries(snapshot.state.workItems).map(([id, item]) =>
-    workItemsForViewer(id) ? [id, { ...item, title: null, definitionOfDone: null }] : [id, item])) : snapshot.state.workItems;
+    workItemsForViewer(id, item) ? [id, { ...item, title: null, definitionOfDone: null }] : [id, item])) : snapshot.state.workItems;
   const replyRequests = Object.fromEntries(Object.entries(snapshot.state.replyRequests ?? {}).filter(([, request]) =>
     [request.requesterId, request.recipientId].includes(snapshot.viewerId)
     && messageInHistory({ id: request.id, createdAt: request.createdAt }, historyFloor)));
@@ -171,7 +220,7 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
     ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests }),
     eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible).map(event => {
       const workItemId = event?.data?.workItemId;
-      if (typeof workItemId !== "string" || !workItemsForViewer(workItemId)) return event;
+      if (typeof workItemId !== "string" || !workItemsForViewer(workItemId, snapshot.state.workItems?.[workItemId])) return event;
       if (!Object.hasOwn(event.data, "title") && !Object.hasOwn(event.data, "definitionOfDone")) return event;
       return { ...event, data: { ...event.data,
         ...(Object.hasOwn(event.data, "title") ? { title: null } : {}),

@@ -1,0 +1,78 @@
+{
+  "base": "7320a9354",
+  "runtime": "0576f097b",
+  "native": "c59d18869",
+  "nodePassed": 20,
+  "nativePassed": 1,
+  "baselineHTTPFailed": 1,
+  "baselineNativeFailed": 1,
+  "logicalAdmission": {
+    "oldRecordsAtRefusal": 201,
+    "oldBytesAtRefusal": 104179,
+    "currentRecords": 208,
+    "currentBytes": 107457,
+    "scopedMaxRecords": 512,
+    "unchangedMaxBytes": 262144,
+    "unchangedConversationRows": 4,
+    "globalDefaultRecordsUnchanged": 200
+  },
+  "nativeWarm": [
+    {
+      "limit": 1,
+      "statements": 216,
+      "physicalReads": 1084,
+      "physicalWrites": 4,
+      "returnedJSONBytes": 258062,
+      "sqlTextBytes": 23801,
+      "bindingBytes": 5872,
+      "workerWallMs": 7
+    },
+    {
+      "limit": 5,
+      "statements": 263,
+      "physicalReads": 1135,
+      "physicalWrites": 4,
+      "returnedJSONBytes": 268978,
+      "sqlTextBytes": 33502,
+      "bindingBytes": 7333,
+      "workerWallMs": 5
+    },
+    {
+      "limit": 30,
+      "statements": 263,
+      "physicalReads": 1135,
+      "physicalWrites": 4,
+      "returnedJSONBytes": 268978,
+      "sqlTextBytes": 33502,
+      "bindingBytes": 7333,
+      "workerWallMs": 4
+    }
+  ],
+  "nativeUnknownCounters": 0,
+  "logs": {
+    "node-before": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/node-before.log.gz",
+      "uncompressedSha256": "bca5a8c87c94c7fc734d6600c74a0003f3778204d60e85b65534101576d0e77e"
+    },
+    "node-after": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/node-after.log.gz",
+      "uncompressedSha256": "613f11595deb642bc3b06fbc4db9c36ae5894cd5266c82359eb288419e892a2e"
+    },
+    "native-before": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/native-before.log.gz",
+      "uncompressedSha256": "210796c02a1d68804bbb8b7138c76557013e8163bcc226c5401a8e13a274ddac"
+    },
+    "native-after": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/native-after.log.gz",
+      "uncompressedSha256": "ce479d9cc6d283a843e2b47d3753c37b7f8960005e191dc70f6a065abebc2588"
+    },
+    "lint": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/lint.log.gz",
+      "uncompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-lint": {
+      "path": "audit/evidence/scoped-inbox-budget-20261102/native-lint.log.gz",
+      "uncompressedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

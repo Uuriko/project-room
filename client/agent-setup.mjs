@@ -61,6 +61,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
   if (!Object.hasOwn(ACCESS_PRESETS, access)) throw new Error("Choose access: chat, work, collaborate, or maximum");
   const requestedAccess = { preset: access, permissions: [...ACCESS_PRESETS[access].permissions], requiresReview: access !== "chat" };
   const destination = setupTarget(target, origin);
+  let openPublicRoom = false;
   if (destination.publicRoom) {
     // Resolve without credentials or redirects. A public page is a stable door,
     // not an authority to send this identity to a different service or room.
@@ -71,8 +72,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     if (!response.ok) throw new Error("Public room page unavailable; ask for an invitation or check the room URL");
     const page = await response.json();
     if (page.schema !== "project-room-public-room/1" || page.slug !== destination.publicRoom
-        || !["link", "request"].includes(page.join?.mode)) throw new Error("Invalid public room entrance");
+        || !["link", "request", "open"].includes(page.join?.mode)) throw new Error("Invalid public room entrance");
     destination.roomId = destination.publicRoom;
+    openPublicRoom = page.join.mode === "open";
     if (page.join.mode === "link") {
       const href = new URL(page.join.href, destination.origin);
       if (href.origin !== destination.origin || href.username || href.password || href.pathname !== "/"
@@ -82,8 +84,8 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       if (!invitation.sharedToken) throw new Error("Public room entrance is not a shared invitation");
       destination.sharedToken = invitation.sharedToken;
     } else if (!accept) {
-      return { status: "approval_required", requestedAccess, preview: { roomId: page.slug, permissions: [], admission: "request" },
-        next: "This room requires approval. Repeat with --accept to request read/chat access" };
+      return { status: "approval_required", requestedAccess, preview: { roomId: page.slug, permissions: [], admission: page.join.mode },
+        next: openPublicRoom ? "Repeat with --accept to join this room with read/chat guest access; no owner approval is needed" : "This room requires approval. Repeat with --accept to request read/chat access" };
     }
   }
   const journal = openSetupJournal(directory);
@@ -131,13 +133,17 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       saved.identityId = identity.identityId; journal.save(saved);
     }
     // This authenticated discovery also verifies imported/recovered credentials.
-    const memberships = [], cursors = new Set(); let cursor;
-    do {
-      const page = await listAgentRooms(saved.origin, saved.secret, cursor ? { ...options, after: cursor } : options);
-      if (page.identityId !== saved.identityId) throw new Error("Room list returned a different identity");
-      if (page.nextCursor && cursors.has(page.nextCursor) || cursors.size >= 100 || memberships.length + page.rooms.length > 5000) throw new Error("Room list exceeds the setup limit");
-      memberships.push(...page.rooms); cursor = page.nextCursor; if (cursor) cursors.add(cursor);
-    } while (cursor);
+    const readMemberships = async () => {
+      const memberships = [], cursors = new Set(); let cursor;
+      do {
+        const page = await listAgentRooms(saved.origin, saved.secret, cursor ? { ...options, after: cursor } : options);
+        if (page.identityId !== saved.identityId) throw new Error("Room list returned a different identity");
+        if (page.nextCursor && cursors.has(page.nextCursor) || cursors.size >= 100 || memberships.length + page.rooms.length > 5000) throw new Error("Room list exceeds the setup limit");
+        memberships.push(...page.rooms); cursor = page.nextCursor; if (cursor) cursors.add(cursor);
+      } while (cursor);
+      return memberships;
+    };
+    const memberships = await readMemberships();
     if (!step.roomId) {
       const response = await fetchImpl(saved.origin + edgeDoorApiPath(saved.origin, "/api/public/rooms/directory"), {
         redirect: "error", credentials: "omit", signal: AbortSignal.timeout(15000) });
@@ -160,8 +166,10 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       const result = await requestAccess(saved.origin, { roomId: step.roomId, identityId: saved.identityId,
         displayName: saved.name, requestedPermissions: [], note: "I would like to join this room and collaborate.", requestId: step.requestId }, options);
       step.admission = result.status; journal.save(saved);
-      return { status: result.status, identityId: saved.identityId, roomId: step.roomId, requestId: step.requestId,
+      if (result.status !== "approved") return { status: result.status, identityId: saved.identityId, roomId: step.roomId, requestId: step.requestId,
         next: "Repeat this command to check admission; no new identity or request will be created" };
+      membership = (await readMemberships()).find(room => room.roomId === step.roomId);
+      if (!membership) throw new Error("Approved membership could not be confirmed; retry this saved setup");
     }
     const issued = typeof membership.mcpToken?.credential === "string" && membership.mcpToken.credential.startsWith("rak_")
       ? membership.mcpToken.credential : null;
@@ -174,7 +182,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     } catch (error) {
       if (error.code !== "config_not_found") throw error;
     }
-    let token = kept ?? issued;
+    if (step.roomCredential !== undefined && (typeof step.roomCredential !== "string" || !step.roomCredential.startsWith("rak_")))
+      throw new Error("Saved room credential is invalid; no new key was issued");
+    let token = kept ?? issued ?? step.roomCredential;
     if (!token) {
       // A saved connection that was not kept (a different origin, room or
       // member, or a non-rak_ token) can never equal the config this run
@@ -188,6 +198,10 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       };
       issuerFields["tok" + "en"] = saved.secret;
       const issuer = new RoomAgentClient(issuerFields);
+      if (step.keyIssuancePending) throw new Error("Previous API key issuance is unconfirmed; reconcile that key before retrying. No replacement key was issued");
+      // Open-room admission has no returned bootstrap key. A lost issuance ACK
+      // cannot recover this server's one-time secret; never silently mint again.
+      if (openPublicRoom) { step.keyIssuancePending = true; journal.save(saved); }
       const key = await issuer.createAgentKey({
         // Same scopes as the hosted onboarding token (agent-plugin-store.mjs):
         // since b42251c3 the MCP inbox/wake tools need mcp:inbox / mcp:wake.
@@ -200,6 +214,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       const roomCredential = key.credential;
       const next = roomCredential;
       token = next;
+      step.roomCredential = token; step.keyIssuancePending = false; journal.save(saved);
     }
     const config = { version: 1, origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, token };
     const client = new RoomAgentClient({ ...config, fetchImpl });

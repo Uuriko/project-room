@@ -10,7 +10,7 @@ const workflows = Object.fromEntries(['deploy-prod', 'rollback-prod'].map(name =
 const deploy = workflows['deploy-prod'].jobs.deploy.steps;
 const rollback = workflows['rollback-prod'].jobs.rollback.steps;
 const runtime = workflows['deploy-prod'].jobs['release-runtime'].steps;
-const receipt = steps => steps.find(step => step.name === 'Receipt to muse-room');
+const receipt = steps => steps.find(step => step.name === 'Receipt to Project Room');
 function execute(t, step, values = {}, recovery) {
   const dir = mkdtempSync(join(tmpdir(), 'outcome-report-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -18,13 +18,13 @@ function execute(t, step, values = {}, recovery) {
   const summary = join(dir, 'summary'); writeFileSync(summary, '');
   // Execute the actual workflow body, replacing only transport to capture its
   // posted command. No production credentials, origin, or network are used.
-  const run = step.run.replace("node --input-type=module -e '\n", "node --input-type=module -e '\nglobalThis.fetch = async (_url, options) => { console.log(JSON.stringify({ captured: JSON.parse(options.body) })); return {ok:true,status:200}; };\n");
+  const run = step.run.replace("node --input-type=module -e '\n", "node --input-type=module -e '\nglobalThis.fetch = async (_url, options) => { console.log(JSON.stringify({ captured: JSON.parse(options.body), destination: _url, requestOrigin: options.headers.origin })); return {ok:true,status:200}; };\n");
   const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', run], { cwd: new URL('..', import.meta.url), encoding: 'utf8',
     env: { ...process.env, ROOM_RECEIPT_TOKEN: 'fixture', RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary,
       SHA: 'a'.repeat(40), PROD_ORIGIN: 'https://example.invalid', RECEIPT_ROOM: 'fixture', REASON: '', ...values } });
   assert.equal(result.status, 0, result.stderr);
   const captured = result.stdout.split('\n').find(line => line.startsWith('{"captured":'));
-  return { body: captured ? JSON.parse(captured).captured.data.body : null, summary: readFileSync(summary, 'utf8') };
+  return { body: captured ? JSON.parse(captured).captured.data.body : null, destination: captured ? JSON.parse(captured).destination : null, requestOrigin: captured ? JSON.parse(captured).requestOrigin : null, summary: readFileSync(summary, 'utf8') };
 }
 test('literal deploy receipt preserves upload/strict/live outcomes independently of job status', t => {
   const step = receipt(deploy);
@@ -89,4 +89,25 @@ test('deployment summary uses phase outcomes and does not equate absent version 
   assert.match(summary, /version not captured/);
   assert.match(summary, /Strict smoke: skipped; live smoke: skipped/);
   assert.doesNotMatch(summary, /not deployed/);
+});
+
+
+test('production and rollback receipts target the normalized project', () => {
+  for (const workflow of Object.values(workflows)) {
+    assert.equal(workflow.env.RECEIPT_ROOM, 'room-fafdae79cf8c');
+  }
+});
+
+
+test('actual deploy, rollback and publication receipts honor destination and origin configuration', t => {
+  for (const step of [receipt(deploy), receipt(rollback), runtime.find(step => step.name === 'Runtime publication outcome')]) {
+    assert.equal(step.env.ROOM_RECEIPT_TOKEN, '${{ secrets.ROOM_RECEIPT_TOKEN }}');
+    for (const room of ['room-fafdae79cf8c', 'explicit-other-room']) {
+      const origin = 'https://receipt-fixture.invalid';
+      const result = execute(t, step, { PROD_ORIGIN: origin, RECEIPT_ROOM: room });
+      assert.equal(result.destination, `${origin}/api/rooms/${room}/commands`);
+      assert.equal(result.requestOrigin, origin);
+    }
+  }
+  for (const workflow of Object.values(workflows)) assert.equal(workflow.env.PROD_ORIGIN, 'https://room.trydemigod.com');
 });

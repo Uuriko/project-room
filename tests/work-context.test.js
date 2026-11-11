@@ -153,11 +153,13 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   const complete = version => mutate(producer, T.WORK_COMPLETED, { summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: version, producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   await complete("v1");
   let context = await reviewer.workContext("test-handoff");
-  // Selected context must match the human card without rewriting the session ledger.
+  // Agent-facing reads report done on finished work; the ledger is not rewritten.
   assert.equal(context.work.state, "completed");
-  assert.equal(context.work.status, "queued");
+  assert.equal(context.work.status, "done");
   assert.equal(context.work.displayStatus, "done");
-  assert.equal(context.accessSummary.budget.sessionStatus, "queued");
+  assert.equal(context.work.recordedStatus, "queued");
+  assert.equal(context.accessSummary.budget.sessionStatus, "done");
+  assert.equal(context.accessSummary.budget.recordedSessionStatus, "queued");
   assert.match(workContextMarkdown(context), /Session display status: done/);
   assert.match(workContextMarkdown(context), /Recorded session controls[^\n]+"status":"queued"/);
   assert.equal(context.next.action, "verify"); assert.equal(context.next.addressedToViewer, true);
@@ -296,7 +298,7 @@ test("access summary lists only what the member can read; quoted mentions and im
   assert.deepEqual(summary.omitted, context.context.omitted, "the preview repeats the exact omissions the read reports");
   assert.deepEqual(summary.omitted, [...WORK_CONTEXT_OMISSIONS]);
   assert.deepEqual(summary.evidence, { records: [], retrieved: false });
-  assert.deepEqual(summary.budget, { maxRuntimeMs: "unknown", maxAttempts: "unknown", maxConcurrent: "unknown", maxSpendCents: "unknown", maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 0, sessionStatus: "queued" });
+  assert.deepEqual(summary.budget, { maxRuntimeMs: "unknown", maxAttempts: "unknown", maxConcurrent: "unknown", maxSpendCents: "unknown", maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 0, sessionStatus: "queued", recordedSessionStatus: "queued" });
   assert.equal(summary.externalExecution, false); assert.equal(summary.credentials, "none");
   const text = JSON.stringify(summary);
   for (const leak of ["SENTINEL", "quoted-mention", "excerpt-import", "UNRELATED"]) assert.equal(text.includes(leak), false, leak);
@@ -314,7 +316,7 @@ test("access summary lists only what the member can read; quoted mentions and im
   f.send("producer", T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: revision() });
   f.store.mutateWorkSession(f.keys.producer, "commons", { requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: revision(), action: "set_status", status: "processing", budget: { maxSpendCents: 500, maxAttempts: 2 } });
   const budget = f.view().accessSummary.budget;
-  assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 1, sessionStatus: "processing" });
+  assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 1, sessionStatus: "processing", recordedSessionStatus: "processing" });
   f.send("producer", T.WORK_STARTED, { workItemId: "test-handoff", expectedRevision: revision() });
   f.send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   const completed = f.view();

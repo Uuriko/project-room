@@ -123,7 +123,7 @@ export function createConversationDirectory({ read, changed = () => {} }) {
       if (page.mode === 'reset') { page = await read({ limit: 50 }); more = false; }
       if (ticket !== epoch) return;
       if (page.mode === 'reset' || more && page.nextCursor === previous) throw new Error(uiText('direct.changedAgain'));
-      peers = more ? [...new Map([...peers, ...page.peers].map(peer => [peer.memberId, peer])).values()] : page.peers;
+      if(more){const all=new Map(peers.map(peer=>[peer.memberId,peer]));for(const peer of page.peers){const old=all.get(peer.memberId);if(!old||peer.lastMessageAt>old.lastMessageAt)all.set(peer.memberId,peer);}peers=[...all.values()];}else peers=page.peers;
       cursor = page.nextCursor;
     } catch (cause) { if (ticket === epoch) { error = cause; if (!more) { peers = []; cursor = null; } } }
     finally {

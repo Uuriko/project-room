@@ -126,11 +126,11 @@ test("anonymous catalog keeps packet tools plus the existing OAuth access check"
     "packet must name room_mcp_snippet among the four join tools");
 });
 
-test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+test("outside identity gets join readers, access and join tools, and public-work tools", async () => {
   const names = await toolsList(undefined, outsiderSecret);
-  // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  assert.deepEqual(names, [...JOIN_READERS, "room_check_access", "room_join", ...PUBLIC_WORK_ALL]);
+  assert.match(llmsFullTxt(), /room_join {}/, "discovery must explain the default public-lobby join");
+  assert.match(llmsFullTxt(), /Outside identities get the four join tools, room_check_access and room_join, plus seven public-work tools/, "packet must describe the actual outside catalog");
 });
 
 test("member core profile is the packet's 13 core tools; join readers drop once joined (#5468)", async () => {

@@ -1,14 +1,14 @@
 name: staging
 
-# Deploy main to the isolated staging Worker (env.staging, script
-# project-room-stage) and check it. This never deploys production.
+# Deploy an explicitly selected candidate to the persistent staging Worker
+# (env.staging, project-room-stage). Main may use an older schema than an
+# active rehearsal, so a main push must never overwrite it automatically.
+# This never deploys production.
 # A missing CLOUDFLARE_API_TOKEN or ROOM_AGENT_CARD_SIGNING_KEY Actions
 # secret fails this workflow with "missing <NAME>" instead of going green
 # without deploying. This workflow is not a required check, so it never
 # blocks merges to main.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -71,7 +71,7 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
         run: |
           set -o pipefail
-          pnpm exec wrangler deploy --env staging --keep-vars | tee "$RUNNER_TEMP/wrangler-deploy.txt"
+          pnpm exec wrangler deploy --durable-objects-code-update-mode 'deferred 60s' --env staging --keep-vars --var ROOM_WAKE_ADAPTERS:0 --var ROOM_ASSIGNMENT_DEADLINES:0 | tee "$RUNNER_TEMP/wrangler-deploy.txt"
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const config = JSON.parse(readFileSync("wrangler.jsonc", "utf8"));
@@ -98,6 +98,7 @@ jobs:
         env:
           ROOM_SMOKE_ORIGIN: https://project-room-stage.getdasha.workers.dev
           ROOM_SMOKE_ISOLATED: "1"
+          ROOM_SMOKE_EXPECTED_REVISION: ${{ github.sha }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs --browser | tee staging-smoke.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

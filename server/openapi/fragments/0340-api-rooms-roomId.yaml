@@ -8,7 +8,13 @@
         view) is the read-only Catch up boundary: that marker moved past the
         viewer's own unbroken run of events, the same boundary the return
         brief uses. Reading it never writes a marker. `?view=work` returns the
-        work-focused snapshot (`snapshotView`, `snapshotVersion`). Header
+        work-focused snapshot (`snapshotView`, `snapshotVersion`). Normalized
+        work and orientation views return version 2 with at most four exact
+        current task records, viewer-scoped private definitions and `workWindow`.
+        Its `hasMore`, encrypted `nextCursor` and exact `nextRead.path` continue
+        the source using `work_cursor`; absence from a page is not absence from
+        the room. Source change or process restart invalidates the cursor.
+        Legacy work/orientation remain version 1. Header
         `x-project-room-help-context: 1` (with `view=work`) adds help
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
@@ -40,11 +46,38 @@
         other members or work. It performs fresh authorization on each read;
         it is not a cached grant for a later operation. Context/audit headers
         and other query filters cannot be combined with this view.
+        `?view=authority&memberId=...` returns `snapshotView: authority`,
+        version 1, with the authenticated caller, owner and at most 64 selected
+        member IDs. Repeated `memberId` selects are deduplicated. Only current
+        id/kind/active/revision/identity/account/accountable-human fields are
+        returned, never message history, work bodies or a full roster. Records
+        are verified before field selection. `authoritySelection` reports the
+        exact requested IDs, `complete: true`, and `unresolvedMemberIds`;
+        unresolved does not assert absence or revocation and cannot authorize
+        dependent work. The response is limited to 128 KiB. Each read freshly
+        authenticates in one read transaction; it is not a cached grant for
+        later operations. Other query filters and context/audit headers are
+        rejected. The bridge rechecks actual stored request authors before
+        execution/delivery and its explicitly configured human before forwarding
+        host tool approval; this read grants no host access.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
-          schema: { type: string, enum: [work, identity, orientation] }
+          schema: { type: string, enum: [work, identity, orientation, authority] }
+        - name: memberId
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 64
+            items: { type: string, minLength: 1, maxLength: 128 }
+          description: Exact member IDs for view=authority only; defaults always include caller and owner.
+        - name: work_cursor
+          in: query
+          schema: { type: string, maxLength: 4096 }
+          description: Exact opaque continuation from a normalized work or orientation view; only with the same view.
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }

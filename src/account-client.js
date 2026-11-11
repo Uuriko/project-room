@@ -1,5 +1,5 @@
 import { uiText } from "./strings.js";
-import { humanErrorMessage } from "./error-copy.js";
+import { humanErrorMessage, isDeadLinkCode } from "./error-copy.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
@@ -175,7 +175,9 @@ export class AccountClient {
       // Ownership ended (signed out, revoked, binding rotated): retire the
       // view instead of throwing. Uncertain failures (5xx, offline) keep
       // the session so the caller can retry.
-      if (error?.status === 401 || error?.status === 403 || error?.status === 409
+      // A storage capacity refusal does not establish an identity change.
+      // Keep the session, as for other uncertain failures, and let the caller retry.
+      if (error?.status === 401 || error?.status === 403 || (error?.status === 409 && error?.code !== "pilot_limit")
         || ["unauthenticated", "access_denied", "session_binding_changed"].includes(error?.code)) {
         this.invalidate(generation, session);
         return false;
@@ -185,6 +187,12 @@ export class AccountClient {
     if (!this.owns(generation, session)) return superseded();
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
+  }
+  createRoom(data, { session = this.currentSession("creating a room", { authenticated: true }) } = {}) {
+    return this.request("/api/account-rooms", { method: "POST", data, session });
+  }
+  createRoomFromTemplate(data, { session = this.currentSession("creating a room", { authenticated: true }) } = {}) {
+    return this.request("/api/account-rooms/from-template", { method: "POST", data, session });
   }
   async rooms(after = null) {
     const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
@@ -326,7 +334,7 @@ export class AccountClient {
     try {
       preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
     } catch (error) {
-      if (error.code !== "link_unavailable") throw error;
+      if (!isDeadLinkCode(error.code)) throw error;
       const session = this.session ?? await this.restore();
       if (!session?.authenticated) throw error;
       const generation = this.generation;

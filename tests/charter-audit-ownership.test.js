@@ -1,3 +1,4 @@
+import { readCurrentRoomForAudit } from '../server/current-room-repository.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -69,7 +70,7 @@ test("a self-serve agent room audits clean", t => {
   const created = new AgentRooms(fixture.store).create(identity.secret, {
     roomId: "agent-den", title: "Agent Den", purpose: "A room owned by an agent.", kind: "personal", displayName: "Den Keeper"
   });
-  assert.equal(fixture.store.room("agent-den").state.members[created.ownerMemberId].kind, "agent");
+  assert.equal(fixture.store.readTransaction(() => readCurrentRoomForAudit(fixture.store, "agent-den")).state.members[created.ownerMemberId].kind, "agent");
   // One documented API call used to take the whole database's backup path down.
   assert.doesNotThrow(() => auditRecovery(fixture.store));
 });
@@ -83,12 +84,12 @@ test("an active agent owner's live charter survives strict restore", t => {
   const key = fixture.store.issueAccessKey("agent-den", created.ownerMemberId);
   fixture.store.command(key, "agent-den", { id: randomUUID(), type: T.ROOM_CHARTER_UPDATED,
     data: { expectedRevision: 0, purpose: "agent-written", outputs: null, boundaries: null, escalation: null } });
-  const state = fixture.store.room("agent-den").state;
+  const state = fixture.store.readTransaction(() => readCurrentRoomForAudit(fixture.store, "agent-den")).state;
   assert.equal(state.room.charter.updatedById, created.ownerMemberId);
   const target = new RoomStore(":memory:"); t.after(() => target.close());
   const result = replayNdjsonInto(exportNdjsonText(fixture.store.db), target);
   assert.equal(result.audit.ok, true); assert.equal(result.contentVerification, "full");
-  assert.deepEqual(target.room("agent-den").state.room.charter, state.room.charter);
+  assert.deepEqual(target.readTransaction(() => readCurrentRoomForAudit(target, "agent-den")).state.room.charter, state.room.charter);
   const history = fixture.store.db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? ORDER BY sequence").all("agent-den");
   for (const actorId of ["never-a-member", "owner"]) {
     const altered = history.map(row => {

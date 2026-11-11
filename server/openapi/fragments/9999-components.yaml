@@ -837,6 +837,7 @@ components:
         actor: { $ref: '#/components/schemas/Actor' }
         before:
           type: object
+          nullable: true
           properties:
             account: { type: string }
             lotState: { type: string }
@@ -929,7 +930,25 @@ components:
         roomId: { type: string }
         sequence: { type: integer, description: Room sequence the list was read at }
         limit: { type: integer, description: Maximum pins per room (50) }
-        count: { type: integer }
+        count: { type: integer, description: Visible pins in this page; not a global total for contractVersion 2 }
+        contractVersion: { type: integer, enum: [2], description: Present for bounded normalized pages }
+        sourceWindow:
+          type: object
+          required: [complete, sourceBound]
+          properties:
+            complete: { type: boolean, description: This continuation reached the end of its pin source }
+            sourceBound: { type: integer, const: 4 }
+        page:
+          type: object
+          required: [hasMore, nextCursor, nextRead]
+          properties:
+            hasMore: { type: boolean }
+            nextCursor: { type: [string, 'null'] }
+            nextRead:
+              type: [object, 'null']
+              properties:
+                method: { type: string, const: GET }
+                path: { type: string }
         pins:
           type: array
           items:

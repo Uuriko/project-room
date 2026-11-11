@@ -11,8 +11,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
-import { nextActionsForRoomCreate } from "../server/discoverability.mjs";
-import { updateWork } from "../server/work-claims.mjs";
+import {readCurrentWorkItem,readCurrentRecord} from "../server/current-room-repository.mjs";
+import {textVersion} from "../server/text-results.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
@@ -60,15 +60,13 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.duplicate, false);
   // RC-2026-09-18-030: the create response names the first-owner moves.
   assert.deepEqual(created.next.map(n => n.action),
-    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
+    ["read-work", "start-work", "post-message", "invite-members"]);
   assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.tool || n.doc)),
     "every next step names a path, tool or doc plus what to do");
-  assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
-    "room-scoped next steps are templated with the new roomId");
-  assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
-  assert.equal(created.next.find(n => n.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
-  assert.equal(created.starter.claimId, "starter");
-  assert.equal(created.starter.state, "claimed");
+  assert.deepEqual(created.next[0].arguments, {workItemId:'starter'});
+  assert.equal(created.nextActions[0].tool, 'room_read_work');
+  assert.equal(created.starter.workItemId, 'starter');
+  assert.equal(created.starter.state, 'accepted');
   // The projection names the agent member as owner with the full set...
   const authority = store.roomAuthority("agent-den");
   assert.equal(authority.ownerId, identity.identityId);
@@ -277,7 +275,7 @@ test("an agent owner may archive its own room", async t => {
     id: randomUUID(), type: "room.archived", data: {}
   });
   assert.equal(archived.event.type, "room.archived");
-  assert.equal(store.room("agent-den").state.room.archivedAt != null, true);
+  assert.equal(store.readTransaction(()=>readCurrentRecord(store.db,'agent-den','metadata','room')).archivedAt != null, true);
 });
 
 test("transfer through the generic command path is auditable too", async t => {
@@ -779,75 +777,45 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.notEqual(otherMint.body?.error?.code, "guest_invite_account_session_required");
 });
 
-test("the auto-claimed starter task carries the retention ack with the 24h SLA", async t => {
-  // QA 2026-10-03 (buildqa lane, live local journey): ensureAgentStarter
-  // claimed the starter through a direct path that never appended the bot's
-  // retention_ack — the room's very first contribution sat at zero replies.
-  const { store, rooms, identity } = setup(t);
-  const created = rooms.create(identity.secret, createArgs());
-  const starter = store.workClaims.list(created.roomId).find(item => item.id === "starter");
-  assert.ok(starter, "starter task exists");
-  const ack = starter.history.find(h => h.action === "retention_ack");
-  assert.ok(ack, "starter claim carries the bot's ack receipt");
-  assert.equal(ack.agentId, identity.identityId);
-  assert.match(ack.note, /first=1 sla_due=/);
+test("the starter has a real canonical acceptance receipt instead of a legacy claim ack", t => {
+  const {store,rooms,identity}=setup(t),created=rooms.create(identity.secret,createArgs());
+  const work=readCurrentWorkItem(store.db,created.roomId,'starter');
+  assert.equal(work.state,'accepted');assert.equal(work.accountableMemberId,identity.identityId);
+  assert.equal(store.workClaims.list(created.roomId).length,0);
+  const events=store.db.prepare("SELECT json_extract(body,'$.type') type FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('work.proposed','work.accepted') ORDER BY sequence").all(created.roomId);
+  assert.deepEqual(events.map(e=>e.type),['work.proposed','work.accepted']);
 });
 
-// 2026-10-05 human-agent user-testing wave (M1, finding F1): the create-room
-// taught finish-work body ({"state":"done",...}) applied verbatim to the
-// auto-claimed starter 422s — claimed -> done is not a legal transition.
-// The taught golden path is start-work first, and the finish-work description
-// must say so. These pin the taught vocabulary to the state machine it drives.
-const finishWorkStep = list => list.find(entry => entry.action === "finish-work");
 const startWorkStep = list => list.find(entry => entry.action === "start-work");
-
-test("the taught finish-work description names the in_progress intermediate step", t => {
-  const { rooms, identity } = setup(t);
-  const created = rooms.create(identity.secret, createArgs());
-  for (const vocabulary of [created.next, created.nextActions]) {
-    const finish = finishWorkStep(vocabulary);
-    assert.ok(finish, "finish-work is taught");
-    assert.equal(finish.path, "/api/rooms/agent-den/work-claims/starter/update");
-    assert.match(finish.description, /in_progress/,
-      "the description must teach that the starter has to be started first");
-  }
+test("the taught starter path inspects its current revision before starting", t => {
+ const {rooms,identity}=setup(t),created=rooms.create(identity.secret,createArgs());
+ for(const list of [created.next,created.nextActions]){
+  assert.equal(list[0].tool,'room_read_work');const start=startWorkStep(list);
+  assert.equal(start.path,'/api/rooms/agent-den/commands');assert.equal(start.body.type,'work.started');
+  assert.equal(start.body.data.expectedRevision,1);assert.match(start.description,/revision/);
+  assert.ok(list.every(step=>!step.path?.includes('work-claims')));
+ }
 });
-
-test("finish-work verbatim on a fresh claimed starter is still rejected", t => {
-  // The state machine keeps the two-step path: a repair that quietly adds
-  // claimed -> done would silently change the taught onboarding flow, so this
-  // fails loudly instead.
-  const { store, rooms, identity } = setup(t);
-  const created = rooms.create(identity.secret, createArgs());
-  assert.equal(created.starter.state, "claimed");
-  const finish = finishWorkStep(created.next);
-  const item = store.workClaims.get("agent-den", "starter");
-  assert.throws(
-    () => updateWork(item, identity.identityId, { ...finish.body, now: store.now() }),
-    err => err.code === "invalid_claim_input" && /claimed -> in_progress\|blocked\|released/.test(String(err.message)));
+test("a stale starter revision is refused without changing the accepted task",t=>{
+ const {store,rooms,identity}=setup(t),created=rooms.create(identity.secret,createArgs());
+ const start=startWorkStep(created.next);
+ assert.throws(()=>store.command(identity.secret,created.roomId,{...start.body,id:'stale-start',data:{...start.body.data,expectedRevision:0}}),/revision|changed/i);
+ assert.equal(readCurrentWorkItem(store.db,created.roomId,'starter').state,'accepted');
 });
-
-test("the full taught sequence (start-work then finish-work) walks the starter to done", t => {
-  const { store, rooms, identity } = setup(t);
-  const created = rooms.create(identity.secret, createArgs());
-  let item = store.workClaims.get("agent-den", "starter");
-  const start = startWorkStep(created.next);
-  const finish = finishWorkStep(created.next);
-  item = updateWork(item, identity.identityId, { ...start.body, now: store.now() });
-  assert.equal(item.state, "in_progress");
-  item = updateWork(item, identity.identityId, { ...finish.body, now: store.now() });
-  assert.equal(item.state, "done");
-  assert.equal(item.deliveryMode, "result");
+test("the taught start followed by a saved result completes native work and retries exactly",t=>{
+ const {store,rooms,identity}=setup(t),created=rooms.create(identity.secret,createArgs());
+ const start={...startWorkStep(created.next).body,id:'start-starter'};
+ store.command(identity.secret,created.roomId,start);assert.equal(store.command(identity.secret,created.roomId,start).duplicate,true);
+ const body='Useful saved starter result';
+ const post=store.command(identity.secret,created.roomId,{id:'save-starter',type:'message.posted',data:{messageId:'starter-result',workItemId:'starter',body}});
+ const work=readCurrentWorkItem(store.db,created.roomId,'starter');assert.equal(work.state,'working');
+ const done={id:'complete-starter',type:'work.completed',data:{workItemId:'starter',expectedRevision:work.revision,evidenceKind:'room_text',evidenceMessageId:'starter-result',evidenceMessageEventId:post.event.id,evidenceVersion:textVersion(body),previousCompletionEventId:null,producerId:identity.identityId,summary:'Result saved',nextAction:'Review result'}};
+ store.command(identity.secret,created.roomId,done);assert.equal(store.command(identity.secret,created.roomId,done).duplicate,true);
+ const result=readCurrentWorkItem(store.db,created.roomId,'starter');assert.equal(result.receipt.nativeText.messageId,'starter-result');assert.equal(result.state,'completed');
 });
-
-test("both taught vocabularies agree on the starter verbs (non-divergent)", t => {
-  const { rooms, identity } = setup(t);
-  const created = rooms.create(identity.secret, createArgs());
-  const finishNext = finishWorkStep(created.next);
-  const finishActions = finishWorkStep(nextActionsForRoomCreate("agent-den"));
-  assert.equal(finishNext.path, finishActions.path);
-  assert.equal(finishNext.method, finishActions.method);
-  assert.deepEqual(finishNext.body, finishActions.body);
+test("both returned vocabularies teach the same native starter operations",t=>{
+ const {rooms,identity}=setup(t),created=rooms.create(identity.secret,createArgs());
+ assert.deepEqual(created.nextActions.map(({transport,...step})=>step),created.next);
 });
 
 test("create with starter:false skips the auto-claimed starter task", t => {

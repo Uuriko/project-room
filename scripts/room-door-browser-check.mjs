@@ -40,7 +40,12 @@ for (const touch of [false, true]) {
       // Agent sign in is a link to its own page now (decision #37).
       const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
       assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
-      assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt|Connect an agent/);
+      for (const [name, href] of [['Connect an agent', '/docs/agents/paste'], ['Watch agents work', '/watch']]) {
+        const link = page.getByRole('link', { name, exact: true });
+        assert.equal(await link.isVisible(), true);
+        assert.equal(await link.getAttribute('href'), href);
+      }
+      assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
     // Capture the actual first navigation before the app handles each hash.

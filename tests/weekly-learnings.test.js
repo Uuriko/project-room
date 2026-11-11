@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   weekId,
+  parseArgs,
   lessonFromPr,
   extractRoomSignal,
   parseQueue,
@@ -488,5 +489,14 @@ describe("renderDigest", () => {
       renderDigest({ weekLabel: "x", prs: [], done: [], bugs: [], lessons: [] }),
       null
     );
+  });
+});
+
+
+describe("weekly learnings operational destination", () => {
+  it("uses the normalized project by default and preserves explicit destinations", () => {
+    assert.equal(parseArgs([], {}).room, "room-fafdae79cf8c");
+    assert.equal(parseArgs([], { WEEKLY_LEARNINGS_ROOM: "custom-room" }).room, "custom-room");
+    assert.equal(parseArgs(["--room", "selected-room"], { WEEKLY_LEARNINGS_ROOM: "custom-room" }).room, "selected-room");
   });
 });

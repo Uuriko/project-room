@@ -69,9 +69,9 @@ test("B-8: one coarse-pointer token, applied via the token", () => {
   assert.match(read("src/project-offers.css"), /min-height: var\(--control-min-target-coarse\)/);
 });
 
-test("B-9: the matcher sits below the offers workspace, and the copy assumes no agent", () => {
+test("B-9: the matcher precedes the offers workspace, and the copy assumes no agent", () => {
   const offers = read("src/project-offers-ui.js");
-  assert.match(offers, /\(\$\('\.workspace'\) \?\? \$\('\.intro'\)\)\.after\(matching\)/);
+  assert.match(offers, /\(\$\('\.workspace'\) \?\? \$\('\.intro'\)\)\.before\(matching\)/);
   assert.doesNotMatch(read("offers.html"), /work on with your agent/);
 });
 

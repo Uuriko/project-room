@@ -1,0 +1,114 @@
+{
+  "status": "INTERMEDIATE offline package only; not complete schema45 or live qualification",
+  "sourceHead": "d663baecae57146fc1cbfee50b7996c599ea1130",
+  "rootSource": "3b3cd0df38bfaac053f29cad9957db25a5028e72",
+  "runtimeDiffFromRootEmpty": true,
+  "changes": [
+    "Generated candidate manifest via existing writer; only src/client.js asset hash drift.",
+    "Extended existing cold archive integration with protected private native inbox obligation and v2 reply list/selected answerBasis; explicit exported module/index probes satisfy coverage without grandfather exemptions."
+  ],
+  "suite": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "command": "node --test tests/runtime-package.test.js tests/candidate-manifest.test.js"
+  },
+  "logs": {
+    "suite": {
+      "path": "audit/evidence/intermediate-package-final-suite-20261101.log",
+      "sha256": "02183946dd4357c3485d0aefeae906270e88632f802897bf50e4bc25d0a2930e",
+      "exitCode": 0
+    },
+    "preflight": {
+      "path": "audit/evidence/intermediate-package-final-preflight-20261101.log",
+      "sha256": "71742c90b2091955c9a83388fd99cfd1ab0c1f7a253fef17cc76bbb9741f8d3e",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/intermediate-package-final-lint-20261101.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    }
+  },
+  "package": {
+    "verified": true,
+    "sourceCommit": "d663baecae57146fc1cbfee50b7996c599ea1130",
+    "sourceTree": "7b3cf428f8b3ce34397d4eed4216d6d73efe4397",
+    "schemaVersion": 45,
+    "files": 689,
+    "assets": 142,
+    "manifestSha256": "00075a650f27d55d8782ab71cfe76c88bdcf93d2e434136e8a124b485cc3f033"
+  },
+  "archive": {
+    "archive": "/tmp/project-room-intermediate-d663baeca.tar",
+    "sha256": "aa96992022a191e17e3224b645b7f35216f423cdaeb2e00a36efd3cb6fc0d7fb",
+    "extracted": "/tmp/project-room-intermediate-d663baeca-extracted"
+  },
+  "standaloneExtractedVerification": {
+    "verified": true,
+    "sourceCommit": "d663baecae57146fc1cbfee50b7996c599ea1130",
+    "sourceTree": "7b3cf428f8b3ce34397d4eed4216d6d73efe4397",
+    "schemaVersion": 45,
+    "files": 689,
+    "assets": 142,
+    "manifestSha256": "00075a650f27d55d8782ab71cfe76c88bdcf93d2e434136e8a124b485cc3f033"
+  },
+  "nativeFixture": {
+    "sourceCommit": "d663baecae57146fc1cbfee50b7996c599ea1130",
+    "package": {
+      "verified": true,
+      "sourceCommit": "d663baecae57146fc1cbfee50b7996c599ea1130",
+      "sourceTree": "7b3cf428f8b3ce34397d4eed4216d6d73efe4397",
+      "schemaVersion": 45,
+      "files": 689,
+      "assets": 142,
+      "manifestSha256": "00075a650f27d55d8782ab71cfe76c88bdcf93d2e434136e8a124b485cc3f033"
+    },
+    "qualification": {
+      "runtimeSource": "751f786639+native-work-2-restore-gate",
+      "actualNative": true,
+      "importedPartialEvents": 1000,
+      "sourceSeal": true,
+      "coverageSteps": 49,
+      "coverageRows": 6075,
+      "maxPayloadRowsPerStep": 128,
+      "coldDuringCoverage": true,
+      "preopenedPreparedDenied": true,
+      "ordinaryReady503UntilAudit": true,
+      "finalUnboundedAuditRequired": true,
+      "coldReady": true,
+      "exactRetry": true,
+      "wholeRecoveryBounded": false,
+      "acceptedNativeWorkCapacity": true,
+      "nativeWorkExactRetry": true
+    },
+    "fixturesOutsideArchive": [
+      "durable-coverage.check.mjs",
+      "durable-coverage-seed.test-fixture.mjs",
+      "durable-coverage-native.test-fixture.mjs",
+      "current-room-serving.test-fixture.mjs"
+    ],
+    "productionSource": "verified offline archive",
+    "archiveUnchanged": true
+  },
+  "initialFailure": {
+    "head": "3b3cd0df38bfaac053f29cad9957db25a5028e72",
+    "passed": 16,
+    "failed": 2,
+    "exitCode": 1,
+    "log": "audit/evidence/intermediate-package-original-red-20261101.log",
+    "reasons": [
+      "candidate manifest assets:src/client.js drift",
+      "four new inbox/reply modules had only indirect Store tests; missing direct test reference gate"
+    ]
+  },
+  "limitations": [
+    "Published root requested intermediate packaging before pending pairing scratch/new-format admission work; this does not qualify unmerged fixes.",
+    "Root browser channels/Record/partial work and metadata flows remain unqualified; archive green does not imply UI complete.",
+    "Actual Native fixture runs unchanged outside immutable archive; every production directory points into verified archive. Its runtimeSource751 diagnostic is a retained historical fixture label; actual runtime source is exact package sourceCommit d663 above.",
+    "Restore imports1000partialevents,49coverage steps6075rows,max128payloadrowsperstep; final unbounded full audit is still mandatory before readiness. wholeRecoveryBounded:false preserved.",
+    "No push/deploy/live migration/schema activation/provider model run or grant change.",
+    "Initial local archive extraction script used unsupported Python filter keyword; reran explicit safe member validation then extraction, standalone verification exit0; no product source change."
+  ]
+}

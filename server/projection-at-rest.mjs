@@ -156,6 +156,25 @@ function restoreEnvelope(message) {
   return out;
 }
 
+// Shared pure per-record codec. The normal serializer supplies its existing
+// memo/write callback; bounded replay can use the same byte/key-order transform
+// without writing serving bodies or manufacturing a new row authority.
+export function projectionMessageAtRest(original, {enabled=false, bodySha=shaOf}={}) {
+  if(!enabled)return original;
+  const message=nullEnvelope(original)?slimEnvelope(original):original;
+  return slimmable(original)?renameKey(message,'body','bodyRef',bodySha(message.body,message.id)):message;
+}
+
+// The same per-record inverse used by bounded qualification; callers supply
+// an independently admitted body, not a repair or full-room hydration path.
+export function projectionMessageFromRest(original,{bodyForSha}={}) {
+  const message=hasMarker(original)?restoreEnvelope(original):original;
+  if(typeof message?.bodyRef!=='string')return message;
+  const body=bodyForSha?.(message.bodyRef);
+  if(typeof body!=='string'||shaOf(body)!==message.bodyRef)throw Error('Missing qualified projection body');
+  return renameKey(message,'bodyRef','body',body);
+}
+
 // Delete every body row the projection about to be stored no longer
 // references (win 4, replacing the json_each trigger). `referenced` is the
 // set of bodyRef shas in the new stored text. Callers run this in the same
@@ -230,15 +249,16 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
   const { known, insert } = prepared(db);
   const present = new Set(known.all(roomId).map(row => row.sha));
   const cache = memoFor(db), memo = previousMemo ?? new Map(), seen = new Map();
-  const slim = messages.map(original => {
-    const message = nullEnvelope(original) ? slimEnvelope(original) : original;
-    if (!slimmable(original)) return message;
-    const cached = memo.get(message.id);
-    const sha = cached && cached.body === message.body ? cached.sha : shaOf(message.body);
-    seen.set(message.id, { body: message.body, sha });
-    if (!present.has(sha)) { insert.run(roomId, sha, message.body); present.add(sha); }
-    return renameKey(message, "body", "bodyRef", sha);
-  });
+  const slim = messages.map(original => projectionMessageAtRest(original, {
+    enabled: true,
+    bodySha(body, id) {
+      const cached = memo.get(id);
+      const sha = cached && cached.body === body ? cached.sha : shaOf(body);
+      seen.set(id, { body, sha });
+      if (!present.has(sha)) { insert.run(roomId, sha, body); present.add(sha); }
+      return sha;
+    }
+  }));
   cache.set(roomId, seen);
   const referenced = new Set();
   for (const message of slim) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);

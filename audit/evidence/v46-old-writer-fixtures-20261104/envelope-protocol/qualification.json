@@ -1,0 +1,40 @@
+{
+  "testCommit": "a7671262819444fdf41737ae6e85ebadcf5c0ac5",
+  "runtimeBase": "ac0a9c8e50658a6b2411e60d321c4b12839be78a",
+  "temporaryRootOverlay": {
+    "restore-admission.mjs": "sha256:bddc89e3e255acf0bbaf1629518727559299b41e065d2a06363843c6b12bd728",
+    "restore-ndjson.mjs": "sha256:d1f7c5374b446c10c8fb67597ecfe8fcd4b10d8a2a239e4863be7de44887ac2f",
+    "restore-result-envelope.mjs": "sha256:6d72a8746271e9c18566a498f6efb05291a7f62b58ad5d22a346d618d63574b0"
+  },
+  "before": {
+    "pass": 0,
+    "fail": 1
+  },
+  "after": {
+    "pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "lint": {
+    "exit": 0,
+    "existingWarnings": 1
+  },
+  "diffCheckExit": 0,
+  "logs": [
+    {
+      "file": "v46-envelope-protocol-before-1104.log.gz",
+      "uncompressedSha256": "30ba51f3c606d0bc85eca16337f218ef814b2a5b89bdcdfd90b6f20d3709533d",
+      "bytes": 3262
+    },
+    {
+      "file": "v46-envelope-protocol-after-1104.log.gz",
+      "uncompressedSha256": "787019a166ce2deed9f2ebf3620dffcef80beddbdf2030e6e8484add30d8d6c2",
+      "bytes": 1909
+    },
+    {
+      "file": "v46-envelope-protocol-lint-1104.log.gz",
+      "uncompressedSha256": "080aa3d2c5325083eeb3f2987f44521985d75425ceca729d71c1bcf0b6c5c70d",
+      "bytes": 224
+    }
+  ]
+}

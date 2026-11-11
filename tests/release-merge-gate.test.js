@@ -173,20 +173,21 @@ test('actual merge CLI performs two complete scans, journals the validated grant
   mkdirSync(bin); mkdirSync(connection, { mode: 0o700 });
   const requests = [];
   let keys = grant.problemKeys;
+  let selectedRoom = "room-fafdae79cf8c";
   const server = createServer((req, res) => {
     requests.push(req.url); res.setHeader('content-type', 'application/json');
     const v = view(); v.slot.history[0].note = JSON.stringify({ ...grant, problemKeys: keys });
-    if (req.url === '/api/session') return res.end(JSON.stringify({ authMode: 'room', roomId: 'muse-room',
+    if (req.url === '/api/session') return res.end(JSON.stringify({ authMode: 'room', roomId: selectedRoom,
       member: { id: 'coordinator', kind: 'agent', active: true, revision: 0, permissions: [] },
       expiresAt: Date.now() + 3600000, account: null, csrf: null, sessionBinding: null, sessionRevision: null }));
     if (req.url.endsWith('/MERGE-SLOT')) return res.end(JSON.stringify(v.slot));
     if (req.url.endsWith('/RELEASE-PAUSE')) return res.end(JSON.stringify(v.pause));
-    if (req.url.includes('/work-claims?')) return res.end(JSON.stringify({ roomId: 'muse-room', claims: [], hasMore: false }));
+    if (req.url.includes('/work-claims?')) return res.end(JSON.stringify({ roomId: selectedRoom, claims: [], hasMore: false }));
     res.statusCode = 404; res.end('{}');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(root, { recursive: true, force: true }); });
-  writeFileSync(join(connection, 'connection.json'), JSON.stringify({ version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: 'muse-room', memberId: 'coordinator', token: 'x'.repeat(43) }), { mode: 0o600 });
+  writeFileSync(join(connection, 'connection.json'), JSON.stringify({ version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: 'room-fafdae79cf8c', memberId: 'coordinator', token: 'x'.repeat(43) }), { mode: 0o600 });
   const fixture = join(root, 'fixture.json');
   writeFileSync(fixture, JSON.stringify({ info, base: candidate.base, protection: { enforce_admins: { enabled: true }, required_status_checks: { strict: false, checks: [{ context: CONTEXT, app_id: null }] } } }));
   writeFileSync(join(bin, 'gh'), `#!${process.execPath}
@@ -207,13 +208,14 @@ else process.exit(9);
 console.log(JSON.stringify(out));
 `, { mode: 0o700 });
   const run = promisify(execFile), script = new URL('../scripts/release-merge-gate.mjs', import.meta.url).pathname;
-  for (const keyMode of ['present', 'absent', 'empty']) for (const statusRequired of [true, false]) for (const changed of [false, true]) {
+  for (const roomMode of ['default', 'explicit', 'environment']) for (const keyMode of ['present', 'absent', 'empty']) for (const statusRequired of [true, false]) for (const changed of [false, true]) {
+    selectedRoom = roomMode === 'default' ? 'room-fafdae79cf8c' : 'configured-project';
     keys = keyMode === 'present' ? grant.problemKeys : keyMode === 'empty' ? [] : undefined;
     writeFileSync(fixture, JSON.stringify({ info, base: candidate.base, protection: { enforce_admins: { enabled: true }, required_status_checks: statusRequired ? { strict: false, checks: [{ context: CONTEXT }] } : null } }));
     requests.length = 0;
-    const calls = join(root, `calls-${keyMode}-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${keyMode}-${statusRequired}-${changed}.json`);
-    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE_DATA: fixture, FIXTURE_CALLS: calls, FIXTURE_JOURNAL: journal, CHANGE_HEAD: changed ? '1' : '0' };
-    const command = run(process.execPath, [script, 'merge', '--pr', String(candidate.pr), '--head', candidate.head, '--base', candidate.base, '--state', journal, '--connection', connection, '--apply'], { env });
+    const calls = join(root, `calls-${roomMode}-${keyMode}-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${roomMode}-${keyMode}-${statusRequired}-${changed}.json`);
+    const env = { ...process.env, PROJECT_ROOM_OPERATIONAL_ROOM: roomMode === 'environment' ? selectedRoom : '', PATH: `${bin}:${process.env.PATH}`, FIXTURE_DATA: fixture, FIXTURE_CALLS: calls, FIXTURE_JOURNAL: journal, CHANGE_HEAD: changed ? '1' : '0' };
+    const command = run(process.execPath, [script, 'merge', '--pr', String(candidate.pr), '--head', candidate.head, '--base', candidate.base, '--state', journal, '--connection', connection, ...(roomMode === 'explicit' ? ['--room', selectedRoom] : []), '--apply'], { env });
     if (changed) await assert.rejects(command, /pr_head_changed.*Qualify the new head/); else await command;
     const observed = readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(observed.filter(x => x.a.includes('graphql')).length, statusRequired ? 2 : 0);
@@ -221,6 +223,7 @@ console.log(JSON.stringify(out));
     // of each remaining selected read per inspection remains intact.
     assert.equal(requests.filter(url => url === '/api/session').length, keyMode === 'present' ? 12 : 6);
     assert.equal(requests.filter(url => url.includes('/work-claims?')).length, keyMode === 'present' ? 6 : 0);
+    assert.ok(requests.filter(url => url !== '/api/session').every(url => url.startsWith(`/api/rooms/${selectedRoom}/`)));
     assert.deepEqual(observed.filter(x => x.input?.context === CONTEXT).map(x => x.input.state), statusRequired ? ['success', 'failure'] : []);
     assert.equal(observed.filter(x => x.a.includes('PUT')).length, changed ? 0 : 1);
     const saved = JSON.parse(readFileSync(journal));

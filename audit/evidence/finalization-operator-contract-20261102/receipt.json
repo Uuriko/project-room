@@ -1,0 +1,42 @@
+{
+  "runtimeBase": "721192847",
+  "testSource": "9e461ae7e405cd354627260013afc789f78afa1b",
+  "testCommand": "/Users/johnpotter/.local/bin/node --test tests/recovery-finalization-continuation-contract.test.mjs",
+  "tests": 3,
+  "pass": 3,
+  "fail": 0,
+  "skip": 0,
+  "exit": 0,
+  "scanExit": 0,
+  "lintExit": 0,
+  "reportCalls": 4218,
+  "preReportCalls": 298,
+  "wholeLiteralOracleRequired": true,
+  "productionCalls": false,
+  "artifacts": [
+    {
+      "artifact": "project-room-finalization-contract-current.log.gz",
+      "bytes": 8750,
+      "sha256": "695096454b3b82f08f9bc7f6959da9a05ac847a40db388b7c66bf11505656e60",
+      "gzipSha256": "6b15d13d17788421748dbcd4bc73150601333c3171c6b64622ea297c305b8114"
+    },
+    {
+      "artifact": "finalization-operator-contract-1102.log.gz",
+      "bytes": 6699,
+      "sha256": "826308ccd531a0b0e6c0e8dc5ca8753f4e47ad4b2da6be21ff418f52d428f453",
+      "gzipSha256": "7012f592fb663f692d45355f2cf848f73d7bb93871e0d31dc2fcad5d6c4b6963"
+    },
+    {
+      "artifact": "finalization-operator-contract-scan-1102.log.gz",
+      "bytes": 53,
+      "sha256": "0aef2bd77e5bb6988196580c4cd8614e9d1c33a477135501d4bd26e108447e5f",
+      "gzipSha256": "17234512edc86968ac33abab93b8c8f40efa636402d9e0bcb6dba3812663166f"
+    },
+    {
+      "artifact": "finalization-operator-contract-lint-1102.log.gz",
+      "bytes": 72313,
+      "sha256": "ebc11d92e8cdd593e58e9ee8218f1faa6b02c6d7f35fc618458a515b609290d9",
+      "gzipSha256": "a55a180ee93c1af28fd1862cfc1a85f919af24d19ba15918d4df4a81d12f8895"
+    }
+  ]
+}

@@ -43,7 +43,7 @@ concurrency:
 env:
   PROD_ORIGIN: https://room.trydemigod.com
   ENTRY_ORIGIN: https://www.getdasha.com/room
-  RECEIPT_ROOM: muse-room
+  RECEIPT_ROOM: room-fafdae79cf8c
   WRANGLER_SEND_METRICS: "false"
 
 jobs:
@@ -107,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/prod-deploy-smoke.mjs --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN"
-      - name: Receipt to muse-room
+      - name: Receipt to Project Room
         if: always()
         continue-on-error: true
         env:

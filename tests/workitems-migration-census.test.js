@@ -28,7 +28,7 @@ const keys = (obj) => Object.keys(obj).sort();
 // silently drops the session counters.
 const PROPOSED_ITEM_KEYS = [
   'accountableMemberId', 'blocker', 'claim', 'createdAt', 'decision', 'decisionHistory',
-  'definitionOfDone', 'humanDecisionMakerId', 'id', 'independentVerificationRequired',
+  'definitionOfDone', 'externalWriteGrantBy', 'externalWriteGrantFor', 'humanDecisionMakerId', 'id', 'independentVerificationRequired',
   'labels', 'mode', 'ownerDecisionRequired', 'proposedById', 'receipt', 'receiptHistory',
   'revision', 'round_count', 'sourceMessageId', 'state', 'supersededBy', 'suspended_by',
   'title', 'tool_calls', 'updatedAt',

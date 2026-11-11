@@ -52,7 +52,8 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
   assert.ok(snapshot.state.messages.length < 2000);
   assert.equal(snapshot.messagesWindow.mode, "recent");
   assert.equal(snapshot.messagesPage.hasMore, true);
-  assert.equal(typeof snapshot.messagesPage.before, "number");
+  assert.equal(snapshot.messagesPage.contractVersion, 2);
+  assert.equal(typeof snapshot.messagesPage.cursor, "string");
   assert.equal(snapshot.state.messages.some(message => message.body.includes("private")), false);
 
   const recent = await (await fetch(`${f.origin}/api/rooms/${created.roomId}?messages=recent`, { headers })).json();
@@ -62,18 +63,25 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
   assert.equal(retired.status, 422);
   assert.equal((await retired.json()).error.code, "invalid_snapshot_view");
 
-  const page = await (await fetch(`${f.origin}/api/rooms/${created.roomId}/messages?before=${snapshot.messagesPage.before}&limit=100`, { headers })).json();
-  assert.equal(page.messagesVersion, 1);
+  const page = await (await fetch(`${f.origin}/api/rooms/${created.roomId}/conversation?cursor=${encodeURIComponent(snapshot.messagesPage.cursor)}&limit=8`, { headers })).json();
+  assert.equal(page.conversationVersion, 1);
   assert.ok(page.messages.length >= 1);
   assert.equal(page.messages.some(message => snapshot.state.messages.some(shown => shown.id === message.id)), false);
 
   const boot = await (await fetch(`${f.origin}/api/rooms/${created.roomId}/bootstrap`, { headers })).json();
-  assert.equal(boot.bootstrapVersion, 1);
+  assert.equal(boot.bootstrapVersion, 2);
   assert.deepEqual(boot.snapshot.state.messages.map(message => message.id), snapshot.state.messages.map(message => message.id));
   assert.equal(boot.presence.available, true);
   assert.equal(boot.readHorizon.available, true);
   assert.equal(boot.saved.available, true);
-  assert.equal(boot.updates.available, true);
+  assert.equal(boot.updates.available, false);
+  assert.equal(boot.updates.code, "current_updates_aggregate_unavailable");
+  assert.equal(boot.snapshot.sections.updates.available, false);
+  assert.equal(boot.snapshot.sections.updates.replacement, "needs-me");
+  assert.deepEqual(boot.snapshot.sections.updates.nextRead,{method:"GET",path:`/api/rooms/${created.roomId}/needs-me`});
+  const attention=await fetch(f.origin+boot.snapshot.sections.updates.nextRead.path,{headers});
+  assert.equal(attention.status,200);
+  assert.equal((await attention.json()).contractVersion,2);
   assert.ok(Buffer.byteLength(JSON.stringify(boot.snapshot)) <= HARD_CEILING);
 
   const mcp = await fetch(`${f.origin}/room/mcp`, {
@@ -83,7 +91,7 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
   });
   const rpc = await mcp.json();
   const value = rpc.result?.structuredContent;
-  assert.equal(value?.bootstrapVersion, 1, JSON.stringify(rpc.error ?? rpc.result ?? rpc).slice(0, 400));
+  assert.equal(value?.bootstrapVersion, 2, JSON.stringify(rpc.error ?? rpc.result ?? rpc).slice(0, 400));
   assert.deepEqual(value.snapshot.state.messages.map(message => message.id), snapshot.state.messages.map(message => message.id));
   assert.ok(Buffer.byteLength(JSON.stringify(value.snapshot)) <= HARD_CEILING);
 });
@@ -91,6 +99,8 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
 test("the shared window fitter and bootstrap builder are the modules the read uses", () => {
   assert.equal(typeof buildRoomBootstrap, "function");
   assert.deepEqual(ROOM_WINDOW_ROUTES.map(row => `${row.method} ${row.path}`), [
+    "GET /api/rooms/{roomId}/needs-me",
+    "GET /api/rooms/{roomId}/work-list",
     "GET /api/rooms/{roomId}/conversations",
     "GET /api/rooms/{roomId}/bootstrap",
     "GET /api/rooms/{roomId}/messages"

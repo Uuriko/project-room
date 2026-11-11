@@ -57,7 +57,7 @@ export async function listMemberAccessRequests(ctx) {
   const records = requests.list(selected.token, roomId, { status: ctx.url.searchParams.get("status") ?? "pending" }, fence);
   const next = records.length ? [{ action: "decide-request", method: "POST",
     path: `/api/rooms/${encodeURIComponent(roomId)}/access-requests/${encodeURIComponent(records[0].requestId)}/decide`,
-    description: `Decide ${records[0].displayName}'s request: send { decision: "approve", permissions: ${JSON.stringify(records[0].requestedPermissions)}, note: null }. Use "deny" to refuse. Send your current room credential.` }]
+    description: records[0].kind==="agent-sponsor-transfer" ? `Approve sponsorship of ${records[0].displayName} by the requesting human: send { decision: "approve" }. Identity and permissions remain unchanged. Use "deny" to refuse.` : `Decide ${records[0].displayName}'s request: send { decision: "approve", permissions: ${JSON.stringify(records[0].requestedPermissions)}, note: null }. Use "deny" to refuse. Send your current room credential.` }]
     : [{ action: "watch-requests", description: "No pending access requests." }];
   return ctx.json(ctx.res, 200, { roomId, requests: records, next });
 }

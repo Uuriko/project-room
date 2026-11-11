@@ -12,11 +12,17 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
 
 Merging and deploying are separate decisions. Production need not be healthy
 before an unrelated, qualified change can merge. An incident may affect what is
-safe to deploy; it does not create a blanket merge freeze. Actual repository protection and workflow schema checks still apply.
+safe to deploy; it does not create a blanket merge freeze. Actual repository
+protection and workflow schema checks still apply.
+
+Potter t778 (2026-11-04) restates the standing rule: land when the PR head's
+required checks are green; deploy with smoke; do not gate merges or deploys on
+main tip's full CI or on an unrelated fix-forward. Temporary freezes are only
+what Potter declares in the release room, and they end when he lifts them.
 
 ## Deploy
 
-1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.
+1. Check current release ownership in Project Room (`room-fafdae79cf8c`) and announce the revision you are shipping. Track the release on the native work board when your existing permissions allow it; see below for the legacy role claim. The workflow serializes runs (`concurrency: production-deploy`).
 2. Run **deploy-prod** with the full 40-character commit SHA:
    - Actions tab → `deploy-prod` → Run workflow → `sha`, optional `reason`; or
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
@@ -27,9 +33,9 @@ safe to deploy; it does not create a blanket merge freeze. Actual repository pro
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
    - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` HTTP 200 with valid liveness and a summary consistent with a fresh `/api/health/jobs` view, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
-   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
-   - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
-4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
+   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with identical recorded writer-fence definitions and reply-contract Git blobs. Changed or missing writer-fence or reply-contract proofs require forward recovery, including same-schema additions such as new tables or newly accepted replies that prior readers reject. A separately qualified manual rollback retains its explicit compatibility requirements. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
+   - posts a receipt to `room-fafdae79cf8c` when the `ROOM_RECEIPT_TOKEN` secret exists.
+4. Post or confirm the receipt in `room-fafdae79cf8c` and close or release the work you actually acquired.
 
 The health smoke requires the required `room-backup` job to be present and healthy,
 and rejects active failed or stale jobs, malformed or old snapshots, and unknown,
@@ -130,9 +136,21 @@ A failed run posts the actual recovery disposition for each Worker: `ROLL FORWAR
 
 Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
 
-## Taking ROLE-DEPLOYER on the Board
+## Recording release ownership
 
-The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour role claim `ROLE-DEPLOYER`. Before a deploy, check who holds it. If it is held and live, coordinate in the room. If it is free or lapsed, claim it with the Board UI or MCP work-claim tools, deploy, post the receipt, then release it or let it lapse.
+The current room uses native work. Inspect current work with `room_list_work`
+and follow its selected reads before proposing or updating a release item with
+your existing permissions. Announce the candidate SHA and active deployment run
+in the room so other operators can coordinate. A missing work permission is not
+permission to change grants, and a rejected command did not acquire ownership.
+
+The legacy `ROLE-DEPLOYER` claim belongs to the older work-claims board. In a
+room that still supports it, read its current owner and lease, acquire it before
+shipping, and release it after the receipt. Native rooms reject new legacy claims
+with `legacy_work_retired`; do not retry that API as a native work operation.
+If the authorized release operator cannot create a native item, record ownership
+in the room and use the workflow's serialized deployment lane. Preserve the
+existing room grants.
 
 ## Secrets (names only)
 
@@ -141,7 +159,7 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `CLOUDFLARE_API_TOKEN` | deploy-prod, rollback-prod, staging | Workers scripts and routes edit on the Cloudflare account. The run fails with `missing CLOUDFLARE_API_TOKEN` without it. |
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
-| `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+| `ROOM_RECEIPT_TOKEN` | optional | Room bearer token authorized for the `room-fafdae79cf8c` receipt. Without it the run skips the receipt. |
 
 ### Reverify an already deployed revision without uploading Workers
 
@@ -287,3 +305,9 @@ force the object through every intervening version.
 
 Primary references: [October 30 change](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/)
 and [code update semantics](https://developers.cloudflare.com/durable-objects/deployments/durable-objects-code-updates/).
+
+Operational defaults moved from the legacy Muse room to `room-fafdae79cf8c` on 2026-11-02. Existing accounts and saved agent connections are retained. The receipt identity still needs membership in the destination; changing the default does not grant access. `release-merge-gate.mjs` uses this project by default, with explicit `--room ROOM_ID` or `PROJECT_ROOM_OPERATIONAL_ROOM` overrides. Historical Muse incident references and room-specific developer permission guards retain their original meaning.
+
+`ROOM_RECEIPT_TOKEN` is the named Actions secret for deploy, rollback and runtime-publication receipts. An empty secret skips posting with a warning; a configured credential without destination access fails the receipt step. GitHub cannot reveal an existing secret for local comparison. An authorized runner can validate it without revealing the credential by reading `/api/rooms/room-fafdae79cf8c?view=identity`, checking the active viewer and posting permissions, and logging only the result. Do not print the bearer or identity-view body. A legacy room-bound key can be checked with `/api/session` for its bound room. Root account access alone does not prove the stored Actions secret has the same access.
+
+For the v46 claim-record upgrade and its field-compatible fallback, see [Claim writer v46](CLAIM-WRITER-V46.md).

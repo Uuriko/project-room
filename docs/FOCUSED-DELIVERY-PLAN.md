@@ -1,5 +1,44 @@
 # Project Room: six-outcome delivery plan
 
+## Scope reassessment — 2026-11-02
+
+John owns outside-account testing; do not ask him again for a tester or make that
+qualification an agent-imposed gate on useful releases. The retained dated
+acceptance scenarios below are evidence and examples, not an instruction to
+finish every proposed feature before using the product.
+
+The useful minimum is an existing agent joining the intended project, finding
+its next useful action, obtaining relevant context, saving a result and resuming
+without duplicated actions or a human reconstructing the project. Rooms are an
+optional project interface. A durable project does not require an always-running
+agent, a mandatory chat visit, a new orchestrator or a universal wake service.
+Reuse existing host execution and pull/resume; qualify unattended operation for
+a concrete requested workflow rather than promise it for every connected host.
+
+Prioritize actual blocked participation and work: surface existing join approvals,
+make genuinely open rooms joinable through the existing admission/invitation
+mechanism, and preserve existing identities. Public showcase pages disclose only
+selected information; publishing one does not silently grant access to the room's
+private history. Give owners one clear way to choose open participation. Ordinary
+joining does not confer room administration or outside-host permissions.
+
+Generic native administration, physical per-room placement and a new experiment
+platform are not MVP requirements. Add a specific administrative action only for
+an actual authorized workflow; preserve existing membership checks. Physical
+sharding must earn its complexity through measured contention or isolation needs.
+Read improvements should reduce accepted-job latency, cost or failures; repeated
+SQL counts alone are not a user-level performance target. Use a small comparison
+on existing useful work when it resolves a real decision, not as another launch
+ceremony. Keep correctness, privacy, durable results and retry recovery.
+
+Research supports selective cooperation, not a universal agent topology:
+[Google's controlled architecture comparison](https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/)
+finds task-dependent gains and losses;
+[Anthropic's October 22 engineering guidance](https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop)
+recommends folding unnecessary agent layers into a main loop while retaining
+useful parallel work and verification. These are supporting evidence, not proof
+of demand or automatic instructions to replace our working hosts.
+
 ## Sharp MVP decision — 2026-10-31
 
 The product is a shared project where a person can bring an existing agent,
@@ -53,7 +92,7 @@ that prepared candidates have been deployed or that every existing defect is fix
 
 
 This page owns active scope. The six outcomes below retain the acceptance criteria
-from the 2026-10-18 scope reduction; the [773-entry inventory](PROJECT-ROOM-TOTAL-BACKLOG.md)
+from the 2026-10-18 scope reduction; the [773-entry inventory](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md)
 is an evidence index, not 773 promised features or an independent execution queue.
 Previous discussion or implementation alone does not justify adoption: retain
 supported benefits over simpler alternatives, including slower or failed trials.
@@ -145,7 +184,7 @@ Rules: **Works** means deployed and verified on production, with the evidence li
 | Decide the next bounded implementation | F1–F6 below and [delivery control](DELIVERY-CONTROL-PLAN.md) | Use current failures, measured bottlenecks and unfinished journeys; distinguish proposed, merged, deployed and verified. |
 | Understand current release and rejected candidates | [Delivery evidence checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Follow exact-source receipts and retained failures; do not revive a reverted optimization merely because its tests passed. |
 | Coordinate overlapping work and releases | [Room coordination](ROOM-COORDINATION.md), [AGENTS](../AGENTS.md), [deployment lane](DEPLOY-LANE.md) | Read current ownership and candidate state; dated claims below are not live leases or approval requirements. |
-| Trace an older unfinished requirement | [Total backlog](PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
+| Trace an older unfinished requirement | [Total backlog](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md), [architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), historical appendix below | Keep the original ID/acceptance and attach current source evidence or an explicit supersession. Unknown is not complete. |
 | Implement a retained work/continuity boundary | [Continuity plan](CONTINUITY-BUILD-PLAN.md), [work lifecycle](WORK-LIFECYCLE-BUILD-PLAN.md), [work cutover](WORK-CUTOVER-PLAN.md) | Reuse detailed contracts after reconciling their dated candidate/status claims with current source. They do not create parallel queues. |
 
 The product test remains: two people and an authorized agent turn a conversation

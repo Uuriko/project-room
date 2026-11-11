@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { timeoutOnlyEvidence } from "./readiness-recovery-hold.mjs";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+// The Worker's own readiness probe budget (HEALTH_PROBE_TIMEOUT_MS). A stale
+// literal here turned every cold-start readiness timeout into a rollback.
+import { HEALTH_PROBE_TIMEOUT_MS } from '../cloudflare/health-probe.mjs';
 
 export function propagationRetry(report, { sha, origin, entry }) {
   if (!/^[0-9a-f]{40}$/.test(sha ?? "") || report?.ok !== false || report.sha !== sha
@@ -64,7 +67,7 @@ export async function pollReadiness({ sha, origin, entry, waitMs = 150000, fetch
     const states = responses.map(({ status, body }) => {
       if (status === 200 && body?.status === "ready" && body.do?.status === "ok"
           && body.emailVerification === "enforced" && body.emailVerificationScope === "durable-object") return "ready";
-      if (status === 503 && body?.status === "degraded" && body.do?.status === "timeout" && body.do.timeoutMs === 1000
+      if (status === 503 && body?.status === "degraded" && body.do?.status === "timeout" && body.do.timeoutMs === HEALTH_PROBE_TIMEOUT_MS
           && [undefined, "unknown", "enforced"].includes(body.emailVerification)
           && [undefined, "unknown", "durable-object"].includes(body.emailVerificationScope)) return "timeout";
       return "invalid";

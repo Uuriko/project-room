@@ -384,7 +384,7 @@ export class HumanPush {
         // Start only after synchronous transaction completion. A failed outer
         // transaction may remove this event even after command() returned.
         const stillVisible = endpoint => {
-          const stored = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, sequence);
+          const stored = this.db.prepare("SELECT e.id FROM events e JOIN rooms r ON r.id=e.room_id WHERE e.room_id=? AND e.sequence=? AND r.archived_at IS NULL").get(roomId, sequence);
           if (stored?.id !== eventId) return false;
           const current = this.store.room(roomId).state;
           const member = current.members?.[recipient.memberId];

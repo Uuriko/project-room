@@ -94,3 +94,9 @@ test("browser evidence persists affected scope and omissions even for an empty s
   assert.equal(Object.hasOwn(actual, "status"), false, "selection is not proof of execution");
   assert.equal(writeBrowserSelection({ files: [], planHash: "empty" }, path).scope, "full");
 });
+
+test("a browser suite addition always runs the directory-derived registration rule", () => {
+  const plan = selectAffectedUnit(["scripts/public-work-availability-browser-check.mjs"]);
+  assert.ok(plan.files.includes("tests/browser-suites.test.js"),
+    "a new browser file changes the dynamic suite registry even without a static import");
+});

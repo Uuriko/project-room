@@ -1,0 +1,30 @@
+{
+  "base": "a8729b4069ed78db278a7c9f611c403dd0184123",
+  "red": "4f5226844",
+  "runtime": "3644200b6",
+  "runtimeFiles": [
+    "server/agent-connections.mjs"
+  ],
+  "runtimeChange": "Only verifyHistory uses protected addressed membership/owner/head reads. Historical prefix replay, receipts and predicates unchanged.",
+  "redCause": "Normalized RoomStore.room refusal at AgentConnections.verifyHistory399",
+  "qualification": {
+    "affectedBeforeAddressedRefinement": 33,
+    "finalAddressedFocused": 9,
+    "failed": 0,
+    "noWholeRoomHydration": true,
+    "originalFullAudit": true,
+    "realHConversion": true,
+    "coldFileReopen": true,
+    "acceptedHumanInvitationAuthentication": true,
+    "activeOwnerAndFriendConnections": true,
+    "revokedAndExpiredFriendRefusal": true,
+    "unchangedConnectionAndInvitationJournals": true,
+    "existingOAuthRefreshSameMember": true,
+    "corruptMembershipAndHistoricalPrefixRefused": true
+  },
+  "limits": [
+    "This is existing normalized-state qualification via the existing H fixture, not reset-route qualification or a requirement to activate via H.",
+    "No actual Worker or live account/provider qualification claimed.",
+    "No adoption-auth patch, new grant, credential rotation, schema or reset implementation."
+  ]
+}

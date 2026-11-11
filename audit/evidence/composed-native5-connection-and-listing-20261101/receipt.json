@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "source": "c345e555a1fa20ae8937683654f4f70a7c6c8bd5",
+  "schema": 45,
+  "live": false,
+  "results": {
+    "claudeConsentBrowser": "6/6",
+    "modernListingHttp": "3/3",
+    "normalizedBrowserJourney": "1/1",
+    "publicationContractsBefore": "19/20 missing current browser duration",
+    "publicationContractsAfter": "20/20 after actual 2068ms measurement",
+    "wholeCheck": "failed:32 existing emitted errors absent from catalog, delegated source-backed repair"
+  },
+  "qualificationLimits": [
+    "Synthetic Google provider; Room routes/browser cookies/consent are real. Actual Claude acceptance not proven.",
+    "Initial mixed route/manifest command incorrectly named manifest .mjs; only route3ran. Correct .js file run in publication contracts.",
+    "Production remains bbb8/schema44 with readiness503 and Room timeout; no release-lock exception approval."
+  ],
+  "artifacts": [
+    {
+      "file": "root-native5-claude-consent-composed-1101.log.gz",
+      "uncompressedSha256": "ba0a5c022b9c86b2ef4ff4ec3b5dadc551776570f8876aaf1fce479a69a69699"
+    },
+    {
+      "file": "root-native5-work-list-composed-1101.log.gz",
+      "uncompressedSha256": "59d48404c5610eaa9a72580e16665978dd56b7e32e66b0a737bcc9184eb37b97"
+    },
+    {
+      "file": "root-native5-consent-publication-contracts-1101.log.gz",
+      "uncompressedSha256": "2407bab2550d8e07212c1a4a3f5336bfbb05ccba6dabcd3845fd525107ba3521"
+    },
+    {
+      "file": "root-native5-current-room-browser-measure-1101.log.gz",
+      "uncompressedSha256": "ae8d82265d9b385f4d1208824f322f6c4aead2ca2e23cf6aa9263b80428481b1"
+    },
+    {
+      "file": "root-native5-consent-publication-contracts-fixed-1101.log.gz",
+      "uncompressedSha256": "827c46f202c035ab48b1045660f6eafe150dbcefdee3602d953cd0a875c90f62"
+    },
+    {
+      "file": "root-native5-composed-publication-check-1101.log.gz",
+      "uncompressedSha256": "54d53ba3967abcac1764030e60205c5b3ca0d2d334850f78ae71bca18d4102f4"
+    }
+  ]
+}

@@ -103,7 +103,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /id="people"/);
   assert.doesNotMatch(html, /Share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}<\/code>/);
   assert.equal(ROOM_PUBLIC_WWW, "https://www.getdasha.com/room");
-  assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
+  assert.match(html, /New rooms are open unless the owner chooses Private\. Adding an agent does not change a room’s saved visibility\./);
   assert.doesNotMatch(html, /id="join-code"|href="#join-code"/);
   assert.match(html, /Start with a prompt/);
   assert.match(html, /<a href="\/room\/llms.txt">Read the agent packet \(llms\.txt\)<\/a>/);

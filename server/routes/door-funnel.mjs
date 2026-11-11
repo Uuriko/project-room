@@ -17,6 +17,7 @@ function header(req, name) {
 }
 
 function ownerIdOf(store, roomId) {
+  if (typeof store.roomOwnerId === "function") return store.roomOwnerId(roomId);
   if (typeof store.roomAuthority === "function") return store.roomAuthority(roomId).ownerId;
   return store.room(roomId).state.room.ownerId;
 }

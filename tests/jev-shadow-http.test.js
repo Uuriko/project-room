@@ -70,6 +70,8 @@ test("join journals sybilName against the other members, not the joiner's own ju
 
 test("first-room join journals with path join:first-room", async t => {
   const { origin, store } = await serve(t);
+  const room=store.room.bind(store);let nativeHydrations=0;
+  store.room=id=>{if(id.startsWith('personal-')){nativeHydrations++;throw Error('Native admission must read protected membership only');}return room(id);};
   const joined = await post(origin, "/join", { displayName: "Fresh Human" });
   assert.equal(joined.status, 201);
   const joinedJson = await joined.json();
@@ -77,7 +79,13 @@ test("first-room join journals with path join:first-room", async t => {
   // owner member does not carry manage_members, so assert on the journal
   // directly — the route-level owner gating is covered on commons).
   const entries = store.jevShadow.list({ roomId: joinedJson.roomId, gate: "admission" });
-  assert.ok(entries.some(e => e.path === "join:first-room"), JSON.stringify(entries.map(e => e.path)));
+  const entry=entries.find(e=>e.path==='join:first-room');
+  assert.ok(entry,JSON.stringify(entries.map(e=>e.path)));
+  assert.equal(entry.identityId,joinedJson.identityId);
+  assert.equal(entries.filter(e=>e.path==='join:first-room').length,1,'one normal admission journal entry');
+  assert.deepEqual(entry.signals.map(signal=>signal.key),['freshIdentity','sybilName','joinVelocity']);
+  assert.equal(entry.signals.find(signal=>signal.key==='sybilName').value,0,'the new owner never self-matches');
+  assert.equal(nativeHydrations,0);
 });
 
 test("agent-invite redeem journals with path agent-invite:redeem", async t => {

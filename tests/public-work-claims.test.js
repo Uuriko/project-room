@@ -19,9 +19,9 @@ function fixture(t) {
   store.db.exec(publicWorkClaimsSchema); store.db.exec(publicWorkClaimFenceSchema);
   const identities = [store.identities.create('First worker'), store.identities.create('Second worker')];
   const service = () => new PublicWorkClaims(store);
-  const enable = (id, files = ['src/shared.js'], reward = { kind: 'unpaid' }, reference = 'main', roomId = 'commons') => {
+  const enable = (id, files = ['src/shared.js'], reward = { kind: 'unpaid' }, reference = 'main', roomId = 'commons', title = id) => {
     const input = { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'],
-      terms: { kind: 'task', title: id, summary: 'Public result', acceptanceCriteria: ['Deliver the declared change'],
+      terms: { kind: 'task', title, summary: 'Public result', acceptanceCriteria: ['Deliver the declared change'],
         repositoryUrl: 'https://github.com/Example/Project', reward, approvalPolicy: { mode: 'human' } } };
     store.projectOffers.create(roomId, 'owner', input);
     store.projectOffers.transition(roomId, 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
@@ -185,6 +185,31 @@ test('anonymous recommendations are grounded, bounded, and leave the registry/jo
   assert.throws(() => f.service().match(null, { autoClaim: true, requestId: 'no-auth' }), code('unauthenticated'));
   assert.throws(() => f.service().match('revoked', {}), code('unauthenticated'));
   assert.throws(() => f.service().match(null, { skills: ['bad\nvalue'] }), code('invalid_public_work'));
+});
+
+test('short skill acronyms match whole tokens rather than unrelated words', t => {
+  const f = fixture(t);
+  f.enable('a-guide', ['docs/guide']);
+  f.enable('b-ui-review', ['src/ui']);
+  f.enable('c-underscore', ['underscore'], { kind: 'unpaid' }, 'main', 'commons', 'ui_kit');
+  f.enable('d-punctuation', ['punctuation'], { kind: 'unpaid' }, 'main', 'commons', 'UI/UX review');
+  f.enable('e-japanese', ['japanese'], { kind: 'unpaid' }, 'main', 'commons', '日本語ドキュメント');
+  f.enable('f-mixed', ['mixed'], { kind: 'unpaid' }, 'main', 'commons', '日本ui');
+  const result = f.service().match(null, { skills: ['UI'], limit: 5 });
+  assert.equal(result.recommendations[0].task.taskId, 'b-ui-review');
+  assert.deepEqual(result.recommendations[0].reasons, ['Matches preference: ui']);
+  const guide = result.recommendations.find(entry => entry.task.taskId === 'a-guide');
+  assert.deepEqual(guide.reasons, ['Available volunteer task with declared repository paths']);
+  const underscore = result.recommendations.find(entry => entry.task.taskId === 'c-underscore');
+  assert.deepEqual(underscore.reasons, ['Available volunteer task with declared repository paths']);
+  const punctuation = result.recommendations.find(entry => entry.task.taskId === 'd-punctuation');
+  assert.deepEqual(punctuation.reasons, ['Matches preference: ui']);
+  const mixed = result.recommendations.find(entry => entry.task.taskId === 'f-mixed');
+  assert.deepEqual(mixed.reasons, ['Matches preference: ui']);
+  const japanese = f.service().match(null, { skills: ['日本'], limit: 5 });
+  assert.equal(japanese.recommendations[0].task.taskId, 'e-japanese');
+  assert.deepEqual(japanese.recommendations[0].reasons, ['Matches preference: 日本']);
+  assert.equal(result.claim, null);
 });
 
 test('explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart', t => {

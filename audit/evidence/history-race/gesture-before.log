@@ -1,0 +1,28 @@
+✖ one loadHistory gesture publishes older messages after an intervening refresh (1.857333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40.793292
+
+✖ failing tests:
+
+test at tests/client-older-window-race.test.mjs:49:1
+✖ one loadHistory gesture publishes older messages after an intervening refresh (1.857333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/history-race-successor/tests/client-older-window-race.test.mjs:52:9)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

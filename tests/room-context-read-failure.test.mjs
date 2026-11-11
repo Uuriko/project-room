@@ -1,3 +1,4 @@
+import {legacyAgentRoom} from './helpers/legacy-agent-room.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
@@ -45,7 +46,7 @@ test('hosted MCP refuses uncertain board state and retries the original version 
   const store = new RoomStore(':memory:'); t.after(() => store.close());
   const identity = store.identities.create('Board-read-fault fixture');
   const rooms = new AgentRooms(store), roomId = 'context-read-fault';
-  rooms.create(identity.secret, { roomId, title: 'Read failure fixture', purpose: 'Synthetic board read uncertainty', kind: 'personal' });
+  legacyAgentRoom(store,identity, { roomId, title: 'Read failure fixture', purpose: 'Synthetic board read uncertainty', kind: 'personal' });
   const mcp = createHostedRoomMcp(store, { agentRooms: rooms });
   const read = version => mcp({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_room_context',
     arguments: { roomId, ...(version ? { since_version: version } : {}) } } }, { authorization: `Bearer ${identity.secret}` });
@@ -60,4 +61,13 @@ test('hosted MCP refuses uncertain board state and retries the original version 
   const recovered = await read(before.context_version);
   assert.notEqual(recovered.result.isError, true);
   assert.equal(recovered.result.structuredContent.not_modified, true);
+});
+
+test('native MCP refuses failed protected work reads and recovers the same conditional version',async t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const identity=store.identities.create('Native fault owner'),rooms=new AgentRooms(store),roomId='native-context-read-fault';rooms.create(identity.secret,{roomId,title:'Native context',purpose:'Protected read recovery',kind:'personal'});store.room=()=>{throw Error('native whole room hydration');};store.workClaims.list=()=>{throw Error('retired Board is not a native source');};
+ const mcp=createHostedRoomMcp(store,{agentRooms:rooms}),read=version=>mcp({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_room_context',arguments:{roomId,...(version?{since_version:version}:{})}}},{authorization:`Bearer ${identity.secret}`});
+ const first=await read();assert.notEqual(first.result?.isError,true,JSON.stringify(first));const before=first.result.structuredContent,prepare=store.db.prepare.bind(store.db);let fired=0;
+ store.db.prepare=sql=>new Proxy(prepare(sql),{get(target,k){const fn=Reflect.get(target,k,target);if(k!=='get')return typeof fn==='function'?fn.bind(target):fn;return(...args)=>{if(sql.startsWith('SELECT revision,payload_bytes,length(CAST(payload AS BLOB))')&&args[1]==='workSummary'){fired++;throw storageFault();}return fn.apply(target,args);};}});
+ try{for(const version of [before.context_version,null]){const refused=await read(version);assert.equal(refused.result.isError,true,JSON.stringify(refused));assert.ok(JSON.stringify(refused).includes('storage_unavailable'));assert.equal(JSON.stringify(refused).includes('synthetic private driver detail'),false);assert.equal(Object.hasOwn(refused.result.structuredContent??{},'context_version'),false);}}finally{store.db.prepare=prepare;}
+ assert.equal(fired,2);const recovered=await read(before.context_version);assert.notEqual(recovered.result.isError,true,JSON.stringify(recovered));assert.equal(recovered.result.structuredContent.not_modified,true);
 });

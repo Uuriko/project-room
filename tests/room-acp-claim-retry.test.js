@@ -18,11 +18,11 @@ function setup(t) {
       session: async () => ({ sessionId: "s" }),
       prompt: async () => { counts.prompts++; return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" }; },
     } });
-    bridge.me = { id: "agent" }; bridge.ownerId = "owner"; bridge.members = { owner: { kind: "human", active: true } };
+    bridge.me = { id: bridge.connection.memberId }; bridge.ownerId = "owner"; bridge.members = { owner: { kind: "human", active: true } };
     bridge.fencingToken = "test-listener";
     bridge.room.checkListener = async () => ({ listener: { valid: true } });
-    bridge.room.room = async () => ({ state: { room: { ownerId: "owner" }, members: { owner: { id: "owner", kind: "human", active: true }, [bridge.connection.memberId]: { id: "agent", active: true } } } });
-    bridge.room.claim = async () => ({ id: "work", owner: "agent", history: [{ action: "created", agentId: "owner" }] });
+    bridge.room.room = async () => ({ state: { room: { ownerId: "owner" }, members: { owner: { id: "owner", kind: "human", active: true }, [bridge.connection.memberId]: { id: bridge.connection.memberId, active: true } } } });
+    bridge.room.claim = async () => ({ id: "work", owner: bridge.connection.memberId, history: [{ action: "created", agentId: "owner" }] });
     bridge.room.claimNote = async (...args) => { counts.notes.push(args); };
     bridge.room.ack = async () => { counts.acks++; };
     return bridge;
@@ -108,6 +108,61 @@ test("fresh wake for a terminal claim acks and skips without a turn or note", as
   assert.equal(counts.notes.length, 1);
   assert.equal(counts.acks, 3);
   assert.equal(closedBridge.stats.skipped, 1);
+});
+
+// Acceptance is not an execution lease: a second signal can wait behind a
+// running turn while a human completes or closes the claim.
+for (const state of ["done", "closed"]) test(`claim becoming ${state} while queued never executes another turn`, async t => {
+  const { make, counts } = setup(t);
+  const bridge = make();
+  let claimState = "claimed";
+  bridge.room.claim = async () => ({ id: "work", owner: "agent", state: claimState, history: [{ action: "created", agentId: "owner" }] });
+  const started = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  t.after(() => finish.resolve());
+  bridge.host.prompt = async () => {
+    counts.prompts++;
+    started.resolve();
+    await finish.promise;
+    return { recorder: { text: "completed", tools: new Map() }, stopReason: "end_turn" };
+  };
+  await bridge.accept(signal);
+  await started.promise;
+  await bridge.accept({ ...signal, signalId: "assigned-queued" });
+  claimState = state;
+  finish.resolve();
+  await bridge.queue.idle();
+  assert.equal(counts.prompts, 1, "the queued wake must not start work on a terminal claim");
+  assert.equal(counts.notes.length, 1, "the already-running turn may still deliver its result");
+  assert.equal(counts.acks, 2, "both the completed turn and skipped queued wake are acknowledged");
+});
+
+for (const state of ["done", "closed"]) test(`claim becoming ${state} during session startup never executes`, async t => {
+  const { make, counts } = setup(t);
+  const bridge = make();
+  let claimState = "claimed";
+  bridge.room.claim = async () => ({ id: "work", owner: "agent", state: claimState, history: [{ action: "created", agentId: "owner" }] });
+  bridge.host.session = async () => { claimState = state; return { sessionId: "s" }; };
+  await deliver(bridge);
+  assert.equal(counts.prompts, 0);
+  assert.equal(counts.notes.length, 0);
+  assert.equal(counts.acks, 1);
+});
+
+test("a skipped terminal wake retries a lost acknowledgement without executing after reopening", async t => {
+  const { make, counts } = setup(t);
+  const first = make();
+  let state = "claimed";
+  first.room.claim = async () => ({ id: "work", owner: "agent", state, history: [{ action: "created", agentId: "owner" }] });
+  first.host.session = async () => { state = "done"; return { sessionId: "s" }; };
+  first.room.ack = async () => { throw new Error("lost ack"); };
+  await deliver(first);
+  // A restart sees the retained discard receipt even if the same claim was
+  // reopened. A new assignment needs a new signal, not a repeated old wake.
+  await deliver(make());
+  assert.equal(counts.prompts, 0);
+  assert.equal(counts.notes.length, 0);
+  assert.equal(counts.acks, 1);
 });
 
 test("actual claim-note API deduplicates the stable request ID", async t => {

@@ -33,6 +33,7 @@ import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { roomOwnerIdOf } from "./room-owner.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -59,7 +60,7 @@ const invalidInput = (reject, expected) => reject(422, "invalid_bounty_input", `
 export const isRoomOwner = (store, roomId, auth) => {
   const memberId = auth?.member?.id;
   if (typeof memberId !== "string" || !memberId || typeof store?.roomAuthority !== "function") return false;
-  const { ownerId } = store.roomAuthority(roomId);
+  const ownerId = roomOwnerIdOf(store, roomId);
   if (typeof ownerId !== "string" || !ownerId) return false;
   return canonicalLane(ownerId) === canonicalLane(memberId);
 };

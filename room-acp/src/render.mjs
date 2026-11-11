@@ -8,6 +8,9 @@ export class TurnRecorder {
   constructor() { this.text = ""; this.tools = new Map(); this.plan = []; }
   update(update) {
     switch (update?.sessionUpdate) {
+      // Structured adapter notices can contain private local configuration paths.
+      // They are diagnostics, never Room replies or saved reply receipts.
+      case "notice": break;
       case "agent_message_chunk": if (update.content?.type === "text") this.text += update.content.text; break;
       case "tool_call": this.tools.set(update.toolCallId, { title: update.title ?? update.kind ?? "tool", status: update.status ?? "pending" }); break;
       case "tool_call_update": {

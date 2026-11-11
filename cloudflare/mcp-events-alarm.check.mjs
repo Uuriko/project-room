@@ -29,6 +29,7 @@ export class Probe extends ProjectRoom {
  if(mode==='revoke')this.allowed=false;
  if(mode==='disabled')this.store.nativeMcpEventsEnabled=false;
  await super.fetch(new Request('https://room.example/api/health'));return Response.json({seeded:true});}
+ if(path==='/monitoring'){const before=this.store.db.prepare('SELECT total_changes() n').get().n;const monitoring=await this.manager.status(this.principal);return Response.json({monitoring,before,after:this.store.db.prepare('SELECT total_changes() n').get().n});}
  if(path==='/state')return Response.json({posts:this.posts,alarmAt:await this.ctx.storage.getAlarm(),rows:this.store.db.prepare('SELECT event_id,state,attempts,next_at,lease_until FROM mcp_event_outbox').all()});
  return super.fetch(request); }
 }
@@ -61,5 +62,21 @@ test('disabled native runtime does not schedule stale outbox deliveries', {timeo
  assert.deepEqual(state.posts,[]);
  assert.equal(state.rows[0].state,'pending');
  assert.ok(state.alarmAt===null || state.alarmAt>Date.now()+5000,JSON.stringify(state));
+ }finally{await mf.dispose();}
+});
+
+
+test('native subscription diagnosis reads metadata in actual workerd without writes or callback delivery', async () => {
+ const mf=await start();try{
+ const before=await read(mf,'/monitoring');
+ assert.equal(before.monitoring.state,'not_subscribed');
+ assert.equal(before.before,before.after);
+ await read(mf,'/seed?mode=disabled');
+ const subscribed=await read(mf,'/monitoring');
+ assert.equal(subscribed.monitoring.state,'subscribed');
+ assert.equal(subscribed.monitoring.execution,'not_verified');
+ assert.equal(subscribed.monitoring.activeSubscriptions,1);
+ assert.equal(subscribed.before,subscribed.after);
+ assert.equal((await read(mf,'/state')).posts.length,0);
  }finally{await mf.dispose();}
 });

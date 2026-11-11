@@ -204,8 +204,20 @@ test("receipt and agent listings are one page at a time", async t => {
   const insertReceipt = store.db.prepare(`INSERT INTO public_receipts
     (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
     VALUES (?, ?, 'public-work', NULL, NULL, NULL, '[]', '[]', NULL, NULL, '[]', ?, ?)`);
+  // Production writes the source record first and projects the mirror
+  // from it (A6); seed both, or the list's fail-closed source-agreement
+  // leg hides every row and the test measures an impossible store.
+  const insertSource = store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)");
   for (let i = 0; i < 21; i += 1) {
-    insertReceipt.run(`pwr_${String(i).padStart(32, "0")}`, `Paged receipt ${i}`, new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(), PUBLIC_START_URL);
+    const id = `pwr_${String(i).padStart(32, "0")}`;
+    const at = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
+    insertSource.run(id, `offer-paged-${i}`, "commons", 1, "ai_public", "note", "cd".repeat(32), 4,
+      JSON.stringify({
+        schema: "public-work-receipt/1", receiptId: id, namespaceId: "commons",
+        identityId: "ai_public", title: `Paged receipt ${i}`, createdAt: at,
+        artifact: { sha256: "cd".repeat(32) },
+      }), Date.now());
+    insertReceipt.run(id, `Paged receipt ${i}`, at, PUBLIC_START_URL);
   }
   const insertAgent = store.db.prepare(`INSERT INTO public_directory_entries
     (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)

@@ -88,42 +88,43 @@ export function auditCharters(state, history, checkpoint = null) {
   //
   // Match updateCharter: room instructions belong to the active room owner,
   // including an agent owner. Account-bound human-only powers are separate.
-  let current = null, atCheckpoint = null, ownerId = null;
-  const members = new Map(); // memberId -> { kind, active }, so a new owner is known
-  const remember = event => {
-    if (!id(event.data.memberId)) return;
-    members.set(event.data.memberId, { kind: event.data.kind ?? "human", active: true });
-  };
+  const cursor = initialCharterAudit();
+  let atCheckpoint = null;
+  const members = new Map();
   for (const row of history) {
     const e = typeof row.body === "string" ? JSON.parse(row.body) : row.event;
-    if (e.type === "room.created") {
-      check(ownerId === null && id(e.data.ownerId) && e.actorId === e.data.ownerId && e.roomId === state.room.id && e.data.roomId === e.roomId);
-      ownerId = e.data.ownerId;
-    }
-    if (e.type === "member.added") {
-      if (e.data.memberId === ownerId) {
-        check(!members.has(ownerId) && e.actorId === ownerId && e.roomId === state.room.id);
-      }
-      remember(e);
-    }
-    // An invited member can later be handed the room, so they have to be known.
-    if (e.type === "member.joined_via_invitation") remember(e);
-    if (e.type === "member.access_changed" && members.has(e.data.memberId) && typeof e.data.active === "boolean") {
-      members.get(e.data.memberId).active = e.data.active;
-    }
-    if (e.type === "ownership.transferred") {
-      check(ownerId !== null && e.actorId === ownerId && id(e.data.toMemberId) && members.has(e.data.toMemberId),
-        "Invalid ownership transfer");
-      ownerId = e.data.toMemberId;
-    }
-    if (e.type === CHARTER_TYPE) {
-      const owner = members.get(ownerId);
-      check(e.roomId === state.room.id && e.actorId === ownerId && owner?.active === true, "Invalid room instructions author");
-      current = charterFromEvent(e, current);
-    }
-    if (checkpoint && row.sequence <= checkpoint.sequence) atCheckpoint = current;
+    advanceCharterAudit(cursor, e, members, state.room.id);
+    if (checkpoint && row.sequence <= checkpoint.sequence) atCheckpoint = cursor.current;
   }
+  const { ownerId, current } = cursor;
   check(ownerId === state.room.ownerId && canonical(state.room.charter ?? null) === canonical(current), "Room instructions require reconciliation");
   if (checkpoint) check(canonical(JSON.parse(checkpoint.projection).room?.charter ?? null) === canonical(atCheckpoint), "Checkpoint instructions require reconciliation");
   return current;
+}
+
+// The full recovery audit and its durable continuation use these exact steps.
+// The keyed member adapter contains only historical kind/active facts.
+export const initialCharterAudit = () => ({ current: null, ownerId: null });
+export function advanceCharterAudit(cursor, e, members, roomId) {
+  if (e.type === "room.created") {
+    check(cursor.ownerId === null && id(e.data.ownerId) && e.actorId === e.data.ownerId && e.roomId === roomId && e.data.roomId === e.roomId);
+    cursor.ownerId = e.data.ownerId;
+  }
+  if (e.type === "member.added") {
+    if (e.data.memberId === cursor.ownerId) check(!members.has(cursor.ownerId) && e.actorId === cursor.ownerId && e.roomId === roomId);
+    if (id(e.data.memberId)) members.set(e.data.memberId, { kind: e.data.kind ?? "human", active: true });
+  }
+  if (e.type === "member.joined_via_invitation" && id(e.data.memberId)) members.set(e.data.memberId, { kind: e.data.kind ?? "human", active: true });
+  if (e.type === "member.access_changed" && members.has(e.data.memberId) && typeof e.data.active === "boolean") {
+    members.set(e.data.memberId, { ...members.get(e.data.memberId), active: e.data.active });
+  }
+  if (e.type === "ownership.transferred") {
+    check(cursor.ownerId !== null && e.actorId === cursor.ownerId && id(e.data.toMemberId) && members.has(e.data.toMemberId), "Invalid ownership transfer");
+    cursor.ownerId = e.data.toMemberId;
+  }
+  if (e.type === CHARTER_TYPE) {
+    const owner = members.get(cursor.ownerId);
+    check(e.roomId === roomId && e.actorId === cursor.ownerId && owner?.active === true, "Invalid room instructions author");
+    cursor.current = charterFromEvent(e, cursor.current);
+  }
 }

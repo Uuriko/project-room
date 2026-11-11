@@ -39,12 +39,9 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   else await ensureSidebarClosed(page);
   await clickChrome(page, '#nav-rooms');
   await page.locator('#account-rooms-list button').first().waitFor();
-  await page.getByText('Room notes', { exact: true }).waitFor();
-  assert.equal(await page.locator('#owner-cockpit-title').isVisible(), false);
-  assert.equal(await page.locator('#cockpit-exceptions details').evaluate(node => node.open), false);
-  await page.getByText('Room notes', { exact: true }).click();
-  assert.equal(await page.locator('#cockpit-exceptions .cockpit-item').first().isVisible(), true);
-  await page.getByText('Room notes', { exact: true }).click();
+  assert.equal(await page.locator('#owner-cockpit-title').count(), 0, 'removed cockpit does not return to account rooms');
+  assert.equal(await page.locator('#account-rooms-title').innerText(), 'Rooms');
+  assert.equal(await page.locator('#account-room-create > summary').isVisible(), true);
   assert.equal(await page.locator('#choose-room').isVisible(), false);
   assert.equal(await page.getByRole('link', { name: 'Join room', exact: true }).isVisible(), true);
   await page.locator('#account-rooms-search').fill('no-room-with-this-title');
@@ -65,7 +62,7 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   await page.locator('#account-rooms-list button').first().click();
   await page.locator('#main').waitFor();
   let answer = 'failed';
-  await page.route('**/referrals', route => route.fulfill({ status: answer === 'failed' ? 503 : 200, contentType: 'application/json', body: JSON.stringify(answer === 'failed' ? { error: { message: 'Unavailable' } } : { invite: null }) }));
+  await page.route(/\/referrals\?view=invitation$/, route => route.fulfill({ status: answer === 'failed' ? 503 : 200, contentType: 'application/json', body: JSON.stringify(answer === 'failed' ? { error: { message: 'Unavailable' } } : { invite: null }) }));
   await clickChrome(page, '#invite-people-button');
   await page.locator('#growth-kit-retry').waitFor();
   assert.equal(await page.locator('#growth-kit-status').isVisible(), true);
@@ -125,7 +122,7 @@ for (const resource of ['entry.js', 'browser-session.js', 'signin-entry.js']) te
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   const early = resource !== 'signin-entry.js';
   await page.locator(early ? '#static-hero' : '#entry-retry').waitFor({ state: 'visible' });
-  if (early) assert.match(await page.locator('#static-hero').innerText(), /PROJECT ROOM/);
+  if (early) assert.match(await page.locator('#static-hero').innerText(), /Project Room/i);
   else assert.equal(await page.locator('#auth-error').isVisible(), true);
   mkdirSync('test-results/startup', { recursive: true });
   await page.screenshot({ path: `test-results/startup/failed-${resource}.png` });
@@ -182,5 +179,5 @@ test('slow module startup can finish after the bounded warning without reloading
   await page.reload();
   assert.equal(await page.locator('#static-hero').isVisible(), true);
   assert.equal(await page.locator('#entry-load-recovery').isVisible(), false);
-  assert.match(await page.locator('#static-hero').textContent(), /shared room/);
+  assert.match(await page.locator('#static-hero').textContent(), /connects the AI agents/);
 });

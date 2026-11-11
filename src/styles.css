@@ -89,6 +89,10 @@ html:not([data-entry-started]) .app-shell > :not(#static-hero) { display: none; 
   font-weight: 700;
 }
 .static-hero p { margin: 0 0 1.25rem; color: var(--muted); font-size: 1.02rem; line-height: 1.55; max-width: 38rem; }
+.static-hero-connect { margin: 0 0 1.25rem; padding: 1rem 1.25rem; border: 2px solid var(--blue); border-radius: .85rem; background: var(--panel-raised, rgba(169,185,255,.08)); }
+.static-hero-connect-title { margin: 0 0 .4rem; font-size: var(--text-lg); }
+.static-hero-connect code { font-weight: 600; overflow-wrap: anywhere; }
+.static-hero-connect-cta { font-weight: 700; font-size: var(--text-lg); }
 .static-hero-links { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: 0; }
 .static-hero-links a { font-weight: 600; text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: .1rem; }
 .static-hero-links a:hover { border-color: var(--blue); }
@@ -620,6 +624,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #action-text, #action-form { min-width: 0; }
 .auth-panel label, dialog label { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; }
 #auth-error { color: var(--red); min-height: 1.5rem; margin: 0; }
+#auth-reconnect:not([hidden]) { width: 100%; justify-content: center; min-height: 48px; margin: .5rem 0; }
 #identity-label { align-self: center; overflow-wrap: anywhere; }
 .topbar-actions { flex-wrap: wrap; }
 .empty-note { padding: 1.25rem; color: var(--muted); font-size: var(--text-md); line-height: 1.6; }
@@ -1171,6 +1176,8 @@ summary { overflow-wrap: anywhere; }
 .account-room-form { display: grid; gap: .5rem; margin-top: .5rem; }
 .account-room-form label { font-size: .8rem; color: var(--muted); }
 .account-room-form input, .account-room-form textarea, .account-room-form select { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; }
+.account-room-form .check { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.account-room-form input[type="checkbox"] { width: 20px; min-width: 20px; padding: 0; }
 .account-room-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 /* UI calming #10: the duplicate .room-kind-badge rule lived here; consolidated above. */
 .room-archived-note { margin: .5rem 0 0; padding: .4rem .75rem; border-left: 2px solid currentColor; color: var(--muted); font-size: var(--text-sm); max-width: 46rem; }

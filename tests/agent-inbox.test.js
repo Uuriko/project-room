@@ -1,3 +1,5 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
+import {readCurrentRecord} from '../server/current-room-repository.mjs';
 // RC-2026-09-18-052: the agent inbox teaches its own follow-ups.
 // GET /api/rooms/{roomId}/agent-inbox carries next[] — an empty inbox
 // names what it will carry; a DM present teaches the reply-dm command
@@ -32,9 +34,9 @@ const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
   headers: secret ? { authorization: `Bearer ${secret}` } : {},
 });
 
-for (const archived of [false, true]) for (const deletedCount of [4, 130]) test(`inbox DMs use edited content, refill past deletions, and advance across tombstones (archived=${archived}, deleted=${deletedCount})`, async t => {
+for (const archived of [false, true]) for (const deletedCount of [4, 130]) test(`[legacy compatibility] inbox DMs use edited content, refill past deletions, and advance across tombstones (archived=${archived}, deleted=${deletedCount})`, async t => {
   const fixture = createAcceptanceFixture(), origin = await startServer(t, fixture);
-  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture, { historical: true });
   const store = fixture.store;
   let clock = Date.now() + 10000; store.now = () => clock;
   const command = (id, type, data) => { clock += 2001; return store.command(ownerSecret, roomId, { id, type, data }); };
@@ -87,14 +89,17 @@ for (const archived of [false, true]) for (const deletedCount of [4, 130]) test(
 
 // Room with an owner and one approved agent friend; returns their secrets,
 // the room id, and the friend's member id.
-async function roomWithFriend(origin, fixture) {
+async function roomWithFriend(origin, fixture, { historical = false } = {}) {
   const owner = fixture.store.identities.create("inbox owner");
   const friend = fixture.store.identities.create("inbox friend");
   const roomId = "inbox-room";
+  if(historical) seedHistoricalNeedsMeRoom(fixture.store,owner,{roomId,title:"Inbox",purpose:"probe"});
+  else {
   const roomRes = await post(origin, "/api/agent-rooms", {
     roomId, title: "Inbox", purpose: "probe", kind: "personal", displayName: "Inbox",
   }, owner.secret);
   assert.equal(roomRes.status, 201);
+  }
   const requestId = "inbox-req-1";
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Friend",
@@ -138,7 +143,7 @@ test("agent inbox keeps ordinary conversation readable without requiring an ackn
     },
   }, ownerSecret);
   assert.equal(dmRes.status, 201);
-  const sequence = fixture.store.room(roomId).sequence;
+  const sequence = fixture.store.headSequence(roomId);
   const res = await get(origin, `/api/rooms/${roomId}/agent-inbox`, friendSecret);
   assert.equal(res.status, 200);
   const json = await res.json();
@@ -159,7 +164,7 @@ test("agent inbox keeps ordinary conversation readable without requiring an ackn
   const requests = await (await get(origin, json.next[1].path, friendSecret)).json();
   assert.deepEqual(requests.requests, []);
   assert.equal(json.directMessages[0].body, "Thanks, nothing more needed from me.");
-  assert.equal(fixture.store.room(roomId).sequence, sequence);
+  assert.equal(fixture.store.headSequence(roomId), sequence);
 });
 
 
@@ -185,10 +190,11 @@ test("inbox discovery finds older open requests outside its DM window through ex
   store.command(ownerSecret, roomId, { id: "recent-chat", type: "message.posted", data: {
     messageId: "recent-chat", body: "A more recent ordinary DM", toMemberId: memberId
   } });
-  const sequence = store.room(roomId).sequence;
+  const sequence = store.headSequence(roomId);
   const inbox = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
   assert.deepEqual(inbox.directMessages.map(message => message.messageId), ["recent-chat"]);
-  assert.equal(inbox.next[0].optional, true);
+  assert.equal(inbox.next.find(step=>step.action === "reply-dm").optional, true);
+  assert.equal(inbox.next[0].required,true,"standing open request takes priority over optional recent chat");
   const expanded = await (await get(origin, `/api/rooms/${roomId}/agent-inbox`, friendSecret)).json();
   assert.equal(expanded.next[0].action, "read-request");
   assert.equal(expanded.next[0].nextRead.arguments.requestMessageId, "old-open");
@@ -211,14 +217,37 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const mcpList = await rpc("tools/call", { name: pointer.tool, arguments: pointer.arguments });
   assert.equal(mcpList.result.isError, undefined, JSON.stringify(mcpList));
   assert.deepEqual(mcpList.result.structuredContent.requests.map(request => request.id), ["old-open"]);
-  assert.equal(store.room(roomId).sequence, sequence);
-  assert.equal(store.room(roomId).state.replyRequests["old-open"].status, "open");
+  assert.equal(store.headSequence(roomId), sequence);
+  assert.equal(store.readTransaction(()=>readCurrentRecord(store.db,roomId,"replyRequests","old-open")).status, "open");
   ask("latest-cancelled");
   store.command(ownerSecret, roomId, { id: "cancel-latest", type: "reply_request.cancelled", data: {
     requestMessageId: "latest-cancelled", expectedRequestRevision: 0, reason: "No longer needed"
   } });
   const historical = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
-  assert.equal(historical.next[0].requestStatus, "cancelled");
-  assert.equal(historical.next[0].required, false);
-  assert.equal(historical.next[0].actionRole, "context_discovery");
+  const cancelledStep=historical.next.find(step=>step.requestStatus === "cancelled");
+  assert.ok(cancelledStep);
+  assert.equal(cancelledStep.required, false);
+  assert.equal(cancelledStep.actionRole, "context_discovery");
+});
+
+for(const deletedCount of [4,130])test(`native inbox skips ${deletedCount} tombstones before source admission`,async t=>{
+ const fixture=createAcceptanceFixture(),origin=await startServer(t,fixture);
+ const {ownerSecret,friendSecret,roomId,memberId}=await roomWithFriend(origin,fixture);
+ const s=fixture.store;let clock=Date.now()+10000;s.now=()=>clock;
+ const send=(id,type,data)=>{clock+=2001;return s.command(ownerSecret,roomId,{id,type,data});};
+ send('live','message.posted',{messageId:'live',body:'Original',toMemberId:memberId});
+ send('edit','message.edited',{messageId:'live',body:'Corrected',expectedMessageRevision:0});
+ for(let i=0;i<deletedCount;i++){
+  send('dead-'+i,'message.posted',{messageId:'dead-'+i,body:'Deleted',toMemberId:memberId});
+  send('erase-'+i,'message.deleted',{messageId:'dead-'+i,expectedMessageRevision:0});
+ }
+ s.room=()=>{throw Error('Whole room hydration forbidden');};
+ const head=s.headSequence(roomId);
+ const response=await get(origin,`/api/rooms/${roomId}/agent-inbox?limit=1`,friendSecret);assert.equal(response.status,200);
+ const page=await response.json();assert.deepEqual(page.directMessages.map(m=>[m.messageId,m.body]),[['live','Corrected']]);
+ assert.equal(page.coverage.conversation.examined,1,'deleted rows never consume source admission');
+ assert.equal(page.cursor.after,head);assert.doesNotMatch(JSON.stringify(page),/Original|Deleted|dead-/);
+ assert.equal(s.headSequence(roomId),head,'inbox remains read-only');
+ const plan=s.db.prepare("EXPLAIN QUERY PLAN SELECT message_id,seq FROM messages INDEXED BY current_messages_incoming_seq_live WHERE room_id=? AND (seq,message_id)<(?,?) AND to_member_id=? AND deleted_at IS NULL ORDER BY seq DESC,message_id DESC LIMIT 8").all(roomId,head+1,'',memberId);
+ assert.ok(plan.some(r=>r.detail.includes('current_messages_incoming_seq_live')));assert.ok(!plan.some(r=>/TEMP B-TREE|SCAN messages/.test(r.detail)));
 });

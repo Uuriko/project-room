@@ -1,5 +1,39 @@
 import { validId } from "../src/events.js";
 import { messageInHistory } from "./history-visibility.mjs";
+import {isCurrentRoom,withCurrentReadContext,readCurrentHead,readCurrentRecord,readCurrentMessage,CURRENT_REQUEST_OPENING_PREDICATE} from './current-room-repository.mjs';
+
+// Addressed protected dependencies only. The legacy full-state contract stays
+// unchanged; normalized reads never reconstruct the room or its request map.
+function currentRunContext(store, roomId, ids, viewerId, recipientOnly = false) {
+  return withCurrentReadContext(store.db, roomId, b => {
+    const head = readCurrentHead(store.db, roomId, b);
+    const room = readCurrentRecord(store.db, roomId, 'metadata', 'room', b);
+    const replyRequests = Object.create(null), members = Object.create(null);
+    for (const id of ids) {
+      const request = readCurrentRecord(store.db, roomId, 'replyRequests', id, b);
+      if (!request) {
+        if (!recipientOnly) fail('request_run_changed', 'Request selector lacks its protected request');
+        continue;
+      }
+      // Deny unrelated selections before loading private opening context.
+      if (recipientOnly && request.recipientId !== viewerId) continue;
+      if (!recipientOnly && ![request.requesterId, request.recipientId].includes(viewerId)) fail('request_run_changed', 'Request party selectors require reconciliation');
+      if (request.id !== id || !validId(request.openingEventId) || !validId(request.requesterId)
+        || !validId(request.recipientId) || !['open','answered','declined','cancelled'].includes(request.status))
+        fail('request_run_changed', 'Request proof requires reconciliation');
+      // Bind request metadata to the independently protected opening message.
+      const opening = readCurrentMessage(store.db, roomId, id, b);
+      const event = opening && store.db.prepare(`SELECT id,json_extract(body,'$.actorId') AS requester,json_extract(body,'$.data.toMemberId') AS recipient,json_extract(body,'$.data.messageId') AS messageId,json_extract(body,'$.at') AS at FROM events WHERE room_id=? AND sequence=? AND ${CURRENT_REQUEST_OPENING_PREDICATE}`).get(roomId, opening.row.seq);
+      if (!opening || event?.id !== request.openingEventId || event.requester !== request.requesterId || event.recipient !== request.recipientId || event.messageId !== id || event.at !== request.createdAt || opening.value.authorId !== request.requesterId
+        || opening.value.toMemberId !== request.recipientId || opening.value.createdAt !== request.createdAt)
+        fail('request_run_changed', 'Request opening requires reconciliation');
+      replyRequests[id] = request;
+      if (!Object.hasOwn(members, request.requesterId)) Object.defineProperty(members, request.requesterId, {value:readCurrentRecord(store.db, roomId, 'members', request.requesterId, b),enumerable:true});
+    }
+    return {state:{room,members,replyRequests}, sequence:head.sequence,
+      floor:store.historyFloor(roomId, viewerId, head.sequence)};
+  });
+}
 
 // This reservation never expires or transfers. A lost host may still be writing.
 // Status is operational metadata, not a message or an answer-basis revision.
@@ -30,18 +64,42 @@ export class RequestRuns {
   }
   list(token, roomId, binding = null) {
     return this.store.readTransaction(() => {
-      const auth = this.store.authenticate(token, roomId, binding), state = this.store.room(roomId).state;
-      const floor = this.store.historyFloor(roomId, auth.member.id, this.store.room(roomId).sequence);
-      const runs = {};
-      if (this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='request_runs' AND type='table'").get()) {
-        for (const row of this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=?").all(roomId)) {
-          const request = state.replyRequests?.[row.request_id];
-          if (!request || request.openingEventId !== row.opening_id
-            || !messageInHistory({ id: request.id, createdAt: request.createdAt }, floor)
-            || ![request.requesterId, request.recipientId].includes(auth.member.id)) continue;
-          runs[row.request_id] = { state: row.state === "working" && this.store.now() - row.updated_at > 120000 ? "unknown" : row.state,
-            updatedAt: row.updated_at };
+      const auth = this.store.authenticate(token, roomId, binding);
+      const current = isCurrentRoom(this.store.db, roomId);
+      const exists = this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='request_runs' AND type='table'").get();
+      // v1 promises a complete map, not a first page. Refuse a larger source
+      // before hydrating any records rather than returning a misleading subset.
+      let context, rows;
+      if (current) {
+        const ids = new Set();
+        // Cap each viewer-only indexed prefix before proof hydration. The
+        // independent union detects a single source's omitted party selector.
+        for (const role of ['requester','recipient']) {
+          for (const row of this.store.db.prepare(`SELECT record_key AS id FROM current_room_records INDEXED BY current_request_party_${role}
+            WHERE room_id=? AND domain='replyRequests' AND json_extract(payload,'$.${role}Id')=? ORDER BY record_key LIMIT 33`).all(roomId,auth.member.id)) ids.add(row.id);
+          const path = role === 'requester' ? '$.actorId' : '$.data.toMemberId';
+          for (const row of this.store.db.prepare(`SELECT json_extract(body,'$.data.messageId') AS id FROM events INDEXED BY current_request_opening_${role}
+            WHERE room_id=? AND json_extract(body,'${path}')=? AND ${CURRENT_REQUEST_OPENING_PREDICATE} ORDER BY sequence LIMIT 33`).all(roomId,auth.member.id)) ids.add(row.id);
         }
+        if (ids.size > 32) fail('request_runs_context_unavailable', 'Request run list exceeds bounded viewer-party v1 coverage; inspect selected requests and original attempts', 422);
+        context = currentRunContext(this.store, roomId, [...ids], auth.member.id);
+        rows = exists ? Object.values(context.state.replyRequests).flatMap(request => {
+          const row = this.store.db.prepare('SELECT * FROM request_runs WHERE room_id=? AND opening_id=?').get(roomId,request.openingEventId);
+          return row ? [row] : [];
+        }) : [];
+      } else {
+        rows = !exists ? [] : this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=?").all(roomId);
+        context = this.store.room(roomId);
+      }
+      const state = context.state, floor = current ? context.floor : this.store.historyFloor(roomId, auth.member.id, context.sequence);
+      const runs = {};
+      for (const row of rows) {
+        const request = state.replyRequests?.[row.request_id];
+        if (!request || request.openingEventId !== row.opening_id
+          || !messageInHistory({ id: request.id, createdAt: request.createdAt }, floor)
+          || ![request.requesterId, request.recipientId].includes(auth.member.id)) continue;
+        runs[row.request_id] = { state: row.state === "working" && this.store.now() - row.updated_at > 120000 ? "unknown" : row.state,
+          updatedAt: row.updated_at };
       }
       return { contractVersion: 1, roomId, viewerId: auth.member.id, runs };
     });
@@ -52,14 +110,17 @@ export class RequestRuns {
       || !["claim", "working", "result_ready", "needs_attention", "delivered"].includes(input.action))
       fail("invalid_request_run", "Choose one request, attempt and supported action", 422);
     return this.store.transaction(() => {
-      const auth = this.store.authenticate(token, roomId, binding), state = this.store.room(roomId).state;
+      const auth = this.store.authenticate(token, roomId, binding);
+      const current = isCurrentRoom(this.store.db, roomId);
+      const context = current ? currentRunContext(this.store, roomId, [input.requestMessageId], auth.member.id, true) : this.store.room(roomId);
+      const state = context.state;
       const request = state.replyRequests?.[input.requestMessageId];
       if (auth.member.kind !== "agent" || !request || request.recipientId !== auth.member.id)
         fail("request_run_denied", "Only the addressed agent may report its host", 403);
       const row = this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=? AND opening_id=?").get(roomId, request.openingEventId);
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
       if (input.action === "claim" || input.action === "working") {
-        const floor = this.store.historyFloor(roomId, auth.member.id, this.store.room(roomId).sequence);
+        const floor = current ? context.floor : this.store.historyFloor(roomId, auth.member.id, context.sequence);
         if (!messageInHistory({ id: request.id, createdAt: request.createdAt }, floor))
           fail("request_run_changed", "Request is outside your visible history; reconcile the original attempt");
         this.store.dmConsents.requireDmAllowed(roomId, auth.member.id, request.requesterId);
@@ -94,6 +155,18 @@ export class RequestRuns {
 // Internal observation only: callers supply canonical requests already filtered
 // for this viewer/history floor within the same read transaction. Never accept
 // request records from HTTP input or use this observation as execution authority.
+// Pickup may omit bodies, but its selected run ownership still depends on
+// the exact protected canonical request opening. Reuse execution's proof rules.
+export function validateSelectedRunOpenings(store,roomId,requests,viewerId){
+  if(!isCurrentRoom(store.db,roomId))return;
+  if(!validId(viewerId)||!Array.isArray(requests)||requests.length>4)fail('request_runs_context_unavailable','Selected pickup proof exceeds bounded v1 coverage; use the paged request reads',422);
+  if(!requests.length)return;
+  const context=currentRunContext(store,roomId,requests.map(request=>request.id),viewerId,true);
+  for(const selected of requests){const current=context.state.replyRequests[selected.id];
+    if(!current||['id','openingEventId','requesterId','recipientId','revision','status'].some(key=>selected[key]!==current[key]))fail('request_run_changed','Selected request opening requires reconciliation');
+  }
+}
+
 export function observeSelectedRuns(store, roomId, requests) {
   if (!requests.length || !store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='request_runs' AND type='table'").get()) return {};
   // CROSS JOIN pins selected openings as the outer loop. An ordinary JOIN

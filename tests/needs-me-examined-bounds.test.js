@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // Round 2 of W2-F9-CURE (RES-1538, Codex's exact-SQL falsifier, room
 // seq 25273): at the round-1 cured head the reply and mention scans
 // reported examined rows their SQL RETURNED, while the queries filtered
@@ -23,7 +24,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe, REPLY_SCAN_ROW_BUDGET, MENTION_SCAN_ROW_BUDGET, REPLY_SCAN_BYTE_BUDGET } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -33,11 +33,10 @@ function setup(t, roomId) {
   let clock = Date.now();
   store.now = () => (clock += 2100); // stay under the chat flood guard
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
   const owner = store.identities.create('OwnerC');
-  rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Examined bounds', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Examined bounds', kind: 'personal' });
   linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
@@ -151,4 +150,32 @@ test('examined bounds: the byte budget stops a scan of very large events before 
   assert.equal(page.scan.mentions.exhausted, true, 'the mention scan stopped at its byte budget before the range end');
   assert.equal(page.scan.exhausted, true, 'the read names a budget as the reason it stopped');
   assert.equal(page.hasMore, true, 'a byte-exhausted read signals continuation, never completeness');
+});
+
+test('examined bounds: a room-scoped page with hasMore keeps that roomId in nextRead so continuation stays in the room', t => {
+  const roomId = 'scoped-continuation';
+  const { store, bob, owner, post } = setup(t, roomId);
+  const maya = addMaya(store, owner, roomId);
+  post(maya.secret, 'maya-post', { body: 'Maya original post' });
+  for (let i = 0; i < 3200; i++) post(i % 2 ? owner.secret : bob.secret, `plain-${i}`, { body: `plain post ${i}` });
+  let page = collectNeedsMe(store, maya.secret, { roomId, since: { rooms: { [roomId]: 0 }, land: {}, landIds: {} } });
+  assert.equal(page.hasMore, true, 'fixture must produce a partial scoped page');
+  for (let n = 0; page.hasMore && n < 40; n++) {
+    assert.equal(page.nextRead.tool, 'room_needs_me');
+    assert.equal(page.nextRead.arguments.roomId, roomId, 'a scoped continuation names the same room');
+    assert.ok(page.items.every(item => !item.roomId || item.roomId === roomId), 'scoped pages carry only that room');
+    page = collectNeedsMe(store, maya.secret, page.nextRead.arguments);
+  }
+  assert.equal(page.hasMore, false, 'the scoped chain completes');
+  assert.equal(page.nextRead, undefined);
+});
+
+test('examined bounds: an unscoped continuation carries no roomId', t => {
+  const roomId = 'unscoped-continuation';
+  const { store, bob, owner, post } = setup(t, roomId);
+  const maya = addMaya(store, owner, roomId);
+  for (let i = 0; i < 3200; i++) post(i % 2 ? owner.secret : bob.secret, `u-${i}`, { body: `plain post ${i}` });
+  const page = collectNeedsMe(store, maya.secret, { since: { rooms: { [roomId]: 0 }, land: {}, landIds: {} } });
+  assert.equal(page.hasMore, true);
+  assert.equal('roomId' in page.nextRead.arguments, false);
 });

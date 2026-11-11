@@ -228,7 +228,7 @@ test("job wiring: fresh findings surface in job health as a named patrol failure
     const records = await tick(1_000);
     const entry = jobHealthView(records, 1_000).jobs.find(candidate => candidate.name === "patrol");
     assert.equal(entry.consecutiveFailures, 1);
-    assert.match(entry.lastError, /sequence invariant failed/);
+    assert.equal(entry.lastError, "Job failed");
     assert.ok(!entry.lastError.includes("alpha"), "the room id never reaches the public error");
     assert.equal(entry.lastErrorSubcheck, "sequence");
     assert.equal(entry.lastErrorCode, "patrol_finding");

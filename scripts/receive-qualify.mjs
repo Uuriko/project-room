@@ -12,6 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { readCurrentRecord } from '../server/current-room-repository.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
@@ -20,17 +21,21 @@ const messageId = 'qualify-question';
 
 async function qualify() {
   const store = new RoomStore(':memory:');
+  let server = null, directory = null, child = null, secret = '', stderr = '', buffer = '';
+  const frames = [], waiters = new Set();
+  try {
   const owner = store.identities.create('Qualify owner');
   const agent = store.identities.create('Qualify receiver');
+  secret = agent.secret;
   new AgentRooms(store).create(owner.secret, { roomId, title: 'Qualify', purpose: 'Synthetic receive qualification' });
   linkWithProof(store, owner.secret, roomId, agent, { memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   store.dmConsents.request(roomId, owner.identityId, 'receiver', 'Synthetic request');
   store.dmConsents.decide(roomId, 'receiver', owner.identityId, 'approve');
   store.dmConsents.request(roomId, 'receiver', owner.identityId, 'Synthetic reply');
   store.dmConsents.decide(roomId, owner.identityId, 'receiver', 'approve');
-  const server = createRoomServer({ store });
+  server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const directory = mkdtempSync(join(tmpdir(), 'receive-qualify-'));
+  directory = mkdtempSync(join(tmpdir(), 'receive-qualify-'));
   const config = join(directory, 'private');
   saveAgentConnection(config, {
     version: 1, origin: 'http://127.0.0.1:' + server.address().port,
@@ -38,12 +43,11 @@ async function qualify() {
   });
   const env = { ...process.env, ROOM_AGENT_CONFIG: config };
   for (const name of ['ROOM_AGENT_ORIGIN', 'ROOM_AGENT_ROOM', 'ROOM_AGENT_MEMBER', 'ROOM_AGENT_TOKEN']) delete env[name];
-  const child = spawn(process.execPath, [
+  child = spawn(process.execPath, [
     fileURLToPath(new URL('./room-listen.mjs', import.meta.url)),
     '--mode', 'channel', '--host', 'qualify-host', '--cadence-seconds', '60'
   ], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-  let stderr = '', buffer = '', id = 0;
-  const frames = [], waiters = new Set();
+  let id = 0;
   child.stderr.on('data', chunk => { stderr += chunk; });
   child.stdout.on('data', chunk => {
     buffer += chunk;
@@ -65,8 +69,6 @@ async function qualify() {
   };
   const send = frame => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...frame }) + '\n');
   const rpc = (method, params = {}) => { const requestId = ++id; send({ id: requestId, method, params }); return wait(frame => frame.id === requestId); };
-  const secret = agent.secret;
-  try {
     const initialized = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'receive-qualify', version: '1' } });
     assert.deepEqual(initialized.result.capabilities.experimental, { 'claude/channel': {} });
     send({ method: 'notifications/initialized' });
@@ -94,7 +96,7 @@ async function qualify() {
     };
     const posted = await rpc('tools/call', { name: 'room_respond_to_request', arguments: answer });
     assert.equal(posted.result.structuredContent.status, 'recorded');
-    assert.equal(store.room(roomId).state.replyRequests[messageId].status, 'answered');
+    assert.equal(readCurrentRecord(store.db, roomId, 'replyRequests', messageId).status, 'answered');
     const ack = await rpc('tools/call', { name: 'room_acknowledge_wake', arguments: { signalIds: [pointer.signalId] } });
     assert.deepEqual(ack.result.structuredContent.acknowledged, [pointer.signalId]);
     assert.equal(ack.result.structuredContent.reachability.observed, true);
@@ -107,11 +109,12 @@ async function qualify() {
     process.stdout.write(JSON.stringify(receipt) + '\n');
   } finally {
     for (const waiter of waiters) clearTimeout(waiter.timer);
-    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await once(child, 'exit'); }
-    await new Promise(resolve => server.close(resolve));
+    if (child && child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await once(child, 'exit'); }
+    server?.closeStreams(); server?.closeAllConnections();
+    if (server?.listening) await new Promise(resolve => server.close(resolve));
     store.close();
-    rmSync(directory, { recursive: true, force: true });
-    if ((stderr + buffer + JSON.stringify(frames)).includes(secret)) throw new Error('Qualification output included the saved credential');
+    if (directory) rmSync(directory, { recursive: true, force: true });
+    if (secret && (stderr + buffer + JSON.stringify(frames)).includes(secret)) throw new Error('Qualification output included the saved credential');
   }
 }
 

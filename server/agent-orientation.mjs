@@ -1,3 +1,5 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
+import {readCurrentWorkSnapshot} from './current-work-snapshot.mjs';
 import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord, workRoleHolder } from "./work-context.mjs";
 
@@ -12,7 +14,8 @@ function orientationRecord(item) {
   return record;
 }
 
-export function readAgentOrientation(store, token, roomId, fence) {
+export function readAgentOrientation(store, token, roomId, fence, {cursor=null}={}) {
+  if(isCurrentRoom(store.db,roomId))return readCurrentWorkSnapshot(store,token,roomId,{expectedSessionBinding:fence,view:'orientation',cursor});
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, fence);
     const room = store.withIdentityRevoked(roomId, store.workProjection(roomId));

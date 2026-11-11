@@ -1,3 +1,4 @@
+import { boardClaimToolsEnabled } from "./board-claim-tools.mjs";
 // AUX-08: on the full MCP profile, each front-door tool (the core and lean
 // lists) states its access, its cost and its REST twin in the description, so an agent
 // that reads only tools/list knows who may call it, what it costs and how to
@@ -18,9 +19,11 @@ const ANY_OR_ROOM = "any identity secret, or a room token (rak_) on /mcp; the RE
 const STATIC = "any caller, no secret needed";
 
 export const MCP_TOOL_CONTRACTS = Object.freeze({
+  room_wait_for_attention: {access: `read, ${MEMBER}; same scopes as room_read_inbox`, cost: "read only, at most four bounded inbox probes and one pending wait, starts no AI", rest: "none; use GET /api/rooms/{roomId}/agent-inbox for immediate reads"},
   room_work_claim_thread: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims/{claimId}/thread" },
   room_needs_me: { access: `read, ${ANY_OR_ROOM}`, cost: READ, rest: "GET /api/needs-me" },
   room_read_messages: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/events" },
+  room_mark_caught_up: { access: "write, room member; hidden from guest and read-only-tier catalogs; reader access updates own read-position marker only", cost: "one cursor upsert; posts nothing", rest: "POST /api/rooms/{roomId}/cursor" },
   room_post_message: { access: `write, ${GUEST_OK}`, cost: POST, rest: `${COMMANDS} (message.posted)` },
   room_reply: { access: `write, ${MEMBER_WRITE}`, cost: POST, rest: `${COMMANDS} (message.posted)` },
   room_list_requests: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/reply-requests" },
@@ -33,6 +36,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_join: { access: `write, ${ANY} with a share link, invite code, or room pairing; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/share-links/join-agent or POST /api/agent-invites/redeem or POST /api/pair" },
   room_merge_members: { access: `write, room owner or a member with manage_members and decide; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/rooms/{roomId}/members/merge" },
   room_put_file: { access: `write, ${MEMBER_WRITE}`, cost: "stages at most 1 MiB; others see nothing until room_commit_file", rest: "POST /api/rooms/{roomId}/files" },
+  room_list_files: { access: `read, ${MEMBER}`, cost: "normalized: up to 8 metadata entries for 1–8 selected visible messages per page; legacy list may expire staging; starts no AI", rest: "GET /api/rooms/{roomId}/files?messageId={messageId} (repeat messageId for the same selection; cursor continues it)" },
   room_commit_file: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/files/{id}/commit" },
   add_land_item: { access: `write, ${MEMBER_WRITE}`, cost: "one write; does not merge or deploy", rest: "POST /api/rooms/{roomId}/add_land_item" },
   list_land_queue: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/list_land_queue" },
@@ -50,6 +54,10 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_join_kits: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static kits document" },
   room_join_prompt: { access: `read, ${STATIC}`, cost: READ, rest: "none, a static door prompt document" },
   room_mcp_snippet: { access: `read, ${STATIC}`, cost: READ, rest: "none, static host config snippets" },
+  // Public-profile only: served by livePublicMcpTools, never on full, so
+  // the full-only ratchet could not see it. The handler is the same
+  // anonymous mint as its REST twin (budgets and proof-of-work included).
+  room_identity_mint: { access: `write, ${STATIC}`, cost: "one write, starts no AI; returns a one-time identity secret shown once; anonymous budgets apply and repeated mints may require proof-of-work", rest: "POST /api/agent-identities" },
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
   room_list_work: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/work-claims" },
@@ -93,6 +101,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_release_claim: { access: `write, Board writer who holds the claim or has manage_claims; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (claim.released)` },
   room_renew_claim: { access: `write, Board writer holding the active claim; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (claim.renewed)` },
   room_request_history: { access: `read, room member`, cost: READ, rest: "GET /api/rooms/{roomId}/reply-history" },
+  room_cancel_request: { access: `write, room member who asked, or the human room owner; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (reply_request.cancelled)` },
+  room_progress_request: { access: `write, room member the request is addressed to; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (reply_request.progressed)` },
   room_request_reply: { access: `write, room member; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (message.posted)` },
   room_resolve_blocker: { access: `write, room member with assigned accept_work; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.blocker_resolved)` },
   room_select_help_offer: { access: `write, the accountable member of the task; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.help_offer_updated)` },
@@ -100,6 +110,9 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_submit_text_result: { access: `write, assigned room member with complete_work; write mode also needs write authority and an active claim; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.completed)` },
   room_supersede_work: { access: `write, room member with steer and Board write access; hidden from guest and read-only-tier agents`, cost: WRITE, rest: `${COMMANDS} (work.superseded)` },
   room_map: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/map/query" }
+  // Flag ROOM_BOARD_CLAIM_TOOLS (off by default): contracts exist only when listed.
+  ,...(boardClaimToolsEnabled() ? {
+    room_work_claim: { access: `write, Board writer (finish: the holder); hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/rooms/{roomId}/work-claims/{claimId}/claim, POST /api/rooms/{roomId}/work-claims/{claimId}/update" } } : {})
 });
 
 export function mcpToolContractLine(name) {

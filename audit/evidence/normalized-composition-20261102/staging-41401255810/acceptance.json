@@ -1,0 +1,16 @@
+{
+  "head": "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+  "run": "https://github.com/Uuriko/project-room/actions/runs/41401255810",
+  "result": "success",
+  "buildId": "2026-11-02T06:39:26.802Z",
+  "workerVersion": "22deb11f-f144-4121-b23b-de048b3c5b4c",
+  "scope": "Isolated staging public discovery, browser and cold-start checks; no authenticated migration or production qualification",
+  "workerColdMs": 480,
+  "doColdMs": 1215,
+  "doColdBudgetGated": false,
+  "smokeP95Ms": 197,
+  "knownWarnings": 1,
+  "localOperatorInventoryStatus": 403,
+  "productionChanged": false,
+  "gitComparison": "main e850 is an ancestor; candidate is 535 commits ahead. Raw smoke compare is live...main, so behind describes main relative to live."
+}

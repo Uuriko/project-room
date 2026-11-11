@@ -54,6 +54,9 @@ export function createNeedsAttentionCard(options) {
   }
   function requestItem(request) {
     const path = client.path(`/access-requests/${encodeURIComponent(request.requestId)}/decide`);
+    if(request.kind==='agent-sponsor-transfer')return {kind:'access_request',id:request.requestId,severity:'action',requestKind:request.kind,
+      title:uiText("agentSponsor.requestTitle", {name:request.displayName}),detail:request.note,requestedPermissions:[],
+      actions:['approve','deny'].map(decision=>({action:decision,method:'POST',path,body:{decision}}))};
     return { kind: "access_request", id: request.requestId, severity: "action", requestKind: request.kind,
       title: request.kind === "permissions" ? `${request.displayName} wants more permissions` : `${request.displayName} asks to join`,
       detail: `Requested: ${request.requestedPermissions.map(permissionLabel).join(", ") || "read and chat"}${request.kind === "permissions" ? ". Approval adds permissions and keeps existing access." : ""}`,
@@ -141,14 +144,14 @@ export function createNeedsAttentionCard(options) {
   function render(report) {
     const items = report?.items ?? [];
     currentReport = report;
-    count.textContent = String(report?.itemCount ?? items.length);
+    count.textContent = report?.coverage?uiText(report.coverage.complete?"currentRoom.attentionCount":"currentRoom.attentionLoaded",{count:items.length}):String(report?.itemCount??items.length);
     pages.hidden = !report?.nextCursor && !report?.previousCursor;
-    range.textContent = items.length ? `Showing ${report.pageOffset + 1}–${report.pageOffset + items.length} of ${report.itemCount}` : "";
-    section.hidden = items.length === 0;
+    range.textContent=report?.coverage?uiText(report.coverage.complete?"currentRoom.attentionComplete":"currentRoom.attentionPartial"):(items.length?uiText("currentRoom.attentionRange",{from:report.pageOffset+1,to:report.pageOffset+items.length,count:report.itemCount}):'');
+    section.hidden = items.length === 0&&!report?.coverage;
     list.innerHTML = items.map((item, itemIndex) => `
       <li class="attention-item attention-${esc(item.kind)} attention-severity-${esc(item.severity)}" data-item-index="${itemIndex}" data-access-request-id="${item.kind === "access_request" ? esc(item.id) : ""}">
         <div class="attention-body">
-          <span class="attention-kind">${esc(item.requestKind === "permissions" ? "Permission request" : KIND_LABEL[item.kind] ?? item.kind)}</span>
+          <span class="attention-kind">${esc(item.requestKind === "agent-sponsor-transfer" ? "Agent sponsorship" : item.requestKind === "permissions" ? "Permission request" : KIND_LABEL[item.kind] ?? item.kind)}</span>
           <strong class="attention-title">${esc(item.title)}</strong>
           <p class="attention-detail">${esc(item.detail)}</p>
         </div>
@@ -249,7 +252,7 @@ export function createNeedsAttentionCard(options) {
         // Owners retain their paged rollup; admins receive only the request queue
         // their existing manage_members authority permits, never the owner rollup.
         if (!canReadOwnerRollup()) report = null;
-        report = report ? { ...report, ownerOnly: true, items: report.items.map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
+        report = report ? { ...report, ownerOnly: true, items: (report.contractVersion === 2 ? [...requests, ...report.items] : report.items).map(item => item.kind === "access_request" ? byId.get(item.id) : item).filter(Boolean) }
           : { items: requests, itemCount: requests.length, pageOffset: 0, ownerOnly: false };
       }
       if (partial && !report?.items.some(item => item.id === partial.id)) partial = null;

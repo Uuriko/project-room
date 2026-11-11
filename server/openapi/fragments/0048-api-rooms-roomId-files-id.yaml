@@ -2,9 +2,11 @@
     get:
       summary: Read one room file with its bytes
       description: |
-        REST parity with the MCP room_get_file tool. Members read one staged
-        or committed room file. The response carries the bytes as base64.
-        A file the caller cannot see returns 404.
+        REST parity with MCP room_get_file. Staged files are uploader-only.
+        Normalized committed files require a protected bound message visible
+        under this viewer's current history floor and DM scope. Knowing a file
+        id never bypasses those rules. Unknown, private and pre-join files
+        return the same 404. Authorized bytes are returned as base64.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: id

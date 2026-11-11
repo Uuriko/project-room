@@ -1,0 +1,11 @@
+✔ actual compact native receipt click opens exact selected result loader and preserves binding (0.909875ms)
+✔ full external receipt remains unopened; busy and noncurrent cards do not open (0.614666ms)
+✔ full native previous completion pointer is retained (0.239083ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50.472709

@@ -49,7 +49,7 @@ const validateBinding = binding => {
   if (binding === undefined || binding === null) return null; // legacy desktop grant
   const fields = binding?.principalType === "invited-agent"
     ? ["resource", "roomId", "identityId", "memberId", "principalType", "invitationGrantId", "identityEpoch"]
-    : ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch", ...(binding?.principalType === "account-owned-agent" ? ["principalType", "accountEpoch"] : [])];
+    : ["resource", "roomId", "identityId", "memberId", "humanMemberId", "identityEpoch", ...(["account-owned-agent","account-adopted-agent"].includes(binding?.principalType) ? ["principalType", "accountEpoch", ...(binding?.principalType==="account-adopted-agent"?["adoptionId"]:[])] : [])];
   check(binding && typeof binding === "object" && !Array.isArray(binding)
     && Object.keys(binding).length === fields.length
     && fields.every(key => typeof binding[key] === "string" && binding[key].length > 0 && binding[key].length <= 512),
@@ -328,7 +328,9 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_grant", "refresh token expired"); }
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     if (record.clientId !== clientId) fail("invalid_grant", "client_id mismatch");
-    checkResource(record, resource);
+    // RFC 8707 section 2.2 allows resource to be omitted on refresh. Retain
+    // exactly this grant's saved resource; omission cannot make it unbound.
+    checkResource(record, resource === undefined ? record.binding?.resource : resource);
     if (!bindingActive(record)) fail("invalid_grant", "agent connection is no longer active");
     // Issue the replacement pair BEFORE revoking the old token (#2944).
     // issueTokenPair can still throw (validateScopes, or

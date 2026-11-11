@@ -11,7 +11,7 @@
 // no extra work.
 
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, historyVisibility, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES as T, historyVisibility, memberHistoryVisibility } from "../src/events.js";
 
 
 // Invite copy for link guests and guest-agent members. Without an owner
@@ -31,6 +31,43 @@ export function guestHistoryAccessLead(room) {
 
 const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
 
+// Pure leaves shared by the full history audit and durable recovery census.
+export function advanceHistoryActivation(previous,entry) {
+ let nowActive;
+ if(JOIN_TYPES.includes(entry.type))nowActive=true;
+ else if(entry.active===1||entry.active===true)nowActive=true;
+ else if(entry.active===0||entry.active===false)nowActive=false;
+ else return previous;
+ return {active:nowActive,row:nowActive&&!previous.active?entry:previous.row};
+}
+export function historyJoinPoint(row,headSequence) {
+ if(!row||!Number.isSafeInteger(row.sequence)||typeof row.at!=='string')return {sequence:(Number.isSafeInteger(headSequence)?headSequence:0)+1,at:'9999-12-31T23:59:59.999Z',found:false};
+ return {sequence:row.sequence,at:row.at,found:true};
+}
+export function historyExclusionIds(entry) {
+ return [entry.id,entry.messageId].flatMap(id=>typeof id==='string'?[id,`${id}:channel`]:[]);
+}
+
+// V2 activation tuple: initialization/full audit may enumerate history; serving
+// reads and invitation writes use the protected addressed tuple instead.
+export function historyActivationTuple(db,roomId,memberId,headSequence) {
+ const rows=db.prepare(`SELECT sequence,json_extract(body,'$.at') at,json_extract(body,'$.type') type,
+   json_extract(body,'$.data.active') active FROM events WHERE room_id=?
+   AND json_extract(body,'$.data.memberId')=? AND json_extract(body,'$.type') IN (?,?,?) ORDER BY sequence`)
+   .all(roomId,memberId,...JOIN_TYPES,T.MEMBER_ACCESS_CHANGED);
+ let activation={active:false,row:null};for(const row of rows)activation=advanceHistoryActivation(activation,row);
+ return historyActivationValue(historyJoinPoint(activation.row,headSequence));
+}
+export function historyActivationValue({sequence,at,found}) {
+ if(found===false)throw Error('Missing qualified member activation source');
+ return {version:2,sequence,at,tieBreak:'source-sequence'};
+}
+function atOrAfterActivation(at,id,floor,sequenceFor) {
+ const instant=Date.parse(at),joined=Date.parse(floor.at);
+ if(!Number.isFinite(instant)||!Number.isFinite(joined))return false;
+ return instant>joined || instant===joined&&sequenceFor(id)>=floor.sequence;
+}
+
 // Returns null (no limit) or { sequence, at, sameInstant } for the member's
 // join event. Timestamps have millisecond precision, so `sameInstant` lists
 // the ids of messages and events that share the join's millisecond but come
@@ -49,32 +86,16 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
        AND json_extract(body,'$.data.memberId')=?
      ORDER BY sequence`
   ).all(roomId, ...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED, memberId);
-  let row = null, active = false;
-  for (const entry of rows) {
-    let nowActive;
-    if (JOIN_TYPES.includes(entry.type)) nowActive = true;
-    else if (entry.active === 1 || entry.active === true) nowActive = true;
-    else if (entry.active === 0 || entry.active === false) nowActive = false;
-    else continue; // access_changed without an explicit active flag says nothing about activation
-    if (nowActive && !active) row = entry;
-    active = nowActive;
-  }
-  if (!row || !Number.isSafeInteger(row.sequence) || typeof row.at !== "string") {
-    const head = Number.isSafeInteger(headSequence) ? headSequence : 0;
-    return { sequence: head + 1, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() };
-  }
+  let activation={active:false,row:null};
+  for(const entry of rows)activation=advanceHistoryActivation(activation,entry);
+  const row=historyJoinPoint(activation.row,headSequence);
+  if(!row.found)return {sequence:row.sequence,at:row.at,sameInstant:new Set()};
   const sameInstant = new Set();
   const earlier = db.prepare(
     `SELECT json_extract(body,'$.id') AS id, json_extract(body,'$.data.messageId') AS messageId FROM events
      WHERE room_id=? AND sequence<? AND json_extract(body,'$.at')=?`
   ).all(roomId, row.sequence, row.at);
-  for (const entry of earlier) {
-    for (const id of [entry.id, entry.messageId]) {
-      if (typeof id !== "string") continue;
-      sameInstant.add(id);
-      sameInstant.add(`${id}:channel`);
-    }
-  }
+  for(const entry of earlier)for(const id of historyExclusionIds(entry))sameInstant.add(id);
   return { sequence: row.sequence, at: row.at, sameInstant };
 }
 
@@ -82,6 +103,7 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
 export function messageInHistory(message, floor) {
   if (!floor) return true;
   const createdAt = message?.createdAt;
+  if(floor.version===2)return typeof createdAt==='string'&&atOrAfterActivation(createdAt,message.id,floor,floor.messageSequence);
   if (typeof createdAt !== "string" || createdAt < floor.at) return false;
   return createdAt > floor.at || !floor.sameInstant?.has(message.id);
 }
@@ -134,6 +156,7 @@ export function rowInHistory(row, floor, messagesById = null) {
 export function eventInHistory(event, floor, messagesById = null) {
   if (!floor) return true;
   const at = event?.at;
+  if(floor.version===2)return typeof at==='string'&&atOrAfterActivation(at,event.id,floor,floor.eventSequence)&&!targetsHiddenMessage(event,floor,messagesById);
   if (typeof at !== "string" || at < floor.at) return false;
   return (at > floor.at || !floor.sameInstant?.has(event.id)) && !targetsHiddenMessage(event, floor, messagesById);
 }
@@ -182,10 +205,10 @@ export function visibleSequenceHorizon(db, roomId, viewerId, headSequence, isOwn
 // command path. An archived room records nothing new, so its exports leave
 // no event; they stay owner-only.
 export function requireExportOwner(store, roomId, memberId, fail) {
-  if (memberId !== store.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can export the room");
+  if (memberId !== store.roomAuthority(roomId, {memberId}).ownerId) fail(403, "owner_required", "Only the room owner can export the room");
 }
 
 export function recordRoomExport(store, token, roomId, format, expectedSessionBinding = null) {
-  if (isRoomArchived(store.room(roomId).state)) return null;
+  if (store.roomArchivedForExport(roomId)) return null;
   return store.command(token, roomId, { id: randomUUID(), type: T.ROOM_EXPORTED, data: { format } }, expectedSessionBinding);
 }

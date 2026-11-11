@@ -172,7 +172,7 @@ test("end to end: parity poison is named on the health surface, the failing tick
     if (view.consecutiveFailures > 0) { failing = view; failingAt = t0 + i * 3_600_000; }
   }
   assert.ok(failing, "poisoned parity fails a tick");
-  assert.match(failing.lastError, /messages_parity/);
+  assert.equal(failing.lastError, "Job failed", "public health conceals exception text; structured codes identify the failed check");
   assert.equal(failing.lastErrorSubcheck, "messages_parity");
   assert.equal(failing.lastErrorCode, "messages_parity_failed");
   assert.equal(failing.lastErrorClass, "integrity_mismatch");

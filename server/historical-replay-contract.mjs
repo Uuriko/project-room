@@ -2,6 +2,7 @@
 // Shared producer rules and bounded saved-prefix consumption; no proof baseline.
 import { createHash } from 'node:crypto';
 import { ServiceError } from './service-error.mjs';
+import {CURRENT_WRITER_FORMAT} from './current-room-format.mjs';
 import { replayPre749Sessions } from './legacy-session-replay.mjs';
 export const HISTORICAL_REPLAY_CONTRACT_VERSION = 1;
 export const HISTORICAL_REPLAY_KIND = 'pre749-sessions';
@@ -164,7 +165,7 @@ function lookupValue(db, row, roomId, head) {
 }
 // Caller holds its read/writer transaction. This reconstructs only a previously
 // proved exact prefix; it never reads serving payloads or establishes a proof.
-export function savedHistoricalReplayCheckpoint(db, roomId, through, eventBudget = LIMIT) {
+function historicalCheckpoint(db, roomId, through, eventBudget = LIMIT) {
   if (!db.isTransaction) throw Error('Historical checkpoint requires a transaction');
   if (!Number.isSafeInteger(through) || through < 1 || typeof roomId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(roomId)) return null;
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operator_actions'").get()) return null;
@@ -189,15 +190,152 @@ export function savedHistoricalReplayCheckpoint(db, roomId, through, eventBudget
   const raw = db.prepare('SELECT sequence,CAST(id AS BLOB) AS id,CAST(body AS BLOB) AS body FROM events WHERE room_id=? AND sequence<=? ORDER BY sequence LIMIT 65').all(roomId,head);
   let events;
   try {
-    if (pre749PrefixDigest(roomId,raw) !== c.prefixSha256) unavailable();
     const decoded = decodeHistoricalEventRows(raw);
     if (decoded.at(-1).id !== c.headEventId) unavailable();
     events = decoded.map(row => { const incoming = objectJson(db,row.body); if (incoming.id !== row.id || incoming.roomId !== roomId) unavailable(); return incoming; });
   } catch (error) { if (error instanceof TypeError) unavailable(); throw error; }
+  const privacy = readHistoricalPrivacy ( db , { roomId , head , original , value , contract : c , raw , events , through } ) ;
+  if ( ! privacy && pre749PrefixDigest ( roomId , raw ) !== c . prefixSha256 ) unavailable ( ) ;
   let state;
   try { state = replayPre749Sessions(events); }
   catch (error) { if (error.constructor === Error && !error.code) unavailable(); throw error; }
   const json = JSON.stringify(state);
-  if (hash(json) !== c.snapshotHash || Buffer.byteLength(json) > original.saved.admission.outputBytes || spent.bytes + size.bytes + Buffer.byteLength(json) > BYTES) unavailable();
-  return {state,json,sequence:head,eventId:c.headEventId,events:head};
+  if ( ( ! privacy && hash ( json ) !== c . snapshotHash ) || Buffer . byteLength ( json ) > original . saved . admission . outputBytes + ( privacy ? 64 * 64 : 0 ) || spent . bytes + size . bytes + Buffer . byteLength ( json ) > BYTES ) unavailable ( ) ;
+  return { state , json , sequence : head , eventId : c . headEventId , events : head , _basis : { roomId , head , original , value , contract : c , raw , entries : events , privacy } } ;
+}
+
+export function savedHistoricalReplayCheckpoint ( db , roomId , through , eventBudget = LIMIT ) {
+ const result = historicalCheckpoint ( db , roomId , through , eventBudget ) ; if ( ! result || result . budgetExceeded ) return result ;
+ const { _basis , ... publicValue } = result ; return publicValue ;
+}
+
+// Derived privacy write proofs. These never replace the original historical
+// repair receipt or adopt changed history as a fresh original basis.
+const PRIVACY_BASIS = 'historical_replay_privacy_basis' , PRIVACY_ERASURE = 'historical_replay_erased' ;
+const PRIVACY_DESCRIPTOR_BYTES = 64 * 1024 , PRIVACY_INPUT_BYTES = 128 * 1024 ;
+export const HISTORICAL_REPLAY_MAX_INPUT_BYTES = BYTES + PRIVACY_INPUT_BYTES ;
+const privacyBasisId = b => 'oa_lsr_privacy_basis_' + hash ( [ b . roomId , b . head , b . original . row . id , contractHash ( b . contract ) ] ) ;
+const privacyErasureId = ( b , slot ) => 'oa_lsr_privacy_' + hash ( [ b . roomId , b . head ] ) + '_' + slot ;
+const exactKeys = ( value , keys ) => value && typeof value === 'object' && ! Array . isArray ( value ) && Object . keys ( value ) . sort ( ) . join ( ',' ) === [ ... keys ] . sort ( ) . join ( ',' ) ;
+const commandCanonical = value => Array . isArray ( value ) ? '[' + value . map ( commandCanonical ) . join ( ',' ) + ']' : value && typeof value === 'object' ? '{' + Object . keys ( value ) . sort ( ) . map ( key => JSON . stringify ( key ) + ':' + commandCanonical ( value [ key ] ) ) . join ( ',' ) + '}' : JSON . stringify ( value ) ;
+function privacyAction ( db , id , action , roomId , maximum , spent ) {
+ const size = db . prepare ( "SELECT length(CAST(counts_json AS BLOB)) bytes,typeof(counts_json) kind FROM operator_actions WHERE id=?" ) . get ( id ) ;
+ if ( ! size ) return null ;
+ if ( size . kind !== 'text' || ! Number . isSafeInteger ( size . bytes ) || size . bytes < 2 || size . bytes > maximum || spent . bytes + size . bytes + 256 > PRIVACY_INPUT_BYTES ) unavailable ( ) ;
+ spent . bytes += size . bytes + 256 ;
+ const row = db . prepare ( 'SELECT action,target_kind,target_id,result,CAST(counts_json AS BLOB) bytes FROM operator_actions WHERE id=?' ) . get ( id ) ;
+ if ( row . action !== action || row . target_kind !== 'room' || row . target_id !== roomId || row . result !== ( action === 'current_room_writer_admission' ? 'opened' : action === 'current_room_writer_closed' ? 'closed' : 'committed' ) ) unavailable ( ) ;
+ return objectJson ( db , sourceText ( row . bytes ) ) ;
+}
+function privacyTarget ( entry ) {
+ if ( entry . type === 'message.posted' ) return typeof entry . data ?. messageId === 'string' && entry . data . messageId ? entry . data . messageId : entry . id ;
+ return entry . type === 'message.edited' ? entry . data ?. messageId : null ;
+}
+function erasedEvent ( entry ) {
+ const out = structuredClone ( entry ) ;
+ if ( Object . hasOwn ( out . data , 'body' ) ) out . data . body = null ;
+ if ( Object . hasOwn ( out . data , 'attachments' ) ) out . data . attachments = null ;
+ out . data . redacted = true ; return JSON . stringify ( out ) ;
+}
+function basisCommitment ( value ) {
+ return hash ( [ 'project-room.historical-privacy-basis.v1' , value . roomId , value . head , value . originalReceiptId , value . contractSha256 , value . prefixSha256 , value . snapshotHash , value . rows ] ) ;
+}
+function newPrivacyBasis ( b ) {
+ const value = { version : 1 , roomId : b . roomId , head : b . head , originalReceiptId : b . original . row . id , contractSha256 : contractHash ( b . contract ) , prefixSha256 : b . contract . prefixSha256 , snapshotHash : b . contract . snapshotHash , rows : b . raw . map ( ( row , i ) => {
+  const entry = b . entries [ i ] , target = privacyTarget ( entry ) ;
+  return [ row . sequence , sourceText ( row . id ) , hash ( sourceText ( row . body ) ) , target ? hash ( erasedEvent ( entry ) ) : null , target ?? null , entry . type === 'message.posted' && typeof entry . data ?. body === 'string' ? Buffer . byteLength ( entry . data . body ) : null ] ;
+ } ) } ;
+ if ( Buffer . byteLength ( JSON . stringify ( value ) ) > PRIVACY_DESCRIPTOR_BYTES ) unavailable ( ) ; return value ;
+}
+function validatePrivacyBasis ( value , b ) {
+ if ( ! exactKeys ( value , [ 'version' , 'roomId' , 'head' , 'originalReceiptId' , 'contractSha256' , 'prefixSha256' , 'snapshotHash' , 'rows' ] ) || value . version !== 1 || value . roomId !== b . roomId || value . head !== b . head || value . originalReceiptId !== b . original . row . id || value . contractSha256 !== contractHash ( b . contract ) || value . prefixSha256 !== b . contract . prefixSha256 || value . snapshotHash !== b . contract . snapshotHash || ! Array . isArray ( value . rows ) || value . rows . length !== b . head ) unavailable ( ) ;
+ for ( let i = 0 ; i < value . rows . length ; i ++ ) {
+  const row = value . rows [ i ] ;
+  if ( ! Array . isArray ( row ) || row . length !== 6 || row [ 0 ] !== i + 1 || typeof row [ 1 ] !== 'string' || Buffer . byteLength ( row [ 1 ] ) > 256 || ! sha ( row [ 2 ] ) || ( row [ 3 ] !== null && ! sha ( row [ 3 ] ) ) || ( row [ 4 ] !== null && ( typeof row [ 4 ] !== 'string' || ! /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/ . test ( row [ 4 ] ) ) ) || ( ( row [ 3 ] === null ) !== ( row [ 4 ] === null ) ) || ( row [ 5 ] !== null && ( ! Number . isSafeInteger ( row [ 5 ] ) || row [ 5 ] < 0 ) ) ) unavailable ( ) ;
+ }
+}
+function privacyEvent ( db , roomId , sequence , id , spent ) {
+ if ( ! Number . isSafeInteger ( sequence ) || sequence < 1 || typeof id !== 'string' ) unavailable ( ) ;
+ const size = db . prepare ( 'SELECT length(CAST(body AS BLOB)) bytes,typeof(body) kind,id FROM events WHERE room_id=? AND sequence=?' ) . get ( roomId , sequence ) ;
+ if ( ! size || size . kind !== 'text' || ! Number . isSafeInteger ( size . bytes ) || size . bytes < 2 || size . id !== id || size . bytes > 32 * 1024 || spent . bytes + size . bytes > PRIVACY_INPUT_BYTES ) unavailable ( ) ; spent . bytes += size . bytes ;
+ const entry = objectJson ( db , sourceText ( db . prepare ( 'SELECT CAST(body AS BLOB) bytes FROM events WHERE room_id=? AND sequence=?' ) . get ( roomId , sequence ) . bytes ) ) ;
+ if ( entry . id !== id || entry . roomId !== roomId ) unavailable ( ) ; return entry ;
+}
+function validatePrivacyErasure ( db , b , descriptor , value , slot , spent , { closingPermitId = null } = { } ) {
+ if ( ! exactKeys ( value , [ 'version' , 'basisSha256' , 'slot' , 'messageId' , 'actorId' , 'command' , 'deletion' , 'redaction' , 'admission' , 'transition' ] ) || value . version !== 1 || value . basisSha256 !== basisCommitment ( descriptor ) || value . slot !== slot || typeof value . messageId !== 'string' || typeof value . actorId !== 'string' || ! Array . isArray ( value . command ) || value . command . length !== 3 || ! Array . isArray ( value . deletion ) || value . deletion . length !== 2 || ! Array . isArray ( value . redaction ) || value . redaction . length !== 2 || ! Array . isArray ( value . admission ) || value . admission . length !== 5 || ! Array . isArray ( value . transition ) || value . transition . length !== 5 ) unavailable ( ) ;
+ const original = descriptor . rows [ slot - 1 ] ;
+ if ( ! original || original [ 4 ] !== value . messageId || ( b . events ?? b . entries ) [ slot - 1 ] ?. type !== 'message.posted' ) unavailable ( ) ;
+ const deleted = privacyEvent ( db , b . roomId , ... value . deletion , spent ) , redacted = privacyEvent ( db , b . roomId , ... value . redaction , spent ) ;
+ if ( value . deletion [ 0 ] <= b . head || value . redaction [ 0 ] <= value . deletion [ 0 ] || value . redaction [ 0 ] > b . through || deleted . type !== 'message.deleted' || redacted . type !== 'message.redacted' || deleted . actorId !== value . actorId || redacted . actorId !== value . actorId || deleted . at !== redacted . at || deleted . data ?. messageId !== value . messageId || redacted . data ?. messageId !== value . messageId || ! Number . isSafeInteger ( deleted . data ?. expectedMessageRevision ) || deleted . data . expectedMessageRevision < 0 || deleted . idempotencyKey !== hash ( value . actorId + ':' + value . command [ 0 ] ) ) unavailable ( ) ;
+ if ( ( original [ 5 ] > 0 ? redacted . data . byteLength !== original [ 5 ] : Object . hasOwn ( redacted . data , 'byteLength' ) ) ) unavailable ( ) ;
+ const command = { id : value . command [ 0 ] , type : 'message.deleted' , data : deleted . data } ;
+ if ( value . command [ 2 ] === 'null' ) command . causationId = null ;
+ else if ( value . command [ 2 ] === 'undefined' ) command . causationId = undefined ;
+ else if ( value . command [ 2 ] === 'value' ) command . causationId = deleted . causationId ;
+ else if ( value . command [ 2 ] !== 'absent' ) unavailable ( ) ;
+ const receipt = db . prepare ( 'SELECT fingerprint,sequence FROM commands WHERE room_id=? AND actor_id=? AND id=?' ) . get ( b . roomId , value . actorId , value . command [ 0 ] ) ;
+ if ( ! receipt || receipt . sequence !== value . deletion [ 0 ] || receipt . fingerprint !== value . command [ 1 ] || receipt . fingerprint !== hash ( commandCanonical ( command ) ) ) unavailable ( ) ;
+ const opened = privacyAction ( db , value . admission [ 0 ] , 'current_room_writer_admission' , b . roomId , 4096 , spent ) ;
+ if ( ! exactKeys ( opened , [ 'roomId' , 'permitId' , 'headHash' , 'format' ] ) || opened . roomId !== b . roomId || opened . permitId !== value . admission [ 0 ] || opened . headHash !== value . admission [ 1 ] || ! [
+   'normalized-current-v1-native-work-5',
+   'normalized-current-v1-native-work-6'
+  ] . includes ( opened . format ) ) unavailable ( ) ;
+ if ( value . admission [ 0 ] !== closingPermitId ) { const closed = privacyAction ( db , value . admission [ 0 ] + '_closed' , 'current_room_writer_closed' , b . roomId , 4096 , spent ) ; if ( ! exactKeys ( closed , [ 'permitId' ] ) || closed . permitId !== value . admission [ 0 ] ) unavailable ( ) ; }
+ const transition = privacyAction ( db , value . transition [ 0 ] , 'current_room_transition' , b . roomId , 128 * 1024 , spent ) ;
+ const tuple = value . transition [ 4 ] ;
+ if ( ! exactKeys ( transition , [ 'version' , 'roomId' , 'headHash' , 'records' ] ) || transition . version !== 1 || transition . roomId !== b . roomId || transition . headHash !== value . transition [ 1 ] || value . transition [ 2 ] !== value . redaction [ 0 ] || ! Number . isSafeInteger ( value . admission [ 3 ] ) || ! Number . isSafeInteger ( value . admission [ 4 ] ) || value . deletion [ 0 ] !== value . admission [ 4 ] + 1 || value . transition [ 3 ] !== value . admission [ 3 ] + 1 || value . transition [ 0 ] !== 'oa_current_' + hash ( [ b . roomId , value . transition [ 2 ] , value . transition [ 3 ] , value . transition [ 1 ] , value . admission [ 2 ] , transition . records ] ) || ! Array . isArray ( transition . records ) || transition . records . length > 128 || ! Array . isArray ( tuple ) || tuple . length !== 5 || tuple [ 0 ] !== 'messageWitness' || tuple [ 1 ] !== value . messageId || ! Number . isSafeInteger ( tuple [ 2 ] ) || tuple [ 2 ] < 0 || tuple [ 3 ] !== 1 || ! sha ( tuple [ 4 ] ) || ! transition . records ?. some ( row => JSON . stringify ( row ) === JSON . stringify ( tuple ) ) ) unavailable ( ) ;
+ return value ;
+}
+function readHistoricalPrivacy ( db , b , { closingPermitId = null } = { } ) {
+ const spent = { bytes : 0 } , descriptor = privacyAction ( db , privacyBasisId ( b ) , PRIVACY_BASIS , b . roomId , PRIVACY_DESCRIPTOR_BYTES , spent ) ;
+ if ( ! descriptor ) { const ids = Array . from ( { length : b . head } , ( _ , i ) => privacyErasureId ( b , i + 1 ) ) ; if ( db . prepare ( 'SELECT 1 FROM operator_actions WHERE id IN (' + ids . map ( ( ) => '?' ) . join ( ',' ) + ') LIMIT 1' ) . get ( ... ids ) ) unavailable ( ) ; return null ; }
+ validatePrivacyBasis ( descriptor , b ) ; const erased = new Map ( ) , receipts = [ ] ;
+ for ( let slot = 1 ; slot <= b . head ; slot ++ ) {
+  const value = privacyAction ( db , privacyErasureId ( b , slot ) , PRIVACY_ERASURE , b . roomId , 4096 , spent ) ;
+  if ( value ) { validatePrivacyErasure ( db , b , descriptor , value , slot , spent , { closingPermitId } ) ; if ( erased . has ( value . messageId ) ) unavailable ( ) ; erased . set ( value . messageId , value ) ; receipts . push ( value ) ; }
+ }
+ if ( ! receipts . length ) unavailable ( ) ;
+ for ( let i = 0 ; i < b . raw . length ; i ++ ) {
+  const row = descriptor . rows [ i ] , entry = b . events ?. [ i ] ?? b . entries ?. [ i ] , raw = b . raw [ i ] , changed = erased . has ( row [ 4 ] ) ;
+  if ( row [ 0 ] !== raw . sequence || row [ 1 ] !== sourceText ( raw . id ) || hash ( sourceText ( raw . body ) ) !== ( changed ? row [ 3 ] : row [ 2 ] ) || ( changed && ( privacyTarget ( entry ) !== row [ 4 ] || entry . data ?. body != null || entry . data ?. redacted !== true || ( Object . hasOwn ( entry . data , 'attachments' ) && entry . data . attachments !== null ) ) ) ) unavailable ( ) ;
+ }
+ return { descriptor , receipts , bytes : spent . bytes } ;
+}
+
+// Preparation verifies original source before the first rewrite. Its closure
+// stays inside the synchronous deletion transaction; nothing grants a reader
+// permission to replace the original historical proof.
+export function prepareHistoricalReplayErasure ( db , { roomId , through , messageId , actorId , command , deletion , redaction } ) {
+ if ( ! db . isTransaction || ! redaction ) unavailable ( ) ;
+ const result = historicalCheckpoint ( db , roomId , through ) ; if ( ! result ) return null ;
+ const b = { ... result . _basis , through , events : result . _basis . entries } , descriptor = b . privacy ?. descriptor ?? newPrivacyBasis ( b ) ;
+ const slot = descriptor . rows . find ( row => row [ 4 ] === messageId && b . entries [ row [ 0 ] - 1 ] . type === 'message.posted' ) ?. [ 0 ] ;
+ if ( ! slot ) return null ;
+ if ( b . privacy ?. receipts . some ( row => row . messageId === messageId ) ) unavailable ( ) ;
+ const permit = db . prepare ( 'SELECT enabled,room_id,receipt_id FROM current_room_writer_permit WHERE singleton=1' ) . get ( ) , prior = db . prepare ( 'SELECT * FROM current_room_head WHERE room_id=?' ) . get ( roomId ) ;
+ if ( permit ?. enabled !== 1 || permit . room_id !== roomId || ! prior ) unavailable ( ) ;
+ const admission = privacyAction ( db , permit . receipt_id , 'current_room_writer_admission' , roomId , 4096 , { bytes : 0 } ) ;
+ if ( admission ?. headHash !== prior . head_sha256 || admission . format !== CURRENT_WRITER_FORMAT ) unavailable ( ) ;
+ const cause = Object . hasOwn ( command , 'causationId' ) ? ( command . causationId === undefined ? 'undefined' : command . causationId === null ? 'null' : 'value' ) : 'absent' ;
+ const value = { version : 1 , basisSha256 : basisCommitment ( descriptor ) , slot , messageId , actorId , command : [ command . id , hash ( commandCanonical ( command ) ) , cause ] , deletion : null , redaction : null , admission : [ permit . receipt_id , prior . head_sha256 , prior . receipt_id , prior . revision , prior . sequence ] , transition : null } ;
+ let admitted = false ;
+ return { admit ( receiptBytesUpperBound ) {
+  if ( ! Number . isSafeInteger ( receiptBytesUpperBound ) || receiptBytesUpperBound < 1 || receiptBytesUpperBound > 128 * 1024 ) unavailable ( ) ;
+  const existing = b . privacy ?. bytes ?? Buffer . byteLength ( JSON . stringify ( descriptor ) ) + 256 ;
+  const additional = 4096 + receiptBytesUpperBound + Buffer . byteLength ( JSON . stringify ( deletion ) ) + Buffer . byteLength ( JSON . stringify ( redaction ) ) + 1024 ;
+  if ( existing + additional > PRIVACY_INPUT_BYTES ) unavailable ( ) ; admitted = true ;
+ } , finalize ( sequence ) {
+  if ( ! admitted ) unavailable ( ) ;
+  const head = db . prepare ( 'SELECT * FROM current_room_head WHERE room_id=?' ) . get ( roomId ) , transition = privacyAction ( db , head ?. receipt_id , 'current_room_transition' , roomId , 128 * 1024 , { bytes : 0 } ) , tuple = transition ?. records ?. find ( row => row [ 0 ] === 'messageWitness' && row [ 1 ] === messageId ) ;
+  if ( ! head || head . event_id !== redaction . id || head . sequence <= sequence || ! tuple ) unavailable ( ) ;
+  value . deletion = [ sequence , deletion . id ] ; value . redaction = [ head . sequence , redaction . id ] ; value . transition = [ head . receipt_id , head . head_sha256 , head . sequence , head . revision , tuple ] ;
+  const insert = ( id , action , body ) => db . prepare ( 'INSERT INTO operator_actions(id,at,action,target_kind,target_id,counts_json,result) VALUES(?,?,?,?,?,?,?)' ) . run ( id , Date . now ( ) , action , 'room' , roomId , JSON . stringify ( body ) , 'committed' ) ;
+  if ( ! b . privacy ) insert ( privacyBasisId ( b ) , PRIVACY_BASIS , descriptor ) ;
+  insert ( privacyErasureId ( b , slot ) , PRIVACY_ERASURE , value ) ;
+  // Same exact post-write validation as cold readers, except this transaction's
+  // outer writer has not appended its closing receipt yet.
+  const rows = db . prepare ( 'SELECT sequence,CAST(id AS BLOB) id,CAST(body AS BLOB) body FROM events WHERE room_id=? AND sequence<=? ORDER BY sequence LIMIT 65' ) . all ( roomId , b . head ) ;
+  const entries = decodeHistoricalEventRows ( rows ) . map ( row => objectJson ( db , row . body ) ) ;
+  readHistoricalPrivacy ( db , { ... b , raw : rows , events : entries , through : head . sequence } , { closingPermitId : value . admission [ 0 ] } ) ;
+ } } ;
 }

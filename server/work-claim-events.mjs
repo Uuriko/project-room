@@ -1,3 +1,4 @@
+import { currentCommandContext, prepareCurrentWrite } from './current-room-repository.mjs';
 // Work-claim room events. A claim, renewal, handoff or release used to change
 // only the work_claims table: nobody saw it in the room, the event tail, the
 // digest or an agent's wake feed, so agents re-announced every claim in chat.
@@ -19,7 +20,8 @@ import { ServiceError } from "./service-error.mjs";
 // referrals): store.mjs sits above this module in the import graph, so the
 // binding is only safe to dereference once modules are fully loaded.
 import { PILOT_LIMITS } from "./store.mjs";
-import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { resolveNamedReviewers, hasCurrentReview, createWork, claimWork } from "./work-claims.mjs";
+import { runAutomations } from "./event-automations.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -255,7 +257,8 @@ export function emitWorkClaimEvent(store, roomId, options) {
   const { actorId, item, action, previousOwnerId = null, previousState = null, resolving = false, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false } = options;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
-  const room = store.room(roomId);
+  const current = currentCommandContext(store,roomId,{id:'claim-context',type:'work_claim.updated',data:{}},{actorId});
+  const room = current?.room ?? store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
   // the receipt so the claim write still commits; an archived room has no
   // live timeline to update.
@@ -284,10 +287,12 @@ export function emitWorkClaimEvent(store, roomId, options) {
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  const projection = store.storedProjection(roomId, compact);
+  const currentWrite=current?.current ? prepareCurrentWrite(store,{roomId,previous:room,state:compact,event:incoming,sequence,current:current.current}) : null;
+  const projection = currentWrite?.projection ?? store.storedProjection(roomId, compact);
   if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
+  currentWrite?.persistEntities();
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
@@ -301,5 +306,9 @@ export function emitWorkClaimEvent(store, roomId, options) {
     try { postReceiptCard(store, roomId, item, stamp); }
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
+  // User automations (ROOM_AUTOMATIONS, off by default) read this same event.
+  // A failing rule never rolls back the claim write.
+  try { runAutomations(store, roomId, incoming, item, { createWork, claimWork, emitWorkClaimEvent, enqueueClaimWake }); }
+  catch (error) { console.error("room automations failed:", error?.message ?? error); }
   return { sequence, event: incoming };
 }

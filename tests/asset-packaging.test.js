@@ -1,21 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
 import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 
-// Decision #36 (#3254, Option A): the generated agent pages are build output
-// and never committed, so a plain checkout (and every exact-commit package)
-// legitimately lacks them; the deploy build generates them first (the
-// wrangler command asserted in the first test). The packaged/served contract
-// below is therefore stated against the allowlist minus the generated pages
-// absent from this tree — everything else must always be present.
-const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { frontDoorHtml } from '../server/github-oauth.mjs';
@@ -25,19 +17,38 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return pathToFileURL(directory + '/');
 }
+// Snapshot the inputs so parallel doc generators cannot change the expected set
+// or bytes between the test's observation and the asynchronous asset build.
+async function sourceSnapshot(t) {
+  const source = await fixture(t), produced = [];
+  const files = [...assetPaths, ...templateAssetPaths, 'cloudflare/build-assets.mjs', 'server/public-assets.mjs'];
+  for (const file of files) {
+    let bytes;
+    try { bytes = await readFile(new URL('../' + file, import.meta.url)); }
+    catch (error) {
+      if (error.code === 'ENOENT' && generatedAgentPages.includes(file)) continue;
+      throw error;
+    }
+    const destination = new URL(file, source);
+    await mkdir(dirname(fileURLToPath(destination)), { recursive: true });
+    await writeFile(destination, bytes);
+    if (assetPaths.includes(file) || templateAssetPaths.includes(file)) produced.push(file);
+  }
+  return { source, produced };
+}
 test('asset build produces and refreshes exactly the allowlisted application files', async t => {
   const output = await fixture(t);
-  const packaged = [...assetPaths, ...templateAssetPaths];
-  const produced = packaged.filter(file => !absentGenerated(file));
-  assert.equal(await buildAssets(output), produced.length);
+  const { source, produced } = await sourceSnapshot(t);
+  const { buildAssets: buildSnapshot } = await import(new URL('cloudflare/build-assets.mjs', source).href);
+  assert.equal(await buildSnapshot(output), produced.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
-  await buildAssets(output);
+  await buildSnapshot(output);
   // Derived from the allowlist rather than written down: 'connectors' was
   // added to publicAssets and this line still said ['index.html', 'src'].
   const topLevel = [...new Set(produced.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
   assert.deepEqual((await readdir(output)).sort(), topLevel);
   assert.deepEqual((await readdir(new URL('src/', output))).sort(), produced.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
-  for (const file of produced) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
+  for (const file of produced) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL(file, source)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/build-room-acp-pack.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs', 'deploy builds the generated agent pages first, then stamps the committed revision before building exact assets');
 });
@@ -69,21 +80,22 @@ test('every local browser import is included in the deployment allowlist', async
   }
 });
 test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
-  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  const { source, produced } = await sourceSnapshot(t);
+  const store = new RoomStore(':memory:'), server = createRoomServer({ store, assetRoot: source });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const path of assetPaths.filter(file => !absentGenerated(file))) {
+  for (const path of assetPaths.filter(file => produced.includes(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    const disk = await readFile(new URL('../' + path, import.meta.url));
+    const disk = await readFile(new URL(path, source));
     // The fixture server has no GitHub auth, so the front door omits that anchor.
     const expected = path === 'index.html' ? Buffer.from(frontDoorHtml(disk, { githubConfigured: false })) : disk;
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.
-  for (const path of assetPaths.filter(absentGenerated)) {
+  for (const path of assetPaths.filter(file => generatedAgentPages.includes(file) && !produced.includes(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 404, path);
   }

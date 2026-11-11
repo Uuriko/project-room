@@ -1,0 +1,67 @@
+{
+  "schema": "member2-genuine-native-upgrade-v1",
+  "pass": true,
+  "pins": [
+    "8e65a6e73ae191ffa7fc89c2e88fa382ad2ac000",
+    "2ebce68b3c556f313476716afdae84f2a2b33e6d"
+  ],
+  "node": "v24.22.1",
+  "compatibilityDate": "2026-07-30",
+  "bundleSha256": [
+    "f2264831162a05c80af8d383cc36018337a0f334653436efde9685556ac80e7d",
+    "9a5c50a92e74a571069d78d772a3e9d9540b5afdba5b70e870e76e1b82bf2e38"
+  ],
+  "observations": [
+    {
+      "phase": "genuine-old-seed",
+      "guardFormat": 5,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    },
+    {
+      "phase": "first-new-cold-open",
+      "guardFormat": 6,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    },
+    {
+      "phase": "second-new-cold-open",
+      "guardFormat": 6,
+      "preservedAuthSnapshot": "995696b6611f1066d2cd78383138a59a3d1fe60d70494899d124774d37dbfc62",
+      "roomsSha256": "6b7bcd0dc97e37a378e03d33dfe462a8318bdb9e705659c3982102a95d4fa01b"
+    }
+  ],
+  "wallSeconds": 1.4941497920000002,
+  "limits": "Synthetic local legacy data only; no populated-format migration, production state, or current composition qualification. No guard SQL relabeling or schema stamp deletion.",
+  "source_clean_after": true,
+  "auth_snapshot_tables": [
+    "credentials",
+    "accounts",
+    "account_credentials",
+    "account_session_slots"
+  ],
+  "additional_exact_rows": "rooms",
+  "authenticated_each_phase": [
+    "legacy room owner access key",
+    "account session token and binding"
+  ],
+  "restarts": 2,
+  "miniflare": "4.20260730.0",
+  "esbuild": "0.28.2",
+  "workerd": "2026-07-30",
+  "workerd_sha256": "b887d31d8839e80798bf3f92c416343c5db7dd9b22d7fe21bcf877f5d411936f",
+  "artifacts": {
+    "stderr.log": {
+      "bytes": 1482,
+      "sha256": "3ffa06cac50a4f199b4787599e58b41f5f97df343805dd6ac7449626c1ee9df6"
+    },
+    "genuine_native_upgrade.mjs": {
+      "bytes": 5290,
+      "sha256": "83979a72108a4cbddd0222164f57d066d17db4ec9932b16034c477a1970c52fb"
+    },
+    "full.log": {
+      "bytes": 3175,
+      "sha256": "2e72908c75b152b6401a61612db8e53737f991b7c75901e8d63c2220721750c1"
+    }
+  }
+}

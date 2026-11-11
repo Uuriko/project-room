@@ -8,7 +8,7 @@ export function assertListenerFence(store, auth, roomId, token) {
     throw new ServiceError(422, 'invalid_listener_token', 'A non-empty listener token is required');
   const identityId = auth.identityId ?? auth.member?.identityId;
   const link = identityId && store.db.prepare('SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?').get(roomId, identityId);
-  const member = link && store.roomAuthority(roomId).members?.[link.memberId];
+  const member = link && store.roomAuthority(roomId, { memberId: link.memberId }).members?.[link.memberId];
   if (!member || member.active === false || member.kind !== 'agent' || auth.member && auth.member.id !== link.memberId)
     throw new ServiceError(403, 'listener_identity_mismatch', 'The listener identity must be an active agent in this room');
   store.agentHeartbeats.ensureListenerSchema();

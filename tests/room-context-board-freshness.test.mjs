@@ -1,3 +1,4 @@
+import {legacyAgentRoom} from './helpers/legacy-agent-room.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
@@ -122,7 +123,7 @@ test('hosted MCP conditional context refreshes a changed current board projectio
   const identity = store.identities.create('Context freshness owner');
   const rooms = new AgentRooms(store);
   const roomId = 'context-freshness-mcp';
-  rooms.create(identity.secret, { roomId, title: 'Context freshness', purpose: 'Synthetic current-board probe', kind: 'personal' });
+  legacyAgentRoom(store,identity, { roomId, title: 'Context freshness', purpose: 'Synthetic current-board probe', kind: 'personal' });
   const mcp = createHostedRoomMcp(store, { agentRooms: rooms });
   const context = async since => {
     const reply = await mcp({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
@@ -142,4 +143,16 @@ test('hosted MCP conditional context refreshes a changed current board projectio
   assert.notEqual(conditional.not_modified, true, 'MCP must refresh the changed current board projection');
   assert.notEqual(conditional.context_version, before.context_version);
   assert.equal(conditional.orient.availableClaims.some(item => item.id === id), true);
+});
+
+test('native MCP context refreshes canonical work without reopening the retired Board',async t=>{
+ const store=new RoomStore(':memory:');t.after(()=>store.close());const identity=store.identities.create('Native context owner'),rooms=new AgentRooms(store),roomId='native-context-freshness';rooms.create(identity.secret,{roomId,title:'Native context',purpose:'Canonical freshness',kind:'personal'});store.room=()=>{throw Error('native whole room hydration');};store.workClaims.list=()=>{throw Error('retired Board must not serve native context');};
+ const mcp=createHostedRoomMcp(store,{agentRooms:rooms}),read=async since=>{const result=await mcp({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_room_context',arguments:{roomId,...(since?{since_version:since}:{})}}},{authorization:`Bearer ${identity.secret}`});assert.notEqual(result.result?.isError,true,JSON.stringify(result));assert.equal(result.error,undefined);return result.result.structuredContent;};
+ const before=await read(),id='new-canonical';assert.equal(before.focusWork.some(item=>item.id===id),false);
+ store.command(identity.secret,roomId,{id:'new-work',type:'work.proposed',data:{workItemId:id,title:'Useful canonical task',definitionOfDone:'Exact saved result',accountableMemberId:identity.identityId,mode:'read'}});
+ // Hosted identity authentication records existing usage telemetry. Every
+ // authoritative identity field and every other durable row must stay exact.
+ const snapshot=()=>Object.fromEntries(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(({name})=>[name,store.db.prepare('SELECT * FROM "'+name+'"').all().map(row=>{if(name!=='agent_identities')return row;const{last_used_at:_at,last_used_ua:_ua,mcp_legacy_uses:_uses,...authority}=row;return authority;})]));
+ const durableBefore=snapshot(),full=await read(),conditional=await read(before.context_version);assert.ok(full.focusWork.some(item=>item.id===id));assert.notEqual(conditional.not_modified,true);assert.notEqual(conditional.context_version,before.context_version);assert.ok(conditional.focusWork.some(item=>item.id===id));assert.equal((await read(conditional.context_version)).not_modified,true);assert.deepEqual(snapshot(),durableBefore,'native reads preserve every row except existing identity usage telemetry');
+ assert.equal(store.workClaims.get(roomId,id),null,'canonical task must not acquire a legacy mirror');
 });

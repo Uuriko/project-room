@@ -440,3 +440,35 @@ for (const count of [1, 5]) test(`agent invitation clipboard handoff keeps ${cou
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_invite_redeem_receipts').get().n, 0, 'copying does not enroll or start an agent');
   assert.equal(await page.locator('.agent-invite-instructions[open]').count(), 0, 'local commands remain optional');
 });
+
+test('existing owned agent is primary; separate-agent creation is explicit and uncertain retry stays exact', {timeout:30000}, async t=>{
+ const f=await setup(t),requests=[],choice={choiceId:'a'.repeat(64),sourceRoomId:'previous-room',sourceMemberId:'existing-claude',identityId:'ai_existing_browser',memberId:'existing-claude',displayName:'Existing Claude',label:'Existing Claude — previous-room'};
+ await f.page.route('**/api/rooms/commons/agent-connections',async route=>{
+  const req=route.request();
+  if(req.method()==='GET'){
+   const response=await route.fetch(),value=await response.json();
+   return route.fulfill({response,json:{...value,existingAgentEnrollment:{available:true,choices:[choice],profiles:{chat:[],contribute:['accept_work','complete_work'],review:['verify']}}}});
+  }
+  const data=req.postDataJSON();requests.push(data);
+  if(data.action!=='enroll-existing')return route.continue();
+  if(requests.length===1)return route.fulfill({status:503,json:{error:{code:'unavailable',message:'Synthetic interrupted acknowledgment'}}});
+  return route.fulfill({status:200,json:{enrolledExisting:true,identityId:choice.identityId,duplicate:true,receipt:{roomId:'commons',memberId:choice.memberId,requestId:data.requestId}}});
+ });
+ await f.open();const add=f.page.getByRole('button',{name:'Add this existing agent',exact:true});await add.waitFor({state:'visible'});
+ assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),false);
+ assert.equal(await f.page.locator('#agent-connect-name').isVisible(),false);
+ assert.equal(await f.page.locator('#agent-connect-name').isDisabled(),true,'hidden required name must not block existing-agent submission');
+ assert.equal(await f.page.locator('#agent-create').isVisible(),false);
+ assert.equal(await f.page.locator('#agent-connect-access').isVisible(),true);
+ assert.equal(await f.page.locator('#agent-manage-connections').isVisible(),true);
+ const reveal=f.page.getByText('Create a separate agent',{exact:true});await reveal.click();
+ assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),true);await f.page.waitForFunction(()=>!document.querySelector('#agent-connect-name').disabled);assert.equal(await f.page.locator('#agent-connect-name').isDisabled(),false);
+ await reveal.click();assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),false);assert.equal(requests.length,0);
+ f.page.once('dialog',dialog=>dialog.dismiss());await add.click();assert.equal(requests.length,0,'declined explicit consent grants no access');
+ f.page.once('dialog',dialog=>dialog.accept());await add.click();
+ const retry=f.page.getByRole('button',{name:'Retry original enrollment',exact:true});await retry.waitFor({state:'visible'});
+  await f.page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent==='Retry original enrollment'&&!button.disabled));assert.equal(await retry.isEnabled(),true);assert.equal(await f.page.locator('#agent-separate-agent').evaluate(node=>node.open),false);
+ assert.equal(await f.page.locator('#agent-type-catalog').isVisible(),false);assert.equal(await f.page.locator('#agent-connect-access').isDisabled(),true);
+ const original=JSON.stringify(requests[0]);await retry.click();await f.page.waitForFunction(()=>document.querySelector('#agent-connect-status').textContent.includes('OAuth'));
+ assert.equal(requests.length,2);assert.equal(JSON.stringify(requests[1]),original);assert.ok(requests.every(value=>value.action==='enroll-existing'));
+});

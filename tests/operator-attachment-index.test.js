@@ -40,12 +40,25 @@ test('attachment index is an explicit operator action, absent on ordinary startu
 test('quota and expiry explicitly constrain live rows without changing attachment quantities', t => {
   const store = new RoomStore(':memory:'); t.after(() => store.close()); store.initialize(initialRoom());
   const key = store.issueAccessKey('commons', 'owner'), queries = [], prepare = store.db.prepare.bind(store.db);
+  store.roomAttachments.stage(key, 'commons', { id: 'expires', filename: 'x.txt', mediaType: 'text/plain', data: 'eA==' });
+  store.db.prepare("UPDATE room_attachments SET expires_at=0 WHERE id='expires'").run();
+  seed(store, { id: 'retained', state: 'committed', bytes: Buffer.from('ok') });
   store.db.prepare = sql => { queries.push(sql); return prepare(sql); };
   store.roomAttachments.stage(key, 'commons', { id: 'first', filename: 'x.txt', mediaType: 'text/plain', data: 'eA==' });
   const quota = queries.find(sql => sql.includes('AS roomBytes'));
   assert.match(quota, /WHERE room_id=\? AND state IN \('staged','committed'\)/);
+  const preflight = queries.find(sql => sql.startsWith('SELECT 1 FROM room_attachments WHERE room_id=?'));
+  assert.match(preflight, /state IN \('staged','committed'\)/);
   const expiry = queries.find(sql => sql.includes("SET state='expired'"));
   assert.match(expiry, /state IN \('staged','committed'\)/);
+  const rows = store.db.prepare('SELECT id,state,byte_length,bytes FROM room_attachments ORDER BY id').all();
+  assert.deepEqual(rows.map(row => [row.id, row.state, row.byte_length, row.bytes?.length ?? null]),
+    [['expires', 'expired', 1, null], ['first', 'staged', 1, 1], ['retained', 'committed', 2, 2]],
+    'only expired staging bytes are released; committed quantities and the new upload survive');
+  queries.length = 0;
+  store.roomAttachments.expire('commons', store.now());
+  assert.equal(queries.some(sql => sql.includes("SET state='expired'")), false,
+    'a second sweep with no expired staging rows does not open a write');
 });
 
 function local(t) {

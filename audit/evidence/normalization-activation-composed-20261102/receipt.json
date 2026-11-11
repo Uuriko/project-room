@@ -1,0 +1,9 @@
+{
+  "runtime": "8ce28bb16",
+  "nodePassed": 18,
+  "nativePassed": 2,
+  "preflightPassed": 2,
+  "sponsorshipRecordPassed": 2,
+  "originalPreflightFailure": "Inherited main sponsorship module lacked direct test reference; meaningful stored-consent requester binding tests added",
+  "productionActivation": "not yet successful; exact request preserved privately; converter fix is a reproduced candidate cause"
+}

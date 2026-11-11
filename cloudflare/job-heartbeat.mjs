@@ -1,8 +1,9 @@
 import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
-// and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
-// it back without auth. A job whose lastSuccessAt is older than 3x its period is
+// and a redacted lastError in the Durable Object. GET /api/health/jobs exposes
+// a fixed error marker and structured run facts without auth, never error prose.
+// A job whose lastSuccessAt is older than 3x its period is
 // stale. A disabled job is not stale. This is the signal that was missing when
 // every cron tick failed with a DO RPC error for weeks while page health checks
 // stayed green.
@@ -51,12 +52,38 @@ const MAX_ERROR = 240;
 const MAX_SUMMARY_KEYS = 12;
 
 // Error text can quote URLs, headers or tokens. Keep one short line and drop
-// anything that looks like a credential or a query string.
+// anything that looks like a credential or a query string. The pattern set
+// is pinned to the Node scheduler's copy (redactJobError in server/jobs.mjs)
+// by tests/job-health-redaction.test.js: both health surfaces are read back
+// unauthenticated, so the two copies must never drift apart.
 export function redactError(value) {
   const text = String(value ?? 'unknown error')
+    // A credential split across a line break is two short runs, neither of
+    // which trips the long-run rule below. Join token runs separated by a
+    // real newline or a JSON-escaped \n when both sides look like token
+    // material, so the joined run is judged as one credential.
+    .replace(/([A-Za-z0-9+/_=-]{8,})(?:\r\n|\n|\\n)([A-Za-z0-9+/_=-]{8,})/g, '$1$2')
     .replace(/[\r\n\t]+/g, ' ')
+    // PEM blocks: the key body is base64 lines whose individual runs can
+    // sit under the long-run threshold (a GCP service-account key body
+    // leaked this way). Take the whole block, and fail closed on an
+    // unterminated BEGIN marker.
+    .replace(/-----BEGIN [A-Z0-9 ]*-----[\s\S]*?-----END [A-Z0-9 ]*-----/g, '[redacted]')
+    .replace(/-----BEGIN [A-Z0-9 ]*-----[\s\S]*/g, '[redacted]')
+    // URI/URL userinfo (mongodb://user:password@host, redis://:password@,
+    // amqp://, mysql://, https://user:password@): the password sits before
+    // the @, ahead of any query string, so the query-strip below never
+    // reaches it. Short passwords between delimiters also slip past the
+    // long-run rule, which is how the DB URI passwords leaked.
+    .replace(/(\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/:@]*:)[^\s/@]+(@)/g, '$1[redacted]$2')
+    // Compound key names — my_password_value, passwordHash, client_secret,
+    // private_key, AccountKey=: the credential word may be prefixed or
+    // suffixed, which a bare \b keyword match misses. The value needs a
+    // real assignment separator and at least 8 chars, so this rule does
+    // not extend the legacy keyword rule's reach to short tails.
+    .replace(/([A-Za-z0-9_-]*(?:password|passwd|secret|token|api[-_]?key|private[-_]?key|account[-_]?key|credential)[A-Za-z0-9_-]*)(\s*"?\s*[:=]\s*"?)([^\s"',;}]{8,})/gi, '$1$2[redacted]')
     .replace(/\b(bearer|token|secret|password|authorization)(\s*[:=]?\s*)\S+/gi, '$1$2[redacted]')
-    .replace(/\b(?:pri|ghp|gho|ghs|ghu|github_pat|sk|xox[abpr]|whsec|re)_[A-Za-z0-9_-]{6,}/g, '[redacted]')
+    .replace(/\b(?:(?:pri|ghp|gho|ghs|ghu|github_pat|sk|xox[abpr]|whsec|re)_|glpat-|pypi-|dckr_pat_)[A-Za-z0-9_-]{6,}/g, '[redacted]')
     .replace(/(https?:\/\/[^\s?#]+)[?#]\S*/g, '$1')
     .replace(/[A-Za-z0-9+/_-]{32,}={0,2}/g, '[redacted]')
     .trim();
@@ -296,6 +323,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
   const gatesKnown = env != null || store != null;
   const jobs = CRON_JOBS.map(job => {
     const record = stored?.[job.name] ?? {};
+    // Rebuild structured public evidence even for predating stored records.
+    const failure = sanitizeFailureDetail(record.lastFailure);
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
     const source = REGISTRY.find(item => item.name === job.name);
     const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
@@ -345,7 +374,9 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       attemptOutcome: typeof record.attemptOutcome === 'string' ? record.attemptOutcome : null,
       uncommittedAttemptSinceAt: iso(record.uncommittedAttemptSinceAt ?? null),
       secondsSinceSuccess: enabled ? ageSeconds : null,
-      lastError: record.lastError ?? null,
+      // Free-form diagnostics can contain unknown credentials or personal data.
+      // Keep the public marker fixed, including for errors stored before this rule.
+      lastError: record.lastError == null ? null : 'Job failed',
       lastErrorAt: iso(record.lastErrorAt),
       // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
       // the text alone cannot say whether it is today's failure. On
@@ -353,15 +384,15 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       // lastError from 2026-10-15 and was triaged as a live validation
       // failure. lastErrorCurrent is true only while the job is failing now.
       lastErrorCurrent: record.lastError != null && (record.consecutiveFailures ?? 0) > 0,
-      lastErrorCode: record.lastFailure?.code ?? null,
-      lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
-      lastErrorClass: record.lastFailure?.errorClass ?? null,
-      lastErrorRecordClass: record.lastFailure?.recordClass ?? null,
-      lastErrorReason: record.lastFailure?.reason ?? null,
-      lastErrorComponent: record.lastFailure?.component ?? null,
+      lastErrorCode: failure?.code ?? null,
+      lastErrorSubcheck: failure?.subcheck ?? null,
+      lastErrorClass: failure?.errorClass ?? null,
+      lastErrorRecordClass: failure?.recordClass ?? null,
+      lastErrorReason: failure?.reason ?? null,
+      lastErrorComponent: failure?.component ?? null,
       lastDurationMs: record.lastDurationMs ?? null,
       consecutiveFailures: record.consecutiveFailures ?? 0,
-      lastSummary: record.lastSummary ?? null,
+      lastSummary: compactSummary(record.lastSummary),
       lastSummaryAt: iso(record.lastSummaryAt),
       overdueStreak: Number.isFinite(record.overdueStreak) ? record.overdueStreak : null,
       overdueSinceAt: iso(record.overdueSinceAt ?? null),

@@ -1,3 +1,4 @@
+import { isCurrentRoom, readCurrentMessage } from './current-room-repository.mjs';
 import { messageQueries, decodeMessageRecord as decode } from './message-queries.mjs';
 // Current message records across the migration boundary. The working set wins;
 // only rows explicitly removed by the archive marker may supply missing records.
@@ -79,6 +80,7 @@ export function messageThreadRoot(repository, id) {
 // storage. SQLite still scans the legacy JSON carrier; only one record crosses
 // into JS and unrelated bodies are never hydrated. Call inside a read transaction.
 export function selectedMessageRecord(store, roomId, id, hasArchive = false) {
+  if (isCurrentRoom(store.db,roomId)) return readCurrentMessage(store.db,roomId,id)?.value;
   const marker = store.db.prepare("SELECT json_extract(projection,'$.messageAuthority') AS marker FROM rooms WHERE id=?").get(roomId);
   if (marker?.marker !== null && marker?.marker !== undefined) {
     hasMessageAuthority({ messageAuthority: JSON.parse(marker.marker) });

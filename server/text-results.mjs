@@ -19,19 +19,35 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     : db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND coalesce(json_extract(body,'$.data.messageId'),id)=?").get(state.room.id, messageId);
   check(row);
   const post = JSON.parse(row.body), message = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
+  validateStoredTextIdentity({roomId:state.room.id,workItemId,messageId,row,message,post});
+  let previous = null;
+  if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
+    const prior = db.prepare(`SELECT body FROM events WHERE room_id=? AND sequence<? AND json_extract(body,'$.data.workItemId')=? AND (json_extract(body,'$.type')='work.proposed' OR (json_extract(body,'$.type') IN (${WORK_REVISION_TYPES.map(() => "?").join(",")}) AND json_type(body,'$.data.expectedRevision')='integer')) ORDER BY sequence DESC LIMIT 1`).get(state.room.id, row.sequence, workItemId, ...WORK_REVISION_TYPES);
+    check(prior); previous = JSON.parse(prior.body);
+  }
+  return storedTextFromEvidence({roomId:state.room.id,workItemId,messageId,row,message,post,previous,
+    citedVersion:message?.deletedAt && post.data.body == null ? citedEvidenceVersion(state,messageId) : null});
+}
+
+function validateStoredTextIdentity({roomId,workItemId,messageId,row,message,post}) {
   // A withdrawn message is a tombstone. PRIV-1 nulls the log body; older
   // withdrawals still have the string there. Either way the body returned
   // to a reader is null.
   const withdrawn = Boolean(message?.deletedAt);
-  check(message && post.type === "message.posted" && post.roomId === state.room.id && post.id === row.id
+  check(message && post.type === "message.posted" && post.roomId === roomId && post.id === row.id
     && (post.data.messageId || post.id) === messageId && post.data.workItemId === workItemId && message.workItemId === workItemId
     && (withdrawn ? message.body === null : post.data.body === message.body) && post.actorId === message.authorId && post.at === message.createdAt
     && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId);
+  return withdrawn;
+}
+
+// Shared exact leaf: callers supply independently addressed evidence; no scans.
+export function storedTextFromEvidence({roomId,workItemId,messageId,row,message,post=JSON.parse(row.body),previous=null,citedVersion=null}) {
+  check(row);
+  const withdrawn=validateStoredTextIdentity({roomId,workItemId,messageId,row,message,post});
   let proposal = null;
   if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
-    const prior = db.prepare(`SELECT body FROM events WHERE room_id=? AND sequence<? AND json_extract(body,'$.data.workItemId')=? AND (json_extract(body,'$.type')='work.proposed' OR (json_extract(body,'$.type') IN (${WORK_REVISION_TYPES.map(() => "?").join(",")}) AND json_type(body,'$.data.expectedRevision')='integer')) ORDER BY sequence DESC LIMIT 1`).get(state.room.id, row.sequence, workItemId, ...WORK_REVISION_TYPES);
-    check(prior);
-    const previous = JSON.parse(prior.body);
+    check(previous);
     proposal = proposalContext(post.data, { revision: previous.type === "work.proposed" ? 0 : previous.data.expectedRevision + 1 });
   }
   check(isDeepStrictEqual(message.proposal ?? null, proposal));
@@ -39,7 +55,7 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
   // receipt; the byte length stays on the message.
   if (withdrawn && post.data.body == null) {
     check(post.data.redacted === true && message.body === null);
-    const version = citedEvidenceVersion(state, messageId);
+    const version = citedVersion;
     check(typeof version === "string" && /^sha256:[0-9a-f]{64}$/.test(version));
     check(Number.isInteger(message.redactedByteLength) && message.redactedByteLength > 0);
     return { messageId, messageEventId: post.id, postedById: post.actorId, createdAt: post.at,
@@ -126,6 +142,16 @@ export function auditTextResults(db, state, history) {
       // nothing but a replay of the log.
       const { nativeText, text } = verifyTextCompletion(db, state, { ...work, receipt: parent ? { eventId: parent } : null }, data, { allowWithdrawn: true });
       const receipt = [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === event.id);
+      auditTextReceipt({event,row,receipt,nativeText,text});
+    }
+    previous.set(data.workItemId, event.id);
+  }
+  check(audited.size === projected.size);
+}
+
+// Exact receipt projection equality shared by full and durable audit paths.
+export function auditTextReceipt({event,row,receipt,nativeText,text}) {
+  const data=event.data;
       // Legacy stored receipts predate result segments; treat a missing
       // segments field as the null backfill the new applier writes.
       const normalized = { ...receipt, segments: receipt?.segments ?? null };
@@ -135,8 +161,4 @@ export function auditTextResults(db, state, history) {
         checksClaimed: data.checksClaimed || [], segments: validateResultSegments(data.segments),
         nextAction: data.nextAction, eventId: event.id
       }));
-    }
-    previous.set(data.workItemId, event.id);
-  }
-  check(audited.size === projected.size);
 }

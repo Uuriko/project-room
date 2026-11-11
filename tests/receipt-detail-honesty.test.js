@@ -80,6 +80,15 @@ test("public-work receipt without a merge never claims a verified merge", () => 
   assert.match(html, /unsigned/);
 });
 
+test("a public-work receipt links to its result; other receipt types do not invent one", () => {
+  const html = renderReceiptDetailHtml(publicWorkReceipt);
+  assert.match(html, /href="\/api\/public-work\/receipts\/pwr_room_offer1\/artifact">Download result<\/a>/);
+  const claim = renderReceiptDetailHtml({ ...publicWorkReceipt, source: "work-claim" });
+  assert.doesNotMatch(claim, /\/api\/public-work\/receipts\/pwr_room_offer1\/artifact/);
+  assert.match(claim, /deliverable itself is not included on this page/);
+  assert.doesNotMatch(renderReceiptDetailHtml(mergedReceipt), /deliverable itself is not included/);
+});
+
 test("recorded public-work decisions do not invent a human reviewer", () => {
   for (const state of ["verified", "rejected", "revision_requested"]) {
     for (const verificationReviewerKind of ["human", "agent", undefined]) {

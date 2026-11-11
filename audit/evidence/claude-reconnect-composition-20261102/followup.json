@@ -1,0 +1,23 @@
+{
+  "failedSlice": {
+    "source": "f73539b913e2c7640cfbb3481cbe878d2badb59b",
+    "files": 103,
+    "tests": 948,
+    "pass": 856,
+    "fail": 91,
+    "skip": 1,
+    "fullSuite": false
+  },
+  "nativeAuth": {
+    "source": "9a9cdc055",
+    "tests": 1,
+    "pass": 1
+  },
+  "monitor": {
+    "merge": "c1b11b649386422ab9a0e644501245a0623325f9",
+    "run": 41408473058,
+    "conclusion": "success",
+    "doesNotClearJobFailure": "room-backup"
+  },
+  "claudeLiveSeatVerified": false
+}

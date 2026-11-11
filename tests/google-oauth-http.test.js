@@ -354,3 +354,15 @@ test("Google callback bridge is bounded, local and escapes provider query data",
   assert.throws(() => googleCallbackResumePage('https://room.example/evil?state=x'), {code:'google_callback_invalid'});
   assert.throws(() => googleCallbackResumePage('https://room.example/api/auth/google/callback?code='+'x'.repeat(16385)), {code:'google_callback_invalid'});
 });
+
+test('research: Google login renews an old browser slot and cookie', async t => {
+ const f=createAcceptanceFixture();f.store.now=()=>Date.now()-29*86400000;const slot=f.store.createAccountSessionSlot();
+ f.store.now=()=>Date.now();
+ const origin=await startServer(t,f,{googleAuth:googleAuth()});
+ const flow=await beginFlow(origin,`account_session=${slot.token}`);
+ const callback=await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${flow.authorize.searchParams.get('state')}&code=code-fixture`,{redirect:'manual',headers:{Cookie:`account_session=${slot.token}`}});
+ assert.equal(callback.status,200,await callback.clone().text());const token=accountCookie(callback);assert.ok(token);assert.notEqual(token,slot.token);
+ const session=f.store.authenticateAccountSession(token);assert.ok(session.expiresAt-f.store.now()>29*86400000);
+ const cookie=callback.headers.get('set-cookie');const maxAge=Number(/Max-Age=(\d+)/i.exec(cookie)?.[1]);assert.ok(maxAge>29*86400,`max-age ${maxAge}`);
+ assert.throws(()=>f.store.authenticateAccountSession(slot.token),{code:'unauthenticated'});
+});

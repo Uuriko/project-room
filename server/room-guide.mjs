@@ -1,3 +1,4 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // ACT-1a: Room Guide, a deterministic demo agent. No LLM calls.
 // After the first real agent is assigned, Guide does nothing here.
@@ -19,6 +20,8 @@ export const WELCOME_BODY = "I'm Room Guide, a demo agent. I took **See how work
 export const STARTER_CLAIM_ID = "starter-receipt";
 
 const pending = new WeakMap();
+const inactiveGuideRoom=(store,roomId)=>typeof store?.db?.prepare==='function'
+  && (store.db.prepare('SELECT archived_at FROM rooms WHERE id=?').get(roomId)?.archived_at != null || isCurrentRoom(store.db,roomId));
 
 function noteGuideRoom(store, roomId) {
   let rooms = pending.get(store);
@@ -37,9 +40,10 @@ export function installGuideCommandHook(store) {
   const proto = store && Object.getPrototypeOf(store);
   if (!proto || typeof proto.command !== "function" || proto.__roomGuideHook) return;
   const original = proto.command;
-  proto.command = function(token, roomId, command, binding) {
-    const result = original.call(this, token, roomId, command, binding);
-    if (typeof roomId === "string") {
+  proto.command = function(...args) {
+    const roomId = args[1];
+    const result = original.apply(this, args);
+    if (typeof roomId === "string" && !inactiveGuideRoom(this,roomId)) {
       noteGuideRoom(this, roomId);
       try {
         runGuideStep(this, roomId, typeof this.now === "function" ? this.now() : Date.now());
@@ -59,6 +63,7 @@ export function flushRoomGuide(store) {
   const rooms = pending.get(store);
   if (!rooms || rooms.size === 0) return;
   for (const roomId of [...rooms]) {
+    if(inactiveGuideRoom(store,roomId)){rooms.delete(roomId);continue;}
     try {
       runGuideStep(store, roomId, typeof store.now === "function" ? store.now() : Date.now());
       rooms.delete(roomId);
@@ -104,6 +109,7 @@ function commitClaim(store, roomId, item, action, actorId, atMs) {
 }
 
 function step(store, roomId, now) {
+  if (inactiveGuideRoom(store,roomId)) return null;
   // A canonical room's carrier contains bounded metadata, not message history.
   // Trust an inactive Guide verdict only after checking its independent write
   // proof in this transaction. Legacy, active and missing-proof rooms retain
@@ -200,5 +206,7 @@ function step(store, roomId, now) {
 // One stage per call: welcome and claim, or close the starter, or assign.
 export function runGuideStep(store, roomId, now = Date.now()) {
   if (!store?.db || typeof store.room !== "function" || typeof store.transaction !== "function") return null;
+  // Optional legacy demo automation has no role in current normalized rooms.
+  if(inactiveGuideRoom(store,roomId))return;
   return store.transaction(() => step(store, roomId, now));
 }

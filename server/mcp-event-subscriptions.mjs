@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
  id TEXT PRIMARY KEY, principal TEXT NOT NULL, document TEXT NOT NULL,
  generation TEXT NOT NULL, state TEXT NOT NULL, expires_at INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_principal ON mcp_event_subscriptions(principal,state,expires_at);
 CREATE TABLE IF NOT EXISTS mcp_event_outbox (
  subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, document TEXT NOT NULL,
  state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -21,7 +22,7 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = message => { throw Object.assign(new Error(message), { code: -32602 }); };
 function principalKey(principal) {
   const fields = ["principalType", "familyId", "resource", "roomId", "identityId", "memberId"];
-  if (!principal || !["account-agent", "account-owned-agent", "invited-agent"].includes(principal.principalType)) fail("Invalid event principal");
+  if (!principal || !["account-agent", "account-owned-agent", "account-adopted-agent", "invited-agent"].includes(principal.principalType)) fail("Invalid event principal");
   const result = {};
   for (const key of fields) {
     if (typeof principal[key] !== "string" || !principal[key] || principal[key].length > 2048) fail("Invalid event principal");
@@ -60,6 +61,20 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     if (!row || row.state !== "active" || row.expires_at <= now()) return false;
     return Boolean(await authorize(JSON.parse(row.principal)));
   };
+  // Only the caller's exact OAuth grant is described. Never read callback
+  // documents or report other installations belonging to the same member.
+  // No sweep, callback, renewal or write is triggered by this observation.
+  async function status(principal) {
+    const key = principalKey(principal);
+    const checkedAt = now();
+    if (!await authorize(JSON.parse(key))) return { state: "grant_denied", scope: "current_oauth_grant",
+      execution: "not_verified", checkedAt: new Date(checkedAt).toISOString() };
+    const row = db.prepare(`SELECT count(*) AS active, max(expires_at) AS expires_at
+      FROM mcp_event_subscriptions WHERE principal=? AND state='active' AND expires_at>?`).get(key, checkedAt);
+    return { state: row.active ? "subscribed" : "not_subscribed", scope: "current_oauth_grant",
+      activeSubscriptions: row.active, latestSubscriptionExpiresAt: row.active ? new Date(row.expires_at).toISOString() : null,
+      execution: "not_verified", checkedAt: new Date(checkedAt).toISOString() };
+  }
   async function subscribe({ principal, name, arguments: args, delivery, cursor = null, ttlMs: requestedTtl }) {
     sweep();
     const key = principalKey(principal);
@@ -193,5 +208,5 @@ export function createMcpEventSubscriptions({ store, authorize, authorizeEvent =
     }
     return results;
   }
-  return { subscribe, unsubscribe, enqueueRequested, drain };
+  return { subscribe, unsubscribe, enqueueRequested, drain, status };
 }

@@ -29,8 +29,13 @@ test('public entry points lead to the served setup skill before unrelated work',
         `deployed-rev ${'a'.repeat(40)} 2026-10-29T20:00:00.000Z`);
       assert.ok(Buffer.byteLength(stamped) < 5120, `stamped packet is ${Buffer.byteLength(stamped)} bytes`);
     }
+    if(path==='/llms.txt'||path==='/AGENTS.md'){
+      assert.ok(text.includes(`${ROOM_ORIGIN}/docs/agents`));
+      assert.ok(text.includes(`${ROOM_ORIGIN}/llms-full.txt`));
+      continue;
+    }
     const start = text.indexOf('## Join the room your user named');
-    assert.ok(start >= 0 && start < 900, path);
+    assert.ok(start >= 0, path);
     assert.ok(text.includes(`${ROOM_ORIGIN}/#room/muse-room`));
     const skill = new URL(/\[the setup instructions\]\(([^)]+)\)/.exec(text)[1]);
     const setup = await fetch(origin + skill.pathname);

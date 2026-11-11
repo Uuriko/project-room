@@ -2,7 +2,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectSnippets, HOSTED_MCP_URL, WORK_LOOP, renderedSnippet } from "../server/connect-snippets.mjs";
+import { AGENT_PASTE_COPY_SCRIPT } from "../server/agent-paste-copy.mjs";
+import { connectSnippets, HOSTED_MCP_URL, renderedSnippet } from "../server/connect-snippets.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
@@ -39,7 +40,7 @@ export function codeBlock(text, label) {
   return `<pre tabindex="0" role="region" aria-label="${escape(plainLabel(label) || "Code example").replaceAll('"', "&quot;")}"><code>${escape(text)}</code></pre>`;
 }
 
-export function renderMarkdown(markdown, { labelPrefix = "" } = {}) {
+export function renderMarkdown(markdown, { labelPrefix = "", renderCode = codeBlock } = {}) {
   const blocks = [];
   let lastHeading = "";
   let codeCount = 0;
@@ -59,7 +60,7 @@ export function renderMarkdown(markdown, { labelPrefix = "" } = {}) {
       i += 1;
       while (i < lines.length && !lines[i].startsWith("```")) { body.push(lines[i]); i += 1; }
       codeCount += 1;
-      blocks.push(codeBlock(body.join("\n"), [labelPrefix, lastHeading || `code example ${codeCount}`].filter(Boolean).join(": ")));
+      blocks.push(renderCode(body.join("\n"), [labelPrefix, lastHeading || `code example ${codeCount}`].filter(Boolean).join(": "), codeCount));
       i += 1;
       continue;
     }
@@ -127,12 +128,21 @@ h1,h2{color:var(--text)}
 a{color:var(--blue)}
 pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.agent-paste-prompt{box-sizing:border-box;width:100%;max-width:100%;padding:12px 16px;background:#191a20;color:var(--text);border:1px solid var(--line);border-radius:.45rem;font:inherit;resize:vertical}
+.agent-paste-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+label[for^="agent-paste-prompt-"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.copy-prompt{margin:8px 0;padding:8px 14px;border:1px solid var(--line);border-radius:.45rem;background:#393b45;color:var(--text);font:inherit;cursor:pointer}
+.copy-prompt:not([hidden]){display:block}
+.copy-prompt:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+details.guide-section{border-top:1px solid var(--line);padding:12px 0}
+details.guide-section summary{cursor:pointer;color:var(--text);font-weight:600}
+details.guide-section summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
 :not(pre)>code{overflow-wrap:anywhere}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
-function page({ title, description, path, body, steps }) {
+function page({ title, description, path, body, steps, script = "" }) {
   const canonical = ORIGIN + path;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -140,12 +150,13 @@ function page({ title, description, path, body, steps }) {
 <meta name="description" content="${escape(description)}">
 <link rel="canonical" href="${canonical}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="help" type="text/plain" href="/llms.txt" title="Project Room agent instructions">
 <style>${style}</style>
 <script type="application/ld+json">${howTo(title, steps)}</script>
 </head><body><main>
 ${body}
 <footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
-</main></body></html>
+</main>${script ? `<script>${script}</script>` : ""}</body></html>
 `;
 }
 
@@ -162,7 +173,7 @@ export function agentPages(dir = join(root, "docs", "agents")) {
     const steps = sections(markdown);
     steps.push({ title: "Config", text: snippet.replace(/\s+/g, " ").trim() });
     pages.set(tool.htmlFile, page({
-      title: `Connect ${tool.label}`,
+      title: `Connect ${tool.label} to Project Room`,
       description: `Connect ${tool.label} to Project Room with one command. The config names an environment variable and does not contain a secret.`,
       path: tool.docsPath,
       body,
@@ -173,20 +184,25 @@ export function agentPages(dir = join(root, "docs", "agents")) {
   const pasteMd = readFileSync(join(dir, PASTE_PAGE.id + ".md"), "utf8");
   if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
   if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
+  const pasteBody = renderMarkdown(pasteMd, { labelPrefix: "Paste block",
+    renderCode: (text, label, index) => `<label for="agent-paste-prompt-${index}">Copy this prompt into your agent: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}</label><button type="button" class="copy-prompt" aria-label="Copy prompt: ${escape(plainLabel(label).replace(/^Paste block:\s*/, ''))}" data-copy-prompt="agent-paste-prompt-${index}" hidden>Copy prompt</button><span id="agent-paste-prompt-${index}-status" role="status" aria-live="polite"></span><details class="prompt-preview"><summary>View prompt</summary><textarea id="agent-paste-prompt-${index}" class="agent-paste-prompt" readonly rows="4" spellcheck="false">${escape(text)}</textarea></details>` });
+  const pasteSections = pasteBody.split(/(?=<h2>)/);
+  const compactPasteBody = pasteSections.map((section, index) => index < 2 ? section : section.replace(/^<h2>(.*?)<\/h2>/, '<details class="guide-section"><summary>$1</summary>') + '</details>').join('');
   pages.set(PASTE_PAGE.htmlFile, page({
-    title: "Connect your agent by pasting",
-    description: "Paste one block into ChatGPT, Claude, Cursor or another agent. It joins your room, says hello, and never needs your key.",
+    title: "Connect ChatGPT Dot or another agent to Project Room",
+    description: "Connect your existing ChatGPT Dot or another agent to Project Room. Find the official MCP URL, host approval steps and connection checks.",
     path: PASTE_PAGE.docsPath,
-    body: renderMarkdown(pasteMd, { labelPrefix: "Paste block" }),
+    body: compactPasteBody,
     steps: sections(pasteMd),
+    script: AGENT_PASTE_COPY_SCRIPT,
   }));
-  const indexBody = renderMarkdown(indexMd) + "<ul>" + connectSnippets.map(tool => `<li><a href="${tool.docsPath}">${escape(tool.label)}</a> — <code>${escape(tool.command)}</code></li>`).join("") + "</ul>";
+  const indexBody = renderMarkdown(indexMd);
   pages.set("docs/agents/index.html", page({
-    title: "Connect your agent",
-    description: "One command connects Claude Code, Codex, Cursor, Cline, VS Code, Aider, or a framework agent to the shared room.",
+    title: "Connect to Project Room — ChatGPT Dot, Claude and Codex",
+    description: "Connect your existing AI agent to Project Room through MCP or HTTP. Official setup for ChatGPT Dot, Claude, Codex and other hosts, with identity reuse and access checks.",
     path: "/docs/agents",
     body: indexBody,
-    steps: [{ title: "Pick a tool", text: connectSnippets.map(tool => tool.label).join(", ") }, ...WORK_LOOP.map((text, index) => ({ title: "Work loop " + (index + 1), text }))],
+    steps: sections(indexMd),
   }));
   return pages;
 }

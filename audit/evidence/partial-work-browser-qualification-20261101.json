@@ -1,0 +1,89 @@
+{
+  "sourceHead": "c1869c1b2bac7ea67faba7f4cf10735e7fb4867b",
+  "base": "3f1e947c7f752cbe2f81e1aaf693eddad2598dad",
+  "ownership": "src/app.js normalized partial work routing/details and NEW tests only; src/client.js unchanged because proposed roomcookie guard defect was disproved by source and real HTTP controls",
+  "status": "source frozen for root composition; not actual-browser or live verification",
+  "changes": [
+    "Normalized missing/summary work IDs use existing selected /work-context before full details render; missing records no longer fall back to legacy claims. Legacyv1 fallback remains.",
+    "Validate exact room/viewer/work ID, full required selected fields/revision and existing ownsResponse; refuse unavailable/mismatched/older-than-held responses.",
+    "Prevent late mount after session/generation/state/navigationepoch/URL or latestselectedID changes; snapshot refresh re-reads active work rather than retaining stalefullrecord.",
+    "Thin timeline work is a safe DOM-built linkedtitle, not a fabricated full card/action set. One separately selected current record is mounted without altering room completeness metadata. Native drafts use same addressed read."
+  ],
+  "checks": {
+    "node": {
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0,
+      "newTests": 12,
+      "command": "node --test tests/partial-work-browser.test.mjs tests/client.test.js tests/account-client.test.js tests/claim-record-reveal-notice.test.js"
+    },
+    "eslint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "secretScan": "exit0 clean",
+    "i18n": {
+      "exitCode": 1,
+      "base": "3f1e947c7f752cbe2f81e1aaf693eddad2598dad",
+      "remaining": "Preexisting src/current-record-context.js missing from tracked i18n-scope manifest; no new count-growth finding after safe summary DOM construction."
+    }
+  },
+  "logs": {
+    "original": {
+      "path": "audit/evidence/partial-work-browser-original-20261101.log",
+      "sha256": "149abb36cc0754a5efa86411a61e8f734f90fcb0e4854eff32277dd15dd1d88c",
+      "exitCode": 1
+    },
+    "node": {
+      "path": "audit/evidence/partial-work-browser-node-20261101.log",
+      "sha256": "8bdd18654cd30e61bc73118d708147c5df660a937057ee0ca77ac408fcb2650d",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/partial-work-browser-lint-20261101.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exitCode": 0
+    },
+    "secretScan": {
+      "path": "audit/evidence/partial-work-browser-secretScan-20261101.log",
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    },
+    "i18n": {
+      "path": "audit/evidence/partial-work-browser-i18n-20261101.log",
+      "sha256": "ab92fd67b7d47f0be4ef29fa42f6fb0c2c89ff57d20cae6ace2a7f6dee477f84",
+      "exitCode": 1
+    },
+    "overviewRepro": {
+      "path": "audit/evidence/partial-work-browser-overviewRepro-20261101.log",
+      "sha256": "aff65a62752a75f88f72ad25512b12c73d8efe2c90baa1b822ce914ebe6700de",
+      "exitCode": 1
+    }
+  },
+  "sourceDigests": {
+    "src/app.js": "8391c92b2d82409242229aef06d7ef8832d4579930e02b6412622aefd1ebcb6b",
+    "src/client.js": "5ea0f2ab5bd28e245faf7c4178d6a113106ad58fccc80d2ec46e2bb9119d1326",
+    "tests/partial-work-browser.test.mjs": "3fd8bd1ecf3e855101cdf5257b16ac541224e6e5c16ef991b54669cd70c13559"
+  },
+  "actualHTTP": [
+    "Real store.createSession human room_cookie +RoomClient.refresh normalizedv2, omitted ninthwork selectedwork.definitionOfDone verified.",
+    "Real store.createJoinSession accountless agent room_cookie +RoomClient.workContext selected read remains bound and authenticated.",
+    "Account authMode without canonical ownership refuses before network; existing account-client/client tests pass."
+  ],
+  "vm": [
+    "Actual revealWork route functions and navigateWorkRecord executed with controlled dependencies; not a replacement for Fo browser qualification.",
+    "Missing ID, heldthin summary, exactID/viewer/room/unavailable, stale revision, five lifecycle races, latestdirectselection race, legacyfallback and thin/full timeline rendering covered."
+  ],
+  "separateKnownDefect": {
+    "repro": "audit/evidence/partial-work-overview-input-repro-20261101.mjs",
+    "owner": "root overview/bootstrap lane",
+    "result": "Exact3f1 actualHTTP initialRoom+one extra legalagent+9tinywork throughRoomClient.refresh fails409current_room_context_unavailable; do not weaken sharedbudget or call this roomcookie failure."
+  },
+  "limits": [
+    "Actual browser layout/keyboard/hash-back QA is still Fo reserved lane; no duplicate browser run.",
+    "Root owns channels/Record/ancillary metadata and broader partial work navigation inventory.",
+    "Selected current work still reports existing context omissions; no full history/completeness/grant synthesis.",
+    "Candidate manifest must be regenerated by root after full composition because src/app.js changed.",
+    "No push, deploy, live migration, new credentials/grants outside synthetic fixture, provider/model execution or schema activation."
+  ]
+}

@@ -1,0 +1,45 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":50,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":29412632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ archived queued Guide work is retired before projection load (0.4815ms)
+✔ pending human push checks archived SQL before loading old room (68.409583ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":50,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":53,"heapBytes":39758512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":44,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":48712808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":44,"legacyColdStartMs":44,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ GET /human-push reports push preferences, defaulting to on (88.560417ms)
+room diagnostic op__ID1LHVR 401 unauthenticated access /api/rooms/:roomId/human-push
+room diagnostic op_USK_Wiyw 403 human_push_humans_only access /api/rooms/:roomId/human-push
+room diagnostic op_8o08uVhY 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_xim3mnGk 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_5ngW7ckR 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_T1deBVui 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_wKYfvB1u 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_RrUFnjZx 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_covo1Ej4 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+room diagnostic op_cBoX4rsD 422 invalid_human_push_preferences input /api/rooms/:roomId/human-push
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":51005080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ PATCH /human-push sets preferences, merges partial updates, and validates (73.623875ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":40,"heapBytes":57545328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":39,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ preferences are stored even when push is not configured (50.274584ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":40,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":41,"heapBytes":66412048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":41,"legacyColdStartMs":40,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ notifyPosted honors the per-kind switches, on by default (64.396666ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":39,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":39,"heapBytes":73155600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":40,"legacyColdStartMs":39,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ the older in-app preference levels still do not steer the push (52.265291ms)
+✔ unreadable push preferences suppress delivery (56.807792ms)
+✔ push route metadata keeps every preference and subscription operation room-authenticated (0.136917ms)
+✔ flushRoomGuide retries a step that threw and clears it only after success (0.464291ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 618.510875

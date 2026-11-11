@@ -17,6 +17,7 @@ const EMPTY_UNTIL_CRON = new Set([
   // contains ordinary rooms; the populated table is audited in muse-development-access.test.js.
   "development_co_owner_links",
   "message_replay_snapshots", // Staging is empty outside an unfinished replay.
+  "current_restore_audit_scratch", // Temporary verification rows exist only during a restore.
   "membership_delegation_pending",
   "room_access_auto_approve",
   "integrity_snapshot",
@@ -125,6 +126,12 @@ test("deferred cold start on a production-shaped store stays within the budget",
   try {
     try {
       await seedRecoveryCoverage(fixture);
+      // A mixed store includes actual schema45 entity rows, not merely its
+      // empty tables. Keep the legacy 200k-event room below as a separate case.
+      fixture.store.initialize(initialRoom("normalized-cold"), { representation: "normalized-current-v1" });
+      const normalizedKey = fixture.store.issueAccessKey("normalized-cold", "owner");
+      fixture.store.command(normalizedKey, "normalized-cold", { id: "normalized-cold-post", type: "message.posted",
+        data: { messageId: "normalized-cold-message", body: "Saved before the cold restart" } });
       const counted = [];
       for (const table of applicationTables) {
         if (!/^[a-z0-9_]+$/.test(table)) throw new Error(`unexpected table name ${table}`);
@@ -155,6 +162,11 @@ test("deferred cold start on a production-shaped store stays within the budget",
       assert.ok(record.sequences > EVENTS);
       assert.ok(record.cpuMs < COLD_START_CPU_BUDGET_MS, `deferred cold start used ${record.cpuMs}ms CPU`);
       assert.equal(deferred.room("commons").state.channels[DEFAULT_CHANNEL_ID].id, DEFAULT_CHANNEL_ID);
+      const marker = JSON.parse(deferred.db.prepare("SELECT projection FROM rooms WHERE id='normalized-cold'").get().projection);
+      assert.equal(marker.normalizedCurrent.version, 1);
+      assert.equal(deferred.db.prepare("SELECT count(*) n FROM current_room_head WHERE room_id='normalized-cold'").get().n, 1);
+      assert.equal(deferred.db.prepare("SELECT body FROM messages WHERE room_id='normalized-cold' AND message_id='normalized-cold-message'").get().body,
+        "Saved before the cold restart");
     } finally { deferred.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

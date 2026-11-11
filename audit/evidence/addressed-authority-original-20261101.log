@@ -1,0 +1,79 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":41,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":18,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":43,"heapBytes":28034904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":41,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":38580824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":34804704,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":8,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":8,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":29286256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":34,"heapBytes":35101656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":33,"integrity":"eager","phases":{"schema":{"ms":9,"rowsRead":0},"plugin":{"ms":16,"rowsRead":0},"fence":{"ms":7,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":33,"heapBytes":40100152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":33,"legacyColdStartMs":33,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ existing short-profile access credential authenticates in a legal100-member normalized room (99.274416ms)
+✖ issuing a selected member key in a legal100-member room does not require full roster hydration (85.58475ms)
+✖ selected principal authority ignores large unrelated advertised profiles (130.559333ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 464.0095
+
+✖ failing tests:
+
+test at tests/addressed-member-authority.test.mjs:18:1
+✖ existing short-profile access credential authenticates in a legal100-member normalized room (99.274416ms)
+  Error: Current record context exceeds bounded input; use a smaller addressed request
+      at refuse (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:29:35)
+      at charge (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:137:55)
+      at readCurrentRecord (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:205:3)
+      at currentAuthorityFromHead (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:320:79)
+      at currentRoomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:311:10)
+      at RoomStore.roomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:4222:21)
+      at RoomStore.authenticate (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:5309:26)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/tests/addressed-member-authority.test.mjs:19:52)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25) {
+    status: 409,
+    code: 'current_room_context_unavailable',
+    headers: null
+  }
+
+test at tests/addressed-member-authority.test.mjs:21:1
+✖ issuing a selected member key in a legal100-member room does not require full roster hydration (85.58475ms)
+  Error: Current record context exceeds bounded input; use a smaller addressed request
+      at refuse (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:29:35)
+      at charge (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:137:55)
+      at readCurrentRecord (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:205:3)
+      at currentAuthorityFromHead (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:320:79)
+      at currentRoomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:311:10)
+      at RoomStore.roomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:4222:21)
+      at file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:5176:28
+      at run (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:700:22)
+      at Object.transaction (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:727:22)
+      at RoomStore.transaction (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:4024:41) {
+    status: 409,
+    code: 'current_room_context_unavailable',
+    headers: null
+  }
+
+test at tests/addressed-member-authority.test.mjs:24:1
+✖ selected principal authority ignores large unrelated advertised profiles (130.559333ms)
+  Error: Current record context exceeds bounded input; use a smaller addressed request
+      at refuse (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:29:35)
+      at charge (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:137:55)
+      at readCurrentRecord (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:205:3)
+      at currentAuthorityFromHead (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:320:79)
+      at currentRoomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/current-room-repository.mjs:311:10)
+      at RoomStore.roomAuthority (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/server/store.mjs:4222:21)
+      at TestContext.<anonymous> (file:///Users/johnpotter/src/pr-addressed-member-authority-1101/tests/addressed-member-authority.test.mjs:25:62)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18) {
+    status: 409,
+    code: 'current_room_context_unavailable',
+    headers: null
+  }

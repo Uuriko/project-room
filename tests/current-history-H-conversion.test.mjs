@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {RoomStore} from '../server/store.mjs';import {initialRoom} from '../server/bootstrap.mjs';import {event} from '../src/events.js';import {replayCutoverSchema,captureReplayWitness,advanceReplayWitness,partitionReplayWitness,qualifyReplayHWork,qualifyReplayHMessages,advanceCurrentRoomConversion} from '../server/replay-cutover.mjs';import {readConversation} from '../server/conversation-sync.mjs';import {auditRecovery} from '../server/recovery.mjs';import {readCurrentRecord} from '../server/current-room-repository.mjs';
+test('existing since-join H conversion derives complete bounded activation facts before publication',t=>{
+ const s=new RoomStore(':memory:');t.after(()=>s.close());const at='2026-11-01T00:00:00.000Z',es=initialRoom();for(const e of es)e.at=at;
+ es.push(event({roomId:'commons',actorId:'owner',at,type:'room.history_visibility_set',data:{historyVisibility:'since_join'}}));
+ es.push(event({roomId:'commons',actorId:'owner',at:'2026-11-01T01:00:00+01:00',type:'message.posted',data:{messageId:'before',body:'Must stay hidden'}}));
+ es.push(event({roomId:'commons',actorId:'owner',at,type:'member.added',data:{memberId:'reader',displayName:'Reader',kind:'agent',permissions:[]}}));
+ es.push(event({roomId:'commons',actorId:'owner',at,type:'message.posted',data:{messageId:'after',body:'Visible original result'}}));
+ s.initialize(es);const key=s.issueAccessKey('commons','reader');while(!s.backfillMessages({limit:200}).done){}s.checkMessagesParity({roomId:'commons'});s.db.exec(replayCutoverSchema());
+ const capture=captureReplayWitness(s,{roomId:'commons',requestId:'capture',expectedHead:s.headSequence('commons'),reason:'Existing since-join room conversion'});let n=0,p={bytes:0};
+ while(p.phase!=='witness_verified')p=advanceReplayWitness(s,{roomId:'commons',generation:capture.generation,requestId:'hash-'+n++,expectedBytes:p.bytes});p={bytes:0};n=0;
+ while(p.phase!=='codec_partitioned')p=partitionReplayWitness(s,{roomId:'commons',generation:capture.generation,requestId:'codec-'+n++,expectedBytes:p.bytes});qualifyReplayHWork(s,{roomId:'commons',generation:capture.generation,requestId:'work',expectedWorkCount:0});p={hMessageSteps:0};n=0;
+ while(!p.hMessagesQualified){p=qualifyReplayHMessages(s,{roomId:'commons',generation:capture.generation,requestId:'message-'+n++,expectedSteps:p.hMessageSteps});assert.ok(n<100);}
+ p={currentSteps:0};n=0;while(p.phase!=='current_serving'){p=advanceCurrentRoomConversion(s,{roomId:'commons',generation:capture.generation,requestId:'current-'+n++,expectedSteps:p.currentSteps});assert.ok(p.phase==='current_serving'||p.inputBytes<=262144);assert.ok(n<100);}
+ assert.throws(()=>readConversation(s,key,'commons',{messageId:'before'}),e=>e.status===404);assert.equal(readConversation(s,key,'commons',{messageId:'after'}).messages[0].body,'Visible original result');assert.equal(s.readTransaction(()=>readCurrentRecord(s.db,'commons','historyFloors','reader')).sequence,5);assert.equal(s.readTransaction(()=>readCurrentRecord(s.db,'commons','historyFloors','owner')).sequence,2);assert.doesNotThrow(()=>auditRecovery(s));
+});

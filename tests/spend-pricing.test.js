@@ -1,3 +1,4 @@
+import {readCurrentRecord,withCurrentReadContext} from '../server/current-room-repository.mjs';
 // Spend-pricing kill switch (jill-spend-pricing-killswitch): the owner-only
 // emergency lever promised to Dot's QA lane (room seq 2748).
 //
@@ -70,7 +71,10 @@ function roomWithPeer(t) {
   return { store, roomId, ownerMemberId, peerMemberId, ownerSecret: owner.secret, peerSecret: peer.secret };
 }
 
-const stateOf = f => f.store.room(f.roomId).state;
+const stateOf = f => f.store.readTransaction(()=>withCurrentReadContext(f.store.db,f.roomId,()=>({
+  room:readCurrentRecord(f.store.db,f.roomId,'metadata','room'),
+  members:f.store.roomAuthority(f.roomId,{memberId:f.peerMemberId}).members
+})));
 
 test("reducer: pricing defaults enabled, owner-only, strict shape, replayable", async t => {
   const f = roomWithPeer(t);

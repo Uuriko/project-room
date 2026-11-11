@@ -97,11 +97,11 @@ test('readiness observations distinguish shared callers and late RPC settlement 
   assert.equal((await f.fetch('/api/ready')).status, 200);
   assert.equal(await f.count(), 2, 'settled probe is not cached');
 });
-test('actual DO readiness observations retain exactly one SQL statement, pause and original error', async t => {
+test('actual DO readiness observations retain two admission reads plus one probe, pause and original error', async t => {
   const f = await fixture(t, {});
   for (const mode of ['ok', 'paused', 'sql-error', 'emitter-error']) {
     const result = await (await f.fetch('/actual?mode=' + mode)).json();
-    assert.equal(result.statements, mode === 'paused' ? 0 : 1);
+    assert.equal(result.statements, mode === 'paused' ? 0 : 3);
     if (mode === 'sql-error') assert.equal(result.originalError, true);
     else assert.equal(result.result.ok, mode !== 'paused');
     if (mode === 'emitter-error') { assert.deepEqual(result.observations, []); continue; }
@@ -136,10 +136,10 @@ test('readiness provenance uses strict static stamps and refuses arbitrary stamp
 test('readiness provenance is opt-in on the actual DO and retains legacy shape and errors',async t=>{
   const f=await fixture(t,{});
   const legacy=await (await f.fetch('/actual?mode=ok')).json();
-  assert.deepEqual(legacy.result,{ok:true,emailVerification:'relaxed-no-mailer'});assert.equal(legacy.statements,1);
+  assert.deepEqual(legacy.result,{ok:true,emailVerification:'relaxed-no-mailer'});assert.equal(legacy.statements,3);
   for(const mode of ['ok','paused','sql-error','emitter-error']) {
     const value=await (await f.fetch('/actual?mode='+mode+'&diagnostics=1')).json();
-    assert.equal(value.statements,mode==='paused'?0:1);
+    assert.equal(value.statements,mode==='paused'?0:3);
     if(mode==='sql-error'){assert.equal(value.originalError,true);continue;}
     const diagnostic=value.result.readinessObservation;
     assert.equal(diagnostic.sourceRevision,TEST_SOURCE);assert.equal(diagnostic.buildId,TEST_BUILD);

@@ -106,28 +106,29 @@ test("ledger and enforcement: reserve on start, refuse the start that would exce
   assert.throws(() => f.send("agent", T.SESSION_STATUS_CHANGED, { workItemId: b, expectedRevision: f.state().workItems[b].revision, status: "active", spendCents: 3600 }),
     { status: 409, code: "spend_allowance_exceeded" });
   // ...while on the session path the session's own budget trip-wire fires first: the run is
-  // force-stopped without a spend report, so its reservation is held as unknown spend, not freed.
+  // force-stopped, and the stop records the triggering spend (#3349), so the tripped
+  // attempt's spend is known — it counts as spent, not held as unknown spend.
   const overCap = await f.session(b, { status: "failed", spendCents: 3100 });
   assert.equal(overCap.status, 409); assert.equal(overCap.json.error.code, "budget_exceeded");
   assert.equal(sessionRecord(f.state().workItems[b]).status, "failed");
-  assert.deepEqual([f.report().heldCents, f.report().sessions.attemptsHeld], [3000, 1]);
+  assert.deepEqual([f.report().spentCents, f.report().heldCents, f.report().sessions.attemptsHeld], [3600, 0, 0]);
   // Stopping A below its reservation frees the difference.
   assert.equal((await f.session(a, { status: "done", spendCents: 800 })).status, 201);
-  assert.deepEqual([f.report().spentCents, f.report().reservedCents, f.report().heldCents, f.report().committedCents, f.report().headroomCents], [800, 0, 3000, 3800, 1200]);
-  // A retry that declares no budget inherits its cap (2000) and 2000 > 1200.
+  assert.deepEqual([f.report().spentCents, f.report().reservedCents, f.report().heldCents, f.report().committedCents, f.report().headroomCents], [3900, 0, 0, 3900, 1100]);
+  // A retry that declares no budget inherits its cap (2000) and 2000 > 1100.
   const retry = await f.session(a, { status: "processing" });
   assert.equal(retry.status, 409); assert.equal(retry.json.error.code, "spend_allowance_exceeded");
-  const retryFit = await f.session(a, { status: "processing", budget: { maxSpendCents: 1200 } });
+  const retryFit = await f.session(a, { status: "processing", budget: { maxSpendCents: 1100 } });
   assert.equal(retryFit.status, 201);
   assert.equal(f.report().headroomCents, 0);
   // A stop above the cap still lands on the command path so actual spend is recorded.
   f.send("agent", T.SESSION_STOPPED, { workItemId: a, expectedRevision: f.state().workItems[a].revision, status: "failed", spendCents: 1300 });
-  assert.deepEqual([f.report().spentCents, f.report().overCents], [2100, 100]);
+  assert.deepEqual([f.report().spentCents, f.report().overCents], [5200, 200]);
   // Unknown spend never frees allowance: a stop with no report holds the declared cap.
   f.send("owner", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 6000, periodDays: 30 });
-  assert.equal((await f.session(a, { status: "processing", budget: { maxSpendCents: 900 } })).status, 201);
+  assert.equal((await f.session(a, { status: "processing", budget: { maxSpendCents: 800 } })).status, 201);
   assert.equal((await f.session(a, { status: "failed" })).status, 201);
-  assert.deepEqual([f.report().heldCents, f.report().sessions.attemptsHeld, f.report().headroomCents], [3900, 2, 0]);
+  assert.deepEqual([f.report().heldCents, f.report().sessions.attemptsHeld, f.report().headroomCents], [800, 1, 0]);
   const held = await f.session(c, { status: "processing", budget: { maxSpendCents: 1 } });
   assert.equal(held.status, 409, "held spend blocks the next start");
   // The ledger is the same function the card uses.

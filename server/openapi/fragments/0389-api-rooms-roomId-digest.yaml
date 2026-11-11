@@ -2,7 +2,21 @@
     get:
       summary: Room digest (bounded catch-up / since-wake delta)
       description: |
-        One capped read composed from the context, needs-me, and updates
+        Normalized rooms return contractVersion 2: bounded conversation
+        attention and native standing work/request pointers. Exact global
+        totals are unknown (`null`), not zero. Empty filtered pages may have
+        `sourceWindow.complete: false`; pass the exact returned
+        `sourceWindow.nextRead` {since,cursor} to the same endpoint until
+        that scope completes. Numeric `next` does not advance while partial.
+        The opaque cursor is viewer, credential, room, head and original-since
+        bound; restart/head changes invalidate it (409), requiring a fresh
+        traversal. Coverage explicitly omits other attention sources and
+        globalAttentionComplete stays false. V2 responses are at most 16384
+        bytes including the continuation. RoomAgentClient.roomDigest accepts
+        this nextRead object directly. No read acknowledges or clears work.
+
+        Legacy rooms retain contractVersion 1 below. One capped read composed
+        from the context, needs-me, and updates
         projections: exact seq coverage for the window (`coverage.byType`
         counts are never capped and sum to `coverage.eventsInWindow`), the
         room's `context_version` with projection counts, the latest changed
@@ -22,8 +36,13 @@
           in: query
           required: false
           schema: { type: integer, minimum: 0 }
+        - name: cursor
+          in: query
+          required: false
+          description: Exact opaque native continuation from sourceWindow.nextRead; keep since unchanged.
+          schema: { type: string, maxLength: 12288 }
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "Room digest, at most 4096 bytes of JSON" }
+        '200': { description: "Legacy v1 at most 4096 bytes; bounded native v2 at most 16384 bytes of JSON" }
         '409': { description: cursor_ahead }
         '422': { description: invalid_cursor }

@@ -1,4 +1,7 @@
+import { withAgentSessions } from "./agent-session-state.mjs";
 import { readWorkItem } from "./work-repository.mjs";
+import { boardPlanningEnabled, PLANNING_FIELDS, PLANNING_QUERY, planningPatchOf, hasPlanningInput, applyPlanning, planningQueryOf, filterPlanning, sortPlanning, groupPlanning } from "./board-planning.mjs";
+import { boardViewsEnabled, getView, withSavedView } from "./board-views.mjs";
 import { assertListenerFence, LISTENER_TOKEN_HEADER } from "./listener-fence.mjs";
 import { messageRepository } from "./message-repository.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
@@ -37,7 +40,7 @@ import { messageRepository } from "./message-repository.mjs";
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, releaseWork, delegateWork, claimDelegateEnabled, requestApproval, decideApproval, approvalHoldEnabled, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
@@ -49,10 +52,11 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { alertLeaseRefusal, notifyClaimCollisions } from "./agent-collisions.mjs";
+import { alertLeaseRefusal, notifyClaimCollisions, notifyLeaseExpired } from "./agent-collisions.mjs";
 import { noteProjectMapOverlap, publishProjectMapOverlap, withProjectMapOverlap } from "./project-map-store.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
+import { notifyContractChanges } from "./contract-notices.mjs"; // contract-change notices (flag)
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
@@ -63,13 +67,14 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
+import { currentReceiptClaim, currentReceiptClaims, currentRoomReceiptState } from "./current-receipts.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
 import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived, publicReceipts } from "../src/events.js";
+import { isRoomArchived, ownMember, publicReceipts } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -347,6 +352,18 @@ const refuseSweep = () => refuseBoardAction(
   "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
   "Ask the room owner or a claim manager to sweep the Board.");
 
+// FUNNEL-FIXES C2: the gate refusal every non-writer receives on every POST
+// work-claims route, whatever id they supplied. The next[] names all three
+// lawful legs (contribute invite · permission request with the tokens named
+// and the 7-day undecided expiry · public-work match) so the refusal is
+// self-correcting in one step, and the body is byte-identical across id
+// kinds by construction — it is built from constants only.
+const WORK_CLAIMS_GATE_NEXT = Object.freeze([
+  Object.freeze({ action: "ask-owner-for-contribute-invite", command: "Ask the room owner for a contribute invite." }),
+  Object.freeze({ action: "request-permissions", permissions: Object.freeze(["accept_work", "complete_work"]), expiresUndecidedAfterDays: 7, command: "Request the accept_work and complete_work permissions through the access-request path; requests expire undecided after 7 days." }),
+  Object.freeze({ action: "public-work", method: "POST", endpoint: "/api/public-work/match", command: "Take public work instead: POST /api/public-work/match with your saved identity needs no room profile." }),
+]);
+
 function refuseWorkClaims() {
   const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
   const hint = "Ask the room owner for a contribute invite.";
@@ -356,7 +373,7 @@ function refuseWorkClaims() {
   error.body = {
     error: { code: "work_claims_not_permitted", message },
     hint,
-    next: [{ command: hint }],
+    next: WORK_CLAIMS_GATE_NEXT.map(step => ({ ...step })),
   };
   throw error;
 }
@@ -441,22 +458,40 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
-    if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
+    const planningKey = boardPlanningEnabled() && PLANNING_QUERY.includes(key);
+    if ((!BOARD_QUERY.has(key) && !planningKey) || params.getAll(key).length !== 1) {
       invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
     }
+  }
+  // Board planning fields: filters narrow the items; sort returns the first
+  // `limit` sorted items (a sorted page has no cursor).
+  let planningSort = null;
+  let groupBy = null;
+  if (boardPlanningEnabled() && PLANNING_QUERY.some(key => params.has(key))) {
+    const { query: pq, error } = planningQueryOf(params);
+    if (error) invalidInput(reject, error);
+    items = filterPlanning(items, pq);
+    planningSort = pq.sort ?? null;
+    groupBy = pq.groupBy ?? null;
   }
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
   const view = params.get("view");
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
+  if (planningSort !== null) {
+    if (params.has("cursor") || params.has("queue")) invalidInput(reject, "planning sort returns a top-N page without cursor or queue");
+    const state = params.get("state");
+    if (state !== null && !STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
+  }
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
-  const present = page => {
+  const present = page => groupBy === null ? presentPage(page) : ({ ...presentPage(page), groupBy, groups: groupPlanning(page.claims, groupBy) });
+  const presentPage = page => {
     // #3661: every claim read carries the derived pull settlement state on
     // its pull record (verified / asserted / pending; link-less claims
     // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
+      claims: withAgentSessions(page.claims, nowMs).map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
@@ -464,6 +499,11 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
     if (cursor && (cursor.q !== "ready" || cursor.s !== undefined)) invalidInput(reject, "a cursor from a queue=ready page");
     return present({ ...pageReady(readyClaims(items), limit, cursor), queue: "ready", historyScope: "ready" });
+  }
+  if (planningSort !== null) {
+    const state = params.get("state");
+    const pool = state === null ? items.filter(item => !isTerminalClaimState(item.state)) : items.filter(item => item.state === state);
+    return present({ claims: sortPlanning(pool, planningSort).slice(0, limit), nextCursor: null, sort: planningSort, historyScope: state === null ? "open" : "state" });
   }
   if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
   const state = params.has("state") ? params.get("state") : null;
@@ -595,7 +635,11 @@ const receiptOf = item => {
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
   const noTwin = Object.freeze({ ...receipt, publicId: null, publicUrl: null });
-  const state = store.room(roomId)?.state;
+  // N20-01: for current rooms store.room() refuses (409
+  // current_room_context_required), so the opt-in state is read from
+  // the bounded canonical metadata record; the twin logic below is
+  // unchanged for every room.
+  const state = currentRoomReceiptState(store, roomId) ?? store.room(roomId)?.state;
   if (!state || publicReceipts(state).enabled !== true) return noTwin;
   for (const publicId of [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]) {
     if (publicReceiptById(store, publicId)) {
@@ -732,6 +776,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
     try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    notifyContractChanges(store, roomId, linked);
     try { noteProjectMapOverlap(store, roomId, linked); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return linked;
   };
@@ -876,6 +921,61 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // FUNNEL-FIXES C2 — gate before load (normative ordering: the gate or
+  // authority determination precedes the linked-item block below AND body-
+  // shape validation; shape errors are returned only to callers who pass).
+  // Before this block, the claim/renew/update branches loaded the target
+  // first, so a non-writer could distinguish a real claim id (409 naming
+  // the holder) from a work-item or invented id (404) — a live existence/
+  // state/holder oracle. Now: writer-gated routes refuse non-writers with
+  // the one gate body for every id; authority-gated routes collapse to one
+  // generic work_not_owner for callers with no authority over the id,
+  // whether or not it exists. Internal reads used to compute a per-item
+  // authority never shape a response for a caller who fails it. The Room
+  // Guide starter fence above runs first for that one server identity, as
+  // before (its starter distinction is an accepted, identity-scoped
+  // residual). create/sweep/config carry no claim id and keep their
+  // existing in-branch gates.
+  if (req.method === "POST") {
+    const gateAccess = resolveWorkClaimAccess(store, roomId, auth);
+    const gateCaller = auth.member.id;
+    const gateItem = typeof workClaimId === "string" ? registry.get(roomId, workClaimId) : null;
+    const hasAuthority = item => Boolean(item)
+      && (item.owner === gateCaller || item.delegate === gateCaller || mayManageAnyClaim(gateAccess));
+    if (workClaimRoute === "approval") {
+      // Flag check relocated before the linked-item block (it was the
+      // branch's first line, i.e. after the block — a residual oracle).
+      if (!approvalHoldEnabled()) reject(404, "not_found", "Approval holds are not enabled on this server");
+      const approvalAuthority = Boolean(gateItem) && (gateItem.owner === gateCaller || gateItem.delegate === gateCaller
+        || (gateItem.approvalHold?.status === "pending" && gateItem.approvalHold?.approverId === gateCaller));
+      if (!approvalAuthority) reject(403, "work_not_owner", `Approval for work "${workClaimId}" can be requested only by its holder or delegate, or decided only by its named approver`);
+    } else if (workClaimRoute === "delegate") {
+      if (!claimDelegateEnabled()) reject(404, "not_found", "Claim delegation is not enabled on this server");
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}"'s delegate can be set only by its holder or a claim manager`);
+    } else if (workClaimRoute === "release") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}" can be released only by its holder or a claim manager`);
+    } else if (workClaimRoute === "reassign") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}" can be reassigned only by its holder or a claim manager`);
+    } else if (workClaimRoute === "premise-invalid") {
+      if (!hasAuthority(gateItem)) reject(403, "work_not_owner", `Work "${workClaimId}"'s premise can be flagged only by its holder or a claim manager`);
+    } else if (workClaimRoute === "claim" || workClaimRoute === "renew" || workClaimRoute === "close" || workClaimRoute === "cancel") {
+      if (!mayWriteWorkClaims(gateAccess)) refuseWorkClaims();
+    } else if (workClaimRoute === "update") {
+      // Coarse gate: writers and reviewers both have lawful update paths
+      // (the delivered->done verify / send-back transitions); the per-item
+      // owner/reviewer logic in the branch is unchanged.
+      if (!mayWriteWorkClaims(gateAccess) && !mayReviewWorkClaims(gateAccess)) refuseWorkClaims();
+    } else if (workClaimRoute === "review") {
+      // Sub-branch-aware, mirroring the branch's own discrimination: a
+      // verdict-shaped body needs the review predicate; any other body is
+      // a note and needs the attest predicate.
+      const gateData = body(req);
+      const verdictShaped = gateData && typeof gateData === "object" && !Array.isArray(gateData)
+        && ("verdict" in gateData || "summary" in gateData || "url" in gateData);
+      if (verdictShaped) { if (!mayReviewWorkClaims(gateAccess)) refuseWorkClaims(); }
+      else if (!mayAttestWorkClaims(gateAccess)) refuseAttest();
+    }
+  }
   // An item-backed card is a view of canonical work acceptance. Its
   // board bundle/verdict cannot replace signed evidence or designated roles.
   // Both human and agent callers use the existing command endpoint instead.
@@ -950,6 +1050,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
     try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    notifyContractChanges(store, roomId, item);
     try { noteProjectMapOverlap(store, roomId, item); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return item;
   };
@@ -978,6 +1079,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     enqueueClaimWake(store, roomId, before.owner,
       `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
       { reason: "lease_expired", actorId: before.owner });
+    notifyLeaseExpired(store, roomId, before);
   });
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };
@@ -1001,7 +1103,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // and is acting on someone else's claim. The claim holder takes the
   // ordinary path. Fixtures that do not name an owner stay holder-only.
   const authorityOver = item => {
-    if (item.owner === caller) return false;
+    if (item.owner === caller || (item.delegate !== undefined && item.delegate === caller)) return false;
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
@@ -1052,8 +1154,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
+    let listParams = url?.searchParams;
+    if (boardViewsEnabled() && listParams?.has("savedView")) {
+      const saved = getView(store.db, { roomId, viewId: listParams.get("savedView") });
+      if (!saved) reject(404, "unknown_view", "No such saved Board view in this room");
+      listParams = withSavedView(listParams, saved);
+    }
     return json(res, 200, withProjectMapOverlap(store, roomId, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds }));
+      listParams, nowMs), swept: sweptIds }));
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -1077,7 +1185,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
       return true;
     };
-    const ranked = registry.list(roomId)
+    // N20-01: current-format rooms never write Board rows (the sync is
+    // gated off by design), so their receipts are projected read-side
+    // from the canonical work items; legacy rooms keep the registry.
+    const ranked = (currentReceiptClaims(store, roomId) ?? registry.list(roomId))
       .filter(item => item.state === "done")
       .filter(matches)
       .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1098,7 +1209,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!member || member.active === false) {
       reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     }
-    const item = registry.list(roomId)
+    // B7: on current rooms the named receipt is an addressed read of
+    // that one work item, not a full-room enumeration (which 409s in
+    // mature rooms); legacy rooms keep the registry find unchanged.
+    const nativeClaim = currentReceiptClaim(store, roomId, workClaimId);
+    const item = nativeClaim !== null ? nativeClaim : registry.list(roomId)
       .find(entry => entry.state === "done" && `rc_${entry.id}` === workClaimId);
     if (!item) reject(404, "receipt_not_found", `No receipt "${workClaimId}" in this room`);
     return json(res, 200, stampReceipts({
@@ -1165,7 +1280,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "acceptanceCriteria"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, acceptanceCriteria?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "acceptanceCriteria", ...(boardPlanningEnabled() ? PLANNING_FIELDS : [])] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, acceptanceCriteria?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -1196,7 +1311,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
+    const planning = boardPlanningEnabled() ? planningPatchOf(raw) : { patch: {} };
+    if (planning.error) invalidInput(reject, planning.error);
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, acceptanceCriteria: data.acceptanceCriteria }, { now: nowMs, agentId: caller }));
+    if (Object.keys(planning.patch).length) item = applyPlanning(item, planning.patch);
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
@@ -1238,7 +1356,52 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
-    const item = load(claimIdOf(reject, workClaimId));
+    // FUNNEL-FIXES C2 step 1A: the writer gate has already run (pre-block),
+    // so a miss here is owed an actionable answer. When the id names a
+    // native work item in this room, the 404 says so — kind, the item's
+    // state, its accountable member, and next[] to the work-context read
+    // (plus the correct verb for its state: a proposed item's next step is
+    // acceptance by its accountable member). That caller is a Board writer
+    // in this room and can already read all of it via the room's open work
+    // list. A pure garbage id keeps the plain 404 with the re-read-the-
+    // board next (docs/ERROR-TAXONOMY.md:72-76). Non-writers never reach
+    // this code, so neither shape leaks existence to them.
+    const claimId = claimIdOf(reject, workClaimId);
+    const item = registry.get(roomId, claimId);
+    if (!item) {
+      const boardPath = `/api/rooms/${encodeURIComponent(roomId)}/work-claims`;
+      let canonical = null;
+      if (store.db) { try { canonical = readWorkItem(store.db, roomId, claimId); } catch { canonical = null; } }
+      if (canonical) {
+        const contextPath = `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(claimId)}`;
+        const message = `No work claim "${claimId}" in this room — "${claimId}" is a native work item (${canonical.state}), not a Board claim`;
+        const error = new ServiceError(404, "work_claim_not_found", message);
+        error.body = {
+          error: { code: "work_claim_not_found", message },
+          kind: "work_item_not_board_claim",
+          workItemId: claimId,
+          workItemState: canonical.state,
+          accountableMemberId: canonical.accountableMemberId ?? null,
+          hint: "Work items are not Board claims. Read the item's work context for its next step, or re-read the Board for claimable claim ids.",
+          next: [
+            { action: "read-work-context", method: "GET", path: contextPath },
+            ...(canonical.state === "proposed"
+              ? [{ action: "accept-work-item", path: contextPath, command: `This work item is proposed: its accountable member (${canonical.accountableMemberId ?? "unassigned"}) accepts it through the work-context flow — POST ${contextPath} names the accept step. It has no Board claim to take.` }]
+              : [{ action: "act-on-work-item", path: contextPath, command: "Act on this work item through its work-context flow; it is not claimed through the Board claim route." }]),
+            { action: "re-read-board", method: "GET", path: boardPath },
+          ],
+        };
+        throw error;
+      }
+      const message = `No work claim "${claimId}" in this room`;
+      const error = new ServiceError(404, "work_claim_not_found", message);
+      error.body = {
+        error: { code: "work_claim_not_found", message },
+        hint: "Re-read the work-claims board for the current ids; never guess.",
+        next: [{ action: "re-read-board", method: "GET", path: boardPath }],
+      };
+      throw error;
+    }
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
@@ -1261,7 +1424,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(409, "work_claim_conflict",
         ownerHeldCopy(item) ?? `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
-    requireWriter();
+    // The writer gate already ran before the linked-item block (C2); the
+    // state answers above are post-gate answers for entitled callers.
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
@@ -1337,7 +1501,30 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       requiredReading: requiredReadingFor(item.kind) }));
   }
   if (workClaimRoute === "update" && req.method === "POST") {
-    const data = body(req);
+    const rawUpdate = body(req);
+    let planningPatch = null;
+    let data = rawUpdate;
+    if (boardPlanningEnabled() && hasPlanningInput(rawUpdate)) {
+      // Planning is not part of the existing requestId payload digest. Refuse
+      // this combination before mutation instead of replaying a different plan.
+      if (Object.hasOwn(rawUpdate, "requestId"))
+        reject(422, "invalid_claim_input", "Send a separate planning edit without requestId; requestId does not support planning fields.");
+      const { patch, error } = planningPatchOf(rawUpdate);
+      if (error) invalidInput(reject, error);
+      planningPatch = patch;
+      data = Object.fromEntries(Object.entries(rawUpdate).filter(([key]) => !PLANNING_FIELDS.includes(key)));
+      if (Object.keys(data).length === 0) {
+        // Planning-only edit: any room writer may set planning fields (Linear
+        // parity); terminal claims stay immutable.
+        requireWriter();
+        requireEventBudget();
+        const current = load(claimIdOf(reject, workClaimId));
+        if (isTerminalClaimState(current.state)) reject(409, "work_claim_terminal", `work "${current.id}" is ${current.state} and immutable`);
+        const saved = applyPlanning(current, planningPatch);
+        commit(saved, "state_changed", { coalesce: true, previousState: current.state });
+        return json(res, 200, saved);
+      }
+    }
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
@@ -1359,7 +1546,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const sendBackCall = item.state === "delivered" && data.state === "in_progress";
     const reviewerOutcome = item.owner !== caller && data.requestId !== undefined
       ? reviewerRequestOutcome(item, data.requestId, caller) : null;
-    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) {
+    const delegateCall = item.delegate !== undefined && item.delegate === caller;
+    if (item.owner !== caller && !delegateCall && !verifyCall && !sendBackCall && !reviewerOutcome) {
       reject(403, "work_not_owner", ownerHeldCopy(item)
         ?? `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     }
@@ -1532,8 +1720,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const result = data.requestId !== undefined && (sendBackCall || (verifyCall && policy !== "self_attested")) && item.owner !== caller
       ? runPure(reject, () => bindReviewerRequestOutcome(item, acked, caller, data.requestId, data.readingAck)) : acked;
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
-    return json(res, 200, result);
+    const saved = planningPatch ? applyPlanning(result, planningPatch) : result;
+    commit(saved, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
+    return json(res, 200, saved);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who
@@ -1710,6 +1899,56 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     });
     return json(res, 200, reassigned);
   }
+  if (workClaimRoute === "approval" && req.method === "POST") {
+    // The flag check and the union-authority collapse already ran before
+    // the linked-item block (C2); this check is the branch-local backstop.
+    if (!approvalHoldEnabled()) reject(404, "not_found", "Approval holds are not enabled on this server");
+    const data = body(req);
+    if (!shape(data, { required: ["action"], optional: ["approver", "step", "note"] })) invalidInput(reject, "{action: request|approve|deny, approver?, step?, note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    requireEventBudget();
+    let next, wake;
+    try {
+      if (data.action === "request") {
+        const members = store.roomAuthority(roomId).members ?? {};
+        const member = typeof data.approver === "string" ? ownMember(members, data.approver) : null;
+        if (!member || member.active === false) reject(422, "work_approver_unknown_member", "approver must be an active member of this room");
+        next = requestApproval(item, caller, { approverId: data.approver, step: text("step", data.step, { multiline: true }), now: nowMs });
+        wake = { memberId: data.approver, reason: "approval_requested" };
+      } else if (data.action === "approve" || data.action === "deny") {
+        next = decideApproval(item, caller, { decision: data.action, note: text("note", data.note, { multiline: true }), now: nowMs });
+        const worker = item.approvalHold?.requestedBy;
+        wake = worker ? { memberId: worker, reason: `approval_${next.approvalHold.status}` } : null;
+      } else reject(422, "invalid_claim_input", "action must be request, approve or deny");
+    } catch (error) { if (error instanceof ClaimError) reject(422, error.code, error.message); throw error; }
+    commit(next, "approval", wake ? { attention: "assigned", attentionMemberId: wake.memberId, wakeMemberId: wake.memberId, wakeReason: wake.reason } : {});
+    return json(res, 200, next);
+  }
+  if (workClaimRoute === "delegate" && req.method === "POST") {
+    // The flag check and the authority collapse already ran before the
+    // linked-item block (C2); this check is the branch-local backstop.
+    if (!claimDelegateEnabled()) reject(404, "not_found", "Claim delegation is not enabled on this server");
+    const data = body(req);
+    if (!shape(data, { required: ["delegate"], optional: ["note"] })) invalidInput(reject, "{delegate: memberId|null, note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    const authority = authorityOver(item);
+    const target = data.delegate;
+    if (target !== null) {
+      const members = store.roomAuthority(roomId).members ?? {};
+      const member = typeof target === "string" ? ownMember(members, target) : null;
+      if (!member || member.active === false) {
+        reject(422, "work_delegate_unknown_member", `delegate "${typeof target === "string" ? target : "?"}" is not an active member of this room`);
+      }
+    }
+    requireEventBudget();
+    const note = text("note", data.note, { multiline: true });
+    let delegated;
+    try { delegated = delegateWork(item, caller, target, { note, now: nowMs, authority }); }
+    catch (error) { if (error instanceof ClaimError) reject(422, error.code, error.message); throw error; }
+    commit(delegated, "delegated", target === null ? {} : {
+      attention: "assigned", attentionMemberId: target, wakeMemberId: target, wakeReason: "assigned" });
+    return json(res, 200, delegated);
+  }
   if (workClaimRoute === "renew" && req.method === "POST") {
     // Lease-renewal check-ins: the owner extends their claim's lease only by
     // citing their own public progress message, posted in this room after
@@ -1729,7 +1968,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         : `Work "${item.id}" is not claimed — claim it first, then renew`);
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
-    requireWriter();
+    // The writer gate already ran before the linked-item block (C2): a
+    // non-writer's renew refusal is the gate 403 in every case, including
+    // the non-holder case that used to surface work_not_owner above.
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);

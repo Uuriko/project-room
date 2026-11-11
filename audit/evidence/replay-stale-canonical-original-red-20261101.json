@@ -1,0 +1,8 @@
+{
+  "source": "6a5a5b425",
+  "scope": "new read-only explicit proof-limit plan on unchanged capture; actual busy canonical room after legitimate post, valid plan hash",
+  "exitCode": 1,
+  "failure": "invalid replay capture intent",
+  "log": "/tmp/replay-stale-valid-plan-original-red.log",
+  "sha256": "8203a4d4e8c5e5398638cab5cd4f92a8303d0df38f7e1e62bc3ddb131bb3c15a"
+}

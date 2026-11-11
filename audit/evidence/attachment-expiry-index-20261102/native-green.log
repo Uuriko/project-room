@@ -1,0 +1,21 @@
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":58,"integrity":"deferred","phases":{"schema":{"ms":14,"rowsRead":8389},"plugin":{"ms":23,"rowsRead":41018},"fence":{"ms":17,"rowsRead":47276},"verifies":{"ms":2,"rowsRead":21696},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":58,"legacyColdStartMs":58,"clockSemantics":"io-bound","cpuMeasured":false}
+{"fixture":"runtime-attachment-expiry","before":{"expiry":520,"quota":520},"after":{"expiry":12,"quota":12},"beforePlan":[{"id":8,"parent":0,"notused":62,"detail":"SEARCH room_attachments USING INDEX current_room_attachments_message (room_id=?)"}],"afterPlan":[{"id":8,"parent":0,"notused":61,"detail":"SEARCH room_attachments USING INDEX room_attachments_live (room_id=? AND state=?)"}]}
+{"fixture":"runtime-attachment-stage","before":{"expiry":520,"quota":520},"after":{"expiry":12,"quota":12}}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":50,"integrity":"deferred","phases":{"schema":{"ms":12,"rowsRead":8389},"plugin":{"ms":23,"rowsRead":41018},"fence":{"ms":13,"rowsRead":47276},"verifies":{"ms":2,"rowsRead":21696},"checksum":{"ms":0,"rowsRead":0}},"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"io-bound","cpuMeasured":false}
+{"fixture":"combined-admission-boundary","seed":{"rows":32768,"seedMs":748},"admitted":{"rows":32768,"keyBytes":4194304,"storedBytes":67108864},"plan":{"ms":128,"rowsRead":69082,"keyReads":1,"builds":0},"install":{"ms":139,"rowsRead":139383,"keyReads":1,"builds":1}}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":4,"integrity":"deferred","phases":{"schema":{"ms":1,"rowsRead":884},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":1,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":9,"sequences":18,"projectionBytes":8187}
+{"event":"room.store_initialized","initializationMs":5,"legacyColdStartMs":4,"clockSemantics":"io-bound","cpuMeasured":false}
+{"fixture":"bounded-index-reverse","measured":{"ms":107,"rowsRead":69969,"keyReads":1,"builds":0}}
+{"event":"room.cold_start","clockSemantics":"io-bound","durationMs":3,"integrity":"deferred","phases":{"schema":{"ms":0,"rowsRead":883},"fence":{"ms":0,"rowsRead":0},"plugin":{"ms":1,"rowsRead":5},"verifies":{"ms":0,"rowsRead":2},"checksum":{"ms":0,"rowsRead":0}},"rooms":9,"sequences":18,"projectionBytes":8187}
+{"event":"room.store_initialized","initializationMs":3,"legacyColdStartMs":3,"clockSemantics":"io-bound","cpuMeasured":false}
+✔ actual Workers admit optional index boundaries, preserve rollback/retry and reduce terminal quota work (3173.83475ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3328.221834

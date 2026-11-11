@@ -1,10 +1,13 @@
+import { uiText } from './strings.js';
+import { prepareClaimOverlap, matchClaimOverlap } from './claim-overlap.js';
+import { currentRecordClaimOverlaps, inheritCurrentRecordContext } from './current-record-context.js';
 import { canAdministerRoom, canInviteCoOwners, museDevelopmentAccess } from './room-administration.js';
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
-import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
+import { REPLY_CANCELLED, cancelReplyRequest, REPLY_PROGRESSED, progressReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
@@ -44,6 +47,7 @@ export const EVENT_TYPES = Object.freeze({
   PAIR_APPROVED: "pair.approved",
   PAIR_DENIED: "pair.denied",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
+  MEMBER_SPONSOR_TRANSFERRED: "member.sponsor_transferred",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
@@ -60,6 +64,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
+  REPLY_REQUEST_PROGRESSED: REPLY_PROGRESSED,
   POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
@@ -343,13 +348,23 @@ export function firstBlockedWakeTarget(state, actorId, targetIds) {
 // personal / organization badge until a real organization model (D1) exists;
 // rooms created before it read as personal. Archive is an owner-only event
 // (room.archived) that turns the room read-only: reads, streams and export
-// continue, and no further event of any type is accepted for that room. A
+// continue. Ordinary coordination stays frozen; only the active current owner
+// may explicitly erase content through the existing privacy events. A
 // member leaves by ending their own access (member.access_changed on
 // themself, permissions unchanged, active false) without needing
 // manage_members; the owner cannot leave.
 export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
 export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
 export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
+// One policy for live admission and deterministic replay. These internal
+// follow-up events remain absent from the public command catalog. Target,
+// revision, membership and evidence checks still belong to their handlers.
+export function isArchivedOwnerPrivacyEvent(state,incoming) {
+  if(!isRoomArchived(state)||!['message.deleted','message.redacted','receipt.evidence_withdrawn'].includes(incoming?.type))return false;
+  const actor=ownMember(state.members,incoming.actorId);
+  return actor?.active===true&&actor.id===state.room.ownerId;
+}
+
 export function isLeaveRequest(state, incoming) {
   const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
   return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
@@ -611,6 +626,7 @@ function lightMessageCloneIds(incoming) {
 }
 function cloneStateForApply(current, incoming, journal = null) {
   const state = { ...current, ...(journal ?? {}) };
+  inheritCurrentRecordContext(current,state);
   if (!journal && Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
   if (!journal && current.seenEvents && typeof current.seenEvents === "object") {
     state.seenEvents = { ...current.seenEvents };
@@ -669,7 +685,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
   if (incoming.type !== EVENT_TYPES.ROOM_CREATED) {
     if (!state.room) throw new Error("Room must be created before other events");
     if (incoming.roomId !== state.room.id) throw new Error("Event belongs to a different Room");
-    if (isRoomArchived(state)) throw new Error("Room is archived");
+    if (isRoomArchived(state)&&!isArchivedOwnerPrivacyEvent(state,incoming)) throw new Error("Room is archived");
   }
 
   const handlers = {
@@ -695,6 +711,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.PAIR_APPROVED]: recordPair,
     [EVENT_TYPES.PAIR_DENIED]: recordPair,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
+    [EVENT_TYPES.MEMBER_SPONSOR_TRANSFERRED]: transferMemberSponsor,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
@@ -711,6 +728,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
+    [EVENT_TYPES.REPLY_REQUEST_PROGRESSED]: progressReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
     // message.reaction_set; replay skips them.
     [RETIRED_REPLAY_EVENT_TYPES.MESSAGE_REACTION_SET]: () => {},
@@ -1561,7 +1579,7 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed", "delegated", "approval"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
 // Owner-equivalent invite mint. The invite table is the source of truth.
@@ -1670,23 +1688,13 @@ function recordDecision(state, incoming) {
   }
 }
 
-// Same path grammar as server/claim-scopes.mjs: a file, folder/** or **.
-const claimPath = value => {
-  const text = String(value).trim().replace(/^\.\//, "");
-  if (text === "**") return { path: "", subtree: true };
-  const subtree = text.endsWith("/**");
-  return { path: (subtree ? text.slice(0, -3) : text).replace(/\/+$/, ""), subtree };
-};
-const covers = (scope, other) => scope.path === other.path || (scope.subtree && (!scope.path || other.path.startsWith(`${scope.path}/`)));
 export function claimOverlaps(state, workItemId, repository, paths, at) {
-  const mine = paths.map(claimPath);
-  const repo = String(repository).trim().toLowerCase();
-  const found = [];
+  const scoped = currentRecordClaimOverlaps(state, workItemId, repository, paths, at);
+  if (scoped !== undefined) return scoped;
+  const query = prepareClaimOverlap(workItemId, repository, paths, at), found = [];
   for (const other of Object.values(state.workItems ?? {})) {
-    if (other.id === workItemId || !other.claim || !claimIsActive(other.claim, at)) continue;
-    if (String(other.claim.repository).trim().toLowerCase() !== repo) continue;
-    const shared = other.claim.paths.filter(path => { const theirs = claimPath(path); return mine.some(own => covers(own, theirs) || covers(theirs, own)); });
-    if (shared.length) found.push({ workItemId: other.id, holderId: other.claim.holderId, paths: shared.slice(0, 16) });
+    const overlap = matchClaimOverlap(query, other);
+    if (overlap) found.push(overlap);
     if (found.length >= 10) break;
   }
   return found;
@@ -1842,3 +1850,15 @@ const { postMessage, editMessage, deleteMessage, redactMessage, recordEvidenceWi
 
 // Compose work transitions once with the same authority guards as other domains.
 const { proposeWork, acceptWork, startWork, blockWork, recordHandoff, clearHalt, resolveBlocker, completeWork, supersedeWork, acquireClaim, releaseClaim, renewClaim, recordVerification, applySession, recordOwnerDecision } = createWorkReducers({ WORK_STATES, requirePermission, requireFields, requireMember, knownMember, receiptHasKnownProducer, requireWorkItem, assertRoomTrust, roomPolicy, claimIsActive, claimOverlaps, hasPermission, matchesReceipt, hasConfirmedIndependentPass, requirePublicDecisionSource });
+
+function transferMemberSponsor(state,incoming) {
+ requireFields(incoming.data,["requestId","requestDigest","memberId","expectedMemberRevision","toMemberId","expectedHumanRevision","previousSponsorId","identityId"]);
+ if(!ownerLevel(state,incoming.actorId))throw Error("Owner required");
+ const m=ownMember(state.members,incoming.data.memberId),human=ownMember(state.members,incoming.data.toMemberId);
+ if(!m||m.kind!=="agent"||m.active!==true||m.id===state.room.ownerId||!human||human.kind!=="human"||human.active!==true||m.id===human.id)throw Error("Unknown member");
+ if(m.revision!==incoming.data.expectedMemberRevision||human.revision!==incoming.data.expectedHumanRevision||m.accountableHumanId!==incoming.data.previousSponsorId||m.identityId!==incoming.data.identityId)throw Error("Stale revision");
+ if(!/^[a-f0-9]{64}$/.test(incoming.data.requestDigest))throw Error(uiText("agentSponsor.invalidConsent"));
+ const actor=ownMember(state.members,incoming.actorId);
+ if(incoming.actorId!==state.room.ownerId&&m.permissions.some(p=>!actor.permissions.includes(p)))throw Error(uiText("agentSponsor.permissionsNotHeld"));
+ m.accountableHumanId=human.id;m.sponsorAdoptionId=incoming.data.requestId;m.sponsorAdoptionDigest=incoming.data.requestDigest;m.revision+=1;
+}

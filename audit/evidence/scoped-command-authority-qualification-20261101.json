@@ -1,0 +1,235 @@
+{
+  "sourceHead": "fc2dfcbc8eb9f075033842129424b8eafa738315",
+  "base": "194d3ab58113a4f0c398b91606cc0e7c6e63b191",
+  "scope": "Offline sparse normalized command authority, no push/live/install",
+  "sourceSha256": {
+    "cloudflare/scoped-command-worker.check.mjs": "380dfbbda4dcbaff068821d30747689c6b1c4c6b7a6a5c95b7ae308a4da186af",
+    "cloudflare/scoped-command-worker.test-fixture.mjs": "b84432f436fd8b50897b1e157740dbafca8fd339782db55b8eda93982939a208",
+    "server/activity.mjs": "6d0575784630712b1950caaddabeb5f642fb64fc48e1b9615eb0423a5975b63c",
+    "server/current-room-repository.mjs": "420d34f0aa3ab9adf5a1d48c2d7ec538349d133efb17ddbe317d95ae71b72c8f",
+    "server/replay-cutover.mjs": "11b14dcfe30e3f1f0fa348d8e5ac1c44d1ae96f6e0a12485a792c497c2f3f68e",
+    "server/store.mjs": "b4d07d2f2b5255c08d7ee05bef9dda8fdaf739e91475af3fd497c6c4f978ca4b",
+    "server/work-claim-events.mjs": "dfbf5b39f904644ce6f474ef2e3439c5554e0bc8bec7fe48233fb056c02f8af3",
+    "tests/scoped-command-members.test.mjs": "1c22a0ed727fee31326ab218960a9f3b8afaf1c5920ce075186115d1495af575"
+  },
+  "results": {
+    "node": {
+      "pass": 110,
+      "fail": 0,
+      "skip": 0,
+      "ownNew": 13,
+      "exit": 0
+    },
+    "worker": {
+      "pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "exit": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 34,
+      "exit": 0
+    },
+    "secretScan": {
+      "exit": 0
+    }
+  },
+  "logs": {
+    "originalCommandRed": {
+      "path": "audit/evidence/scoped-command-originalCommandRed-20261101.log.gz",
+      "uncompressedSha256": "f9aa7c6293a23a5e5b99c35204c8fe3969747cbe32ddee4e65af65fb22740b40",
+      "exitCode": 1
+    },
+    "aliasGuardRed": {
+      "path": "audit/evidence/scoped-command-aliasGuardRed-20261101.log.gz",
+      "uncompressedSha256": "b7aaf406bfeb6dabbaad39d0213e1485f71cc7231f7af3a5d98c11b8ac5fcbfa",
+      "exitCode": 1
+    },
+    "finalNode": {
+      "path": "audit/evidence/scoped-command-finalNode-20261101.log.gz",
+      "uncompressedSha256": "22ec029f490c705ed585df7d3e83646c197628f0d1716f266aa1aa12a8ca7047",
+      "exitCode": 0
+    },
+    "actualWorker": {
+      "path": "audit/evidence/scoped-command-actualWorker-20261101.log.gz",
+      "uncompressedSha256": "99567b03bd08a94a4e372711f01d5cbbad6fb54042e64b2abb8bc1b6bd4ee453",
+      "exitCode": 0
+    },
+    "lint": {
+      "path": "audit/evidence/scoped-command-lint-20261101.log.gz",
+      "uncompressedSha256": "dc04dbb2b72af1884a977c34dd9535ac4dd0a8620877310631e5ee023befe503",
+      "exitCode": 0
+    },
+    "secretScan": {
+      "path": "audit/evidence/scoped-command-secretScan-20261101.log.gz",
+      "uncompressedSha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "exitCode": 0
+    },
+    "invalidSpoofFixtureRetained": {
+      "path": "audit/evidence/scoped-command-invalidSpoofFixtureRetained-20261101.log.gz",
+      "uncompressedSha256": "a6148d4d743650235948367396c095fd324b39e634c8bad4cf24dc2620b77ced",
+      "exitCode": 1
+    }
+  },
+  "workerMeasurements": [
+    {
+      "surface": "small",
+      "count": 2,
+      "cold": {
+        "statements": 95,
+        "rowsRead": 3609,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 41875,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "warm": {
+        "statements": 96,
+        "rowsRead": 1161,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 42206,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "propose": {
+        "statements": 108,
+        "rowsRead": 306,
+        "rowsWritten": 44,
+        "unknown": 0,
+        "returnedSqlTextBytes": 42467,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "accept": {
+        "statements": 112,
+        "rowsRead": 355,
+        "rowsWritten": 31,
+        "unknown": 0,
+        "returnedSqlTextBytes": 44278,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "statements": 31,
+        "rowsRead": 199,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 39818,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      }
+    },
+    {
+      "surface": "large",
+      "count": 100,
+      "cold": {
+        "statements": 95,
+        "rowsRead": 3609,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 51291,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "warm": {
+        "statements": 96,
+        "rowsRead": 1161,
+        "rowsWritten": 37,
+        "unknown": 0,
+        "returnedSqlTextBytes": 51622,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "propose": {
+        "statements": 108,
+        "rowsRead": 306,
+        "rowsWritten": 44,
+        "unknown": 0,
+        "returnedSqlTextBytes": 51883,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "accept": {
+        "statements": 112,
+        "rowsRead": 355,
+        "rowsWritten": 31,
+        "unknown": 0,
+        "returnedSqlTextBytes": 53694,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      },
+      "retry": {
+        "statements": 31,
+        "rowsRead": 199,
+        "rowsWritten": 0,
+        "unknown": 0,
+        "returnedSqlTextBytes": 49230,
+        "eventPayloadBytes": 0,
+        "rawRuntime": {
+          "statements": 2,
+          "rowsWritten": 2,
+          "unknown": 0
+        }
+      }
+    }
+  ],
+  "dependencyPlan": {
+    "actor": "Trusted authenticated Store.command actor; durable incoming actor for unpublished replay; existing internal standalone emitter options actor. Never caller command.actorId.",
+    "ordinaryMembers": "Protected owner and actor, explicit member/recipient/work role/producer IDs, selected message authors/parties, selected requests requester/recipient, selected work accountable/verifier/human-decision/proposer/claim-holder/current-receipt attribution/triage. Each loaded record identity checked.",
+    "halts": "Actor and explicit work.halt_cleared target only; absent/invalid internal actor skipped, existing owner fallback retained.",
+    "mentions": "Full existing roster and identity/display/longest-alias/squad semantics for any posted body containing @. Only this Store.command consumer reserves1024 logical units. Byte ceiling256KiB and global default200 unchanged.",
+    "noAt": "Skip identity alias enumeration in wake targeting, pause mention resolution and activity fanout; actual holder-proved link fixture demonstrates one redundant read before activity guard and zero afterward, real alias mention still resolves."
+  },
+  "remainingLimits": [
+    "Not a whole100-member-product qualification. DM consent mutation/authority helper still full roster; plain DM post and implicit private reply work at100large. No edits to consent lane.",
+    "100-member full mention roster with large unrelated profiles may hit unchanged256KiB; must refuse rather than silently narrow name resolution. No large-profile full-mention support claim.",
+    "ActualWorker fixture has100members with97large unrelated legal capability profiles but no linked identities; separate Node holder-proved linkedalias fixture qualifies noAt alias suppression and mention correctness, not100linkedalias native cost.",
+    "Native counters cover adapter-observed statements plus explicit raw outer runtime permit flips only, not every possible unobserved native maintenance statement. Cold request excludes constructor startup.",
+    "Post warm1161rows remains significant constant schema/sideeffect overhead; this fix proves member-growth independence for measured paths, not optimal wholecommand cost.",
+    "Candidate replay actor stitch covered existingHtail Node controls; no new actualWorker replay migration benchmark.",
+    "No grant or schema changes, no new queue/domain/cache, no production deployment."
+  ],
+  "corrections": [
+    "Original malicious actor test expected success but existing validateCommand correctly rejects extra actorId; corrected to assert422 and direct helper still proves explicit trusted option ignores invented command field. Retained original failing log.",
+    "Illegal self-sponsored new human fixture was corrected to existing default human self-owner semantics; not counted as product failure. Earlier temporary log name later overwritten; no false preservation claim."
+  ]
+}

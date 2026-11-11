@@ -10,8 +10,11 @@ import { join } from "node:path";
 import { RoomStore, nodeSqlLimits } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream } from "../server/room-export.mjs";
-import { operatorRestoreFromBackupResponse } from "../server/restore-ndjson.mjs";
+import { operatorRestoreFromBackupResponse as beginOperatorRestoreFromBackupResponse } from "../server/restore-ndjson.mjs";
 import { writeKvBackup } from "../cloudflare/room-backup.mjs";
+import {completeOperatorRestore} from './helpers/complete-operator-restore.mjs';
+const operatorRestoreFromBackupResponse = async (request,token,store,...rest) => completeOperatorRestore(await beginOperatorRestoreFromBackupResponse(request,token,store,...rest),token,store);
+
 
 const binds = (db, n) => db.prepare(`SELECT ? IN (${Array(n).fill("?").join(",")}) AS x`).get(...Array(n + 1).fill(1)).x;
 

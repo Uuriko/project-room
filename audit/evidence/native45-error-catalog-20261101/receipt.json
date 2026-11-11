@@ -1,0 +1,77 @@
+{
+  "finalSource": "c71bf0e062a0bdf0b9bdb28e9241658f31d1a715",
+  "catalogSource": "12ebb8b0075d46094deb7948b3df0f187c97ae95",
+  "routeEvidence": "29f2ab1f6ba7cb6e62c92340cd60b32bd5f9fe39",
+  "reviewedMissingCodes": 32,
+  "newNamedRecoveries": 9,
+  "sourceHashes": {
+    "src/agent-error.mjs": "eaa6b7147b2f9b6b19e92a4dab4184a7793fdf7fe36921fe4d5bc169c25c9d3e",
+    "skills/project-room/references/errors-catalog.md": "42e0075a27094b70800d0b100168b0710eb6bc523bfe02ca51f1a9e281560bb6",
+    "plugins/project-room/skills/project-room/references/errors-catalog.md": "42e0075a27094b70800d0b100168b0710eb6bc523bfe02ca51f1a9e281560bb6",
+    "tests/current-error-recovery-guidance.test.mjs": "012357cfb398acab32b227b946fc9cddfe3225141c962179350084e9ddc89cc9",
+    "scripts/CANDIDATE-MANIFEST.json": "77eb31007c0623543640860ec27d3f142bcbd12f20a40fc6f3472c5030772e0c"
+  },
+  "results": {
+    "presenceBefore": "32 missing in prior work-list CI log; preserved in route evidence",
+    "afterCatalogOnly": {
+      "exit": 1,
+      "reason": "9 actual Unknown recovery fallthroughs; no exemption used"
+    },
+    "catalogAndNamedNeighbors": {
+      "exit": 0,
+      "pass": 34,
+      "skip": 0
+    },
+    "fullCiModeAt12ebb": {
+      "exit": 0,
+      "driftPass": 15,
+      "fullNode": "explicitly skipped under existing CI contract"
+    },
+    "finalConciseHintsNeighbors": {
+      "exit": 0,
+      "pass": 34,
+      "skip": 0
+    },
+    "finalSecretScan": {
+      "exit": 0,
+      "files": 1818
+    },
+    "skillsMirror": {
+      "exit": 0,
+      "byteIdentical": true
+    },
+    "manifest": "generator rerun schema45/179assets/9deployment, unchanged bytes"
+  },
+  "runtimeLimits": [
+    "Only nine existing AX_NAMED_RECOVERIES entries; no service/auth/approval or grant behavior changed.",
+    "Hints are factual and under120characters; precise next commands retain operator, original identity, original request and immutable evidence constraints.",
+    "No full CI rerun after final wording-only refinement per parent; focused34+scan explicitly rerun.",
+    "No live deployment, provider authorization or migration performed."
+  ],
+  "logs": {
+    "native45-error-catalog-first": {
+      "bytes": 3062,
+      "sha256": "4181787b9c6f6cafe93dfa7fbfeeceb373abab7a38236816178c58307e2e49ae"
+    },
+    "native45-error-catalog-neighbors": {
+      "bytes": 5782,
+      "sha256": "6d86f9f7426fd54e9f55bf7f833daef89cf0277642b8c4ca83f0e6131603141c"
+    },
+    "native45-error-catalog-ci": {
+      "bytes": 71137,
+      "sha256": "411e7614fafcd3f8a292c390bd08ee1be0c66c2727fd190f06fc0b6c02a5fcf2"
+    },
+    "native45-error-catalog-short-final": {
+      "bytes": 5778,
+      "sha256": "f5002514ccef13fb9a9e429680f2fca12f700aab098240c21db6a327ea247549"
+    },
+    "native45-error-catalog-short-secret": {
+      "bytes": 53,
+      "sha256": "e4aae997915ba83d01e1e85411ed268f9c4407d1826888e6a9c9c53dbef9e4ed"
+    },
+    "native45-error-catalog-mirror": {
+      "bytes": 22,
+      "sha256": "e012c71835a6f77a4f1383b7ccb12eaceace914d7f7d054f2436ad33cd5a2515"
+    }
+  }
+}

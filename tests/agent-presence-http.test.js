@@ -64,15 +64,13 @@ test("presence next[] names watch-presence when nobody is online", async t => {
   const json = await res.json();
   assert.ok(json.members.length > 0, "active roster is listed even when nobody is watching");
   assert.ok(json.members.every(m => m.watching === false));
-  // The starter task is claimed for the room's creator at creation
-  // (agent-rooms ensureAgentStarter — a board-registry claim). Since the
-  // #5338 leg (b) cure, presence truthfully lists board-door holds, so
-  // exactly one member, the creator, holds exactly the starter; every
-  // other member holds nothing. Nobody is online, so the only next step
-  // is still watch-presence.
-  const holders = json.members.filter(m => m.workingOn.length > 0);
-  assert.equal(holders.length, 1);
-  assert.deepEqual(holders[0].workingOn.map(entry => entry.workItemId), ["starter"]);
+  // Normalized presence observes connections without reading work history.
+  // An unqueried held-work domain must not be represented as empty or live.
+  assert.equal(json.coverage.heldWork, "not-evaluated");
+  for (const member of json.members) {
+    assert.equal(member.coverage.heldWork, "not-evaluated");
+    assert.equal(Object.hasOwn(member, "workingOn"), false);
+  }
   assert.deepEqual(json.next.map(n => n.action), ["watch-presence"]);
 });
 

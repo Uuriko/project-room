@@ -38,7 +38,7 @@ async function selectResultWork(f) {
   if (!await f.page.locator(`[data-work-record-id="${f.workItemId}"]`).isVisible()) await openWorkFromSearch(f.page, f.workItemId, "A quiet room");
 }
 
-async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
+async function setup(t, { mobile = false, review = false, viewport = null, onPage = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   send(T.MEMBER_ADDED, { memberId: "human-checker", displayName: "Test checker", kind: "human", permissions: ["verify"] });
@@ -61,6 +61,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   const page = await browser.newPage({ viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }), isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
+  await onPage?.(page);
   await page.goto(origin); await signInFixture(page, f.keys[review ? "human-checker" : "owner"]); await page.locator("#main").waitFor({ state: "visible" });
   await openWorkFromSearch(page, workItemId, "A quiet room");
   const open = async () => {
@@ -621,21 +622,91 @@ test("native result 320px: a card re-render rescues a focused View result contro
 });
 
 for (const mobile of [false, true]) test(`result feedback preserves another reply (${mobile ? "mobile" : "desktop"})`, { timeout: 30000 }, async t => {
-  const f = await setup(t, { mobile, body: "A detailed result for review.\n".repeat(60) });
+  const started = Date.now(), transitions = [], label = mobile ? "mobile" : "desktop";
+  let phase = "setup", f = null, diagnosticPage = null, finished = false;
+  const record = event => {
+    const entry = { phase, event, elapsedMs: Date.now() - started };
+    transitions.push(entry);
+    // Emit immediately: an outer test deadline must still identify the last
+    // transition, even when the browser cannot answer failure diagnostics.
+    console.log(JSON.stringify({ test: `protected-reply-${label}`, ...entry }));
+  };
+  const step = async (name, operation) => {
+    phase = name; record("begin");
+    const value = await operation();
+    record("end"); return value;
+  };
+  // Register before setup's browser teardown. Only bounded structural state
+  // from this disposable local fixture is retained: no credentials or bodies.
+  t.after(async () => {
+    if (finished) return;
+    const prefix = `test-results/native-result-protected-reply-${label}-failure`;
+    let state = null, timer;
+    try {
+      state = diagnosticPage ? await Promise.race([
+        diagnosticPage.evaluate(() => ({
+          hash: location.hash.slice(0, 160),
+          mainHidden: document.querySelector("#main")?.hidden ?? null,
+          resultHidden: document.querySelector("#result-dialog")?.hidden ?? null,
+          threadBackHidden: document.querySelector("#thread-back")?.hidden ?? null,
+          activeElementId: document.activeElement?.id.slice(0, 160) ?? null,
+          nativeDraftPresent: Boolean(document.querySelector('[data-message-record-id="native-draft"]')),
+          otherFeedbackPresent: Boolean(document.querySelector('[data-message-record-id="other-feedback"]')),
+          workCardPresent: Boolean(document.querySelector('[data-work-record-id="native-human"]')),
+          draftLength: document.querySelector("#message-input")?.value.length ?? null,
+          replyContextLength: document.querySelector("#reply-context")?.textContent.length ?? null
+        })),
+        new Promise(resolve => { timer = setTimeout(() => resolve({ unavailable: "diagnostic deadline" }), 750); })
+      ]) : { unavailable: "page not created" };
+    } catch { state = { unavailable: "browser did not answer" }; }
+    finally { clearTimeout(timer); }
+    mkdirSync("test-results", { recursive: true });
+    const evidence = { phase, elapsedMs: Date.now() - started, transitions, state };
+    writeFileSync(prefix + ".json", JSON.stringify(evidence, null, 2));
+    console.log(JSON.stringify({ test: `protected-reply-${label}`, failure: evidence }));
+    await diagnosticPage?.screenshot({ path: prefix + ".png", timeout: 1000 }).catch(() => {});
+  });
+  // Keep incidental history hydration from satisfying this case's setup.
+  // Selected work reads still reach the real server; only generic conversation
+  // pages wait for the explicit reader gesture below. No response is fabricated.
+  let releaseHistory;
+  const historyRevealed = new Promise(resolve => { releaseHistory = resolve; });
+  t.after(() => releaseHistory());
+  f = await step("setup", () => setup(t, { mobile, onPage: async page => {
+    diagnosticPage = page;
+    await page.route("**/api/rooms/commons/conversation?*", async route => {
+      const query = new URL(route.request().url()).searchParams;
+      if (!query.has("messageId") && !query.has("threadId")) await historyRevealed;
+      await route.fallback();
+    });
+  }, body: "A detailed result for review.\n".repeat(60) }));
   f.complete();
   f.send(T.MESSAGE_POSTED, { messageId: "other-feedback", body: "A separate question", replyToId: "native-draft" });
-  await messageAction(f.page, "native-draft", "reply");
-  await messageAction(f.page, "other-feedback", "reply");
-  await f.page.locator("#message-input").fill("My answer to the separate question");
-  const originalReply = await f.page.locator("#reply-context").textContent();
-  await f.page.locator("#thread-back").click();
-  await selectResultWork(f); await f.page.locator(`[data-read-result='${f.workItemId}']`).first().click();
-  await f.page.locator("#result-discuss").waitFor({ state: "visible" });
-  await f.page.locator("#result-discuss").click();
+  assert.equal(await f.page.locator('[data-work-record-id="native-human"]').isVisible(), true,
+    "selected work completes while generic older history is held");
+  assert.equal(await f.page.locator('[data-message-record-id="native-draft"]').count(), 0,
+    "the protected-reply setup starts with its source outside the recent window");
+  await step("open-selected-draft", async () => {
+    // Navigate the exact source through its public record URL while generic
+    // history remains held. Selected reads must not depend on a full page fill.
+    await f.page.goto(new URL("#pr-record/message/native-draft", f.page.url()).href);
+    await f.page.locator('[data-message-record-id="native-draft"]').waitFor({ state: "visible" });
+    releaseHistory();
+  });
+  await step("root-reply", () => messageAction(f.page, "native-draft", "reply"));
+  await step("other-reply", () => messageAction(f.page, "other-feedback", "reply"));
+  await step("other-draft", () => f.page.locator("#message-input").fill("My answer to the separate question"));
+  const originalReply = await step("read-reply-context", () => f.page.locator("#reply-context").textContent());
+  await step("thread-back", () => f.page.locator("#thread-back").click());
+  await step("select-work", () => selectResultWork(f));
+  await step("read-result", () => f.page.locator(`[data-read-result='${f.workItemId}']`).first().click());
+  await step("discuss-visible", () => f.page.locator("#result-discuss").waitFor({ state: "visible" }));
+  await step("discuss", () => f.page.locator("#result-discuss").click());
   assert.equal(await f.page.locator("#result-dialog").isVisible(), true);
-  await f.capture(`protected-reply-${mobile ? "mobile" : "desktop"}`);
-  await f.page.locator("#close-result").click();
-  await messageAction(f.page, "native-draft", "thread");
+  await step("protected-screenshot", () => f.capture(`protected-reply-${label}`));
+  await step("close-result", () => f.page.locator("#close-result").click());
+  await step("return-thread", () => messageAction(f.page, "native-draft", "thread"));
   assert.equal(await f.page.locator("#message-input").inputValue(), "My answer to the separate question");
   assert.equal(await f.page.locator("#reply-context").textContent(), originalReply);
+  finished = true;
 });

@@ -1,0 +1,33 @@
+{
+  "phase": "reveal-older-history",
+  "elapsedMs": 9447,
+  "transitions": [
+    {
+      "phase": "setup",
+      "event": "begin",
+      "elapsedMs": 0
+    },
+    {
+      "phase": "setup",
+      "event": "end",
+      "elapsedMs": 1327
+    },
+    {
+      "phase": "reveal-older-history",
+      "event": "begin",
+      "elapsedMs": 1375
+    }
+  ],
+  "state": {
+    "hash": "#pr-record/work/native-human",
+    "mainHidden": false,
+    "resultHidden": true,
+    "threadBackHidden": false,
+    "activeElementId": "",
+    "nativeDraftPresent": false,
+    "otherFeedbackPresent": false,
+    "workCardPresent": true,
+    "draftLength": 0,
+    "replyContextLength": 0
+  }
+}

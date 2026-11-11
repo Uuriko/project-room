@@ -70,6 +70,7 @@ import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_C
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 import { disputabilityFor } from "./bounty-disputability.mjs";
+import { roomOwnerIdOf } from "./room-owner.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -842,7 +843,7 @@ export class BountyEscrow {
         "bounty escrow requires a membership source (store.roomAuthority)");
       return lane;
     }
-    const { ownerId } = this.store.roomAuthority(roomId);
+    const ownerId = roomOwnerIdOf(this.store, roomId);
     // Member ids are validId-shaped, so the owner id may be the legacy
     // colon form (id:agent:jill) while _requireLane() returns the canonical
     // lane (id:agent/jill). Compare canonical forms — comparing raw would

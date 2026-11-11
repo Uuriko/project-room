@@ -230,3 +230,26 @@ test('a dm.consent_changed stream receipt fires onConsentChange; other receipts 
   await client.flight.promise.catch(() => {});
   assert.equal(fires.length, 1, 'other receipts leave the hook alone');
 });
+
+test('bond receipts refresh selected bonds, unrelated and obsolete streams do not', async t => {
+  const { client, streams, emit } = fixture(t);
+  let changes = 0;
+  client.onBondChange = () => { changes++; };
+  client.connect();
+  await emit('open', 1);
+  let sequence = 7;
+  for (const type of ['bond.proposed', 'bond.activated', 'bond.revoked', 'message.posted']) {
+    sequence++;
+    client.fetcher = async () => followUpSnapshot(client, sequence);
+    streams[0].dispatchEvent(new MessageEvent('room-event', {
+      data: JSON.stringify({ sequence, event: { type, roomId: 'commons' } }),
+    }));
+    await client.flight?.promise;
+  }
+  assert.equal(changes, 3);
+  client.generation++;
+  streams[0].dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence: ++sequence, event: { type: 'bond.proposed', roomId: 'commons' } }),
+  }));
+  assert.equal(changes, 3, 'an obsolete stream cannot refresh another session');
+});

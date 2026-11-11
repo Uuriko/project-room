@@ -1,9 +1,9 @@
 // The saved Room connection: one private JSON file per room under
 // ~/.config/room-acp (0700 dir, 0600 file). Never printed.
-import { mkdirSync, readFileSync, rmSync, readdirSync, chmodSync, statSync } from "node:fs";
+import { rmSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { atomicPrivateJson } from "./private-state.mjs";
+import { atomicPrivateJson, assertPrivatePath, ensurePrivateDirectory, readPrivateJson } from "./private-files.mjs";
 import { registerSecret } from "./redact.mjs";
 
 export function configDir(env = process.env) {
@@ -13,21 +13,19 @@ const fileFor = (roomId, env) => join(configDir(env), `${roomId.replace(/[^A-Za-
 
 export function saveConnection(connection, env = process.env) {
   const dir = configDir(env);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
+  ensurePrivateDirectory(dir, {recursive: true});
   const path = fileFor(connection.roomId, env);
   atomicPrivateJson(path, connection);
-  chmodSync(path, 0o600);
   return path;
 }
 
 export function listConnections(env = process.env) {
   let names = [];
-  try { names = readdirSync(configDir(env)).filter(name => name.endsWith(".json") && !name.startsWith("sessions-")); } catch { return []; }
+  try { assertPrivatePath(configDir(env), true); names = readdirSync(configDir(env)).filter(name => name.endsWith(".json") && !name.startsWith("sessions-")); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
   return names.map(name => {
     const path = join(configDir(env), name);
-    if (process.platform !== "win32" && (statSync(path).mode & 0o077)) throw new Error(`${path} is readable by other users; run chmod 600 on it`);
-    const value = JSON.parse(readFileSync(path, "utf8"));
+    const value = readPrivateJson(path);
     registerSecret(value.credential);
     registerSecret(value.identitySecret);
     return value;

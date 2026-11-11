@@ -1,0 +1,62 @@
+  /api/rooms/{roomId}/automations:
+    post:
+      summary: List, create, enable, disable or delete room automations
+      x-room-permission: owner
+      description: |
+        Off unless ROOM_AUTOMATIONS=1 (404 otherwise). Room owner only.
+        A rule runs on the room's own `work_claim.updated` events: `trigger`
+        matches `actions`, `kinds`, `states` and/or `tags`; `action` is
+        `{type: wake, member, brief}` or `{type: open_task, title, assignee?}`.
+        Rules start disabled. Each rule runs at most once per event, and events
+        from automation-opened tasks never trigger rules. Built-in template
+        `post-deploy-check`: a deploy claim reaching done wakes `member` to run
+        the prod smoke check and baselines and open a Board task with evidence
+        on regression.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                list: { type: boolean }
+                template: { type: string, enum: [post-deploy-check] }
+                member: { type: string }
+                create:
+                  type: object
+                  required: [name, trigger, action]
+                  properties:
+                    name: { type: string, maxLength: 80 }
+                    trigger:
+                      type: object
+                      properties:
+                        actions: { type: array, items: { type: string } }
+                        kinds: { type: array, items: { type: string, enum: [work, land, deploy] } }
+                        states: { type: array, items: { type: string } }
+                        tags: { type: array, items: { type: string } }
+                    action:
+                      type: object
+                      required: [type]
+                      properties:
+                        type: { type: string, enum: [wake, open_task] }
+                        member: { type: string }
+                        brief: { type: string, maxLength: 1000 }
+                        title: { type: string, maxLength: 200 }
+                        assignee: { type: string }
+                enable: { type: string }
+                disable: { type: string }
+                delete: { type: string }
+      responses:
+        '201':
+          description: Rule created (disabled)
+        '200':
+          description: List (`rules`, `templates`) or enable/disable/delete result
+        '403':
+          description: Caller is not the room owner
+        '404':
+          description: Feature flag off, or unknown rule
+        '422':
+          description: Invalid trigger, action, template or member

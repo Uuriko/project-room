@@ -1,5 +1,7 @@
+import {isCurrentRoom,readCurrentHead,withCurrentReadContext} from './current-room-repository.mjs';
+import {ServiceError} from './service-error.mjs';
 import { savedHistoricalReplayCheckpoint, SavedHistoricalReplayError } from './historical-replay-contract.mjs';
-import { assertMessageWrite, recordMessageWrite, servingProofDrift, messageProofMatches, MESSAGE_PROOF_SELECT, MESSAGE_PROOF_FIELDS } from './write-integrity.mjs';
+import { assertMessageWrite, recordMessageWrite, servingProofDrift, messageProofMatches, projectionDigest, assertProjectionWrite, MESSAGE_PROOF_SELECT, MESSAGE_PROOF_FIELDS } from './write-integrity.mjs';
 import { writeMessageReplaySnapshot, discardMessageReplaySnapshot, decodeMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
 import { hasMessageAuthority } from './message-authority.mjs';
@@ -24,6 +26,13 @@ export const MESSAGE_ROW_TYPES = Object.freeze([
 ]);
 
 const MESSAGE_ROW_TYPE_SET = new Set(MESSAGE_ROW_TYPES);
+
+// Exact leaf-owned access paths; only selected thread reads verify/charge them.
+export const THREAD_VISIBILITY_INDEXES = Object.freeze([
+  {name:'current_messages_thread_public_seq',sql:"CREATE INDEX current_messages_thread_public_seq ON messages(room_id,thread_root_id,seq,message_id) WHERE to_member_id IS NULL OR to_member_id=''"},
+  {name:'current_messages_thread_incoming_seq',sql:'CREATE INDEX current_messages_thread_incoming_seq ON messages(room_id,thread_root_id,to_member_id,seq,message_id)'},
+  {name:'current_messages_thread_outgoing_seq',sql:"CREATE INDEX current_messages_thread_outgoing_seq ON messages(room_id,thread_root_id,author_id,seq,message_id) WHERE to_member_id IS NOT NULL AND to_member_id<>''"}
+]);
 
 export const MESSAGES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages (
@@ -51,7 +60,7 @@ CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id, seq);
 CREATE INDEX IF NOT EXISTS messages_room_channel_seq ON messages(room_id, channel_id, seq);
 CREATE INDEX IF NOT EXISTS messages_room_thread_seq ON messages(room_id, thread_root_id, seq);
 CREATE INDEX IF NOT EXISTS messages_room_dm_seq ON messages(room_id, to_member_id, seq);
-`;
+` + THREAD_VISIBILITY_INDEXES.map(index=>index.sql.replace('CREATE INDEX','CREATE INDEX IF NOT EXISTS')+';').join('\n');
 
 // One row per room the replay has touched. applied_seq is the last event
 // whose message rows are certified. state_seq/replay_event_id anchor the
@@ -120,6 +129,15 @@ export const MESSAGES_BACKFILL_BATCH = 200;
 const BACKFILL_COMMIT = 25;
 const SWEEP_ID = "";
 const POSTED = "message.posted";
+const postedMessageId = posted => posted?.data?.messageId || posted?.id;
+// The reducer's one deterministic public copy shares its parent's posting
+// sequence. DMs, work proposals and non-replies never create this record.
+const createsChannelCopy = (posted, id) => posted?.type === POSTED
+  && Boolean(posted.data?.alsoSendToChannel) && Boolean(posted.data?.replyToId)
+  && !posted.data?.toMemberId && !posted.data?.workItemId
+  && `${postedMessageId(posted)}:channel` === id;
+const postingCreatesMessage = (posted, id) => posted?.type === POSTED
+  && (postedMessageId(posted) === id || createsChannelCopy(posted, id));
 
 // Same party rule as eventsAfter for message.posted: a row with to_member_id
 // is visible to its author and the addressed member. Everyone else sees only
@@ -548,8 +566,8 @@ export function archivedMessageRow(db, roomId, messageId, marker = archiveMarker
 
 // Ids of the room's archived messages (no longer in the projection), for audits
 // that compare the projection with a full replay.
-export function archivedMessageIds(db, roomId) {
-  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+export function archivedMessageIds(db, roomId, qualifiedArchive = undefined) {
+  const { throughSeq, retainedJson } = recoveryArchiveMarker(db, roomId, qualifiedArchive);
   if (!throughSeq) return new Set();
   return new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
     .all(roomId, throughSeq, retainedJson).map(row => row.message_id));
@@ -1077,8 +1095,16 @@ function loadState(store, room, cursor, budget, admitState) {
 // no per-call NOT IN list is needed: binding one value per room parked in
 // this call broke past 100 (the Worker's Durable Object SQL limit) exactly
 // when many rooms stop replaying at once.
+// Normalized heads belong to the separate current-record integrity audit.
+// Excluding them is maintenance selection, not certification or a grant. A
+// marker without its independent head remains a candidate and must refuse.
+function normalizedMessageSource(db,roomId) {
+  if(!isCurrentRoom(db,roomId))return false;
+  withCurrentReadContext(db,roomId,()=>readCurrentHead(db,roomId));
+  return true;
+}
 function nextRoom(db) {
-  return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
+  const room=db.prepare(`SELECT r.id AS id, r.sequence AS sequence
     FROM rooms r
     LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
     WHERE (c.room_id IS NULL
@@ -1088,8 +1114,11 @@ function nextRoom(db) {
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
       )))
       AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id = r.id AND b.skipped=0)
+      AND NOT EXISTS (SELECT 1 FROM current_room_head h WHERE h.room_id=r.id)
     ORDER BY r.id
     LIMIT 1`).get() ?? null;
+  if(room)normalizedMessageSource(db,room.id);
+  return room;
 }
 
 // True when a room's messages table has replayed to the room's current
@@ -1474,6 +1503,7 @@ function caughtUpSql(after) {
           )
         )
         AND r.id > ?
+        AND NOT EXISTS (SELECT 1 FROM current_room_head h WHERE h.room_id=r.id)
       ORDER BY r.id
       LIMIT 1`,
     after
@@ -1482,9 +1512,11 @@ function caughtUpSql(after) {
 
 function nextParityRoom(db, after) {
   const query = caughtUpSql(after);
-  return db.prepare(query.sql).get(query.after)?.id
+  const roomId=db.prepare(query.sql).get(query.after)?.id
     ?? db.prepare(caughtUpSql("").sql).get("")?.id
     ?? null;
+  if(roomId)normalizedMessageSource(db,roomId);
+  return roomId;
 }
 
 function parityNumbers(db, roomId) {
@@ -1569,6 +1601,7 @@ export function runMessagesParityCheck(store, { report = () => {} } = {}) {
 function certifyMessagesParity(store, target = null) {
   let roomId;
   if (target !== null) {
+    if(normalizedMessageSource(store.db,target))throw new ServiceError(409,'current_room_context_unavailable','Normalized messages require their independent current-record integrity audit, not legacy replay certification');
     if (!messagesBackfillCaughtUp(store.db, target)) return { ok: false, checked: 0, roomId: target, reason: "not_caught_up" };
     roomId = target;
   } else {
@@ -1732,8 +1765,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
         let posted = null;
         try { posted = JSON.parse(eventAt.get(roomId, row.seq)?.body); } catch { /* fails below */ }
         // An also-send-to-channel copy is posted by its thread reply's event as `<id>:channel`.
-        const postedId = posted?.data?.messageId || posted?.id;
-        ok = posted?.type === POSTED && (postedId === message.id || (Boolean(posted.data?.alsoSendToChannel) && `${postedId}:channel` === message.id));
+        ok = postingCreatesMessage(posted, message.id);
       }
       if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
     }
@@ -1762,8 +1794,24 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
 // Apply a room's archive marker to a fully replayed state, so a replay can be
 // compared with the compacted stored projection. Messages at or below the
 // marker and not retained leave the state; the marker is rebuilt from the table.
-export function compactReplayLikeArchive(db, roomId, state) {
-  const marker = archiveMarker(db, roomId);
+function recoveryArchiveMarker(db,roomId,qualifiedArchive) {
+  // Normalized recovery supplies its independently censused archive metadata;
+  // its closed rooms carrier deliberately contains no legacy archive marker.
+  // Ordinary legacy callers continue to read the existing carrier marker.
+  let marker;
+  if(qualifiedArchive===undefined)marker=archiveMarker(db,roomId);
+  else if(qualifiedArchive===null)marker={throughSeq:0,count:0,retainedIds:[],retainedJson:'[]'};
+  else {
+    const {throughSeq,count,retainedIds}=qualifiedArchive;
+    if(!Number.isSafeInteger(throughSeq)||throughSeq<1||!Number.isSafeInteger(count)||count<0
+      ||!Array.isArray(retainedIds)||retainedIds.some(id=>typeof id!=='string')||new Set(retainedIds).size!==retainedIds.length)
+      throw Error('projection_corrupt: qualified recovery archive marker differs');
+    marker={throughSeq,count,retainedIds,retainedJson:JSON.stringify(retainedIds)};
+  }
+  return marker;
+}
+export function compactReplayLikeArchive(db, roomId, state, qualifiedArchive = undefined) {
+  const marker=recoveryArchiveMarker(db,roomId,qualifiedArchive);
   const raw = JSON.parse(db.prepare('SELECT projection FROM rooms WHERE id=?').get(roomId).projection);
   const canonical = hasMessageAuthority(raw);
   if (!marker.throughSeq) {
@@ -1862,4 +1910,82 @@ export function archivedMessageCommandContext(store, roomId, room, messageId, { 
   const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq,
     count: Math.max(0, marker.count-restored.length), retainedIds: [...marker.retainedIds,...restoredIds] } };
   return { ...room, state: next };
+}
+
+
+const adoptionProofFailure = kind => { throw Error('normalization_' + kind); };
+function adoptionPostingSequence(db, roomId, message, byId, sequence) {
+  if(sequence===undefined){
+    sequence=db.prepare(`SELECT sequence FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? AND json_extract(body,'$.type')='message.posted' ORDER BY sequence LIMIT 1`).get(roomId,message.id)?.sequence;
+  }
+  if(sequence===undefined && message.id.endsWith(':channel')){
+    const parentId=message.id.slice(0,-':channel'.length);
+    const origin=db.prepare(`SELECT sequence,body FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? AND json_extract(body,'$.type')='message.posted' ORDER BY sequence LIMIT 1`).get(roomId,parentId);
+    const posted=origin?JSON.parse(origin.body):null,parent=byId.get(parentId);
+    if(!createsChannelCopy(posted,message.id)||!parent||message.authorId!==posted.actorId||message.createdAt!==posted.at
+    ||messageChannelId(message)!==messageChannelId(parent)||message.replyToId||message.toMemberId||message.workItemId
+    ||!message.editedAt&&!message.deletedAt&&!isDeepStrictEqual(message.body,posted.data.body))throw Error('Invalid derived channel copy posting binding');
+    sequence=origin.sequence;
+  }
+  if(!Number.isSafeInteger(sequence)||sequence<1)throw Error('Missing original message posting sequence');
+  return sequence;
+}
+function independentInlineProofBasis(db, roomId, state) {
+  assertProjectionWrite(db,roomId);
+  const source=db.prepare('SELECT projection FROM rooms WHERE id=?').get(roomId),proof=db.prepare('SELECT metadata_hash FROM integrity_room_state WHERE room_id=?').get(roomId);
+  if(!source||!proof?.metadata_hash||projectionDigest(source.projection)!==proof.metadata_hash)adoptionProofFailure('absent_proof_source_unavailable');
+  if(!db.prepare('SELECT json_valid(?) ok').get(source.projection).ok
+    ||db.prepare('SELECT 1 FROM json_tree(?) WHERE key IS NOT NULL GROUP BY parent,key HAVING count(*)>1 LIMIT 1').get(source.projection))adoptionProofFailure('absent_proof_source_unavailable');
+  const raw=JSON.parse(source.projection);
+  if(raw.room?.id!==roomId||Object.hasOwn(raw,'messageAuthority')||!Array.isArray(raw.messages)
+    ||raw.messages.some(message=>!message||typeof message!=='object'||Array.isArray(message)||Object.hasOwn(message,'_entity')))adoptionProofFailure('absent_proof_source_unavailable');
+  const hydrated=hydrateProjection(db,roomId,raw,{verifyBodyHashes:true,workEntities:false});
+  if(hydrated.missing.length||!isDeepStrictEqual(hydrated.state.messages,state.messages))adoptionProofFailure('absent_proof_source_unavailable');
+  const messages=new Map(hydrated.state.messages.map(message=>[message.id,message]));
+  if(messages.size!==hydrated.state.messages.length)adoptionProofFailure('absent_proof_source_unavailable');
+  return {messages,pins:new Set((raw.pins??[]).map(pin=>pin.messageId))};
+}
+function exactAbsentMessageFields(db,row,message,context){
+  const expected=messageRowForWrite(message,context);
+  return MESSAGE_PROOF_FIELDS.every(field=>{
+    if(!['record_json','reducer_extras_json'].includes(field))return row[field]===expected[field];
+    if(typeof row[field]!=='string'||!db.prepare('SELECT json_valid(?) ok').get(row[field]).ok
+      ||db.prepare('SELECT 1 FROM json_tree(?) WHERE key IS NOT NULL GROUP BY parent,key HAVING count(*)>1 LIMIT 1').get(row[field]))return false;
+    return isDeepStrictEqual(JSON.parse(row[field]),JSON.parse(expected[field]));
+  });
+}
+
+// Explicit operator one-time adoption: reuse proved canonical rows, materialize
+// only missing/stale retained rows through the existing code-owned writer.
+export function materializeCurrentMessageRows(db,roomId,state,{adoptAbsentInlineProofs=false}={}) {
+  const rows=db.prepare('SELECT * FROM messages WHERE room_id=?').all(roomId),existing=new Map(rows.map(row=>[row.message_id,row]));
+  const byId=new Map([...rows.map(row=>[row.message_id,{id:row.message_id,replyToId:row.reply_to_id,channelId:row.channel_id}]),...state.messages.map(message=>[message.id,message])]);
+  const pinned=new Set((state.pins??[]).map(pin=>pin.messageId)),sequences=new Map(),absent=[];
+  // Validate every persisted row before any materialization, including archived
+  // rows. A missing proof must never authorize its own row or a corrupt neighbor.
+  for(const row of rows)if(!messageProofMatches(row)){
+    if(row.entity_hash!==null)adoptionProofFailure('message_proof_mismatch');
+    absent.push(row);
+  }
+  if(absent.length&&!adoptAbsentInlineProofs)adoptionProofFailure('message_proof_missing');
+  const basis=absent.length?independentInlineProofBasis(db,roomId,state):null;
+  for(const row of absent){
+    const message=basis.messages.get(row.message_id);
+    if(!message)adoptionProofFailure('absent_proof_source_unavailable');
+    // Resolve from the posting journal, not this unproved row's sequence.
+    const sequence=adoptionPostingSequence(db,roomId,message,byId,undefined);
+    if(!exactAbsentMessageFields(db,row,message,{sequence,pinned:basis.pins.has(message.id),threadMessages:byId}))adoptionProofFailure('absent_proof_fields_mismatch');
+    sequences.set(message.id,sequence);
+  }
+  for(const message of state.messages){
+    const row=existing.get(message.id);
+    if(sequences.has(message.id))continue;
+    // Legacy erasure may intentionally clear extras to SQL NULL. Current readers
+    // require the reducer's explicit erased history, so materialize that selected
+    // current value through the existing writer instead of reusing the row.
+    if(row&&typeof row.reducer_extras_json==='string'&&!messageRowParityFields(row,message,{sequence:row.seq,pinned:pinned.has(message.id),threadMessages:byId}).length)continue;
+    sequences.set(message.id,adoptionPostingSequence(db,roomId,message,byId,row?.seq));
+  }
+  writeMessageRows(db,{roomId,state,sequenceById:sequences,messageIndex:byId,exactSequence:true});
+  return db.prepare('SELECT * FROM messages WHERE room_id=? ORDER BY seq,message_id').all(roomId);
 }

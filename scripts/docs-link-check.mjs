@@ -1,7 +1,8 @@
 // Intra-repo markdown links in the maintained docs, plus the orphan
 // gate: every maintained docs/ file must be reachable from docs/INDEX.md
 // by following resolved links (decision #32), unless it is on the
-// enumerated machine-reachable exception list below. The history
+// enumerated machine-reachable exception list below, or under
+// docs/research/ (source-bound notes, selectively linked). The history
 // archive (archive/docs/history/) is a record and is not checked.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -161,7 +162,17 @@ export function orphanedDocs(exceptions = ORPHAN_EXCEPTIONS) {
       }
     }
   }
-  const orphans = subjects.filter(abs => !reached.has(abs) && !(rel(abs) in exceptions));
+  // docs/research/** holds source-bound working notes linked selectively from
+  // INDEX (and from design/procedure docs). It is not a navigable handbook
+  // tree — same spirit as skipping archive history — so do not require every
+  // research file to be INDEX-reachable. Broken links inside research are
+  // still checked above via maintainedMarkdown().
+  // Prefix exception only; INDEX may still link selective research notes.
+  const isExcepted = absPath => {
+    const r = rel(absPath);
+    return r in exceptions || r.startsWith("docs/research/");
+  };
+  const orphans = subjects.filter(abs => !reached.has(abs) && !isExcepted(abs));
   return {
     orphans: orphans.map(rel),
     failures: orphans.map(abs =>

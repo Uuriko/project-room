@@ -1,0 +1,120 @@
+{
+  "source": "3b6094f49c628f16dad5f81acedc1b2617c73ccc",
+  "base": "a2a4e31b4b4f911e541ca648ec418c1cd1fd52b2",
+  "node": "v24.22.1",
+  "native": {
+    "miniflare": "4.20260730.0",
+    "workerd": "2026-07-30",
+    "compatibilityDate": "2026-07-30",
+    "override": false
+  },
+  "results": {
+    "baseline": {
+      "tests": 12,
+      "pass": 1,
+      "fail": 11,
+      "exit": 1
+    },
+    "final": {
+      "tests": 16,
+      "nodePass": 15,
+      "actualNativePass": 1,
+      "skip": 0,
+      "exit": 0
+    },
+    "neighbor": {
+      "tests": 19,
+      "pass": 17,
+      "fail": 2,
+      "exit": 1
+    },
+    "exactBaseNeighborReplay": {
+      "tests": 2,
+      "pass": 0,
+      "fail": 2,
+      "exit": 1
+    }
+  },
+  "sources": {
+    "server/bonds.mjs": "9394fe49e3111178ea01dcfdc4de137582b8b76f6e558a3ed96554c0c2db37df",
+    "server/current-native-inbox.mjs": "69d8383e0cf222075e1b45a5a827685563b836abd3bf23ffa43080b9a5fab191",
+    "server/current-room-repository.mjs": "f5a09c3e944638844c034da67c05b36b58c8c697e80bf0476b727cbbd3c9d1af",
+    "server/http.mjs": "50228d26a7d0579ea8ec4d7c142b87801dc2b558fa02c7a8c300cf9220703a3d",
+    "server/store.mjs": "4a3dfca2cfeb9f3b862114a544d49bac18f5b2405fb275c1fafd976810823941",
+    "tests/current-bonds.test.mjs": "574becfacfe9f5adee95f6da49d52d24002b1f38ec54f8628aabfffe2f96a4af",
+    "cloudflare/current-bonds.check.mjs": "4bb4957b12b0afa03a03dfbb9bdb2d9392afa56ad10a7a4eb2ac2ea713f928d6",
+    "cloudflare/current-bonds.test-fixture.mjs": "6fdaba0ddca706f7ee42c133e67e5f6cf0e41e3235e8e0e7ea9e2ab04e931378"
+  },
+  "logs": [
+    {
+      "file": "baseline.log.gz",
+      "original": "/tmp/native-bonds-before-1102.log",
+      "exitCode": 1,
+      "bytes": 16424,
+      "sha256": "fc00516e1d4806de5309116c333dee3db975bd5f37a83ff61a63964b7d4ead99"
+    },
+    {
+      "file": "first-port.log.gz",
+      "original": "/tmp/native-bonds-after-1102.log",
+      "exitCode": 1,
+      "bytes": 12031,
+      "sha256": "b0d80a2135cadff816888a649184dcd9f48cd2f8ee4a2dbce99e7a183933af3f"
+    },
+    {
+      "file": "http-cap-cause.log.gz",
+      "original": "/tmp/native-bonds-cap-diagnostic-v2-1102.log",
+      "exitCode": 1,
+      "bytes": 3135,
+      "sha256": "b782d539e473bc81073b3c0f5ffd72a69394c0faafb5987b0b6384bc8e4169bc"
+    },
+    {
+      "file": "node-before-branch-compat.log.gz",
+      "original": "/tmp/native-bonds-final-node-v2-1102.log",
+      "exitCode": 0,
+      "bytes": 12089,
+      "sha256": "2f2ff95cd204fd9fc5ec584e23d26cf8c62c34d7883e2fd4615e448f23fba6d6"
+    },
+    {
+      "file": "fixture-burst-refusal.log.gz",
+      "original": "/tmp/native-bonds-final-node-1102.log",
+      "exitCode": 1,
+      "bytes": 13577,
+      "sha256": "d7f3e16e2936bff0d1f766540e28b6121f6faa23716f2e0c4edfbba374c6f9a0"
+    },
+    {
+      "file": "final-frozen.log.gz",
+      "original": "/tmp/native-bonds-frozen-complete-1102.log",
+      "exitCode": 0,
+      "bytes": 13112,
+      "sha256": "c0b50fd3fcce565a4d4592e6ef8f74a948c77b302929ae81742c51a4474c762e"
+    },
+    {
+      "file": "neighbor.log.gz",
+      "original": "/tmp/native-bonds-neighbors-1102.log",
+      "exitCode": 1,
+      "bytes": 16855,
+      "sha256": "44839c0b048817523cd9af9907ab4e24c35d385204034ee824023718c6879ba2"
+    },
+    {
+      "file": "neighbor-baseline.log.gz",
+      "original": "/tmp/native-bonds-neighbor-baseline-1102.log",
+      "exitCode": 1,
+      "bytes": 5032,
+      "sha256": "c4f0d6a2f18b92dd2222d8c1c73d4186e3e9cf54e460d500de60d15c3f38bda2"
+    },
+    {
+      "file": "lint.log.gz",
+      "original": "/tmp/native-bonds-lint-1102.log",
+      "exitCode": 0,
+      "bytes": 7146,
+      "sha256": "935dd560afd493664f9790f1aa90e67bfbb79057041e2b31aaab5a36b38cc86c"
+    },
+    {
+      "file": "secrets.log.gz",
+      "original": "/tmp/native-bonds-secrets-head-1102.log",
+      "exitCode": 0,
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  ]
+}

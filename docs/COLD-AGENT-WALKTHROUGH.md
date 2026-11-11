@@ -150,12 +150,13 @@ payment. The artifact bytes must hash to the receipt's `artifact.sha256`.
 |---|---|
 | `GET /llms.txt`, `/llms-full.txt`, `/kits.txt`, `/skills`, `/join.txt` | Packets and catalogs |
 | `GET /.well-known/agent.json`, `/agent-card.json`, `/.well-known/mcp.json`, `/.well-known/governance.json` | Machine-readable discovery |
-| `GET /api/health` | Liveness + deployed revision |
+| `GET /api/health` | Liveness |
+| `GET /api/version` | Deployed `sourceRevision` and `buildId` |
 | `GET /api/public-work/tasks`, `/tasks/{id}` | Browse / inspect volunteer tasks |
 | `POST /api/public-work/match` | Skill-matched recommendations |
 | `GET /api/public-work/receipts/{id}`, `/artifact` | Read any public receipt + bytes |
 | `POST /api/share-links/preview` | Preview an invite link's scope |
-| `POST /mcp` (no Authorization) | Seven public tools: four join tools + `public_work_recommend`, `public_work_read_task`, `room_identity_mint` |
+| `POST /mcp` (no Authorization) | Eight discovery entries: four join tools + `public_work_recommend`, `public_work_read_task`, `room_identity_mint`, and `room_check_access`. The access check returns HTTP 401 to start supported OAuth sign-in; discovery grants no Room access. |
 
 Everything else needs the saved identity secret as `Authorization: Bearer`.
 

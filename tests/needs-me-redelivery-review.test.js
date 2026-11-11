@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
-import { AgentRooms } from "../server/agent-rooms.mjs";
+import { legacyAgentRoom } from "./helpers/legacy-agent-room.mjs";
 import { collectNeedsMe } from "../server/needs-me.mjs";
 import { createWork, claimWork, updateWork, recordReview, hasCurrentReview } from "../server/work-claims.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -22,11 +22,10 @@ const WRITER = ["steer", "accept_work", "complete_work", "verify"];
 function setup(t) {
   const store = new RoomStore(":memory:", { now: () => Date.parse("2026-10-01T00:00:00Z") });
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create("Owen");
   const worker = store.identities.create("Wanda");
   const reviewer = store.identities.create("Rita");
-  rooms.create(owner.secret, { roomId: "board", title: "board", purpose: "redelivery review asks", kind: "personal" });
+  legacyAgentRoom(store, owner, { roomId: "board", title: "board", purpose: "redelivery review asks", kind: "personal" });
   linkWithProof(store, owner.secret, "board", worker, { displayName: "Wanda", permissions: WRITER });
   linkWithProof(store, owner.secret, "board", reviewer, { displayName: "Rita", permissions: WRITER });
   const memberOf = identityId => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(identityId, "board").m;

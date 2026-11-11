@@ -178,12 +178,22 @@ test("unsupported stored record shapes cannot poison unrelated signed settlement
   for (const { name, sql } of store.db.prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='work_claims'").all()) {
     if (sql?.includes("json_")) store.db.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
   }
+  // The normalized-storage admission guards also inspect JSON. Suspend only
+  // those guards while injecting impossible rows, then restore their exact SQL
+  // before exercising settlement. Production admission is not weakened.
+  const guards = store.db.prepare("SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name='work_claims'")
+    .all().filter(row => row.name.startsWith('current_room_guard_') && row.sql.includes('json_'));
+  assert.ok(guards.length > 0, 'the corruption fixture must encounter normalized admission guards');
+  for (const { name } of guards) store.db.exec(`DROP TRIGGER "${name.replaceAll('"', '""')}"`);
   const shapes = ["{", "null", "42", "true", '"scalar"', "[]", '{"v":1,"kind":"work-claim","data":"scalar"}',
     '{"pullRequests":"scalar","data":{"pullRequests":42}}'];
   for (const [index, item] of shapes.entries()) {
     store.db.prepare("INSERT INTO work_claims(room_id,claim_id,item_json,updated_at) VALUES(?,?,?,?)")
       .run("room-b", `unsupported-${index}`, item, "2026-11-01T00:00:00Z");
   }
+  for (const { sql } of guards) store.db.exec(sql);
+  for (const { name, sql } of guards) assert.equal(
+    store.db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql, sql);
   const before = store.db.prepare("SELECT * FROM work_claims WHERE room_id='room-b' ORDER BY claim_id").all();
   const out = await applyPullRequestWebhook(store, PAYLOAD, sign(PAYLOAD));
   assert.deepEqual(out.applied, [{ roomId: "commons", claimId: "target", outcome: "merged" }]);

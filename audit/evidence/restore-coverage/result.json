@@ -1,0 +1,38 @@
+{
+  "source": "612ca6bb02608474658b54e87b7b98570efc0805",
+  "base": "ac0a9c8e50658a6b2411e60d321c4b12839be78a",
+  "runtime": "Node24.22.1",
+  "qualificationInputs": "Root uncommitted three restore modules; SHA256 in root-source-sha256.txt; NOT included in source commit",
+  "commands": [
+    "/Users/johnpotter/.local/bin/node --test --test-name-pattern='genuine|same original|old625' tests/restore-durable-coverage.test.mjs",
+    "/Users/johnpotter/.local/bin/node --test --test-name-pattern='same original' tests/restore-durable-coverage.test.mjs"
+  ],
+  "results": {
+    "finalFocused": {
+      "passed": 36,
+      "failed": 1,
+      "log": "final-focused.log"
+    },
+    "measurementFinal": {
+      "passed": 1,
+      "failed": 0,
+      "log": "measurement-qualified.log"
+    },
+    "distinctPassingCases": 37,
+    "fullFileNotRun": true
+  },
+  "coverage": [
+    "genuine old45 cold schema refusal",
+    "genuine preopened45 exact missing writer46 refusal without registering46",
+    "independent archived restore-format verifier refusal",
+    "old operator/exact guards refuse before drops; pending state unchanged",
+    "actual2075 schema45 source shared between old4aa/new progress comparison",
+    "full final audit, exact named application row digests and bytes; separate valid45/46 schema stamps"
+  ],
+  "limits": [
+    "No browser/Native/provider/live restore",
+    "Old4aa-generated snapshot experimental census refused422; retained log, not resolved or claimed production regression",
+    "Root previous log copied as attributed before evidence; intermediate failures retained",
+    "No full CI green claim"
+  ]
+}

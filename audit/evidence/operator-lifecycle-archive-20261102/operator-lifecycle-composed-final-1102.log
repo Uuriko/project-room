@@ -1,0 +1,59 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":67,"integrity":"eager","phases":{"schema":{"ms":15,"rowsRead":0},"plugin":{"ms":30,"rowsRead":0},"fence":{"ms":16,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":30553456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":67,"legacyColdStartMs":67,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":131,"integrity":"eager","phases":{"schema":{"ms":35,"rowsRead":0},"plugin":{"ms":74,"rowsRead":0},"fence":{"ms":20,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":76,"heapBytes":36058688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":131,"legacyColdStartMs":131,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":49,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":32610296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":49,"legacyColdStartMs":49,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ archived legacy registry is frozen before projection access (97.796958ms)
+✔ archived native registry is frozen before projection access (142.019625ms)
+✔ scheduler excludes archived PR and sweep candidates; active room still settles (58.878958ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":70,"integrity":"eager","phases":{"schema":{"ms":17,"rowsRead":0},"plugin":{"ms":25,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":72,"heapBytes":39825952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":72,"legacyColdStartMs":70,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":14,"integrity":"eager","phases":{"schema":{"ms":4,"rowsRead":0},"plugin":{"ms":3,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":18,"heapBytes":52787760,"rooms":2,"sequences":5,"projectionBytes":974,"events":5}
+{"event":"room.store_initialized","initializationMs":15,"legacyColdStartMs":14,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":12,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":54824648,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":12,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":3,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":15,"heapBytes":61362912,"rooms":2,"sequences":5,"projectionBytes":260,"events":5}
+{"event":"room.store_initialized","initializationMs":13,"legacyColdStartMs":12,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":51,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":74782928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":51,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":13,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":58,"heapBytes":62263632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":53,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ operator archives legacy agent-owned room, preserves authority and cold receipt (150.8175ms)
+✔ operator archives normalized room, preserves authority and cold receipt (115.68275ms)
+✔ stale plan and audit save failure leave room and event history unchanged (73.391333ms)
+✔ actual operator HTTP requires operator auth, exact confirmation and allowlisted room (94.121792ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":71,"integrity":"eager","phases":{"schema":{"ms":14,"rowsRead":0},"plugin":{"ms":28,"rowsRead":0},"fence":{"ms":14,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":68,"heapBytes":47142424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":72,"legacyColdStartMs":71,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":12,"integrity":"eager","phases":{"schema":{"ms":3,"rowsRead":0},"plugin":{"ms":3,"rowsRead":0},"fence":{"ms":3,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":14,"heapBytes":45799696,"rooms":2,"sequences":6,"projectionBytes":1750,"events":6}
+{"event":"room.store_initialized","initializationMs":13,"legacyColdStartMs":12,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":55,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":24,"rowsRead":0},"fence":{"ms":13,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":40492592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":55,"legacyColdStartMs":55,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":52,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":22,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":46610488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":52,"legacyColdStartMs":52,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":50,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":23,"rowsRead":0},"fence":{"ms":11,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":52873600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":51,"legacyColdStartMs":50,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":48,"integrity":"eager","phases":{"schema":{"ms":12,"rowsRead":0},"plugin":{"ms":21,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":48,"heapBytes":42877808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":48,"legacyColdStartMs":48,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+[boot-config] ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass --allow-unsigned explicitly to record the choice.
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer
+✔ QA retirement revokes target credentials, archives without deletion, preserves unrelated keys and replays (174.936375ms)
+✔ stale plans and late failure cannot leave SQL or resident keys partially revoked (73.055541ms)
+✔ retirement revokes bound OAuth code/access/refresh only (invitation=false) (87.787042ms)
+✔ retirement revokes bound OAuth code/access/refresh only (invitation=true) (76.19425ms)
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":45,"integrity":"eager","phases":{"schema":{"ms":10,"rowsRead":0},"plugin":{"ms":20,"rowsRead":0},"fence":{"ms":10,"rowsRead":0},"verifies":{"ms":1,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":52088696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":45,"legacyColdStartMs":45,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✔ operator HTTP gate refuses room bearer and requires exact QA scope and plan (87.833375ms)
+✔ retirement fences target native leases and signing keys without touching another room subscription (59.643667ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 946.876166

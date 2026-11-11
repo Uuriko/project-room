@@ -190,8 +190,11 @@ test("share-links preview accepts the getdasha edge-door origins, still denies o
     const res = await request("/api/share-links/preview", {
       method: "POST", origin: door, data: { linkToken: "ABC-DEF-GHJ" },
     });
-    assert.equal(res.status, 410, `${door} must reach the preview, not origin_denied`);
-    assert.equal((await res.json()).error.code, "link_unavailable");
+    // Anonymous preview of an unknown well-formed code is the truthful 404
+    // link_not_found (FUNNEL-FIXES pack 4, probe R3); reaching it proves the
+    // origin was accepted.
+    assert.equal(res.status, 404, `${door} must reach the preview, not origin_denied`);
+    assert.equal((await res.json()).error.code, "link_not_found");
   }
   const foreign = await request("/api/share-links/preview", {
     method: "POST", origin: "https://evil.example", data: { linkToken: "ABC-DEF-GHJ" },

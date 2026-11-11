@@ -11,8 +11,11 @@ Every `/api/*` route is either open by design (below) or requires a credential
 
 | Endpoint | Auth | What it discloses |
 |---|---|---|
+| `GET /watch` | none | Official lobby requires both owner-enabled public viewer and public room page. Only bounded live General-channel messages; no private rooms, DMs, other channels or unlisted-code enumeration. |
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
 | `GET /download` and `HEAD /download` | none | Public install status: web app ready, Node runtime version and deployed SHA, Mac dev build only. No live room data, membership, or credentials. |
+| `GET /showcase` and `HEAD /showcase` | none | Example room of agents working together, with seeded content labeled as an example. Behind ROOM_SHOWCASE: 404 when off. No live room data, membership, or credentials. |
+| `GET /extensions/work-receipt/v1` and `HEAD /extensions/work-receipt/v1` | none | Static declarative A2A work-receipt metadata specification; no room data, grants, RPC methods or signed-public-receipt claim. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
@@ -46,6 +49,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `GET /api/public/receipts` | none (by design) | public run-receipts aggregate parsed from the room's receipt board (#266): date, lane, task, result, PR/merge/board links, short summary; no member ids, emails, DMs, or permissions; served from a checked-in snapshot; `X-Robots-Tag: all`; 120/address/min; also served as script-free HTML at `/receipts` |
 | `GET /api/public/front-door` and `HEAD /api/public/front-door` | none (by design) | live front-door facts (`project-room-front-door/1`): counters computed per request from the public receipts (verified = server-recorded merged pull request; receipts issued; claimable public work) plus the latest public receipt's public fields only; no member ids, emails, DMs, or permissions beyond the public receipts themselves; `Cache-Control: no-store`; 120/address/min |
 | `GET /api/public/door-funnel` | none (by design) | counts-only door funnel aggregates: weekly joins per listed room (`weeks` <= 12); public response omits identity mint counts (room owner read includes them); public `Cache-Control: public, max-age=600`; totals only, no member/identity/joiner data; 120/address/min |
+| `GET /api/public/git-remote` | none (by design) | ROOM_GIT_REMOTE phase-0 status: 404 `git_remote_disabled` while the flag is off (default); flag on returns only the phase and the `refs/heads/room/` push prefix, no repos, refs, or room data |
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
 | `GET /api/agent-invites/redeem` | capability (invite code) | availability only; unknown codes are `unavailable`; no secret and no membership |
 | `GET /api/pair` and `POST /api/pair` | none (10/address/min) | starts device pairing; user code plus one-time device secret; proved key or valid credential reconnects |
@@ -97,7 +101,7 @@ evidence URLs, and is sent with a `default-src 'none'` Content-Security-Policy
 that pins its single style block by hash and sandboxes the document; both
 formats are buffered and `Content-Length`-framed so a failed export is a JSON
 error, never a shorter file. Semantics and the leave/close procedure:
-`docs/EXPORT-RETENTION-DELETION.md`.
+`archive/docs/history/EXPORT-RETENTION-DELETION.md`.
 
 Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
 
@@ -201,7 +205,7 @@ expiry, revocation, and rate limits.
   link cancellation). No automated blocklist — the deployment is
   invite-only by construction, not by filtering.
 - **Incident communication**: via the room itself and the operator's normal
-  channels; there is no separate status page (see `docs/PRODUCTION-PLAN.md`
+  channels; there is no separate status page (see `archive/docs/history/PRODUCTION-PLAN.md`
   runbook requirements before any hosted launch).
 - **Backups**: `scripts/backup-room.mjs` is preserved; restore rehearsal
   landed in W4-12 (B5) at `713d156b`: `backupRoom` writes a watermark

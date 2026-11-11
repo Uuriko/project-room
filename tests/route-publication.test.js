@@ -24,7 +24,7 @@ test("the public set is enumerated live from the table, not a pinned list", () =
     "demo-get", "demo-head", "download-get", "download-head",
     "pair-page-get", "pair-phone", "pair-poll", "pair-start-get", "pair-start-post",
     "public-agent-ask", "public-agent-card", "public-agent-page", "public-agent-poll",
-    "public-front-door-get", "public-front-door-head", "public.door-funnel",
+    "public-front-door-get", "public-front-door-head", "public-lobby", "public.door-funnel", "public.git-remote", "showcase-get", "showcase-head", "work-receipt-extension-get", "work-receipt-extension-head",
   ]);
   for (const r of publicRoutes) assert.ok(isPublishable(r, ROUTE_PUBLICATION_NOTE), `${r.id} is public but not publishable under its declaration`);
 });

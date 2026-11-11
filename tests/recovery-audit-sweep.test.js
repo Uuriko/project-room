@@ -114,6 +114,8 @@ function sweep() {
   step(T.MESSAGE_POSTED, "producer", { messageId: "chat-2", body: "an ordinary message while a request is open" });
   step(T.MESSAGE_EDITED, "producer", { messageId: "chat-2", body: "edited while a request is open", expectedMessageRevision: 0 });
   step(T.MESSAGE_DELETED, "producer", { messageId: "chat-2", expectedMessageRevision: 1, reason: "tidy" });
+  // The recipient reports progress (non-terminal, revision unchanged) before the asker cancels.
+  step(T.REPLY_REQUEST_PROGRESSED, "producer", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, progress: "needs_input", note: "Which environment?" }));
   step(T.REPLY_REQUEST_CANCELLED, "owner", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, reason: "never mind" }));
 
   step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
@@ -354,6 +356,8 @@ test("the event surface has not grown without this sweep noticing", () => {
   // member.merged and pair.requested/approved/denied are not exercised here:
   // they need an agent-pairing flow and two live agent members. They are
   // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
-  assert.equal(Object.values(T).length, 72,
+  // member.sponsor_transferred requires explicit account sponsorship consent;
+  // tests/agent-sponsor-transfer.test.mjs exercises that event and auditRecovery.
+  assert.equal(Object.values(T).length, 74,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

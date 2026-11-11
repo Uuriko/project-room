@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // CURE5582 (Codex seq 25449, restated seq 25522): the needs-me digest
 // truncated its attention listing with no attentionIncomplete /
 // continuation marker — a room with 8 replies to the viewer's post
@@ -17,7 +18,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { buildRoomDigest } from '../server/room-digest.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
@@ -27,10 +27,9 @@ function setup(t, roomId) {
   let clock = Date.now();
   store.now = () => (clock += 2100); // stay under the chat flood guard
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const bob = store.identities.create('Bob');
   const owner = store.identities.create('OwnerC');
-  rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Digest overflow', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Digest overflow', kind: 'personal' });
   linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   store.command(owner.secret, roomId, { id: 'add-maya', type: 'member.added', data: { memberId: 'maya', displayName: 'Maya', kind: 'human', permissions: [] } });

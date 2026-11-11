@@ -183,7 +183,7 @@ test("read-only audit refuses a v4 input without migrating or creating a journal
   const f = fixture(t);
   f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v44/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), new RegExp(`requires schema v${STORE_SCHEMA_VERSION}`));
   const raw = new DatabaseSync(f.filename, { readOnly: true });
   try {
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

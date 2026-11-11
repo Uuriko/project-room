@@ -202,10 +202,13 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const baseline = await baselineClient.snapshot();
   assert.ok(baseline.state.messages.some(message => message.body.includes('private-body-sentinel')));
   const first = await resumeAgent({ connection: config });
-  assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, []);
+  assert.equal(first.connection.status, 'credential_accepted'); assert.deepEqual(first.incompleteSources, [{source:'attention',code:'page_limit'}]);
   assert.ok(first.obligations.some(x => x.id === 'task'));
   assert.equal(JSON.stringify(first).includes('private-body-sentinel'), false);
-  assert.equal(first.metrics.requests, 4);
+  assert.equal(first.metrics.attentionPages,2);assert.equal(first.metrics.requests,5);
+  const enumeration={requests:first.metrics.requests,responseBytes:first.metrics.responseBytes,resumeCalls:1};
+  const finishAttention=async initial=>{let current=initial,n=0;while(current.observedThroughBySource.attention?.hasMore){assert.ok(n++<20,'finite fixture attention continuation completes');current=await resumeAgent({connection:config,sinceVersion:initial.contextVersion,attentionCursor:current.observedThroughBySource.attention.cursor});enumeration.requests+=current.metrics.requests;enumeration.responseBytes+=current.metrics.responseBytes;enumeration.resumeCalls++;assert.ok(current.incompleteSources.every(source=>source.source==='attention'&&source.code==='page_limit'));}assert.deepEqual(current.incompleteSources,[]);return current;};
+  const completed=await finishAttention(first);assert.equal(completed.observedThroughBySource.attention.hasMore,false);
   const rpc = async (method, params) => {
     const response = await fetch(origin + '/room/mcp?profile=full', { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${worker.secret}` },
@@ -220,7 +223,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const transported = await rpc('tools/call', { name: hint.tool, arguments: hint.arguments });
   assert.equal(transported.error, undefined); assert.notEqual(transported.result.isError, true);
   assert.equal(transported.result.structuredContent.work.id, 'task');
-  const repeat = await resumeAgent({ connection: config, sinceVersion: first.contextVersion, attentionCursor: first.observedThroughBySource.attention.cursor });
+  const repeat = await resumeAgent({ connection: config, sinceVersion: first.contextVersion, attentionCursor: completed.observedThroughBySource.attention.cursor });
   assert.ok(Buffer.byteLength(JSON.stringify(repeat)) < Buffer.byteLength(JSON.stringify(first)));
   assert.ok(first.metrics.responseBytes < baselineBytes);
   const mismatch = await resumeAgent({ connection: { ...config, memberId: owner.identityId } });
@@ -228,7 +231,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const aliasIdentity = store.identities.create('Alias');
   linkWithProof(store, owner.secret, 'commons', aliasIdentity, { memberId: 'custom-linked-member', displayName: 'Alias', permissions: [] });
   const alias = await resumeAgent({ connection: { ...config, token: aliasIdentity.secret, memberId: 'custom-linked-member' } });
-  assert.equal(alias.connection.status, 'credential_accepted'); assert.deepEqual(alias.incompleteSources, []);
+  assert.equal(alias.connection.status, 'credential_accepted'); assert.ok(alias.incompleteSources.every(source=>source.source==='attention'&&source.code==='page_limit'));
   assert.equal(alias.authoritySummary.id, 'custom-linked-member');
   let revoked = false;
   const ended = await resumeAgent({ connection: config, fetchImpl: async (url, options) => {
@@ -240,7 +243,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   } });
   assert.equal(ended.connection.status, 'unconfirmed');
   assert.deepEqual(ended.attention, []); assert.deepEqual(ended.obligations, []); assert.deepEqual(ended.observedThroughBySource, {});
-  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, roomContextBytes, first: first.metrics, repeat: repeat.metrics }));
+  console.log(JSON.stringify({ benchmark: 'synthetic30messages1000chars', baselineRequests, baselineBytes, roomContextBytes, firstUsefulDiscovery:first.metrics, completeAttentionEnumeration:enumeration, repeat:repeat.metrics }));
 });
 
 // Contract: current open addressed requests survive an advanced observation cursor.
@@ -343,7 +346,7 @@ test('reply-only resume retains old open requests independently of delta observa
   const capped = await resumeAgent({ ...options, maxPages: 1, fetchImpl: async (url, init) => {
     const response = await fetch(url, init);
     if (!String(url).includes('/needs-me')) return response;
-    const value = await response.json(); value.hasMore = true;
+    const value = await response.json(); value.hasMore = true; value.complete = false; value.status = 'incomplete';
     return Response.json(value);
   } });
   assert.deepEqual(capped.openRequests.map(request => request.id), ['old-open']);
@@ -454,4 +457,51 @@ test('failed or old-server agent-work reads withhold requests and runs as unavai
   assert.equal(request.blockedBy.length, 8);
   assert.ok(request.blockedBy.every(reason => reason.length <= 80));
   assert.equal(request.blockedBy[0], `0-${'x'.repeat(78)}`);
+});
+
+test('resume preserves native opaque continuation and maps actual work revision pointers to selected work', async () => {
+  const cursor = { rooms: { commons: 10 }, native: { commons: 'opaque.native.position' } };
+  const f = transport(url => url.includes('/needs-me') ? page({ cursor, hasMore: true,
+    items: [{ kind: 'work', roomId: 'commons', id: 'standing-task', seq: 7 }] }) : undefined);
+  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl, maxPages: 2 });
+  assert.deepEqual(result.observedThroughBySource.attention.cursor, cursor);
+  assert.equal(result.observedThroughBySource.attention.hasMore, true);
+  assert.deepEqual(result.attention[0], { kind: 'work', roomId: 'commons', id: 'standing-task', seq: 7,
+    nextRead: { tool: 'room_read_work', arguments: { roomId: 'commons', workItemId: 'standing-task' } } });
+  const second = f.calls.filter(call => call.url.includes('/needs-me'))[1];
+  assert.deepEqual(JSON.parse(new URL(second.url).searchParams.get('since')), cursor);
+});
+
+test('native continuation keeps exact room/type/token/aggregate limits without admitting unknown cursor keys', async () => {
+  const cases = [null, [], { commons: '' }, { commons: 3 }, { commons: 'x'.repeat(12289) }, { commons: '🙂'.repeat(3073) },
+    Object.fromEntries(Array.from({ length: 41 }, (_, i) => ['room-' + i, 'opaque'])),
+    { commons: 'x'.repeat(12288), other: 'y'.repeat(5000) }, { 'invalid room': 'opaque' }];
+  for (const native of cases) {
+    const f = transport(url => url.includes('/needs-me') ? page({ cursor: { rooms: { commons: 10 }, native } }) : undefined);
+    const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+    assert.equal(result.observedThroughBySource.attention, undefined);
+    assert.ok(result.incompleteSources.some(source => source.source === 'attention' && source.code === 'invalid_response'));
+  }
+});
+
+test('native continuation accepts exact byte and room-count boundaries as opaque values', async () => {
+  for (const native of [{}, { commons: 'x'.repeat(12288) }, { commons: '🙂'.repeat(3072) },
+    Object.fromEntries(Array.from({ length: 40 }, (_, i) => ['room-' + i, 'opaque']))]) {
+    const cursor = { rooms: { commons: 10 }, native };
+    const f = transport(url => url.includes('/needs-me') ? page({ cursor }) : undefined);
+    const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+    assert.deepEqual(result.observedThroughBySource.attention.cursor, cursor);
+  }
+});
+
+test('compact resume retains validated native coverage without claiming global attention completeness', async () => {
+  const row = complete => ({ roomId: 'commons', available: true, mode: 'native_bounded',
+    conversation: { complete, examined: 1, direction: 'recent', range: { recentEventWindow: 500 } },
+    standingWorkAndRequests: { complete: false }, omitted: ['ambient bond and peer routing presentation', 'legacy board presentation'], globalAttentionComplete: false });
+  let pages = 0;
+  const f = transport(url => url.includes('/needs-me') ? page({ contractVersion: 2, nativeCoverage: [row(++pages > 1)], hasMore: pages === 1 }) : undefined);
+  const result = await resumeAgent({ connection, fetchImpl: f.fetchImpl });
+  assert.equal(result.observedThroughBySource.attention.hasMore, false);
+  assert.deepEqual(result.observedThroughBySource.attention.nativeCoverage, [row(true)]);
+  assert.equal(result.observedThroughBySource.attention.nativeCoverage[0].globalAttentionComplete, false);
 });

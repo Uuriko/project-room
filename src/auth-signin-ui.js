@@ -126,7 +126,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code);
       if (uncertain && owns()) {
         accountClient.invalidate(generation, session);
-        await onSignInUncertain?.();
+        await onSignInUncertain?.({ preserveScopedBackup: true });
       }
       throw error;
     }
@@ -547,16 +547,18 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     render();
     setStatus(uiText("signin.copy.034"));
     // The host makes redemption failures visible even before email entry opens.
-    let linkFailure = null;
+    let linkFailure = null, handledMagicSignIn = false;
     await withBusy(async () => {
       try {
         await redeem(email, code);
+        handledMagicSignIn = true;
       } catch (error) {
         linkFailure = failureText(error);
         throw error;
       }
     });
     if (linkFailure) onMagicLinkFailure?.(linkFailure);
+    if (handledMagicSignIn) return { handledMagicSignIn: true };
   }
 
   const onInput = event => {

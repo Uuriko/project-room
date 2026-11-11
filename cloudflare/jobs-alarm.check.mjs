@@ -130,7 +130,8 @@ test("a thrown alarm is rescheduled", async () => {
     // delivery row: #3893 made the drain isolate such rows (dead-letter,
     // job stays healthy), so a JSON.parse error can no longer be this
     // check's throw vehicle. The subject is the alarm machinery.
-    assert.match(webhook.lastError, /seeded webhook drain failure/);
+    assert.equal(webhook.lastError, "Job failed");
+    assert.equal(webhook.lastErrorCurrent, true);
   } finally {
     await mf.dispose();
   }

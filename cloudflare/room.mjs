@@ -3,6 +3,7 @@ import { createSchedulerDiagnostics, readSchedulerDiagnostics } from "./job-sche
 import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
+import { downloadPageCsp } from "../server/download-page.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -43,10 +44,11 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, healthLivenessResponse, readyProbeResponse, jobHealthSnapshotStatus, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
+import { createWakeAdapters } from '../server/wake-adapters.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
 // it; a finished probe does not cache, so the next check sees a fresh answer.
@@ -193,7 +195,8 @@ export class ProjectRoom extends DurableObject {
       // Phase 1a: large message bodies at rest outside the projection row.
       bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
     // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
-    installGuideCommandHook(this.store);
+    const restoring=this.store.restoreStatus().pending;
+    if(!restoring)installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry
     // point. The Durable Object may suspend before the microtask drains;
     // the cron tick remains the restart-safe backstop.
@@ -205,8 +208,8 @@ export class ProjectRoom extends DurableObject {
       });
     });
     this.store.featureEnv = env;
-    bootstrapRoom(this.store, env);
-    this.store.landQueue.configure({ env });
+    this.store.agentPlugin.setWakeAdapters?.(createWakeAdapters({ env }));
+    if(!restoring) { bootstrapRoom(this.store, env);this.store.landQueue.configure({ env }); }
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
     let googleAuth = null;
@@ -229,6 +232,7 @@ export class ProjectRoom extends DurableObject {
     this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      accountAgentEnrollmentEnabled: env.ROOM_ACCOUNT_AGENT_ENROLLMENT_ENABLED === '1',
       mcpOAuthClients: env.ROOM_MCP_OAUTH_CLIENTS ? JSON.parse(env.ROOM_MCP_OAUTH_CLIENTS) : [],
       mcpEventTransport: env.ROOM_MCP_EVENT_CALLBACK_ORIGINS === undefined ? undefined
         : createWorkersMcpEventTransport(JSON.parse(env.ROOM_MCP_EVENT_CALLBACK_ORIGINS)),
@@ -280,6 +284,7 @@ export class ProjectRoom extends DurableObject {
       storeInitializationMs: this.store.initializationMs }));
   }
   #sqlScope(kind, operation, fn, options) {
+    if(kind!=='request' && kind!=='readiness' && !this.paused && this.store)this.store.assertRestoreAdmitted();
     if (!this.sqlCosts) return fn();
     // Flush unattributed counters separately; no subtraction or request ownership
     // inferred for constructor work, legacy RPCs or callbacks after scope close.
@@ -318,7 +323,7 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
-    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
+
     // TM-2 split: the backup doors no longer share one credential.
     // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
     // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
@@ -334,7 +339,7 @@ export class ProjectRoom extends DurableObject {
     // Object's storage. Restore token only; fail-closed on a non-empty store
     // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
@@ -343,8 +348,10 @@ export class ProjectRoom extends DurableObject {
     if (url.pathname === '/api/operator/restore-from-backup') {
       return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
+    if(!this.store.restoreStatus().pending && JOB_LIST_READS.has(url.pathname))await this.refreshJobHealthSnapshot();
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
+      if(!this.store.restoreStatus().pending) {
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => this.store.humanPush.flush()));
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
@@ -365,10 +372,11 @@ export class ProjectRoom extends DurableObject {
           this.requestAlarmWrites = writes;
         }).catch(() => {}));
       }
+      }
     }
   }
 
-  // Readiness is one statement. It does not open the room, replay events, or
+  // Readiness probes only fixed control metadata and the storage connection. It does not open the room, replay events, or
   // scan a table. A paused object has no database, so it is not ready.
   probeStorage(observation) {
     const observed = observation === 'readiness-observation-v1';
@@ -389,6 +397,7 @@ export class ProjectRoom extends DurableObject {
   #probeStorage(observed) {
     if (this.paused || !this.store) return observed ? { ok: false, readinessObservation: {
       ...readinessStamps, sqlOutcome: 'not_run', sqlElapsedMs: 0 } } : { ok: false };
+    try { this.store.assertRestoreAdmitted(); } catch { return {ok:false,reason:'restore_incomplete'}; }
     const started = performance.now();
     let row, sqlElapsedMs, outcome = 'error';
     try {
@@ -403,6 +412,7 @@ export class ProjectRoom extends DurableObject {
   }
 
   async syncGmailMailboxes() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { completed: 0 };
     await yieldToQueuedRequests();
     // The minute cron does not call this when Gmail is off. A direct call still
@@ -414,6 +424,7 @@ export class ProjectRoom extends DurableObject {
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     // Serialize the entire read/merge/write across alarms and cron RPCs.
     const persist = async () => {
       const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
@@ -456,6 +467,7 @@ export class ProjectRoom extends DurableObject {
   // the same tail as recordCronTick so attempt and outcome commits can
   // never interleave.
   async recordCronAttempt(jobName) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     // The attempt ID threads attempt -> run -> outcome: #runDueJobsBody
     // stamps it onto this pass's outcomes, and applyOutcomes resolves
     // the attempt only on an exact match, so a late completion from an
@@ -474,10 +486,12 @@ export class ProjectRoom extends DurableObject {
     finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
   }
   async refreshJobHealthSnapshot() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
     catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
     return { ...view, publicReports: countOpenPublicReports(this.store),
       scheduler: await readSchedulerDiagnostics({ storage: this.ctx.storage, store: this.store, diagnostics: this.schedulerDiagnostics,
@@ -501,6 +515,7 @@ export class ProjectRoom extends DurableObject {
   // every return shape recorded success while the real drain's failures
   // went to console only).
   async drainChannelBacklog() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
@@ -585,6 +600,7 @@ export class ProjectRoom extends DurableObject {
   // replays invitations and legacy projections in slices that yield the
   // input gate. Never called from the constructor.
   async verifyRoomIntegrity() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
@@ -593,6 +609,7 @@ export class ProjectRoom extends DurableObject {
   // patrol is read-only (patrol_* tables only); a paused room skips.
   async patrolTick() {
     if (!scheduledPatrolEnabled(this.env)) return { skipped: 1, disabled: 1 };
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return runPatrolTick(this.store, { deadline: cronDeadline() });
@@ -603,10 +620,12 @@ export class ProjectRoom extends DurableObject {
   // the pending -> delivered | failed -> dead_letter lifecycle with
   // exponential backoff. Runs in the DO so signing secrets never leave it.
   async drainMcpEvents() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) return { skipped: "paused" };
     return this.server.drainMcpEvents();
   }
   async drainWebhookDeliveries() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     return this.store.agentPlugin.drainWebhookDeliveries();
@@ -616,6 +635,7 @@ export class ProjectRoom extends DurableObject {
   // waits until the reset. A missing token is counted, not thrown, and the
   // token itself is never logged.
   async refreshLandQueue() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
     await yieldToQueuedRequests();
     this.store.landQueue.configure({ env: this.env });
@@ -625,6 +645,7 @@ export class ProjectRoom extends DurableObject {
   // receiver; a merged pull completes the claim and a close releases it.
   // The poll is conditional, capped, and waits out a GitHub 403 or 429.
   async refreshClaimPullRequests() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { checked: 0, updated: 0 };
     await yieldToQueuedRequests();
     // Same 5s budget as the other cron RPCs. The poll itself also stops
@@ -640,6 +661,7 @@ export class ProjectRoom extends DurableObject {
   // challenge-window approvals, approved sweeps, dispute timeouts, deadline
   // refunds — so no bounty waits on a human remembering to close an epoch.
   async progressEscrowEpochs() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return runEscrowEpochs(this.store, { now: Date.now() });
@@ -647,6 +669,7 @@ export class ProjectRoom extends DurableObject {
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.
   async backfillPublicReadModel() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { done: false, skipped: "paused", rooms: 0, receipts: 0, cards: 0 };
     await yieldToQueuedRequests();
     return fillPublicReadModel(this.store, { limit: 20, deadline: cronDeadline() });
@@ -654,6 +677,7 @@ export class ProjectRoom extends DurableObject {
   // Scans only disposable web-fetch/research logs. The deletion flag is
   // explicit; authoritative room and security audit journals are excluded.
   async planRetention() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
     await yieldToQueuedRequests();
     const stored = await this.ctx.storage.get(RETENTION_CURSOR_KEY);
@@ -752,6 +776,7 @@ export class ProjectRoom extends DurableObject {
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
   async ensureJobAlarm() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
     const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
@@ -762,6 +787,7 @@ export class ProjectRoom extends DurableObject {
   // Separate RPC invocations give each slow job its own CPU budget. A reset
   // cannot erase outcomes already committed by another invocation.
   async runSlowJob(name) {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (!JOBS.some(job => job.name === name && job.slow && job.runtimes.includes("worker"))) {
       throw new Error("Unsupported slow job");
     }
@@ -771,6 +797,7 @@ export class ProjectRoom extends DurableObject {
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) return;
     let retryDelayMs = 0;
     try {
@@ -790,6 +817,7 @@ export class ProjectRoom extends DurableObject {
   }
   // Operator and cron export. Returns a stream of NDJSON; callers must not log it.
   exportRoomNdjson() {
+    if(!this.paused && this.store)this.store.assertRestoreAdmitted();
     if (this.paused || !this.store) throw new Error('Room paused');
     return exportNdjsonStream(this.store.db);
   }
@@ -800,7 +828,7 @@ export default {
     const started = Date.now();
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
-    let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalPublicPolicy = null, browserPublicPolicy = null, internalDownloadPolicy = null, browserDownloadPolicy = null;
     let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
@@ -811,6 +839,11 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserDownloadPolicy && response.headers.get('Content-Security-Policy') === internalDownloadPolicy) {
+        // /download adds one hashed copy script to the public policy.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserDownloadPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
         // /about carries its own path-pinned policy (see aboutPageCsp);
@@ -832,6 +865,14 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
+      // These public lobby pages must navigate on the canonical host: relative
+      // links on getdasha otherwise leave /room and enter the unrelated site.
+      const lobbyPage=inbound.pathname==='/room/watch'
+        ||inbound.pathname==='/room/docs/agents/paste'&&inbound.searchParams.get('room')==='project-room-lobby';
+      if(request.method==='GET'&&lobbyPage){
+        const canonical=new URL(inbound.pathname.slice('/room'.length)+inbound.search,roomOrigin(env).origin);
+        return finish(new Response(null,{status:302,headers:{Location:canonical.href,'Cache-Control':'no-store'}}),'worker');
+      }
       const pathname = rewriteRoomApiPrefix(inbound.pathname);
       const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
       // OAuth state is bound to a host-only account cookie. Start on the
@@ -859,6 +900,8 @@ export default {
     browserPublicPolicy = publicPageCsp(browserOrigin);
     internalAboutPolicy = aboutPageCsp(url.origin);
     browserAboutPolicy = aboutPageCsp(browserOrigin);
+    internalDownloadPolicy = downloadPageCsp(url.origin);
+    browserDownloadPolicy = downloadPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
@@ -922,6 +965,9 @@ export default {
       const response = await durableObjectJobsHealth({
         start: async () => jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth()),
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        // ROOM_HEALTH_JOBS_CACHE_MS (off by default): skip the Durable Object RPC
+        // for that long after a good job-health read in this isolate.
+        cacheMs: healthCacheMs(env.ROOM_HEALTH_JOBS_CACHE_MS),
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: snapshot => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus: jobHealthSnapshotStatus(snapshot) }),
         onUnready: jobsStatus => workerLivenessResponse(request, { mode, deployment, emailVerification, jobsStatus })

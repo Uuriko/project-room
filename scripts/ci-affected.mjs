@@ -22,6 +22,7 @@ const UNIT_BUDGET_SECONDS = 300;
 export const BROWSER_AFFECTED_BUDGET_MS = 10 * 60 * 1000;
 
 const RULE_UNIT_TESTS = [
+  "tests/browser-suites.test.js",
   "tests/design-tokens-lint.test.js",
   "tests/design-tokens.test.js",
   "tests/design-tokens-css-sync.test.js",

@@ -1,6 +1,7 @@
 // Issue #6 A2: room lifecycle — archive (owner-only, closes the log), leave
 // (a member ends their own access), the personal/organization kind, and the
 // v28 migration that adds rooms.archived_at to genuine v27 data.
+import {currentInviteContext} from "../server/current-room-repository.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,7 +32,6 @@ const access = (actorId, memberId, permissions, active = false) => event({ type:
   data: { memberId, expectedMemberRevision: 0, permissions, active } });
 
 test("reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 44);
   assert.deepEqual([...ROOM_KINDS], ["personal", "organization"]);
   assert.ok(COMMAND_TYPES.includes(T.ROOM_ARCHIVED)); assert.equal(classifyCommand(T.ROOM_ARCHIVED), "act");
   const state = seed("r").reduce(applyEvent, emptyRoomState());
@@ -250,13 +250,13 @@ test("account rooms: discovery carries kind and archive state; creation is bound
   assert.equal(f.store.createAccountRoom(admin.token, admin.binding, request()).duplicate, true, "the client-chosen id is the idempotency key");
   assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, request({ title: "Beta" })), { status: 409, code: "room_exists" });
   assert.throws(() => f.store.createAccountRoom(guest.token, guest.binding, request()), { status: 409, code: "room_exists" }, "another account never learns more than the collision");
-  const room = f.store.room("room-a").state;
+  const room = currentInviteContext(f.store,"room-a",{memberIds:["owner"]}).room.state;
   assert.equal(room.room.kind, "organization"); assert.equal(room.room.ownerId, "owner"); assert.deepEqual(room.members.owner.permissions, [...PERMISSIONS]);
   assert.equal(f.store.accountForMember("room-a", "owner").id, "admin-account");
   const opened = f.store.authenticateAccountSession(admin.token, "room-a", admin.binding);
   assert.equal(opened.member.id, "owner");
   f.store.createAccountRoom(admin.token, admin.binding, request({ roomId: "room-lines", purpose: "Plan the pilot.\nThen run it." }));
-  assert.equal(f.store.room("room-lines").state.room.purpose, "Plan the pilot.\nThen run it.", "a purpose may span lines");
+  assert.equal(currentInviteContext(f.store,"room-lines",{memberIds:["owner"]}).room.state.room.purpose, "Plan the pilot.\nThen run it.", "a purpose may span lines");
   assert.deepEqual(f.store.accountRooms(admin.token, admin.binding).rooms.map(room => [room.id, room.memberId, room.kind, room.archived]),
     [["commons", "admin", "personal", false], ["room-a", "owner", "organization", false], ["room-lines", "owner", "organization", false]]);
   // The creator owns the new room outright: archive it there, leave the old one.

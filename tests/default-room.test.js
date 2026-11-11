@@ -207,6 +207,11 @@ test("ensure-default-room prefers the account's personal room over an earlier ac
   const own = await authedPost(origin, "/api/account-rooms", creds,
     { roomId: "personal-zeta", title: "Zeta", purpose: "p", kind: "personal", displayName: "Owner" });
   assert.equal(own.status, 201);
+  const readRoom = f.store.room.bind(f.store);
+  f.store.room = (roomId, ...args) => {
+    assert.ok(!["a-org-room", "personal-zeta"].includes(roomId), "default selection must use protected metadata, not whole room history");
+    return readRoom(roomId, ...args);
+  };
   const pick = await authedPost(origin, "/api/account/ensure-default-room", creds);
   assert.equal(pick.status, 200);
   const body = await pick.json();

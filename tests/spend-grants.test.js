@@ -717,8 +717,9 @@ test("tools/call: priced tool without a grant is refused and never runs", async 
   assert.match(text, /5 cents/);
   assert.match(text, /room_put_file/);
   // The tool never ran: nothing staged.
-  const listed = await callTool(f.call, f.peer.secret, "room_list_files", { roomId: f.roomId });
-  assert.equal(listed.result.structuredContent.files.length, 0);
+  // Native file listing needs known message IDs; inspect the saved staging
+  // table to prove this refused upload created no bytes or attachment row.
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM room_attachments WHERE room_id=?").get(f.roomId).n, 0);
 });
 
 test("tools/call: priced tool with a grant settles exactly the price", async t => {

@@ -1,4 +1,5 @@
-import { constants, openSync, closeSync, fstatSync, lstatSync, readSync, writeFileSync, fsyncSync, mkdirSync, realpathSync } from "node:fs";
+import { closeSync, fstatSync, readSync, writeFileSync, fsyncSync, realpathSync } from "node:fs";
+import { assertPrivatePath, ensurePrivateDirectory, openNewPrivateFile, openPrivateRead } from "../room-acp/src/private-files.mjs";
 import { resolve, join } from "node:path";
 import { RoomAgentClient, RoomClientError } from "./room-agent.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -31,18 +32,14 @@ export async function readConnectionInput(input = process.stdin) {
     return validate(JSON.parse(Buffer.concat(chunks).toString("utf8")));
   } catch { throw new ConnectionError("invalid_config"); }
 }
-function privateStat(stat, directory = false) {
-  if ((directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1) || (stat.mode & 0o077)
-    || !process.getuid || stat.uid !== process.getuid()) throw new ConnectionError("config_not_private");
-}
 export function readAgentConnection(directory) {
   let fd;
   try {
     if (typeof directory !== "string" || !directory.trim()) throw new ConnectionError("invalid_config");
     const path = resolve(directory);
-    privateStat(lstatSync(path), true);
-    fd = openSync(join(realpathSync(path), filename), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = fstatSync(fd); privateStat(stat);
+    assertPrivatePath(path, true);
+    fd = openPrivateRead(join(realpathSync(path), filename));
+    const stat = fstatSync(fd);
     if (stat.size > limit) throw new ConnectionError("invalid_config");
     const bytes = Buffer.alloc(limit + 1);
     let length = 0, count;
@@ -51,7 +48,7 @@ export function readAgentConnection(directory) {
     return validate(JSON.parse(bytes.subarray(0, length).toString("utf8")));
   } catch (error) {
     if (error instanceof ConnectionError) throw error;
-    throw new ConnectionError(error.code === "ENOENT" ? "config_not_found" : error.code === "ELOOP" ? "config_not_private" : "invalid_config");
+    throw new ConnectionError(error.code === "ENOENT" ? "config_not_found" : ["ELOOP", "private_state_not_private"].includes(error.code) ? "config_not_private" : "invalid_config");
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 
@@ -65,14 +62,12 @@ export function saveAgentConnection(directory, value) {
   try {
     if (typeof directory !== "string" || !directory.trim()) throw new ConnectionError("invalid_config");
     const path = resolve(directory);
-    mkdirSync(path, { mode: 0o700 });
-    privateStat(lstatSync(path), true);
-    fd = openSync(join(realpathSync(path), filename), "wx", 0o600);
-    privateStat(fstatSync(fd));
+    ensurePrivateDirectory(path, {exclusive: true});
+    fd = openNewPrivateFile(join(realpathSync(path), filename));
     writeFileSync(fd, serialized); fsyncSync(fd);
   } catch (error) {
     if (error instanceof ConnectionError) throw error;
-    throw new ConnectionError(error.code === "EEXIST" ? "config_exists" : "config_save_failed");
+    throw new ConnectionError(error.code === "EEXIST" ? "config_exists" : error.code === "private_state_not_private" ? "config_not_private" : "config_save_failed");
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 
@@ -149,7 +144,7 @@ export function connectionDiagnostic(error) {
       : error.status === 403 && error.code === "insufficient_scope" ? "insufficient_scope"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
       : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
-      : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable", "invalid_work_page", "invalid_work_cursor", "stale_work_cursor"].includes(error.code) ? error.code : code;
+      : error.status === 404 && error.code !== "help_context_unavailable" ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable", "invalid_work_page", "invalid_work_cursor", "stale_work_cursor"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
   const httpStatus = error instanceof RoomClientError ? error.status : 0;

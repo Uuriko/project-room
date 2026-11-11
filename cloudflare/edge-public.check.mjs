@@ -169,6 +169,18 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(packet.headers.get('x-test-do-fetches'), '0');
     assert.match(packet.headers.get('content-type'), /text\/plain/);
     assert.match(await packet.text(), /Project Room/);
+    const receiptSpec = await call('/extensions/work-receipt/v1');
+    assert.equal(receiptSpec.status, 200);
+    assert.equal(receiptSpec.headers.get('x-test-do-fetches'), '0');
+    assert.equal(receiptSpec.headers.get('x-test-do-job-reads'), '0');
+    assert.match(receiptSpec.headers.get('content-type'), /text\/markdown/);
+    assert.match(await receiptSpec.text(), /declarative only/);
+    const receiptHead = await call('/extensions/work-receipt/v1', { method: 'HEAD' });
+    assert.equal(receiptHead.status, 200); assert.equal(await receiptHead.text(), '');
+    assert.equal(receiptHead.headers.get('x-test-do-fetches'), '0');
+    const receiptPost = await call('/extensions/work-receipt/v1', { method: 'POST' });
+    assert.equal(receiptPost.status, 405);
+    assert.equal(receiptPost.headers.get('x-test-do-fetches'), '0');
     const agents = await call('/agents.json');
     assert.equal(agents.status, 200);
     assert.equal(agents.headers.get('x-test-do-fetches'), '0');

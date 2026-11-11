@@ -117,11 +117,15 @@ async function deployLag({ liveRevision, githubApi = GITHUB_API, repo = REPO, to
     mainRevision: head.sha, aheadBy: diff.ahead_by ?? null, behindBy: diff.behind_by ?? null, lagHours };
 }
 
-export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000, isolated = false } = {}) {
+export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, githubToken = null, now = Date.now(), maxLagHours = 24, slowMs = 2000, isolated = false, expectedRevision = null } = {}) {
   const { findings, add } = makeRecorder();
   const hosts = [...SAME_HOSTS, new URL(origin).hostname];
   const targetOrigin = new URL(origin).origin;
   if (isolated && SAME_HOSTS.includes(new URL(origin).hostname)) throw new Error("Isolated smoke requires a separate environment origin");
+  if (expectedRevision !== null) {
+    if (isolated !== true) throw new Error("expectedRevision is only available for isolated smoke");
+    if (typeof expectedRevision !== "string" || !/^[0-9a-f]{40}$/.test(expectedRevision)) throw new Error("expectedRevision must be 40 lowercase hex characters");
+  }
   const advertisedChecks = [];
   const timings = [];
   const get = async (path, init = {}) => {
@@ -131,12 +135,15 @@ export async function liveSmoke({ origin = LIVE_ORIGIN, githubApi = GITHUB_API, 
 
   // 1. Version and deploy lag.
   const version = await get("/api/version");
-  let liveRevision = null, lag = null;
+  let liveRevision = null, lag = expectedRevision === null ? null : { status: "unverified", basis: "isolated-expected-revision", expectedRevision };
   if (version) {
     let body = null; try { body = JSON.parse(version.text); } catch { /* reported below */ }
     liveRevision = typeof body?.sourceRevision === "string" && /^[0-9a-f]{40}$/.test(body.sourceRevision) ? body.sourceRevision : null;
     if (version.res.status !== 200 || !liveRevision) add("version", `${version.res.status} ${version.text.slice(0, 80)}`);
-    if (liveRevision) {
+    if (liveRevision && expectedRevision !== null && version.res.status === 200) {
+      lag = { status: liveRevision === expectedRevision ? "expected" : "mismatch", basis: "isolated-expected-revision", expectedRevision };
+      if (liveRevision !== expectedRevision) add("deploy_revision_mismatch", `isolated live ${liveRevision} does not equal expected ${expectedRevision}`);
+    } else if (liveRevision && expectedRevision === null) {
       try { lag = await deployLag({ liveRevision, githubApi, token: githubToken, now, maxLagHours }); }
       catch (error) { lag = { status: "unknown", reason: error instanceof Error ? error.message : String(error) }; }
       if (lag.status === "stale") add("deploy_lag", `live ${liveRevision.slice(0, 8)} is ${lag.aheadBy} commits / ${lag.lagHours} h behind main ${lag.mainRevision.slice(0, 8)}`);
@@ -259,7 +266,7 @@ function summaryMarkdown(report) {
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const args = new Set(process.argv.slice(2));
   const origin = process.env.ROOM_SMOKE_ORIGIN || LIVE_ORIGIN;
-  const report = await liveSmoke({ origin, isolated: process.env.ROOM_SMOKE_ISOLATED === "1", githubApi: process.env.ROOM_SMOKE_GITHUB_API || GITHUB_API,
+  const report = await liveSmoke({ origin, isolated: process.env.ROOM_SMOKE_ISOLATED === "1", expectedRevision: process.env.ROOM_SMOKE_EXPECTED_REVISION ?? null, githubApi: process.env.ROOM_SMOKE_GITHUB_API || GITHUB_API,
     githubToken: process.env.GITHUB_TOKEN || null, maxLagHours: Number(process.env.ROOM_SMOKE_MAX_LAG_HOURS || 24) });
   if (args.has("--browser")) {
     const { chromium } = await import("playwright");

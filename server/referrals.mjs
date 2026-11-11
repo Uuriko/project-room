@@ -1,3 +1,4 @@
+import { currentInviteContext, isCurrentRoom } from './current-room-repository.mjs';
 // Referral attribution: which member brought which member into the room.
 //
 // A referral is recorded exactly once per join — the PRIMARY KEY on
@@ -53,6 +54,30 @@ export const REFERRAL_VIA = Object.freeze(["invite", "request"]);
 export class Referrals {
   constructor(store) { this.store = store; this.db = store.db; }
 
+  // The invitation dialog needs one caller-owned link, not the referral graph
+  // or activation settlement (which examines message history). Keep the same
+  // invitation/verification/autonomy gates and recorded reward-derived cap.
+  invitation(token, roomId, expectedSessionBinding = null, trace = null) {
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+      if (!auth?.member) fail(401, "unauthenticated", "Room membership required");
+      const reward = memberReward(this.store, roomId, auth.member.id);
+      const personal = this.store.shareLinks?.personalInvite(auth, roomId, reward.inviteCap);
+      let invite = null;
+      if (personal?.token) {
+        const room = currentInviteContext(this.store, roomId, { memberIds: [auth.member.id] })?.room ?? this.store.room(roomId);
+        stampIssuer(this.store, roomId, auth.member.id, trace ?? {});
+        invite = { token: personal.token, hash: `#join/${personal.token}`,
+          expiresAt: personal.link.expiresAt, remainingJoins: personal.link.remainingJoins,
+          maxJoins: personal.link.maxJoins, status: personal.link.status,
+          message: inviteMessage(room.state.room?.title) };
+      }
+      const inviteBlocked = !invite && auth.account && this.store.accountLogins.emailGateBlocks(auth.account.id)
+        ? "email_unverified" : null;
+      return { contractVersion: 1, roomId, invite, ...(inviteBlocked ? { inviteBlocked } : {}) };
+    });
+  }
+
   // Record a completed referral. Reuse the caller's transaction or open one,
   // after the referee's member record exists. Idempotent per referee: a
   // second recording for the same referee is a no-op returning the original.
@@ -64,7 +89,7 @@ export class Referrals {
     }
     if (referrerMemberId === refereeMemberId) fail(422, "invalid_referral", "a member cannot refer themselves");
     if (!REFERRAL_VIA.includes(via)) fail(422, "invalid_referral", "via must be invite or request");
-    const members = this.store.room(roomId).state.members ?? {};
+    const members = (currentInviteContext(this.store, roomId, { memberIds: [referrerMemberId, refereeMemberId] })?.room ?? this.store.room(roomId)).state.members ?? {};
     const referrer = members[referrerMemberId];
     const referee = members[refereeMemberId];
     if (!referrer || referrer.active === false) fail(409, "invalid_referral", "referrer is not an active member");
@@ -82,7 +107,7 @@ export class Referrals {
   }
 
   emitReferralCompleted(roomId, { referrerMemberId, refereeMemberId, via, at }) {
-    const room = this.store.room(roomId);
+    const room = (currentInviteContext(this.store, roomId, { memberIds: [referrerMemberId, refereeMemberId] })?.room ?? this.store.room(roomId));
     if (isRoomArchived(room.state)) return;
     if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
     const incoming = event({
@@ -94,6 +119,7 @@ export class Referrals {
       at: new Date(at).toISOString(),
       data: { referrerMemberId, refereeMemberId, via, completedAt: at },
     });
+    if (isCurrentRoom(this.db, roomId)) { this.store.appendSideTableEvent(roomId, incoming); return; }
     let state;
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "referral_rejected", error.message); }
@@ -110,7 +136,7 @@ export class Referrals {
   matchReferrer(roomId, text) {
     const needle = typeof text === "string" ? text.trim().toLowerCase() : "";
     if (!needle) return null;
-    const members = this.store.room(roomId).state.members ?? {};
+    const members = this.store.roomAuthority(roomId).members ?? {};
     const hits = Object.values(members).filter(m => m.active !== false
       && typeof m.displayName === "string" && m.displayName.trim().toLowerCase() === needle);
     return hits.length === 1 ? hits[0].id : null;

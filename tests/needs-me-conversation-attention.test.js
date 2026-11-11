@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // RES-1538 (reply-alert): needs-me misses conversation attention.
 //
 // (a) A reply to one's own post carrying no @mention and no formal reply
@@ -26,6 +27,7 @@ import { collectNeedsMe, roomAttention } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
+for(const current of [false,true]) {
 function setup(t, roomId) {
   const store = new RoomStore(':memory:');
   let clock = Date.now();
@@ -35,14 +37,14 @@ function setup(t, roomId) {
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
   const owner = store.identities.create('OwnerC');
-  rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Conversation attention', kind: 'personal' });
+  if(current)rooms.create(owner.secret,{roomId,title:roomId,purpose:'Conversation attention',kind:'personal'});else seedHistoricalNeedsMeRoom(store,owner,{roomId,title:roomId,purpose:'Conversation attention',kind:'personal'});
   linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   return { store, ada, bob, owner, roomId, advanceClock: ms => { clock += ms; } };
 }
 
-test('needs-me selects a reply to my post with no mention and no formal request as its own kind', t => {
+test(`needs-me selects a reply to my post with no mention and no formal request as its own kind current=${current}`, t => {
   const { store, ada, bob, owner, roomId } = setup(t, 'conv-reply');
   // A human-kind seat: trackMentions writes no reply row for this member, so
   // at the pre-fix head nothing selected the reply at all.
@@ -59,7 +61,7 @@ test('needs-me selects a reply to my post with no mention and no formal request 
   post(bob.secret, 'bob-post', { body: 'Bob original post' });
   post(owner.secret, 'owner-reply-to-bob', { body: 'Owner replying to Bob', replyToId: 'bob-post' });
 
-  const page = collectNeedsMe(store, maya.secret, {});
+  const page = attention(store,maya.secret);
   const replies = page.items.filter(item => item.kind === 'reply');
   assert.deepEqual(replies.map(item => item.id), ['bob-reply'], 'the plain thread reply is selected as kind "reply"');
   assert.equal(replies[0].roomId, roomId);
@@ -72,22 +74,25 @@ test('needs-me selects a reply to my post with no mention and no formal request 
   assert.ok(!page.items.some(item => item.id === 'maya-self-reply'), 'own replies are not attention');
   assert.ok(!page.items.some(item => item.id === 'owner-reply-to-bob'), 'replies to another member\'s post are not mine');
   // The room digest shares the same selection.
-  const attention = roomAttention(store, roomId, 'maya', maya.identityId, 0);
-  assert.ok(attention.some(item => item.kind === 'reply' && item.id === 'bob-reply'), 'roomAttention carries the reply kind');
+  const roomItems = current?attention(store,maya.secret).items:roomAttention(store, roomId, 'maya', maya.identityId, 0);
+  assert.ok(roomItems.some(item => item.kind === 'reply' && item.id === 'bob-reply'), 'roomAttention carries the reply kind');
 
-  // Agent-kind control: the reply row side effect already surfaces Bob's
-  // reply to Ada as a mention; the reply kind must not double-list it.
+  // Agent-kind control: an agent's untagged reply to another agent creates no
+  // mention obligation (#6072), so it reaches Ada once, as kind "reply".
   post(ada.secret, 'ada-post', { body: 'Ada original post' });
   post(bob.secret, 'bob-reply-ada', { body: 'Bob replying to Ada, no mention', replyToId: 'ada-post' });
-  const adaPage = collectNeedsMe(store, ada.secret, {});
+  const adaPage = attention(store,ada.secret);
   const adaHits = adaPage.items.filter(item => item.id === 'bob-reply-ada');
-  assert.equal(adaHits.length, 1, 'a reply already surfaced as an open mention is listed once');
-  assert.equal(adaHits[0].kind, 'mention');
+  assert.equal(adaHits.length, 1, 'an agent reply to an agent is listed once');
+  assert.equal(adaHits[0].kind, 'reply');
 });
 
-test('needs-me mention window is not consumed by mentions the selection discards', t => {
+test(`needs-me mention window is not consumed by mentions the selection discards current=${current}`, t => {
   const { store, ada, bob, roomId, advanceClock } = setup(t, 'conv-window');
   const post = (secret, id, data) => store.command(secret, roomId, { id, type: 'message.posted', data: { messageId: id, ...data } });
+  // The historical producer omits two onboarding events. Keep this exact
+  // boundary specimen above the original 256-event scan clamp in both arms.
+  if(!current)for(let i=0;i<2;i++)post(bob.secret,`boundary-noise-${i}`,{body:'Unrelated boundary event'});
   // 50 dead rows of the timed_out-and-answered class: minimum timeout, let
   // them expire, then Ada answers each in thread (her first answer's
   // trackMentions flips them to timed_out; the terminal state stays).
@@ -121,7 +126,7 @@ test('needs-me mention window is not consumed by mentions the selection discards
   // the cursor never claims unscanned ground, and the chain completes.
   const pages = [];
   let since = { rooms: { [roomId]: 0 }, land: {}, landIds: {} };
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < (current?100:10); i++) {
     const page = collectNeedsMe(store, ada.secret, { since });
     pages.push(page);
     since = JSON.parse(JSON.stringify(page.cursor));
@@ -130,13 +135,13 @@ test('needs-me mention window is not consumed by mentions the selection discards
   const delivered = pages.flatMap(p => p.items).filter(item => item.kind === 'mention' && item.id === 'fresh-mention');
   assert.equal(delivered.length, 1,
     `fresh mention (seq ${freshSeq} of head ${head}) is delivered exactly once by the chain; pages=${pages.map(p => JSON.stringify(p.items.map(i => i.id)))}`);
-  assert.equal(pages.length, 2,
+  assert.equal(current?pages.at(-1).hasMore:pages.length,current?false:2,
     'one budget page plus the delivery page: the dead mention rows forced no extra paging');
   assert.equal(pages[0].hasMore, true, 'the first read admits its scan stopped at the examined-row budget');
   assert.equal(pages.at(-1).hasMore, false, 'the chain reached the head truthfully instead of paging through dead rows');
 });
 
-test('needs-me cursor chain still enumerates a live mention backlog completely', t => {
+test(`needs-me cursor chain still enumerates a live mention backlog completely current=${current}`, t => {
   const { store, ada, bob, roomId } = setup(t, 'conv-chain');
   const post = (secret, id, data) => store.command(secret, roomId, { id, type: 'message.posted', data: { messageId: id, ...data } });
   const expected = [];
@@ -156,3 +161,6 @@ test('needs-me cursor chain still enumerates a live mention backlog completely',
   assert.equal(page.hasMore, false, 'continuation finishes');
   assert.deepEqual(seen.sort(), expected.sort(), 'every live mention is enumerated exactly once across the chain');
 });
+
+}
+function attention(store,secret){const items=[];let since;for(let n=0;n<100;n++){const page=collectNeedsMe(store,secret,{since});items.push(...page.items);if(!page.hasMore)return{...page,items};since=page.cursor;}assert.fail('attention did not complete');}

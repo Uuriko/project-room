@@ -1,0 +1,663 @@
+{
+  "base": "3644d2a7e",
+  "prototype": "123b140df",
+  "scope": "Actual production ProjectRoom constructor with test-only engine continuation driver; synthetic persisted target-owned admission fixture, NOT full operator restore completion",
+  "node": {
+    "passed": 5,
+    "failed": 0,
+    "log": "/tmp/recovery-engine-batch-node.log"
+  },
+  "worker": {
+    "passed": 1,
+    "failed": 0,
+    "arms": [
+      {
+        "n": 1000,
+        "batch": 1,
+        "blobBytes": 0,
+        "calls": 456,
+        "includingRetryHttpCalls": 912,
+        "clientWallMs": 1294.7742910000002,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 12339,
+        "maxEngineRows": 2006,
+        "adapterPhysicalRows": 4378767,
+        "adapterPhysicalWrites": 1824,
+        "rawNativePhysicalRows": 912,
+        "rawNativePhysicalWrites": 912,
+        "totalPhysicalRows": 4379679,
+        "totalPhysicalWrites": 2736,
+        "totalWorkerClockMs": 378,
+        "maxPhysicalRows": 12247,
+        "maxRowsTable": "access_requests",
+        "maxWorkerClockMs": 2,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 11617,
+            "engineRows": 2006,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 11616,
+            "engineRows": 2006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 11618,
+            "engineRows": 2006,
+            "clockMs": 0
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 11617,
+            "engineRows": 2006,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 10602,
+            "engineRows": 1002,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 10603,
+            "engineRows": 1002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 10564,
+            "engineRows": 1000,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 10565,
+            "engineRows": 1000,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "operator_actions",
+            "rows": 9577,
+            "engineRows": 18,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_restore_admission",
+            "rows": 9616,
+            "engineRows": 2,
+            "clockMs": 1
+          }
+        ]
+      },
+      {
+        "n": 1000,
+        "batch": 16,
+        "blobBytes": 0,
+        "calls": 58,
+        "includingRetryHttpCalls": 116,
+        "clientWallMs": 487.81633299999976,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 12339,
+        "maxEngineRows": 2006,
+        "adapterPhysicalRows": 970662,
+        "adapterPhysicalWrites": 232,
+        "rawNativePhysicalRows": 116,
+        "rawNativePhysicalWrites": 116,
+        "totalPhysicalRows": 970778,
+        "totalPhysicalWrites": 348,
+        "totalWorkerClockMs": 68,
+        "maxPhysicalRows": 28372,
+        "maxRowsTable": "agent_autonomy_tiers",
+        "maxWorkerClockMs": 4,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 11617,
+            "engineRows": 2006,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 11616,
+            "engineRows": 2006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 11618,
+            "engineRows": 2006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 11617,
+            "engineRows": 2006,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 10602,
+            "engineRows": 1002,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 10603,
+            "engineRows": 1002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 10564,
+            "engineRows": 1000,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 10565,
+            "engineRows": 1000,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "private_email_connections",
+            "rows": 23936,
+            "engineRows": 33,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "agent_autonomy_tiers",
+            "rows": 28372,
+            "engineRows": 16,
+            "clockMs": 4
+          }
+        ]
+      },
+      {
+        "n": 5000,
+        "batch": 1,
+        "blobBytes": 0,
+        "calls": 456,
+        "includingRetryHttpCalls": 912,
+        "clientWallMs": 1184.3513750000002,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 60402,
+        "maxEngineRows": 10006,
+        "adapterPhysicalRows": 4426830,
+        "adapterPhysicalWrites": 1824,
+        "rawNativePhysicalRows": 912,
+        "rawNativePhysicalWrites": 912,
+        "totalPhysicalRows": 4427742,
+        "totalPhysicalWrites": 2736,
+        "totalWorkerClockMs": 362,
+        "maxPhysicalRows": 19618,
+        "maxRowsTable": "current_room_record_proofs",
+        "maxWorkerClockMs": 3,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 19616,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 19618,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 14602,
+            "engineRows": 5002,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 14603,
+            "engineRows": 5002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 14564,
+            "engineRows": 5000,
+            "clockMs": 3
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 14565,
+            "engineRows": 5000,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "operator_actions",
+            "rows": 9640,
+            "engineRows": 81,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_restore_admission",
+            "rows": 9616,
+            "engineRows": 2,
+            "clockMs": 1
+          }
+        ]
+      },
+      {
+        "n": 5000,
+        "batch": 16,
+        "blobBytes": 0,
+        "calls": 58,
+        "includingRetryHttpCalls": 116,
+        "clientWallMs": 487.7952089999999,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 60402,
+        "maxEngineRows": 10006,
+        "adapterPhysicalRows": 1018725,
+        "adapterPhysicalWrites": 232,
+        "rawNativePhysicalRows": 116,
+        "rawNativePhysicalWrites": 116,
+        "totalPhysicalRows": 1018841,
+        "totalPhysicalWrites": 348,
+        "totalWorkerClockMs": 71,
+        "maxPhysicalRows": 28372,
+        "maxRowsTable": "agent_autonomy_tiers",
+        "maxWorkerClockMs": 3,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 3
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 19616,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 19618,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 14602,
+            "engineRows": 5002,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 14603,
+            "engineRows": 5002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 14564,
+            "engineRows": 5000,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 14565,
+            "engineRows": 5000,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "private_email_connections",
+            "rows": 23999,
+            "engineRows": 96,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "agent_autonomy_tiers",
+            "rows": 28372,
+            "engineRows": 16,
+            "clockMs": 3
+          }
+        ]
+      },
+      {
+        "n": 5000,
+        "batch": 1,
+        "blobBytes": 1048576,
+        "calls": 456,
+        "includingRetryHttpCalls": 912,
+        "clientWallMs": 1623.2733329999992,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 60403,
+        "maxEngineRows": 10006,
+        "adapterPhysicalRows": 4426831,
+        "adapterPhysicalWrites": 1824,
+        "rawNativePhysicalRows": 912,
+        "rawNativePhysicalWrites": 912,
+        "totalPhysicalRows": 4427743,
+        "totalPhysicalWrites": 2736,
+        "totalWorkerClockMs": 504,
+        "maxPhysicalRows": 19618,
+        "maxRowsTable": "current_room_record_proofs",
+        "maxWorkerClockMs": 6,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 4
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 19616,
+            "engineRows": 10006,
+            "clockMs": 3
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 19618,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 14602,
+            "engineRows": 5002,
+            "clockMs": 4
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 14603,
+            "engineRows": 5002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 14564,
+            "engineRows": 5000,
+            "clockMs": 4
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 14565,
+            "engineRows": 5000,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "operator_actions",
+            "rows": 9640,
+            "engineRows": 81,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_restore_admission",
+            "rows": 9616,
+            "engineRows": 2,
+            "clockMs": 1
+          }
+        ]
+      },
+      {
+        "n": 5000,
+        "batch": 16,
+        "blobBytes": 1048576,
+        "calls": 62,
+        "includingRetryHttpCalls": 124,
+        "clientWallMs": 494.9771670000009,
+        "memorySample": {
+          "available": true,
+          "rss": 0,
+          "heapTotal": 0,
+          "heapUsed": 0,
+          "external": 0,
+          "arrayBuffers": 0
+        },
+        "totalEngineRows": 60403,
+        "maxEngineRows": 10006,
+        "adapterPhysicalRows": 1054933,
+        "adapterPhysicalWrites": 248,
+        "rawNativePhysicalRows": 124,
+        "rawNativePhysicalWrites": 124,
+        "totalPhysicalRows": 1055057,
+        "totalPhysicalWrites": 372,
+        "totalWorkerClockMs": 74,
+        "maxPhysicalRows": 28372,
+        "maxRowsTable": "agent_autonomy_tiers",
+        "maxWorkerClockMs": 3,
+        "quickTables": 227,
+        "foreignKeyTables": 228,
+        "highestEngineCostTables": [
+          {
+            "stage": "quick_check",
+            "table": "current_room_record_proofs",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 3
+          },
+          {
+            "stage": "quick_check",
+            "table": "current_room_records",
+            "rows": 19616,
+            "engineRows": 10006,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_record_proofs",
+            "rows": 19618,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "current_room_records",
+            "rows": 19617,
+            "engineRows": 10006,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "events",
+            "rows": 14602,
+            "engineRows": 5002,
+            "clockMs": 2
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "events",
+            "rows": 14603,
+            "engineRows": 5002,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "messages",
+            "rows": 14564,
+            "engineRows": 5000,
+            "clockMs": 3
+          },
+          {
+            "stage": "foreign_key_check",
+            "table": "messages",
+            "rows": 14565,
+            "engineRows": 5000,
+            "clockMs": 2
+          },
+          {
+            "stage": "quick_check",
+            "table": "private_email_connections",
+            "rows": 23999,
+            "engineRows": 96,
+            "clockMs": 1
+          },
+          {
+            "stage": "quick_check",
+            "table": "agent_autonomy_tiers",
+            "rows": 28372,
+            "engineRows": 16,
+            "clockMs": 3
+          }
+        ]
+      }
+    ],
+    "log": "/tmp/recovery-engine-native-counter-stable.log",
+    "measurementCorrection": "Earlier0127 receipt labeled adapter-only counters totalPhysical; latest adds separately observed raw room_writer_permit counters and sums both. Older samples retained in0127 commit as historical adapter-only scope.",
+    "nativeObserver": "One stable db.storage proxy per actual Native instance; no per-request replacement that could invalidate storage identity caches. Constructor cost outside advancing-step totals. Raw native permit cursor counters recorded separately.",
+    "costScope": "Physical rows/writes and summed Worker clock cover advancing steps only. Client wall includes every retry and cold reopen. Retry assertions cover zero adapter writes, not zero native permit writes."
+  },
+  "preserved": [
+    "all227 filtered per-table quick_check calls",
+    "all228 per-table foreign_key_check calls incl sqlite_sequence",
+    "identical engine rows for batch1 and16 on each dataset",
+    "fault after actual checks before atomic checkpoint leaves exact old admission, cold restart still503",
+    "exact request retry returns same result with0writes",
+    "all targets remain503 even enginecomplete; no full audit bypass"
+  ],
+  "batch": {
+    "defaultMaxAtoms": 16,
+    "allowedInternalMaxAtoms": [
+      1,
+      16
+    ],
+    "largeRowsGreaterThan": 128,
+    "largeMaxRowBytesGreaterThan": 131072,
+    "unknownSealedSize": "run alone",
+    "beforeKnownLargeAfterPriorAtom": "defer until next step",
+    "afterLargeAtom": "return immediately",
+    "cursorVersion": 2,
+    "span": "lastBatch={fromStage,fromTable,atoms,largeTable}"
+  },
+  "limitations": [
+    "One table SQLite engine atom remains internally atomic and grows with table rows; NOTstrictCPUbound",
+    "memoryUsage API returns allzero placeholders in Worker; actual memory telemetry unavailable",
+    "clock samples are elapsed not CPU",
+    "row counters do not expose SQLite BLOB bytes or internal memory",
+    "source manifest rowcounts/maxRowBytes are existing frozen coverage optimization input, not authority/certification",
+    "whole restore/oracle remains mandatory; pairing owns integration and protocol5",
+    "unit batch scheduling facade is not sealed-source qualification"
+  ]
+}

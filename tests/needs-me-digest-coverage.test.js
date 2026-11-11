@@ -1,3 +1,4 @@
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 // Round 3 of W2-F9-CURE (RES-1538, Codex seq 25334): the room digest
 // composes its attention section from roomAttention, whose bounded
 // reply scan clamps the window to scanned ground — but the digest
@@ -14,7 +15,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
-import { AgentRooms } from '../server/agent-rooms.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
@@ -23,10 +23,9 @@ function setup(t, roomId) {
   let clock = Date.now();
   store.now = () => (clock += 2100); // stay under the chat flood guard
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const bob = store.identities.create('Bob');
   const owner = store.identities.create('OwnerC');
-  rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Digest coverage', kind: 'personal' });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId, title: roomId, purpose: 'Digest coverage', kind: 'personal' });
   linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   store.command(owner.secret, roomId, { id: 'add-maya', type: 'member.added', data: { memberId: 'maya', displayName: 'Maya', kind: 'human', permissions: [] } });

@@ -56,7 +56,7 @@ function assertTrusted(apiBase, configured) {
 // A configured base (--origin or the default): an origin plus an optional
 // fixed path prefix (the getdasha door lives under /room), https only
 // except on loopback, never with credentials embedded.
-function normalizeBase(value) {
+export function normalizeBase(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error(`invalid Room origin: ${value}`); }
   if (url.username || url.password) throw new Error("Room origin must not contain credentials in the URL");

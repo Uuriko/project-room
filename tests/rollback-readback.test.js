@@ -198,7 +198,7 @@ console.log(JSON.stringify(same(production) ? recorded.prod : recorded.entry));
     SMOKE_AGENT_CARD_FETCHES: "1" };
   const job = parse(readFileSync(join(root, ".github/workflows/rollback-prod.yml"), "utf8")).jobs.rollback;
   const start = job.steps.findIndex(step => step.name === "Roll back") + 1;
-  const end = job.steps.findIndex(step => step.name === "Receipt to muse-room");
+  const end = job.steps.findIndex(step => step.name === "Receipt to Project Room");
   assert.ok(start > 0 && end >= start, "known post-rollback boundary");
   let result = { code: 0 }, readbackOutcome = "skipped", smokeOutcome = "skipped";
   for (const step of job.steps.slice(start, end).filter(step => step.run)) {

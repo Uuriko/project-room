@@ -162,6 +162,7 @@ export function permissionDecisionMessages(store, rows) {
     if (requestEvent?.type !== T.ACCESS_REQUESTED) continue;
     const row = store.db.prepare("SELECT * FROM access_requests WHERE room_id=? AND request_id=?").get(event.roomId, requestEvent.data.requestId);
     if (!row || !["approved", "denied"].includes(row.status)) continue;
+    if(JSON.parse(row.requested_permissions)?.kind === "agent-sponsor-transfer")continue;
     const upgrade = permissionRequestContents(row).upgrade;
     if (upgrade?.decisionMessageId !== event.data.messageId) continue;
     decisions.set(event.data.messageId, { requestId: row.request_id, memberId: upgrade.memberId,

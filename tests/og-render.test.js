@@ -1,5 +1,5 @@
-// VL-1a runtime OG renderer. The golden hash is the PNG bytes of one fixed
-// input, so a layout or atlas change fails here.
+// Pin decoded pixels so layout/atlas changes fail independently of the
+// Node/Worker compressor version. PNG structure and CRCs remain validated.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { OG_HEIGHT, OG_WIDTH, renderOgPng, sanitizeOgText, wrapOgText } from "../server/og-render.mjs";
+import { OG_HEIGHT, OG_WIDTH, decodePng, renderOgPng, sanitizeOgText, wrapOgText } from "../server/og-render.mjs";
 
 const OG_FILES = ["og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png", "og/base-receipt.png"];
 
@@ -26,7 +26,7 @@ function memoryLoader() {
 }
 
 const atlas = JSON.parse(readFileSync(new URL("../og/atlas.json", import.meta.url), "utf8"));
-const GOLDEN = "8be24cd4a63e7f43b33b20584c1b24594910bfe4b1f3b6755eedcb3831199a71";
+const GOLDEN = "5eb5c838d45674a48ce37a19e2bc132743460e46a4d0ffaf042c5c38882d9972";
 
 function ihdr(png) {
   assert.equal(Buffer.from(png.subarray(0, 8)).toString("hex"), "89504e470d0a1a0a");
@@ -35,7 +35,7 @@ function ihdr(png) {
   return { width: view.getUint32(0), height: view.getUint32(4), depth: png[24], color: png[25] };
 }
 
-test("a receipt card is a 1200 by 630 PNG and a fixed input keeps its bytes", async () => {
+test("a receipt card is a 1200 by 630 PNG and a fixed input keeps its pixels", async () => {
   const png = await renderOgPng({
     title: "Ship the receipt",
     subtitle: "Closed by Ada",
@@ -47,7 +47,7 @@ test("a receipt card is a 1200 by 630 PNG and a fixed input keeps its bytes", as
   assert.equal(header.height, OG_HEIGHT);
   assert.equal(header.depth, 8);
   assert.equal(header.color, 6);
-  assert.equal(createHash("sha256").update(png).digest("hex"), GOLDEN);
+  assert.equal(createHash("sha256").update(decodePng(png).rgba).digest("hex"), GOLDEN);
 });
 
 test("a long title wraps to three lines and ends with an ellipsis", () => {
@@ -74,7 +74,7 @@ test("an injected loader renders the golden card and is asked for exactly the bu
     badges: ["CI passing", "Merged"],
     footer: "Made in Project Room",
   }, { loadAsset });
-  assert.equal(createHash("sha256").update(png).digest("hex"), GOLDEN);
+  assert.equal(createHash("sha256").update(decodePng(png).rgba).digest("hex"), GOLDEN);
   assert.deepEqual([...requested].sort(), [...OG_FILES].sort());
 });
 
@@ -94,7 +94,7 @@ test("the render path never touches node:fs when a loader is injected (Worker sh
     badges: ["CI passing", "Merged"],
     footer: "Made in Project Room",
   }, { loadAsset });
-  assert.equal(createHash("sha256").update(png).digest("hex"), GOLDEN);
+  assert.equal(createHash("sha256").update(decodePng(png).rgba).digest("hex"), GOLDEN);
   // The same isolated module without a loader falls back to node:fs and
   // fails here, proving the loader — not the disk — carried the render above.
   await assert.rejects(isolated.renderOgPng({ title: "Hello" }), /ENOENT/);

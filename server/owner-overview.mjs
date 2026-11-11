@@ -1,3 +1,4 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
 // #3342 — Owner Cockpit slice 1: the cross-room read model behind
 // GET /api/owner/overview (spec: project-room-owner-cockpit.md §§2, 4, 6).
 // #3343 — Slice 2 adds the Money (§5) and Roster (§3) sections below:
@@ -107,8 +108,8 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     catch (error) { if (error.status === 403) return null; throw error; }
     const member = roomAuth.member;
     if (!member || member.kind !== "human") return null;
-    const state = store.room(roomId).state;
-    if (member.id === state.room.ownerId) return "owner";
+    const authority = store.roomAuthority(roomId,{memberId:member.id});
+    if (member.id === authority.ownerId) return "owner";
     if (Array.isArray(member.permissions) && member.permissions.includes("manage_members")) return "admin";
     return null;
   };
@@ -124,6 +125,14 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
 
   const pageIds = allRoomIds.filter(roomId => after === null || roomId > after).slice(0, ROOM_PAGE);
   const hasMore = allRoomIds.filter(roomId => after === null || roomId > after).length > ROOM_PAGE;
+  // The legacy cockpit requires complete work/session/money state. Recognize
+  // real current owners without pretending that bounded personal pages are a
+  // complete account-wide report. The existing per-room reader is v2-aware.
+  for (const roomId of pageIds) {
+    if (isCurrentRoom(store.db,roomId) && probeRole(roomId) !== null)
+      fail(409, "current_room_context_required", "Cross-room overview is unavailable for normalized rooms. Open the room's Needs you queue and follow its pages.");
+  }
+
 
   const decisions = [];
   const exceptions = [];

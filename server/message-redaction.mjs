@@ -1,12 +1,15 @@
+import { withCurrentServingWriter } from './current-room-repository.mjs';
+import {purgeReplayCapturesForPrivacy} from './replay-cutover.mjs';
 import { assertMessageWrite, recordMessageWrite } from './write-integrity.mjs';
 import { readMessageReplaySnapshot, writeMessageReplaySnapshot, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
+import {prepareHistoricalReplayErasure} from './historical-replay-contract.mjs';
 // PRIV-1: rewrite a message out of the log, the projection, and the messages
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
 
 import { hasMessageAuthority } from './message-authority.mjs';
 import { storedProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { applyEvent, event, EVENT_TYPES, isRoomArchived } from "../src/events.js";
+import { applyEvent, event, EVENT_TYPES, isRoomArchived, isArchivedOwnerPrivacyEvent } from "../src/events.js";
 import { syncMessageRows } from "./messages-store.mjs";
 
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
@@ -36,6 +39,56 @@ function receiptCites(state, messageId) {
   return false;
 }
 
+// Normalized deletion already has the protected addressed message, its channel
+// copy, ancestry and its one canonical work contract. Native text evidence is
+// valid only for a message explicitly linked to that same work item. Keep the
+// existing shared reducers and event order, but never open a full room/log.
+export function prepareCurrentMessageRedaction(db,{roomId,state,actorId,at,messageId,command,deletion}) {
+  const sourceId=messageId.endsWith(':channel')?null:messageId;
+  const rows=db.prepare("SELECT sequence,json_extract(body,'$.type') type,length(CAST(json_extract(body,'$.data.body') AS BLOB)) bytes FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? ORDER BY sequence");
+  let byteLength=null,alreadyRedacted=false,alreadyWithdrawn=false;
+  for(const row of rows.iterate(roomId,messageId)) {
+    if ( row.type === EVENT_TYPES.MESSAGE_POSTED && byteLength === null ) byteLength = row.bytes;
+    if(row.type===EVENT_TYPES.MESSAGE_REDACTED)alreadyRedacted=true;
+    if(row.type===EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN)alreadyWithdrawn=true;
+  }
+  const events=[],length=Number.isInteger(byteLength)&&byteLength>0?{byteLength}:{};
+  const append=(type,data)=>{const incoming=event({type,actorId,roomId,at,data});state=compact(applyEvent(state,incoming));events.push(incoming);};
+  if(receiptCites(state,messageId)&&!alreadyWithdrawn)append(EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN,{messageId,evidence:'removed',...length});
+  if(!alreadyRedacted)append(EVENT_TYPES.MESSAGE_REDACTED,{messageId,...length});
+  const historical=sourceId?prepareHistoricalReplayErasure(db,{roomId,through:db.prepare('SELECT sequence FROM rooms WHERE id=?').get(roomId).sequence,messageId,actorId,command,deletion,redaction:events.find(entry=>entry.type===EVENT_TYPES.MESSAGE_REDACTED)}):null;
+  let deletionSequence;
+  return {state,events,admit(bytes){historical?.admit(bytes);},finalize(){historical?.finalize(deletionSequence);},persist(sequence){
+    deletionSequence=sequence;
+    purgeReplayCapturesForPrivacy(db,roomId);
+    if(sourceId) {
+      const update=db.prepare('UPDATE events SET body=? WHERE room_id=? AND sequence=?');
+      const source=db.prepare("SELECT sequence,body FROM events INDEXED BY current_redaction_message_events WHERE room_id=? AND CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE id END=? ORDER BY sequence");
+      for(const row of source.iterate(roomId,sourceId)) {
+        const entry=parseEvent(row.body);if(!eventTargetsMessage(entry,sourceId))continue;
+        if(Object.hasOwn(entry.data,'body'))entry.data.body=null;
+        if(Object.hasOwn(entry.data,'attachments'))entry.data.attachments=null;
+        entry.data.redacted=true;update.run(JSON.stringify(entry),roomId,row.sequence);
+      }
+    }
+    for(const incoming of events)db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(roomId,++sequence,incoming.id,JSON.stringify(incoming));
+    // A normalized room serves only canonical records. Old full replay caches
+    // are never its authority; discard them without parsing/hydrating them.
+    discardMessageReplaySnapshot(db,roomId);
+    db.prepare('UPDATE messages_backfill_cursor SET state_seq=0,parity_at_seq=NULL WHERE room_id=?').run(roomId);
+    db.prepare('DELETE FROM messages_backfill_state WHERE room_id=?').run(roomId);
+    eraseMessageAuxiliaryStorage(db,roomId,messageId);
+  }};
+}
+
+function eraseMessageAuxiliaryStorage(db,roomId,messageId) {
+  withCurrentServingWriter(db,roomId,()=>db.prepare("UPDATE room_attachments SET state='deleted',bytes=NULL,filename='purged' WHERE room_id=? AND message_id=? AND state IN ('staged','committed')").run(roomId,messageId));
+  const drops=db.prepare('SELECT id FROM room_code_drops WHERE room_id=? AND message_id=?').all(roomId,messageId);
+  for(const {id} of drops)db.prepare('DELETE FROM room_code_checks WHERE room_id=? AND drop_id=?').run(roomId,id);
+  db.prepare('DELETE FROM room_code_drops WHERE room_id=? AND message_id=?').run(roomId,messageId);
+  db.prepare('DELETE FROM projection_checkpoints WHERE room_id=?').run(roomId);
+}
+
 // Null body and attachments on earlier events for this message, then append
 // message.redacted (and receipt.evidence_withdrawn when a receipt cites it).
 // A channel-copy id shares its text with the source event, so only the source
@@ -62,10 +115,11 @@ export function readRedactionLog(db, roomId) {
 // caller that writes or rebuilds the projection itself after its last call.
 // retainedMessageIds is an ordinary-delete allowlist from its pre-command
 // carrier. Bulk account deletion deliberately uses the empty default.
-export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false, log = null, writeProjection = true, retainedMessageIds = [] }) {
+export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false, log = null, writeProjection = true, retainedMessageIds = [], postArchiveOwnerDelete = false }) {
   if (typeof roomId !== "string" || typeof messageId !== "string" || !messageId) {
     return { state, sequence: null, rewritten: 0 };
   }
+  purgeReplayCapturesForPrivacy(db,roomId);
   const shared = log && log.roomId === roomId ? log : readRedactionLog(db, roomId);
   let postedBody = null;
   let alreadyRedacted = false;
@@ -109,7 +163,8 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   let next = state;
   let sequence = shared.maxSequence;
-  if (!isRoomArchived(state)) {
+  const ownerAfterArchive=postArchiveOwnerDelete&&isArchivedOwnerPrivacyEvent(state,{type:EVENT_TYPES.MESSAGE_REDACTED,actorId});
+  if (!isRoomArchived(state)||ownerAfterArchive) {
     const insert = db.prepare("INSERT INTO events VALUES(?,?,?,?)");
     const length = Number.isInteger(byteLength) && byteLength > 0 ? { byteLength } : {};
     if (receiptCites(state, messageId) && !alreadyWithdrawn) {
@@ -141,8 +196,8 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
   try {
     for (const id of ids) assertMessageWrite(db,roomId,id);
-    db.prepare(`UPDATE messages SET body=NULL, reducer_extras_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
-    if (isRoomArchived(state)) {
+    db.prepare(`UPDATE messages SET body=NULL, reducer_extras_json=${ownerAfterArchive?'reducer_extras_json':'NULL'}, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
+    if (isRoomArchived(state)&&!ownerAfterArchive) {
       db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
     }
     for (const id of ids) recordMessageWrite(db,roomId,id);
@@ -163,9 +218,9 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
     if (!/no such table/i.test(error?.message ?? "")) throw error;
   }
   try {
-    db.prepare(
+    withCurrentServingWriter(db, roomId, () => db.prepare(
       "UPDATE room_attachments SET state='deleted', bytes=NULL, filename='purged' WHERE room_id=? AND message_id=? AND state IN ('staged','committed')"
-    ).run(roomId, messageId);
+    ).run(roomId, messageId));
   } catch (error) {
     if (!/no such (table|column)/i.test(error?.message ?? "")) throw error;
   }
@@ -184,7 +239,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   }
 
   const stored = compact(next);
-  if (!isRoomArchived(state)) {
+  if (!isRoomArchived(state)||ownerAfterArchive) {
     if (writeProjection) db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest, retainedMessageIds }), roomId);
     else db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, roomId);
   }

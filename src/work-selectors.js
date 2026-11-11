@@ -105,7 +105,7 @@ export function searchWorkMatches(state, query) {
       ...REQUEST_ROLES.map(role => state.members[item[role]]?.displayName)];
     const matched = fields.find(text => typeof text === "string" && text.toLocaleLowerCase().includes(term));
     if (matched === undefined) continue;
-    const text = matched === item.title ? item.receipt?.summary || item.definitionOfDone : matched;
+    const text = matched === item.title ? item.receipt?.summary || item.definitionOfDone || matched : matched;
     const folded = text.toLocaleLowerCase(), offset = Math.max(0, folded.indexOf(term) - 60);
     let start = offset;
     // Case folding can expand characters (for example İ); convert the folded

@@ -1,7 +1,11 @@
+import {recoveryReportFingerprint} from './recovery-report-scope.mjs';
+import {verifyShareLinksForRecovery} from './recovery-share-links.mjs';
+import {verifyRemindersForRecovery} from './recovery-reminder-consumption.mjs';
+import {validateRecoveryHistoryEntry} from './recovery-history-entry.mjs';
+import { isCurrentRoom, readCurrentRoomForAudit, verifyCurrentRoomSchema } from './current-room-repository.mjs';
 // Read-only offline audit. It neither repairs data nor proves post-capture authority.
 import { createHash } from "node:crypto";
-import { EVENT_TYPES, RETIRED_REPLAY_EVENT_TYPES, validId } from "../src/events.js";
-import { terminalWork } from "../src/workflow.js";
+import { auditReplayCutoverRecovery } from "./replay-cutover.mjs";
 import { applicationTables, lazyAdditiveTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
 import { auditCharters } from "../src/room-charter.js";
@@ -68,14 +72,18 @@ export function auditRecovery(store) {
     const required = [...applicationTables, ...runtimeTables].sort();
     const allowed = new Set([...required, ...lazyAdditiveTables]);
     requireState(tables.every(name => allowed.has(name)));
+    if (tables.includes("message_replay_units")) auditReplayCutoverRecovery(store.db);
     requireState(required.every(name => tables.includes(name)));
+    verifyCurrentRoomSchema(store.db);
     const rooms = new Map();
     const drift = [];
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
-      const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
-      // An archived room's stored projection is compacted; compare the replay compacted the same way.
-      compactReplayLikeArchive(store.db, row.id, rebuilt.state);
+      const current=isCurrentRoom(store.db,row.id);
+      const actual = current ? readCurrentRoomForAudit(store,row.id) : store.room(row.id), rebuilt = store.rebuildProjection(row.id);
+      // The full current census proved the marker and complete retained-ID map.
+      // A closed current carrier cannot supply that legacy metadata itself.
+      compactReplayLikeArchive(store.db, row.id, rebuilt.state,current?(actual.state.messagesArchive??null):undefined);
       // Phase 2 channels: old stored projections may lack channels while the
       // replay backfills them. Messages in old projections also lack channelId
       // (new code adds it). Compare ignoring channels and message channelIds,
@@ -163,16 +171,10 @@ export function auditRecovery(store) {
       requireState(integer(row.sequence) && row.sequence >= 0);
       const history = store.db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
       requireState(history.length === row.sequence);
-      history.forEach((entry, index) => {
-        const event = JSON.parse(entry.body);
-        requireState(entry.sequence === index + 1 && event.id === entry.id && event.roomId === row.id);
-        requireState([event.id, event.idempotencyKey, event.actorId, event.roomId].every(validId)
-          && (Object.values(EVENT_TYPES).includes(event.type) || Object.values(RETIRED_REPLAY_EVENT_TYPES).includes(event.type)) && typeof event.at === "string" && Number.isFinite(Date.parse(event.at))
-          && event.data && typeof event.data === "object" && !Array.isArray(event.data));
-      });
+      history.forEach((entry,index)=>validateRecoveryHistoryEntry(entry,index+1,row.id));
       auditTextResults(store.db, actual.state, history);
       auditCharters(actual.state, history, checkpoint);
-      auditReplyRequests(actual.state, history, checkpoint, archivedMessageIds(store.db, row.id));
+      auditReplyRequests(actual.state, history, checkpoint, archivedMessageIds(store.db, row.id,current?(actual.state.messagesArchive??null):undefined));
       auditWorkHelp(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
@@ -181,57 +183,16 @@ export function auditRecovery(store) {
     // fails, so one refusal carries the full reconciliation summary.
     if (drift.length) throw reconciliationError(drift);
     const invitations = store.verifyInvitationAudit();
-    store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
+    verifyShareLinksForRecovery(store); store.reminders.verifySchema(); store.agentConnections.verify();
     store.requestRuns.verifySchema({ allowAbsent: true });
     store.inbox.verify();
     store.email.verify();
     store.delegationJournal.verify();
     store.channelUpdates.verifySchema(); store.channelUpdates.verify();
     store.handoffs.verifySchema(); store.handoffs.verify(); // Task 23: handoff journal integrity.
-    const reminders = store.db.prepare("SELECT * FROM private_reminders").all();
-    const receipts = store.db.prepare("SELECT * FROM private_reminder_commands").all();
-    const byWork = new Map();
-    for (const row of receipts) {
-      const receipt = JSON.parse(row.response);
-      requireState(receipt && Object.keys(receipt).sort().join(" ") === "dueAt requestId revision state workItemId"
-        && validId(row.member_id) && validId(row.request_id) && receipt.requestId === row.request_id
-        && validId(receipt.workItemId) && integer(receipt.revision) && receipt.revision > 0
-        && integer(receipt.dueAt) && ["active", "cancelled"].includes(receipt.state));
-      const request = { requestId: receipt.requestId, workItemId: receipt.workItemId,
-        expectedRevision: receipt.revision - 1, action: receipt.state === "active" ? "schedule" : "cancel",
-        ...(receipt.state === "active" ? { dueAt: receipt.dueAt } : {}) };
-      requireState(row.fingerprint === digest(request));
-      const key = canonical([row.room_id, row.member_id, receipt.workItemId]);
-      const history = byWork.get(key) ?? [];
-      requireState(!history.some(item => item.revision === receipt.revision));
-      history.push(receipt); byWork.set(key, history);
-    }
-    for (const history of byWork.values()) {
-      history.sort((a, b) => a.revision - b.revision);
-      requireState(history[0].revision === 1 && history[0].state === "active");
-      for (let i = 1; i < history.length; i++) {
-        const prior = history[i - 1], next = history[i], step = next.revision - prior.revision;
-        requireState(step === 1 || (step === 2 && prior.state === "active" && next.state === "active"));
-        if (next.state === "cancelled") requireState(prior.state === "active" && step === 1 && prior.dueAt === next.dueAt);
-      }
-    }
-    for (const row of reminders) {
-      const state = rooms.get(row.room_id), member = state?.members[row.member_id], work = state?.workItems[row.work_item_id];
-      const key = canonical([row.room_id, row.member_id, row.work_item_id]);
-      const history = byWork.get(key), latest = history?.reduce((a, b) => a.revision > b.revision ? a : b);
-      requireState(member && work && integer(row.revision) && row.revision > 0 && integer(row.due_at)
-        && integer(row.basis_work_revision) && row.basis_work_revision >= 0 && row.basis_work_revision <= work.revision
-        && integer(row.created_at) && integer(row.updated_at) && latest
-        && latest.dueAt === row.due_at && ["active", "cancelled", "resolved"].includes(row.state));
-      if (row.state === "resolved") requireState(latest.state === "active" && row.revision === latest.revision + 1);
-      else requireState(latest.revision === row.revision && latest.state === row.state);
-      const account = store.accountForMember(row.room_id, row.member_id);
-      if (member.kind === "human") requireState(account);
-      if (row.state === "active") requireState(member.active && !terminalWork(work) && (member.kind !== "human" || account.active));
-      byWork.delete(key);
-    }
-    requireState(byWork.size === 0);
-    const contents = applicationTables.map(table => {
+    const reminderAudit=verifyRemindersForRecovery(store,rooms);
+    const fingerprint = recoveryReportFingerprint(store);
+    const contents = fingerprint?.tables ?? applicationTables.map(table => {
       const rows = store.db.prepare(`SELECT * FROM ${table}`).all().map(canonical).sort();
       return { table, rows: rows.length, sha256: digest(rows) };
     });
@@ -239,8 +200,9 @@ export function auditRecovery(store) {
       checks: { sqlite: true, foreignKeys: true, writerFence: true, projectionReplay: true, invitationAudit: true, shareLinks: true, reminders: true, agentConnections: true },
       rooms: rooms.size, events: eventCount, legacyCheckpoints: checkpointCount,
       replay: { basis: "retained checkpoint plus strict tail, or full history without a checkpoint", checkpointEvents, replayedEvents: eventCount - checkpointEvents },
-      invitations: invitations.invitations, reminders: reminders.length, reminderReceipts: receipts.length,
-      tables: contents, dataSha256: digest(contents),
+      invitations: invitations.invitations, reminders: reminderAudit.reminders, reminderReceipts: reminderAudit.reminderReceipts,
+      tables: contents, dataSha256: fingerprint?.dataSha256 ?? digest(contents),
+      ...(fingerprint ? {fingerprintScope:fingerprint.scope} : {}),
       authorityFreshness: "capture-only; later revocations, writes and external effects require reconciliation" };
   });
 }

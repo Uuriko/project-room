@@ -167,6 +167,13 @@
                       maxLength: 128
                       pattern: "^[A-Za-z0-9_-]{1,128}$"
                       description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
+                    priority: { type: [number, 'null'], description: 'Board planning fields (ROOM_BOARD_PLANNING_FIELDS=1 only). null clears. A planning-only update needs room write access, not ownership.' }
+                    estimate: { type: [number, 'null'], description: Board planning fields (flag on only). null clears. }
+                    dueAt: { type: [string, 'null'], format: date-time, description: Board planning fields (flag on only). null clears. }
+                    cycleId: { type: [string, 'null'], description: Board planning fields (flag on only). null clears. }
+                    milestone: { type: [string, 'null'], description: Board planning fields (flag on only). null clears. }
+                    projectId: { type: [string, 'null'], description: Board projects (ROOM_BOARD_PROJECTS=1 only). null clears. }
+                    initiativeId: { type: [string, 'null'], description: Board projects (flag on only). null clears. }
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]

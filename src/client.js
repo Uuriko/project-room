@@ -1,6 +1,6 @@
 import { accountSessionError, sameAccountSession } from "./account-client.js";
 export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits, solveIdentityMintProof, submitIdentityMint } from "./account-client.js";
-import { applyEvent, validId } from "./events.js";
+import { applyEvent, validId, EVENT_TYPES as T } from "./events.js";
 import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
@@ -108,6 +108,11 @@ const FILL_DELAY_MS = 250;
 const LIVENESS_INTERVAL_MS = 10000;
 function firstWindow(read) {
   const window = read?.messagesWindow;
+  if (read?.snapshotVersion === 2 && window?.mode === "recent" && window.omitted === null
+    && typeof window.complete === "boolean" && Array.isArray(read?.state?.messages)) {
+    const { messagesWindow, ...snapshot } = read;
+    return { snapshot, partial: !window.complete };
+  }
   if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(read?.state?.messages)) return null;
   const { messagesWindow, ...snapshot } = read;
   return { snapshot, partial: window.omitted > 0 };
@@ -120,10 +125,10 @@ const FRESH_OPEN_MS = 2000;
 const MAX_REFRESH_COOLDOWN_MS = 300000;
 
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onBondChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
-    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onOptimistic, onSendSettled });
+    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onBondChange, onOptimistic, onSendSettled });
     this.getFlights = new Map();
     this.paging = false;
     this.session = null;
@@ -183,7 +188,8 @@ export class RoomClient {
   }
   async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
@@ -211,6 +217,16 @@ export class RoomClient {
         }
         throw error; }
       return body;
+    } catch (failure) {
+      // Only this request's deadline is ours to classify. An abort does not
+      // establish whether a write committed: callers retain their exact retry.
+      if (timedOut && controller.signal.aborted && failure?.name === "AbortError") {
+        const error = new Error(uiText("request.timedOut"), { cause: failure });
+        error.name = "AbortError";
+        error.code = "request_timeout";
+        throw error;
+      }
+      throw failure;
     } finally { clearTimeout(timer); }
   }
   async restore(roomId = null) {
@@ -402,7 +418,7 @@ export class RoomClient {
           if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
-          else if (!holding || holding.partial) {
+          else if (read.snapshotVersion === 2 || !holding || holding.partial) {
             // First window (or a newer window while only a window is held): used as is.
             const first = firstWindow(read);
             snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial); complete = Boolean(first) && !partial;
@@ -433,7 +449,7 @@ export class RoomClient {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
-              partial, owesFull: stopFill ? false : (!complete && (partial || Boolean(holding?.owesFull))) };
+              partial, owesFull: read.snapshotVersion === 2 || stopFill ? false : (!complete && (partial || Boolean(holding?.owesFull))) };
             void this.rememberBoot(snapshot);
             this.live = { generation, session, snapshot };
             this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
@@ -542,6 +558,7 @@ export class RoomClient {
   // manual-refresh mode has no live deltas to protect and reads on demand.
   // Deliberately independent of snapshot/history overload cooldown: retain the
   // ten-second revocation bound using one small authorization probe per interval.
+  sectionAvailability(name) { if(!this.live||this.live.generation!==this.generation||this.live.session!==this.session)return {available:false,code:'fresh_room_context_required'};return this.live.snapshot.sections?.[name] ?? null; }
   scheduleLiveness(delay = this.livenessInterval) {
     if (this.livenessTimer) return;
     const generation = this.generation, session = this.session;
@@ -700,6 +717,32 @@ export class RoomClient {
   async pageOlder() {
     const generation = this.generation, session = this.session;
     const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    if (anchored()?.snapshot?.snapshotVersion === 2) {
+      // A stream refresh can replace the recent window while this read is in
+      // flight. Retry its current cursor once; never merge a stale page or loop
+      // indefinitely in a busy room. A second replacement leaves history owed.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const live = anchored(), held = this.heldMessages(), page = live?.snapshot?.messagesPage;
+        if (live?.snapshot?.snapshotVersion !== 2) return false;
+        if (!held?.partial || !page?.hasMore || typeof page.cursor !== "string") return false;
+        const params = new URLSearchParams({ cursor: page.cursor, limit: String(page.limit) });
+        const read = await this.request(this.path(`/conversation?${params}`), { fresh: true });
+        if (generation !== this.generation || this.session !== session) return false;
+        if (anchored() !== live) continue;
+        if (!this.ownsResponse(read, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
+        if (read.mode === "reset") { await this.refresh(null, { revalidate: true }); return false; }
+        if (read.mode !== "replace" || !Array.isArray(read.messages)) throw new Error(uiText("conversation.invalidPage"));
+        const seen = new Set(held.messages.map(message => message.id));
+        const messages = [...read.messages.filter(message => !seen.has(message.id)), ...held.messages];
+        const more = read.nextCursor !== null;
+        const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages },
+          messagesPage: { ...page, cursor: read.nextCursor, hasMore: more } };
+        this.held = { ...held, messages: messages.slice(), partial: more, owesFull: false };
+        this.live = { generation, session, snapshot }; this.onSnapshot(snapshot, session);
+        return true;
+      }
+      return false;
+    }
     let before = anchored()?.snapshot?.messagesPage?.before;
     let beforeId = anchored()?.snapshot?.messagesPage?.beforeId ?? null;
     const held0 = this.heldMessages();
@@ -733,6 +776,16 @@ export class RoomClient {
     this.live = { generation, session, snapshot };
     this.onSnapshot(snapshot, session);
     return true;
+  }
+  async recordPage({after=0,eventId=null}={}) {
+    const query=new URLSearchParams({view:'browser',...(eventId===null?{after:String(after),limit:'16'}:{eventId})});
+    const result=await this.roomRead('/events?'+query);if(!result)return null;
+    const rows=result.events;
+    if(result.contractVersion!==2||result.readKind!=='event-window'||result.selection?.eventId!==eventId||eventId===null&&result.selection.after!==after
+      ||!Array.isArray(rows)||rows.length>16||!Number.isSafeInteger(result.next)||result.next<result.selection.after||typeof result.hasMore!=='boolean'
+      ||rows.some((row,i)=>!Number.isSafeInteger(row.sequence)||row.sequence<=result.selection.after||row.sequence>result.next||i&&row.sequence<=rows[i-1].sequence||typeof row.event?.id!=='string')
+      ||eventId!==null&&(rows.length!==1||rows[0].event.id!==eventId))throw Error(uiText("currentRoom.recordUnconfirmed"));
+    return result;
   }
   async bootstrap() {
     return this.request(this.path("/bootstrap"), { fresh: true });
@@ -845,12 +898,13 @@ export class RoomClient {
     const result = await this.request(this.path(`/conversations?${query}`));
     if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) throw new Error(uiText("error.connection_changed"));
     if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
-    if (result.directoryVersion !== 1 || !["replace", "reset"].includes(result.mode) || result.limit !== limit
+    if (![1,2].includes(result.directoryVersion) || !["replace", "reset"].includes(result.mode) || result.limit !== limit
       || !Number.isSafeInteger(result.sequence) || !(result.nextCursor === null || typeof result.nextCursor === "string")
       || !Array.isArray(result.peers) || result.peers.length > limit
       || result.peers.some(peer => !peer || !validId(peer.memberId) || typeof peer.lastMessageAt !== "string")
       || new Set(result.peers.map(peer => peer.memberId)).size !== result.peers.length)
       throw new Error(uiText("direct.invalidDirectory"));
+    if(result.directoryVersion===2&&(!result.sourceWindow||typeof result.sourceWindow.complete!=='boolean'||result.mode!=='reset'&&result.sourceWindow.complete!==(result.nextCursor===null)))throw new Error(uiText('direct.invalidDirectory'));
     return result;
   }
   async replyContext(requestMessageId) {
@@ -865,6 +919,16 @@ export class RoomClient {
       if (!current()) throw new Error("Room identity changed");
       if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error("Room identity changed"); }
       const page = result?.page;
+      if(result.contractVersion===2){
+        const invalid=()=>{throw Error(uiText("currentRoom.requestContextUnconfirmed"));};
+        const anchor=JSON.stringify([result.request?.revision,result.request?.contextEventId,result.current?.contextSequence]);
+        if(result.selection?.requestMessageId!==requestMessageId||result.request?.id!==requestMessageId||!page||page.cursor!==cursor||page.limit!==50||!Array.isArray(page.items)||page.items.length>8||typeof page.hasMore!=='boolean'||result.sourceWindow?.complete!==!page.hasMore||horizon!==null&&anchor!==horizon)invalid();
+        horizon=anchor;for(const item of page.items){if(item.requestMessageId!==requestMessageId||!Number.isSafeInteger(item.sequence)||item.sequence<=last)invalid();last=item.sequence;}
+        if(!page.hasMore){if(page.nextCursor!==null||result.nextRead!==null)invalid();return result;}
+        const next=result.nextRead,args=next?.arguments;
+        if(typeof page.nextCursor!=='string'||!page.nextCursor||seen.has(page.nextCursor)||next?.tool!=='room_read_request'||args?.requestMessageId!==requestMessageId||args.limit!==50||args.cursor!==page.nextCursor||Object.keys(args).sort().join(',')!=='cursor,limit,requestMessageId')invalid();
+        seen.add(page.nextCursor);cursor=page.nextCursor;continue;
+      }
       const anchor = JSON.stringify([page?.horizonSequence, page?.horizonEventId]);
       if (result.contractVersion !== 1 || result.selection?.requestMessageId !== requestMessageId
         || result.request?.id !== requestMessageId || !page || !Array.isArray(page.items)
@@ -873,7 +937,7 @@ export class RoomClient {
         || page.cursor !== cursor || page.afterSequence !== last || horizon !== null && anchor !== horizon
         || page.items.some(item => item.requestMessageId !== requestMessageId
           || !Number.isSafeInteger(item.sequence) || item.sequence <= last || item.sequence > page.horizonSequence))
-        throw new Error("Request context could not be confirmed. Refresh context");
+        throw new Error(uiText("currentRoom.requestContextUnconfirmed"));
       horizon = anchor;
       for (const item of page.items) {
         if (item.sequence <= last) throw new Error("Request context is out of order");
@@ -996,14 +1060,14 @@ export class RoomClient {
       throw error;
     }
   }
-  async threadMutes() {
+  async threadMutes(threadIds=null) {
     // Per-thread mutes for the current member. Read-only list; 401/403 ends
     // access like the sibling reads.
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
     try {
-      const result = await this.request(this.path("/thread-mutes"));
+      const result = await this.request(this.path('/thread-mutes'+(threadIds===null?'':'?'+new URLSearchParams(threadIds.map(id=>['threadId',id])))));
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;
@@ -1302,6 +1366,7 @@ export class RoomClient {
       // Consent state is not part of the room projection, so a snapshot render
       // alone cannot refresh it; the panel refetches on a consent change.
       if (receipt?.event?.type === "dm.consent_changed") this.onConsentChange?.();
+      if ([T.BOND_PROPOSED, T.BOND_ACTIVATED, T.BOND_REVOKED].includes(receipt?.event?.type)) this.onBondChange?.();
       refreshStream(receipt);
     });
     stream.addEventListener("typing", message => {

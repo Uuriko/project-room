@@ -3,6 +3,7 @@ import { EVENT_TYPES as T, event } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 // Read at call time (store.mjs imports this module): one source for capacity.
 import { PILOT_LIMITS } from "./store.mjs";
+import { currentInviteContext, prepareCurrentWrite, withCurrentServingWriter } from "./current-room-repository.mjs";
 
 // Guest-agent tier primitives + seat machinery, shared by guest-invites v1
 // (server/guest-invites.mjs). The v0 link-exchange system that originally
@@ -19,6 +20,33 @@ class GuestAgentLinkError extends Error {
 }
 const fail = (status, code, message) => { throw new GuestAgentLinkError(status, code, message); };
 const hash = value => createHash("sha256").update(value).digest("hex");
+
+// Addressed current read (the agent-invites / share-links / access-requests
+// pattern): current-format rooms refuse the legacy whole-room read
+// (store.mjs _readProjection), so guest state is read through the invite
+// context and falls back to store.room() only for legacy rooms. A room that
+// came from the context carries `current`, which saveGuestEvent uses to
+// persist through the current writer.
+const guestRoom = (store, roomId, { memberIds = [], census = false } = {}) => {
+  const context = currentInviteContext(store, roomId, { memberIds, census });
+  return context ? { ...context.room, current: context.current } : store.room(roomId);
+};
+// Persist one guest event (the access-requests save pattern): through the
+// current writer when the room came from an invite context, else the legacy
+// projection. Returns a freshly read room so a chained write never builds
+// on a consumed context.
+const saveGuestEvent = (store, roomId, room, state, incoming) => {
+  const sequence = room.sequence + 1;
+  const write = room.current ? prepareCurrentWrite(store, { roomId, previous: room, state, event: incoming, sequence, current: room.current }) : null;
+  const projection = write?.projection ?? store.storedProjection(roomId, state);
+  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
+  withCurrentServingWriter(store.db, roomId, () => {
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    write?.persistEntities();
+  });
+  return guestRoom(store, roomId, { census: true });
+};
 
 // Human share tokens stay 43 chars. Guest-agent tokens are a different shape so
 // they can never be redeemed through /api/share-links or #join/.
@@ -82,7 +110,7 @@ export class GuestAgentLinks {
     // exemption): an agent owner may mint guest links on their identity
     // bearer. The mint itself stays account-bound: guest member ids derive
     // from the sponsor account (see guest-invites.mjs).
-    if (!auth.delegate && (auth.member?.id !== this.store.room(roomId).state.room.ownerId
+    if (!auth.delegate && (auth.member?.id !== this.store.roomAuthority(roomId,{memberId:auth.member.id}).ownerId
       || !auth.member.permissions.includes("manage_members"))) {
       fail(403, "owner_required", "Only the room owner can mint a guest invite. Use Add agent for a durable key.");
     }
@@ -100,7 +128,7 @@ export class GuestAgentLinks {
   }
 
   liveCount(roomId) {
-    const members = this.store.room(roomId).state.members;
+    const members = guestRoom(this.store, roomId, { census: true }).state.members;
     let n = 0;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
@@ -119,7 +147,7 @@ export class GuestAgentLinks {
     // provenance recorded in the event data.
     const auth = this.store.authenticate(token, roomId, binding);
     if (auth.delegate) return this.sweepExpiredAsDelegate(roomId, auth);
-    const members = this.store.room(roomId).state.members;
+    const members = guestRoom(this.store, roomId, { census: true }).state.members;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
       const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
@@ -141,12 +169,14 @@ export class GuestAgentLinks {
     // actor and the delegation source ride explicitly in the event data;
     // the delegate's own mint stays credited to the delegate in
     // guest_invites.
-    const ownerId = this.store.room(roomId).state.room.ownerId;
+    let room = guestRoom(this.store, roomId, { census: true });
+    const ownerId = room.state.room.ownerId;
     const grantedBy = this.db.prepare(
       "SELECT granted_by FROM owner_delegate_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL")
       .get(roomId, auth.identityId)?.granted_by ?? ownerId;
-    const room = this.store.room(roomId);
-    let state = room.state, sequence = room.sequence, swept = 0;
+    // Object.values snapshots the roster of the room in hand; each save
+    // returns a freshly read room, and deactivating one guest never changes
+    // another member's revision, so the snapshot stays valid per member.
     for (const member of Object.values(room.state.members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
       const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
@@ -167,21 +197,16 @@ export class GuestAgentLinks {
           delegatedSweepByMemberId: auth.member.id, delegatedSweepByIdentityId: auth.identityId,
           delegatedSweepGrantedBy: grantedBy },
       });
+      let state;
       try {
-        state = { ...applyEventWithGrowth(state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+        state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       } catch (error) {
         fail(422, "command_rejected", error.message);
       }
-      sequence += 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      room = saveGuestEvent(this.store, roomId, room, state, incoming);
       this.store.agentConnections.revokeMember(roomId, member.id);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
       this.store.reminders.retireMember(roomId, member.id);
-      swept += 1;
     }
-    if (swept === 0) return;
-    const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
-    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }
 }

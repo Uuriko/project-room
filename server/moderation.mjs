@@ -1,4 +1,5 @@
-import { messageRepository } from "./message-repository.mjs";
+import { isCurrentRoom } from "./current-room-repository.mjs";
+import { messageRepository, selectedMessageRecord } from "./message-repository.mjs";
 // Moderation (issue #6 E4): report a message to the room owner; mute a member
 // for yourself.
 //
@@ -55,6 +56,12 @@ export function mutedMessage(state, viewerId, message) {
 const readableBy = (message, viewerId, floor) =>
   messageVisibleToViewer({ ...message, deletedAt: null, body: message.body ?? "" }, viewerId, floor);
 
+function reportMessages(store, roomId) {
+  return isCurrentRoom(store.db, roomId)
+    ? { get: id => selectedMessageRecord(store, roomId, id) }
+    : messageRepository(store, roomId, store.room(roomId).state);
+}
+
 const receipt = row => ({ id: row.report_id, messageId: row.message_id, reason: row.reason, createdAt: row.created_at });
 
 export class Moderation {
@@ -82,8 +89,9 @@ export class Moderation {
       const auth = this.store.authenticate(token, roomId, binding);
       // Filing a report is a write: the read-only autonomy tier applies even
       // though reports never pass through store.command() (issue #997).
+      const authority = this.store.roomAuthority(roomId, { memberId: auth.member.id });
       enforceAutonomyTierForAction({
-        db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member,
+        db: this.store.db, roomId, state: { room: { ownerId: authority.ownerId }, members: authority.members }, actor: auth.member,
         action: "moderation_report", fail,
       });
       // Guests may read and chat but may not file moderation reports.
@@ -98,8 +106,7 @@ export class Moderation {
       const reason = typeof request.reason === "string" ? request.reason.trim() : "";
       if (!reason) fail(422, "invalid_report", "Say briefly why you are reporting this message");
       if (reason.length > reportLimits.reasonLength || /[\p{Cc}]/u.test(reason.replace(/[\n\t]/g, ""))) fail(422, "invalid_report", `Keep the reason to ${reportLimits.reasonLength} characters of plain text`);
-      const room = this.store.room(roomId);
-      const message = messageRepository(this.store, roomId, room.state).get(request.messageId);
+      const message = reportMessages(this.store, roomId).get(request.messageId);
       if (!message) fail(404, "message_not_found", "That message is not in this room");
       // A reporter can only report what they can read: a DM between two other
       // members (or history before a since_join reporter's join) answers
@@ -124,11 +131,11 @@ export class Moderation {
   list(token, roomId, binding = null) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
-      const room = this.store.room(roomId);
+      const authority = this.store.roomAuthority(roomId, { memberId: auth.member.id });
       // #643: owner-by-id — the owner capability follows the owner identity,
       // not the member kind; an agent owner may review reports. Owner-only.
-      if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
-      const messages = messageRepository(this.store, roomId, room.state);
+      if (auth.member.id !== authority.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
+      const messages = reportMessages(this.store, roomId);
       // The owner is not exempt from DM privacy: a reported DM's body is shown
       // only when the owner is one of its two parties (and in their history).
       const ownerFloor = summaryHistoryFloor(this.store, roomId, auth.member.id);

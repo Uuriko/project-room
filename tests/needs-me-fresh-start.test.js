@@ -24,6 +24,8 @@ test('cold needs-me skips mentions older than the fresh window; since 0 replays 
   const cold = collectNeedsMe(store, ada.secret, { roomId: 'fresh-room', freshWindow: 5 });
   assert.deepEqual(ids(cold), ['new-mention']);
   assert.ok(cold.items.some(item => item.kind === 'direct_ask' && item.id === 'old-open-request'), 'open obligations survive the recent-history cutoff');
-  const replay = collectNeedsMe(store, ada.secret, { roomId: 'fresh-room', since: 0, freshWindow: 5 });
-  assert.ok(ids(replay).includes('old-mention'), 'since 0 still replays from the start');
+  let replay = collectNeedsMe(store, ada.secret, { roomId: 'fresh-room', since: 0, freshWindow: 5 });
+  const replayed=ids(replay);let pages=1;
+  while(replay.hasMore){assert.ok(pages++<50);replay=collectNeedsMe(store,ada.secret,{roomId:'fresh-room',since:replay.cursor,freshWindow:5});replayed.push(...ids(replay));}
+  assert.ok(replayed.includes('old-mention'), 'since 0 replays from the start through the bounded continuation');
 });

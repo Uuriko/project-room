@@ -17,8 +17,9 @@ import { assertMessageWrite, recordMessageWrite } from './write-integrity.mjs';
 //      order inside one transaction.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
+import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind, ownMember } from "../src/events.js";
 import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { isCurrentRoom,readCurrentHead,readCurrentMessage,readCurrentRecord,withCurrentReadContext,chargeCurrentReadBudget,withCurrentServingWriter } from './current-room-repository.mjs';
 import { hasMessageAuthority } from './message-authority.mjs';
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
@@ -235,6 +236,34 @@ function otherHumanOwners(store, state, roomId, accountId, ownerMemberId) {
   return heirs;
 }
 
+// The deletion inventory needs room ownership, eligible human heirs and
+// whether another active member exists. It does not need work or history bodies.
+function currentDeletionRoom(store,roomId,memberId) {
+  return store.readTransaction(()=>withCurrentReadContext(store.db,roomId,b=>{
+    const head=readCurrentHead(store.db,roomId,b),room=readCurrentRecord(store.db,roomId,'metadata','room',b);
+    if(!head||!room||room.id!==roomId)fail(409,'current_room_context_unavailable','Room ownership inventory is unavailable');
+    const members=Object.create(null),load=id=>{
+      if(Object.hasOwn(members,id))return ownMember(members,id);
+      const member=readCurrentRecord(store.db,roomId,'members',id,b);
+      if(member!==undefined){if(member.id!==id)fail(409,'current_room_context_unavailable','Room member inventory identity differs');Object.defineProperty(members,id,{value:member,enumerable:true});}return member;
+    };
+    if(!load(room.ownerId)||!load(memberId))fail(409,'current_room_context_unavailable','Room ownership inventory is unavailable');
+    if(room.ownerId===memberId){
+      const candidates=store.db.prepare('SELECT member_id FROM member_accounts WHERE room_id=? ORDER BY member_id LIMIT 101').all(roomId);
+      if(candidates.length>100)fail(409,'current_room_context_unavailable','Room account inventory exceeds bounded membership');
+      chargeCurrentReadBudget(b,candidates.reduce((n,row)=>n+Buffer.byteLength(row.member_id)+32,0),candidates.length);
+      for(const row of candidates)load(row.member_id);
+      // The complete protected key census prevents an omitted final member
+      // from turning a shared project into a disposable personal room.
+      const keys=store.db.prepare("SELECT record_key FROM current_room_record_proofs WHERE room_id=? AND domain='members' AND present=1 ORDER BY record_key LIMIT 101").all(roomId);
+      if(head.counts.members>100||keys.length!==head.counts.members)fail(409,'current_room_context_unavailable','Room member inventory is incomplete');
+      chargeCurrentReadBudget(b,keys.reduce((n,row)=>n+Buffer.byteLength(row.record_key)+32,0),keys.length);
+      if(!Object.values(members).some(member=>member.id!==memberId&&member.active!==false))for(const {record_key:id} of keys){const member=load(id);if(member&&member.id!==memberId&&member.active!==false)break;}
+    }
+    return {sequence:head.sequence,messageCount:head.counts.messages,state:{room,members}};
+  },{maxRecords:1024}));
+}
+
 // QA2 finding P2-11: rooms this account owns, classified so deletion cannot
 // leave an ownerless room full of their content.
 export function classifyOwnedRooms(store, accountId) {
@@ -244,8 +273,9 @@ export function classifyOwnedRooms(store, accountId) {
   const archive = [], transfer = [], blocked = [], retained = [];
   for (const membership of memberships) {
     let loaded;
-    try { loaded = store.room(membership.roomId); }
-    catch { continue; }
+    if(isCurrentRoom(store.db,membership.roomId))loaded=currentDeletionRoom(store,membership.roomId,membership.memberId);
+    else try { loaded = store.room(membership.roomId); }
+    catch (error) { if(error.status===404)continue;throw error; }
     const state = loaded.state;
     const ownerMemberId = state.room?.ownerId;
     const entry = {
@@ -254,7 +284,7 @@ export function classifyOwnedRooms(store, accountId) {
       kind: roomKind(state.room),
       memberId: membership.memberId,
       toMemberId: null,
-      messages: Array.isArray(state.messages) ? state.messages.length : 0,
+      messages: loaded.messageCount ?? (Array.isArray(state.messages) ? state.messages.length : 0),
       files: fileCount(store, membership.roomId),
     };
     if (ownerMemberId !== membership.memberId) {
@@ -299,7 +329,21 @@ function saveRoomProjection(store, roomId, sequence, state) {
     ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection=excluded.projection`).run(roomId, sequence, JSON.stringify(checkpoint));
 }
 
+function withDeletionMemberKey(store,roomId,memberId,operation) {
+  const binding=store.db.prepare('SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?').get(roomId,memberId);
+  if(!binding)fail(409,'plan_changed','Account membership changed during deletion; request a fresh plan');
+  const key=store.mintAccessKey(roomId,memberId,60000,binding.account_id);
+  try{return operation(key);}finally{store.revoke(key);}
+}
+
 function appendRoomEvent(store, roomId, actorId, type, data) {
+  if(isCurrentRoom(store.db,roomId)) {
+    // Store.command owns this live policy stamp; it is not a public argument.
+    const {authorityPolicyVersion: _policy,...commandData}=data;
+    return withDeletionMemberKey(store,roomId,actorId,key=>store.command(key,roomId,{
+      id:'account-delete-'+createHash('sha256').update(JSON.stringify([roomId,actorId,type,data])).digest('hex').slice(0,32),type,data:commandData
+    }));
+  }
   const current = store.room(roomId);
   const incoming = event({ type, actorId, roomId, at: new Date(store.now()).toISOString(), data });
   let next;
@@ -368,10 +412,13 @@ function redactRoomMessages(store, roomId, actorId) {
   }
   let files = 0;
   try {
-    files = store.db.prepare(
+    files = withCurrentServingWriter(store.db, roomId, () => store.db.prepare(
       "UPDATE room_attachments SET state='deleted', bytes=NULL, filename='purged' WHERE room_id=? AND state IN ('staged','committed')"
-    ).run(roomId).changes;
-  } catch { files = 0; }
+    ).run(roomId).changes);
+  } catch (error) {
+    if (!/no such (table|column)/i.test(error?.message ?? "")) throw error;
+    files = 0;
+  }
   try {
     store.db.prepare("DELETE FROM room_code_checks WHERE room_id=?").run(roomId);
     files += store.db.prepare("DELETE FROM room_code_drops WHERE room_id=?").run(roomId).changes;
@@ -396,6 +443,32 @@ function rebuildRoom(store, roomId) {
   });
 }
 
+// Explicit destructive account action, not an ordinary serving read. Walk
+// canonical identities once and use the existing addressed privacy command;
+// every message/head/proof transition remains inside the account transaction.
+function archiveCurrentPersonalRoom(store,room) {
+  const metadata=withCurrentReadContext(store.db,room.id,()=>readCurrentRecord(store.db,room.id,'metadata','room'));
+  const archived=isRoomArchived({room:metadata});
+  return withDeletionMemberKey(store,room.id,room.memberId,key=>{
+    let removed=0;
+    const ids=store.db.prepare('SELECT message_id FROM messages WHERE room_id=? ORDER BY message_id').all(room.id);
+    for(const {message_id:id}of ids){
+      const message=withCurrentReadContext(store.db,room.id,()=>readCurrentMessage(store.db,room.id,id)?.value);
+      if(!message)fail(409,'current_room_context_unavailable','Personal room canonical message is missing');
+      if(message.body==null)continue;
+      store.command(key,room.id,{id:'account-delete-msg-'+createHash('sha256').update(room.id+':'+id).digest('hex').slice(0,32),type:EVENT_TYPES.MESSAGE_DELETED,data:{messageId:id,expectedMessageRevision:message.revision??0,reason:'Account deletion'}});removed++;
+    }
+    // A legacy peer-only event has no canonical message command dependency.
+    // Never report an erasure while any unowned body survives.
+    if(store.db.prepare("SELECT 1 FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('message.posted','message.edited','dm.posted') AND json_type(body,'$.data.body')='text' LIMIT 1").get(room.id))
+      fail(409,'current_account_erasure_unavailable','Personal room has a noncanonical historical body requiring privacy reconciliation');
+    removed+=withCurrentServingWriter(store.db,room.id,()=>store.db.prepare("UPDATE room_attachments SET state='deleted',bytes=NULL,filename='purged' WHERE room_id=? AND state IN ('staged','committed')").run(room.id).changes);
+    for(const table of ['room_code_checks','room_code_drops'])if(tableExists(store.db,table))store.db.prepare('DELETE FROM '+table+' WHERE room_id=?').run(room.id);
+    if(!archived)store.command(key,room.id,{id:'account-delete-archive-'+createHash('sha256').update(room.id).digest('hex').slice(0,32),type:EVENT_TYPES.ROOM_ARCHIVED,data:{reason:'Account deletion'}});
+    return removed;
+  });
+}
+
 // Archive a solely owned personal room and strip message and file bytes.
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
@@ -404,6 +477,7 @@ function archivePersonalRoom(store, room) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }
+  if(isCurrentRoom(store.db,room.id))return archiveCurrentPersonalRoom(store,room);
   const removed = redactRoomMessages(store, room.id, room.memberId);
   const state = store.room(room.id).state;
   if (!isRoomArchived(state)) {
@@ -573,10 +647,10 @@ export function planAccountDeletion(store, accountId) {
 
 function deactivateBoundMembers(store, accountId) {
   for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
-    const state = store.room(roomId).state;
-    const member = state.members?.[memberId];
+    const state = isCurrentRoom(store.db,roomId)?currentDeletionRoom(store,roomId,memberId).state:store.room(roomId).state;
+    const member = ownMember(state.members,memberId);
     if (!member || member.active === false || isRoomArchived(state)) continue;
-    if (store.roomAuthority(roomId).ownerId === memberId) continue;
+    if (store.roomOwnerId(roomId) === memberId) continue;
     const key = store.issueAccessKey(roomId, memberId, 60000, accountId);
     store.command(key, roomId, {
       id: `account-delete-leave-${createHash("sha256").update(`${roomId}:${memberId}:${accountId}`).digest("hex").slice(0, 32)}`,
@@ -721,10 +795,11 @@ const EXECUTORS = {
       const lapse = store.delegation.revokeAllGrantedBy(roomId, memberId, { actorId: "account_deleted" });
       revoked += lapse.revoked;
       if (!lapse.stripTargets.length) continue;
-      const state = store.room(roomId).state;
-      if (isRoomArchived(state) || store.roomAuthority(roomId).ownerId !== memberId) continue;
+      const current=isCurrentRoom(store.db,roomId);
+      const state = current?currentDeletionRoom(store,roomId,memberId).state:store.room(roomId).state;
+      if (isRoomArchived(state) || store.roomOwnerId(roomId) !== memberId) continue;
       for (const target of lapse.stripTargets) {
-        const member = store.room(roomId).state.members?.[target.memberId];
+        const member = current?withCurrentReadContext(store.db,roomId,()=>readCurrentRecord(store.db,roomId,'members',target.memberId)):ownMember(store.room(roomId).state.members,target.memberId);
         if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
         appendRoomEvent(store, roomId, memberId, EVENT_TYPES.MEMBER_ACCESS_CHANGED, {
           memberId: member.id, expectedMemberRevision: member.revision,

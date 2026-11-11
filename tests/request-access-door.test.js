@@ -4,7 +4,7 @@
 // module's orchestration to #join-request-form.
 // Contracts guarded here:
 //  1. The door builds a valid POST /api/access-requests body: non-empty
-//     roomId (default muse-room comes from the HTML), validated display
+//     roomId (explicit room link or ID), validated display
 //     name, ar_-shaped idempotency key, minimal accept_work ask.
 //  2. The submit orchestration reuses the browser-stashed identity per room
 //     instead of minting a fresh identity per click (the mint endpoint is
@@ -51,8 +51,14 @@ function fakeClient({ identityId = "ai_test123", calls = [] } = {}) {
   };
 }
 
-test("general door defaults to the open community room", () => {
-  assert.equal(GENERAL_REQUEST_DEFAULT_ROOM_ID, "muse-room");
+test("general door requires an intended room instead of silently choosing one", () => {
+  assert.equal(GENERAL_REQUEST_DEFAULT_ROOM_ID, "");
+  const html = readFileSync(new URL("../join.html", import.meta.url), "utf8");
+  const field = html.match(/<input id="join-request-room"[^>]*>/)?.[0];
+  assert.ok(field);
+  assert.match(field, /value=""/);
+  assert.match(field, /\brequired\b/);
+  assert.doesNotMatch(html, /muse-room<\/code> is the open community room/);
 });
 
 test("build: valid fields produce a submittable body", () => {

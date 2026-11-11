@@ -1,8 +1,11 @@
 // Confirm-then-delete for rooms, identities, and accounts. Planning and find
 // are read-only apart from the operator audit row. Execute recounts, refuses
 // with 409 plan_changed when the counts moved, and deletes inside one writer
-// transaction. The integrity snapshot is rewritten in that same transaction.
+// transaction. The global integrity baseline stays unchanged; only the full
+// integrity pass can certify surviving content.
 
+import { assertRestoreAdmitted } from "./restore-admission.mjs";
+import { isCurrentRoom, verifyCurrentRoomSchema, withCurrentRoomWriter } from "./current-room-repository.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { issueApprovalToken, consumeApprovalToken } from "./approval-tokens.mjs";
 import { validId } from "../src/events.js";
@@ -108,6 +111,7 @@ function deleteEntry(db, entry, kind, id) {
 }
 
 export function countPurge(store, targets) {
+  assertRestoreAdmitted(store.db);
   const totals = new Map(PURGE_TABLES.map(entry => [entry.table, {
     table: entry.table,
     action: entry.action,
@@ -137,13 +141,13 @@ export function hashPurgeCounts(counts) {
 }
 
 function activeHumanCount(store, roomId) {
-  let room;
-  try { room = store.room(roomId); }
+  let members;
+  try { members = isCurrentRoom(store.db,roomId) ? store.roomAuthority(roomId).members : store.room(roomId).state.members; }
   catch (error) {
     if (error?.code === "room_not_found") fail(404, "unknown_target", "No such room");
     throw error;
   }
-  return Object.values(room.state.members ?? {}).filter(member => member && member.kind === "human" && member.active !== false).length;
+  return Object.values(members ?? {}).filter(member => member && member.kind === "human" && member.active !== false).length;
 }
 
 function assertTargetExists(store, target) {
@@ -238,7 +242,7 @@ function liftDeleteGuards(db, tables) {
   const saved = [];
   for (const row of db.prepare("SELECT name, tbl_name AS tbl, sql FROM sqlite_master WHERE type='trigger'").all()) {
     if (!wanted.has(row.tbl) || typeof row.sql !== "string") continue;
-    if (row.name.startsWith("writer_v") || !IDENT.test(row.name)) continue;
+    if (row.name.startsWith("writer_v") || row.name.startsWith("replay_units_writer_") || !IDENT.test(row.name)) continue;
     if (!/\bBEFORE\s+DELETE\b/i.test(row.sql) || /\bWHEN\b/i.test(row.sql)) continue;
     saved.push(row);
   }
@@ -349,6 +353,7 @@ export function createOperatorPurge(store) {
     plan(body, requestId) {
       const base = { action: "plan", requestId };
       try {
+        assertRestoreAdmitted(store.db);
         const reason = parseReason(body);
         const targets = parseTargets(body);
         if (body.allowActiveMembers != null && typeof body.allowActiveMembers !== "boolean") fail(422, "invalid_purge", "allowActiveMembers must be true or false");
@@ -396,6 +401,7 @@ export function createOperatorPurge(store) {
       const base = { action: "execute", requestId };
       let committed = false;
       try {
+        assertRestoreAdmitted(store.db);
         if (!body || Array.isArray(body) || typeof body.planId !== "string" || typeof body.confirmToken !== "string"
           || Object.keys(body).some(key => key !== "planId" && key !== "confirmToken")) {
           fail(422, "invalid_purge", "Supply the planId and confirmToken from the plan");
@@ -422,15 +428,27 @@ export function createOperatorPurge(store) {
           for (const target of saved.targets) {
             for (const entry of PURGE_TABLES) if (entry.action === "delete" && where(entry, target.kind)) touched.add(entry.table);
           }
+          // Keep a current room's complete deletion inside its existing format
+          // admission. Its conditional guards remain installed throughout.
+          const currentRooms = saved.targets.filter(target => target.kind === "room" &&
+            store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=? UNION ALL SELECT 1 FROM current_room_records WHERE room_id=? UNION ALL SELECT 1 FROM current_room_record_proofs WHERE room_id=? LIMIT 1").get(target.id,target.id,target.id));
+          if (currentRooms.length) verifyCurrentRoomSchema(store.db);
+          const currentIds = new Set(currentRooms.map(target => target.id));
           const guards = liftDeleteGuards(store.db, [...touched]);
           try {
             for (const phase of ["via", "normal", "late"]) {
               for (const target of saved.targets) {
+                if (target.kind === "room" && currentIds.has(target.id)) continue;
                 for (const entry of orderedEntries(target.kind, phase)) deleteEntry(store.db, entry, target.kind, target.id);
               }
             }
+            for (const target of currentRooms) withCurrentRoomWriter(store.db,target.id,()=>{
+              for (const phase of ["via", "normal", "late"])
+                for (const entry of orderedEntries("room",phase)) deleteEntry(store.db,entry,"room",target.id);
+              store.db.prepare("DELETE FROM rooms WHERE id=?").run(target.id);
+            });
             for (const target of saved.targets) {
-              if (target.kind === "room") store.db.prepare("DELETE FROM rooms WHERE id=?").run(target.id);
+              if (target.kind === "room" && !currentIds.has(target.id)) store.db.prepare("DELETE FROM rooms WHERE id=?").run(target.id);
               if (target.kind === "identity") {
                 store.db.prepare("UPDATE agent_identities SET revoked_at=COALESCE(revoked_at, ?) WHERE identity_id=?").run(store.now(), target.id);
               }

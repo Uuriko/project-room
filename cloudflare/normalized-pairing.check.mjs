@@ -1,0 +1,21 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {Miniflare} from 'miniflare';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {fileURLToPath} from 'node:url';
+test('actual production Native MCP pairing preserves held identity through interrupted approval, cold delivery and reconnect',{timeout:120000},async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'normalized-pair-native-')),script=(await build({entryPoints:[fileURLToPath(new URL('./normalized-pairing.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
+ const create=()=>new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:directory,durableObjects:{ROOM:{className:'NormalizedPairingRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:'https://room.example'},serviceBindings:{ASSETS:async()=>new Response('Not found',{status:404})}});let mf=create();
+ const call=(path,opts)=>mf.dispatchFetch('https://room.example'+path,opts),post=(path,data,headers={})=>call(path,{method:'POST',headers:{Origin:'https://room.example','Content-Type':'application/json',...headers},body:JSON.stringify(data)}),facts=async(audit=false)=>{const r=await call('/__facts'+(audit?'?audit=1':''));assert.equal(r.status,200,await r.clone().text());return r.json();},restart=async()=>{await mf.dispose();mf=create();};
+ const mcp=async(secret,args)=>{const r=await post('/mcp',{jsonrpc:'2.0',id:'native-pair',method:'tools/call',params:{name:'room_join',arguments:args}},{Authorization:'Bearer '+secret});assert.equal(r.status,200,await r.clone().text());return r.json();};
+ try{
+  const response=await call('/__seed');assert.equal(response.status,200,await response.clone().text());const f=await response.json();
+  const started=await mcp(f.agent.secret,{roomId:'native-pair',displayName:'Kit Arden'});assert.equal(started.result.isError,undefined,JSON.stringify(started));const pending=started.result.structuredContent;
+  assert.ok(pending.pairId);assert.equal(pending.deviceSecret,undefined);
+  const before=await facts(),body={decision:'approve',profile:'chat'},path='/api/rooms/native-pair/pairs/'+pending.pairId+'/decide';
+  const denied=await post(path,body,{Authorization:'Bearer '+f.agent.secret});assert.equal(denied.status,403);assert.equal((await facts()).digest,before.digest);
+  const failed=await post(path,body,{Authorization:'Bearer '+f.owner.secret,'x-fixture-fault':'1'});assert.equal(failed.headers.get('x-fixture-fired'),'true');assert.ok([422,500].includes(failed.status));assert.equal((await facts()).digest,before.digest);
+  await restart();const approved=await post(path,body,{Authorization:'Bearer '+f.owner.secret});assert.equal(approved.status,200,await approved.clone().text());const a=await approved.json();assert.equal(a.memberId,f.agent.identityId);assert.equal(a.connection.identitySecret,undefined);
+  await call('/__advance');await restart();const joined=await mcp(f.agent.secret,{pairId:pending.pairId});assert.equal(joined.result.isError,undefined,JSON.stringify(joined));const connection=joined.result.structuredContent;assert.equal(connection.token,a.connection.token);assert.equal(connection.memberId,f.agent.identityId);
+  const state=await facts(true);assert.equal(state.identityLinks,1);assert.deepEqual(state.members[f.agent.identityId].permissions,[]);
+  await call('/__advance');await restart();const replay=await mcp(f.agent.secret,{pairId:pending.pairId});assert.equal(replay.result.structuredContent.token,connection.token);assert.equal(replay.result.structuredContent.identityId,f.agent.identityId);
+  const reconnected=await post('/api/pair',{room:'native-pair',name:'Kit Arden',credential:connection.token});assert.equal(reconnected.status,200,await reconnected.clone().text());assert.equal((await reconnected.json()).memberId,f.agent.identityId);
+  const final=await facts(true);assert.equal(final.identityLinks,1);assert.deepEqual(final.members[f.agent.identityId].permissions,state.members[f.agent.identityId].permissions);
+ }finally{await mf.dispose();await rm(directory,{recursive:true,force:true});}
+});

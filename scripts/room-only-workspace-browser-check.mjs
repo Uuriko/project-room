@@ -74,7 +74,7 @@ test("account-home session replacement clears old rooms and refresh restores the
   });
   assert.equal(replaced.status(), 201);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await page.locator("#auth-error").filter({ hasText: /(?:session|browser account) changed/i }).waitFor();
+  await page.locator("#auth-error").filter({ hasText: /(?:session(?: ended or)?|browser account) changed/i }).waitFor();
   assert.equal(await page.locator("#account-rooms-panel").isVisible(), false);
   assert.equal(await page.locator('[data-account-room]').count(), 0);
   await page.locator("#refresh-button").click();

@@ -21,6 +21,11 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  ...['current_room_records','current_room_record_proofs','current_room_head'].map(table=>({table,key:'room_id',action:'delete',match:{room:['room_id']}})),
+  {table:'message_replay_units',key:'room_id',action:'delete',optional:true,match:{room:['room_id']}},
+  {table:'current_room_writer_permit',key:'room_id',action:'retain',reason:'Target-wide closed writer singleton is an admission control, not room-owned data.',match:{room:['room_id']}},
+  {table:'current_restore_audit_scratch',key:'room_id',action:'retain',reason:'Target-wide sealed restore evidence belongs to the restore/cleanup lifecycle; a room purge cannot invalidate its checkpoint.',match:{room:['room_id']}},
+
   ...["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },

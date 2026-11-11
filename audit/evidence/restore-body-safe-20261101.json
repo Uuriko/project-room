@@ -1,0 +1,150 @@
+{
+  "date": "2026-11-01",
+  "base": "012395c4d",
+  "status": "offline native45 strict-source body ingestion increment; not whole bounded recovery or release approval",
+  "runtimeFiles": [
+    "server/restore-ndjson.mjs",
+    "cloudflare/room.mjs"
+  ],
+  "receipt": {
+    "actualNative": true,
+    "configuredKv": true,
+    "sourceBytes": 3150297,
+    "sourceSha256": "de911a4abf5dc5f8029651778eaf19849484d98775dff99b84c841fae61e1f9c",
+    "stage": {
+      "put": 5,
+      "get": 4,
+      "delete": 5,
+      "writeBytes": 3151259,
+      "readBytes": 3150297,
+      "maxPutBytes": 1048576,
+      "manifests": 1,
+      "canonicalRoomsAtPut": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "invalidSource": {
+      "put": 3,
+      "get": 0,
+      "delete": 3,
+      "writeBytes": 3145728,
+      "readBytes": 0,
+      "maxPutBytes": 1048576,
+      "manifests": 0,
+      "canonicalRoomsAtPut": [
+        0,
+        0,
+        0
+      ]
+    },
+    "interruptedUpload": {
+      "put": 2,
+      "get": 0,
+      "delete": 2,
+      "writeBytes": 2097152,
+      "readBytes": 0,
+      "maxPutBytes": 1048576,
+      "manifests": 0,
+      "canonicalRoomsAtPut": [
+        0,
+        0
+      ]
+    },
+    "largeBlobBytes": 1048576,
+    "coldSourceIo": {
+      "put": 0,
+      "get": 0,
+      "delete": 0,
+      "writeBytes": 0,
+      "readBytes": 0,
+      "maxPutBytes": 0,
+      "manifests": 0,
+      "canonicalRoomsAtPut": []
+    },
+    "steps": 221,
+    "verified": true,
+    "coldReady": true,
+    "exactRetry": true,
+    "completeSourceBeforeCanonicalImport": true,
+    "wholeRecoveryBounded": false,
+    "eventTuplesAndLargestLineStillUnbounded": true
+  },
+  "sourceAdmission": {
+    "format": "existing room-backup-manifest/parts",
+    "temporaryPrefix": "room-restore-sources/UUID.ndjson",
+    "partBytes": 1048576,
+    "ttlSeconds": 3600,
+    "cleanup": "best effort delete; crashes/failed delete rely on TTL",
+    "rawBodyAdmissionBytes": 67108864,
+    "decodedInputSliceBytes": 65536,
+    "shaBasis": "same decoded-body UTF8 text as original body endpoint; BOM parity tested",
+    "fullApplicationImportBeforePreflight": false,
+    "missingKv": "exact buffered path retained",
+    "newReportWithoutResume": "exact historical buffered report path retained"
+  },
+  "checks": {
+    "newNode": {
+      "passed": 10,
+      "failed": 0,
+      "log": "/tmp/restore-body-safe-node-qualified.log"
+    },
+    "actualNative": {
+      "passed": 1,
+      "failed": 0,
+      "log": "/tmp/restore-body-safe-native-qualified.log"
+    },
+    "legacyProofControls": {
+      "passed": 32,
+      "failed": 1,
+      "log": "/tmp/restore-body-safe-legacy-qualified.log",
+      "limitation": "inherited current schema marker test still asserts44 while runtime45; representative baseline reproduction saved; not waived or counted green"
+    },
+    "secretScan": "/tmp/restore-body-safe-secret-frozen.log",
+    "lint": "/tmp/restore-body-safe-lint-frozen.log"
+  },
+  "failingReproductions": {
+    "independentTestCommit": "49fed912f",
+    "originalBuffering": "/tmp/restore-body-original-baseline.log",
+    "unsafeDirectImportCommit": "07b812723 DO NOT ADOPT",
+    "unsafeLateTrailer": "/tmp/restore-body-negative-detail2.log",
+    "safeLateTrailer": "/tmp/restore-body-safe-node-qualified.log",
+    "inheritedStaleBaseline": "/tmp/restore-body-baseline-neighborhood-stale.log"
+  },
+  "remainingLimits": [
+    "Largest input record/carry and first watermark can still approach existing body cap",
+    "Existing writer hash tracker plus preflight retain event tuples; no complete process-memory bound",
+    "Platform-delivered raw chunk size is not an application-controlled peak-memory guarantee",
+    "KV part limit is measured; process heap/CPU not measured",
+    "Existing session buffers500rows or4MiB per table, self-reference holds and fulloracle remain",
+    "Native source loading/replay still occurs within one request; durable per-part ingestion continuation is not implemented",
+    "Hash-consistent SQL/FK-invalid source failures remain existing later checks and can retain a pending target; no immutable deletion waiver",
+    "Existing KV backup door still has its original stream-import validation order; only byte-feeding was extracted unchanged",
+    "MissingKV, source historical marker and explicit new report compatibility may still buffer up to64MiB"
+  ],
+  "commands": [
+    {
+      "command": "/Users/johnpotter/.local/bin/node --test tests/restore-body-streaming.test.mjs",
+      "result": "10pass0fail",
+      "log": "/tmp/restore-body-safe-node-qualified.log"
+    },
+    {
+      "command": "MINIFLARE_WORKERD_PATH=/Users/johnpotter/.npm/_npx/c943b712072b77c4/node_modules/workerd/bin/workerd /Users/johnpotter/.local/bin/node --test cloudflare/restore-body-native.check.mjs",
+      "result": "1pass0fail",
+      "log": "/tmp/restore-body-safe-native-qualified.log"
+    },
+    {
+      "command": "/Users/johnpotter/.local/bin/node --test --test-name-pattern='^(?!current schema marker)' tests/restore-legacy-write-proofs.test.mjs",
+      "result": "32pass1fail; name pattern did not exclude inherited schema44 assertion",
+      "log": "/tmp/restore-body-safe-legacy-qualified.log"
+    },
+    {
+      "command": "/Users/johnpotter/.local/bin/node scripts/secret-scan-diff.mjs --base 012395c4d",
+      "result": "clean",
+      "log": "/tmp/restore-body-safe-secret-handoff.log"
+    }
+  ]
+}

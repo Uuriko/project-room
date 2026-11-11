@@ -25,7 +25,7 @@
 // The webhook secret is never read here as a value for storage and never
 // leaves the process; only its env var NAME is documented (ops__STATE.md).
 import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
-import { applyPullRequestWebhook, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
+import { applyPullRequestWebhook, publicNamespaceSqlExclusion, isPublicClaimNamespace, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
@@ -246,7 +246,7 @@ function liveClaims(store) {
   const out = [];
   let roomIds = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all()
+    roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims WHERE 1=1${publicNamespaceSqlExclusion(store)}`).all()
       .filter(row => !isPublicClaimNamespace(store, row.roomId)).map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return out;
@@ -421,7 +421,7 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
   if (!store?.db || !store.workClaims) return out;
   let roomIds = [];
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims WHERE 1=1${publicNamespaceSqlExclusion(store)}`).all().map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return out;
     throw error;

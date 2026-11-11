@@ -1,0 +1,9 @@
+{
+  "sourceBase": "63a89fb6756783a4453536ee78efcf6dd10a6095",
+  "scope": "Offline normalized current existing handoff and halt-clear dependency qualification; no deployment",
+  "causalRed": {"log": "/tmp/current-work-handoff-red.log", "failure": "This command has no qualified current-record dependency plan"},
+  "node": {"log": "/tmp/current-work-handoff-node.log", "passed": 14, "failed": 0, "newControls": 4},
+  "actualWorker": {"log": "/tmp/current-work-handoff-worker.log", "passed": 1, "failed": 0, "controls": ["lost committed handoff response then cold exact retry", "retry adapter writes zero", "halt prevents work.started", "fault after current head insert rolls back halt clear and all business/audit rows", "cold restart retains halt", "exact owner clear then original task start", "second cold restart and full independent audit", "closed format permit"]},
+  "preserved": ["existing shared reducers and permission policy", "inherited contribute/review/collaborate profile gate", "accountable member only", "optional expected revision contract", "HTTPS evidence without credentials", "owner triage", "20 prior handoffs", "haltAll false does not clear prior halt", "stale halt replacement cannot be cleared", "clear does not mutate work body", "completion and review gates", "revoked caller cannot reuse saved receipt"],
+  "limits": ["No new generic resume verb; existing start for accepted/blocked or completion for working resumes original task", "Other unsupported work commands remain refused", "No full-room hydration or legacy mirror writes", "Latest root composition and incremental restore protocol require composition qualification", "Historical provenance remains unchanged"]
+}

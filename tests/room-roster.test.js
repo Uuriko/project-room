@@ -262,7 +262,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /syncComposerChrome/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, queuedNote, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery/);
+  const conversationImports = [...app.matchAll(/import\s*\{([^}]+)\}\s*from "\.\/conversation\.js"/g)]
+    .flatMap(match => match[1].split(",").map(name => name.trim()));
+  for (const helper of ["kindLabel", "memberStatus", "memberHandle", "memberPresence", "memberDoneChip", "observedPresenceLabel", "queuedNote", "addressMember", "shouldAddressPresenceClick", "messageMentionsMember", "replyAuthorToAddress", "composerPlaceholder", "removeMention", "parseSearchQuery"]) {
+    assert.ok(conversationImports.includes(helper), `roster imports ${helper}`);
+  }
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);

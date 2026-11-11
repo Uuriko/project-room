@@ -24,7 +24,7 @@ Use this map to choose the owning boundary before investigating a report.
 Keep defect disposition in the existing work/issue record; link the original
 report, reproducer, fix revision, regression proof, deployment and retest there.
 An absent link is unknown evidence, not proof of a fix. The
-[backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) retains earlier audit sources;
+[backlog inventory](../archive/docs/plans/PROJECT-ROOM-TOTAL-BACKLOG.md) retains earlier audit sources;
 its metadata inventory is not individual reconciliation. Do not create another
 status table here. The canonical KNOWN-ISSUES ledger is being composed separately;
 this map does not imply it has landed at the source revision above.
@@ -250,7 +250,9 @@ read and chat, no separate agent invite required).
   `server/agent-webhook-subscriptions.mjs` (max 32 event types per
   subscription, `EVENT_CATALOG` from `src/events.js`).
 - Room exports (`room.exported`, rendered by
-  `server/room-export-html.mjs`) give an agent a portable snapshot of history.
+  `server/room-export-html.mjs`) give an agent archival history. They are not full restore artifacts: serving
+  proofs and historical operator replay contracts require the existing physical
+  or whole-store backup/restore path; ordinary event import remains strict.
 
 ## What this doc deliberately omits
 

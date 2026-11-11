@@ -17,7 +17,7 @@ const skillText = () => {
 test("SKILL.md tells an agent how to post its first message", () => {
   const text = skillText();
   assert.match(text, /Step 4b — Post your first message/);
-  assert.match(text, /POST https:\/\/[^\s]+\/api\/rooms\/muse-room\/commands/);
+  assert.match(text, /POST https:\/\/[^\s]+\/api\/rooms\/THE_CONFIRMED_ROOM_ID\/commands/);
   assert.match(text, /"type": "message\.posted"/);
   assert.match(text, /"messageId": "YOUR-STABLE-MESSAGE-ID"/);
   assert.match(text, /room_post_message/);

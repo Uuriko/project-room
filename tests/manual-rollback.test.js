@@ -64,7 +64,7 @@ if(is(['exec','wrangler','deployments','status',...(name==='prod'?['--env','prod
   fs.writeFileSync(p,JSON.stringify(s)); console.log(JSON.stringify(s.current[name])); process.exit(0);
 }
 const id=name==='prod'?process.env.PROD_ID:process.env.ENTRY_ID;
-if(is(['exec','wrangler','rollback',id,...(name==='prod'?['--env','production']:[]),'--message','rollback-prod run 1: synthetic test','--yes'])) {
+if(is(['exec','wrangler','rollback',id,...(name==='prod'?['--env','production']:[]),'--durable-objects-code-update-mode','immediate','--message','rollback-prod run 1: synthetic test','--yes'])) {
   s.rolled.push(name); s.current[name]={versions:[{version_id:id,percentage:100}]}; fs.writeFileSync(p,JSON.stringify(s)); process.exit(s.rollbackFailure?17:0);
 }
 console.error('Unexpected command'); process.exit(98);
@@ -195,6 +195,8 @@ for (const withoutEntry of [false, true]) test(`qualified exact-pair workflow re
   result = await f.execute();
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(f.rolled(), withoutEntry ? ['prod'] : ['prod', 'entry']);
+  const mutations = f.commands().trim().split('\n').map(line => JSON.parse(line)).filter(args => args.includes('rollback'));
+  for (const args of mutations) assert.equal(args[args.indexOf('--durable-objects-code-update-mode') + 1], 'immediate');
 });
 
 test('qualified manual workflow retains REST fallback after exhausted Wrangler reads', async t => {

@@ -1,0 +1,7 @@
+# Reconcile six recovery history fixtures with v2
+
+Source7e7f935f7 onexactrootd4f8ae4bb. Only the previously assigned six history fixture cases and shared history source assertion change. Original0/6 becomes6/6. No case is dropped and no runtime guard is weakened.
+
+V2 stores independently qualified activation tuples for ALL members, including unlimited owner, and has no materialized same-instant exclusion count. The normal case now observes actual partial history_events progress across cold reopens, then compares every exact expectedFloor record and strict event count. Timestamp cases preserve original24/229byte legal spellings and exact join sequence. The counter corruption now targets expectedFloors, which the v2 census actually uses. Missing/wrong-reference corruption now targets activation scratch; wrong reference deliberately uses an earlier legal join at the SAME instant, so latest reactivation remains mandatory. All three negative cases still require422 refusal, identical saved checkpoint, verifiedfalse and frozen serving503.
+
+The intervening independent strict-event corruption test, all preceding tests and all following tests are byte-identical to base, including prior old-runtime refusal arrays and new recovery text/reminder controls. Exact six affected tests, file-targeted ESLint, secret scan1822files and diffcheck pass. No broad rerun or live proof claimed. Full logs are compressed unchanged with hashes in receipt.json.

@@ -564,7 +564,7 @@ test("hosted needs-me discovers private incoming requests without exposing their
   const before = await list(peer.secret);
   assert.deepEqual(before.replyRequests.map(r => r.id), ["hosted-question"]);
   assert.deepEqual(before.replyRequests[0].nextRead, { tool: "room_read_request", arguments: { requestMessageId: "hosted-question" } });
-  assert.equal(before.replyRequestsEvaluatedThrough, f.store.room(created.roomId).sequence);
+  assert.equal(before.replyRequestsEvaluatedThrough, f.store.roomAuthority(created.roomId, { memberId: created.ownerMemberId }).sequence);
   assert.equal(JSON.stringify(before).includes("Private hosted question"), false);
   assert.equal(Object.hasOwn(before.replyRequests[0], "answerBasis"), false);
   assert.deepEqual((await list(owner.secret)).replyRequests, []);

@@ -1,3 +1,6 @@
+import {isCurrentRoom,readCurrentRecord,readCurrentMessage,readCurrentHistoryFloor,currentMessageMayBeVisible,withCurrentReadContext} from './current-room-repository.mjs';
+import {readCurrentPinsWindow} from './current-pins.mjs';
+import {messageInHistory} from './history-visibility.mjs';
 import { messageRepository } from "./message-repository.mjs";
 // Pinned messages (issue #6 B2): the HTTP-facing read and write for
 // the pin reducers in src/events.js. Both entry points re-check membership on every call through
@@ -30,7 +33,9 @@ export function pinVisibleToViewer(message, viewerId) {
   return !message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId;
 }
 
-function listView(store, roomId, viewerId) {
+function listView(store, roomId, viewerId, options = {}) {
+  const current = readCurrentPinsWindow(store, roomId, viewerId, options);
+  if (current) { const {items, ...rest} = current; const pins = items.map(pinView); return {...rest, count:pins.length, pins}; }
   const room = store.room(roomId);
   const pins = pinnedMessages(room.state)
     .filter(({ message }) => pinVisibleToViewer(message, viewerId))
@@ -38,11 +43,11 @@ function listView(store, roomId, viewerId) {
   return { roomId, sequence: room.sequence, limit: PIN_LIMIT, count: pins.length, pins };
 }
 
-export function listPins(store, token, roomId, expectedSessionBinding = null) {
-  return store.readTransaction(() => {
+export function listPins(store, token, roomId, expectedSessionBinding = null, options = {}) {
+  return store.readTransaction(() => withCurrentReadContext(store.db, roomId, () => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    return listView(store, roomId, auth.member?.id);
-  });
+    return listView(store, roomId, auth.member?.id, options);
+  }));
 }
 
 // Body: { messageId, pinned, requestId? }. requestId is the optional
@@ -59,10 +64,13 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
   const messageId = data.messageId;
   // Membership is checked before anything about the room is disclosed; the
   // early return for "already in the requested state" appends no event.
-  const current = store.readTransaction(() => {
+  const current = store.readTransaction(() => withCurrentReadContext(store.db, roomId, () => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
-    const message = messageRepository(store, roomId, room.state).get(messageId);
+    const native = isCurrentRoom(store.db, roomId);
+    const room = native ? {state:{pins:readCurrentRecord(store.db,roomId,'metadata','pins')??[]}} : store.room(roomId);
+    if (native && !currentMessageMayBeVisible(store.db,roomId,messageId,auth.member.id,undefined,readCurrentHistoryFloor(store.db,roomId,auth.member.id))) fail(404, 'message_not_found', 'No such message in this room');
+    const message = native ? readCurrentMessage(store.db,roomId,messageId)?.value : messageRepository(store, roomId, room.state).get(messageId);
+    if (native && (!pinVisibleToViewer(message??{}, auth.member.id) || !message || !messageInHistory(message,readCurrentHistoryFloor(store.db,roomId,auth.member.id)))) fail(404, 'message_not_found', 'No such message in this room');
     if (!message) fail(404, "message_not_found", "No such message in this room");
     // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
     // Mirrors the pinMessage reducer's condition: a redacted-but-live message
@@ -70,7 +78,7 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
     // log scrub + projection rebuild) is pinnable, only a tombstone is not.
     if (data.pinned && (message.deletedAt || (message.body == null && message.redacted !== true))) fail(409, "message_deleted", "A deleted message cannot be pinned");
     return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)), viewerId: auth.member?.id };
-  });
+  }));
   let receipt = null;
   if (current.pinned !== data.pinned) {
     receipt = store.command(token, roomId, {

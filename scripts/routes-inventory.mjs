@@ -11,6 +11,7 @@
 // the route-name switches in the feature modules.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { parse } from "acorn";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { routeCandidates } from "./open-routes.mjs";
@@ -47,15 +48,22 @@ function readConstants(root) {
 }
 
 function substitute(source, constants) {
-  let text = source;
-  const block = text.match(/const connectionRoutes = Object\.freeze\(\{([\s\S]*?)\}\)/);
-  if (block) {
-    for (const match of block[1].matchAll(/(\w+):\s*["']([^"']+)["']/g)) {
-      text = text.replaceAll(`connectionRoutes.${match[1]}`, JSON.stringify(match[2]));
-    }
+  const replacements = new Map(Object.entries(constants));
+  const block = source.match(/const connectionRoutes = Object\.freeze\(\{([\s\S]*?)\}\)/);
+  if (block) for (const match of block[1].matchAll(/(\w+):\s*["']([^"']+)["']/g)) replacements.set(`connectionRoutes.${match[1]}`, match[2]);
+  const replace = text => {
+    for (const [name, value] of replacements) text = text.replaceAll(name, JSON.stringify(value));
+    return text;
+  };
+  // Keep declarations syntactically valid for lexical analysis. Replacing an
+  // imported constant with its URL inside `import { NAME }` is not JavaScript.
+  const imports = parse(source, { ecmaVersion: "latest", sourceType: "module" }).body.filter(node => node.type === "ImportDeclaration");
+  let text = "", after = 0;
+  for (const node of imports) {
+    text += replace(source.slice(after, node.start)) + source.slice(node.start, node.end);
+    after = node.end;
   }
-  for (const [name, value] of Object.entries(constants)) text = text.replaceAll(name, JSON.stringify(value));
-  return text;
+  return text + replace(source.slice(after));
 }
 
 function matchCloser(text, start, open, close) {
@@ -86,7 +94,7 @@ function matchCloser(text, start, open, close) {
   return -1;
 }
 
-function eachIf(source, visit) {
+function eachIf(source, visit, baseOffset = 0) {
   const re = /\bif\s*\(/g;
   let match;
   while ((match = re.exec(source))) {
@@ -104,7 +112,7 @@ function eachIf(source, visit) {
       const end = source.indexOf("\n", bodyStart);
       body = source.slice(bodyStart, end < 0 ? source.length : end);
     }
-    visit(condition, body);
+    visit(condition, body, { conditionStart: baseOffset + open + 1, bodyStart: baseOffset + bodyStart + (source[bodyStart] === "{" ? 1 : 0) });
     re.lastIndex = close + 1;
   }
 }
@@ -263,11 +271,76 @@ function codeIdentifiers(condition) {
   return [...stripped.matchAll(/(?<![.\w!])([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(match => match[1]);
 }
 
-function boundPaths(condition, bindings) {
+// A matcher name is meaningful only at its lexical use site. A local
+// `match = choices.find(...)` must not inherit an unrelated URL regexp's
+// paths merely because both declarations have the same spelling.
+function scopedMatcherBindings(source) {
+  const scopes = [], tree = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+  const scope = (node, parent, functionScope = false) => {
+    const value = { start: node.start, end: node.end, parent, functionScope, declarations: new Map() };
+    scopes.push(value); return value;
+  };
+  const bind = (pattern, owner, init = null) => {
+    if (!pattern) return;
+    if (pattern.type === "Identifier") owner.declarations.set(pattern.name, { init, owner });
+    else if (pattern.type === "RestElement") bind(pattern.argument, owner);
+    else if (pattern.type === "AssignmentPattern") bind(pattern.left, owner);
+    else if (pattern.type === "ArrayPattern") for (const item of pattern.elements) bind(item, owner);
+    else if (pattern.type === "ObjectPattern") for (const item of pattern.properties) bind(item.value ?? item.argument, owner);
+  };
+  function walk(node, current) {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "Program") current = scope(node, null, true);
+    if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
+      if (node.type === "FunctionDeclaration" && node.id) bind(node.id, current);
+      current = scope(node, current, true); if (node.id) bind(node.id, current);
+      for (const parameter of node.params) bind(parameter, current);
+    } else if (["BlockStatement", "CatchClause", "ForStatement", "ForOfStatement", "ForInStatement", "SwitchStatement"].includes(node.type)) current = scope(node, current);
+    if (node.type === "CatchClause") bind(node.param, current);
+    if (node.type === "ClassDeclaration") bind(node.id, current);
+    if (node.type === "ImportDeclaration") for (const item of node.specifiers) bind(item.local, current);
+    if (node.type === "VariableDeclaration") {
+      let owner = current;
+      if (node.kind === "var") while (owner.parent && !owner.functionScope) owner = owner.parent;
+      for (const item of node.declarations) bind(item.id, owner, node.kind === "const" ? item.init : null);
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) for (const child of value) { if (child?.type) walk(child, current); }
+      else if (value?.type) walk(value, current);
+    }
+  }
+  walk(tree, null);
+  const lookup = (current, name) => {
+    for (; current; current = current.parent) if (current.declarations.has(name)) return current.declarations.get(name);
+    return null;
+  };
+  const resolve = (node, current, seen = new Set()) => {
+    if (!node) return [];
+    if (node.type === "Identifier") {
+      const declaration = lookup(current, node.name);
+      if (!declaration || seen.has(declaration)) return [];
+      return resolve(declaration.init, declaration.owner, new Set([...seen, declaration]));
+    }
+    if (node.type === "Literal" && node.regex) return regexToTemplates(node.regex.pattern);
+    if (node.type === "CallExpression") {
+      if (node.callee.type === "Identifier" && node.callee.name === "routePattern" && typeof node.arguments[0]?.value === "string") return [node.arguments[0].value];
+      if (node.callee.type === "MemberExpression" && !node.callee.computed && node.callee.property.name === "exec") return resolve(node.callee.object, current, seen);
+    }
+    if (node.type === "LogicalExpression" && ["??", "||"].includes(node.operator)) return [...new Set([...resolve(node.left, current, seen), ...resolve(node.right, current, seen)])];
+    if (node.type === "ConditionalExpression") return [...new Set([...resolve(node.consequent, current, seen), ...resolve(node.alternate, current, seen)])];
+    return [];
+  };
+  return { get(name, position) {
+    const current = scopes.filter(item => item.start <= position && position < item.end).at(-1);
+    return resolve({ type: "Identifier", name }, current);
+  } };
+}
+
+function boundPaths(condition, bindings, position) {
   const paths = [];
   const seen = new Set();
   for (const name of codeIdentifiers(condition)) {
-    const found = bindings.get(name);
+    const found = bindings.get(name, position);
     if (!found) continue;
     for (const path of found) if (!seen.has(path)) { seen.add(path); paths.push(path); }
   }
@@ -304,13 +377,14 @@ function scanSwitches(source, names, bag) {
   }
 }
 
-function scanSource(source, bag, { names, matchers, bindings }) {
+function scanSource(source, bag, { names, matchers }) {
   const apply = (methods, paths) => {
     for (const method of methods) for (const path of paths) addRoute(bag, method, path);
   };
-  eachIf(source, (condition, body) => {
+  const lexicalBindings = scopedMatcherBindings(source);
+  eachIf(source, (condition, body, location) => {
     const direct = literalPaths(condition);
-    const bound = boundPaths(condition, bindings);
+    const bound = boundPaths(condition, lexicalBindings, location.conditionStart);
     const visible = withCalledHelpers(source, body);
     let methods = methodsFrom(condition, visible);
     const targets = [...direct, ...bound];
@@ -319,13 +393,13 @@ function scanSource(source, bag, { names, matchers, bindings }) {
     // A pathname check nested under a method gate (Gmail's POST guard, for
     // example) does not repeat the method. It serves the enclosing methods.
     if (methods.size) {
-      eachIf(body, (innerCondition, innerBody) => {
-        const innerTargets = [...literalPaths(innerCondition), ...boundPaths(innerCondition, bindings)];
+      eachIf(body, (innerCondition, innerBody, innerLocation) => {
+        const innerTargets = [...literalPaths(innerCondition), ...boundPaths(innerCondition, lexicalBindings, innerLocation.conditionStart)];
         if (!innerTargets.length) return;
         let innerMethods = methodsFrom(innerCondition, innerBody);
         if (innerMethods.size === 0) innerMethods = topLevelMethods(innerBody);
         if (innerMethods.size === 0) apply(methods, innerTargets);
-      });
+      }, location.bodyStart);
     }
 
     const routeNames = new Set();

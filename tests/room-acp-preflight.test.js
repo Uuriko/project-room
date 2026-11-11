@@ -60,3 +60,26 @@ test("session readiness keeps a hard deadline for a nonresponsive adapter", asyn
   assert.equal(result.ok, false);
   assert.match(result.error, /session\/new timed out/);
 });
+
+for (const mode of ["mode-rejected", "mode-permission"]) {
+  test(`${mode} preserves the invitation until the explicitly selected mode is ready`, async t => {
+    const room = await startRoom(t), { link } = room.invite(), lines = [];
+    const trace = pathJoin(room.home, "selected-mode-methods.txt");
+    const env = { ...room.env, FAKE_ACP_MODE: mode, FAKE_ACP_TRACE: trace };
+    const args = [link, "--agent-cmd", `"${process.execPath}" "${fake}"`, "--mode", "workspace-write"];
+    let requests = 0;
+    assert.equal(await main(args, { env, print: line => lines.push(line), fetchImpl: () => { requests++; throw new Error("must not redeem"); } }), 1);
+    assert.equal(requests, 0, "mode refusal must happen before any invitation request");
+    assert.equal(loadConnection({}, env), null);
+    assert.match(lines.join("\n"), /invitation has not been used/);
+    const refused = readFileSync(trace, "utf8");
+    assert.match(refused, /mode:workspace-write/);
+    assert.doesNotMatch(refused, /session\/prompt/);
+    if (mode === "mode-permission") assert.match(refused, /permission:cancelled/);
+    let selectedMode;
+    assert.equal(await main(args, { env: { ...env, FAKE_ACP_MODE: "echo" }, print: () => {}, run: async options => { selectedMode = options.mode; return 0; } }), 0);
+    assert.equal(selectedMode, "workspace-write");
+    assert.ok(loadConnection({}, env)?.credential, "repairing the mode leaves the same invitation usable");
+    assert.doesNotMatch(readFileSync(trace, "utf8"), /session\/prompt/);
+  });
+}

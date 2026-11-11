@@ -14,6 +14,10 @@ export const fakeAgentCmd = `"${process.execPath}" "${FAKE_AGENT}"`;
 export async function startRoom(t) {
   const f = createAcceptanceFixture();
   const server = createRoomServer({ store: f.store });
+  // Client private-file checks may block this same process on Windows. Do not
+  // let the synthetic server expire an idle pooled socket during that pause;
+  // production serves HTTP in a different process from the ACP client.
+  server.keepAliveTimeout = 0;
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const home = mkdtempSync(join(tmpdir(), "room-acp-home-"));
   t.after(async () => {

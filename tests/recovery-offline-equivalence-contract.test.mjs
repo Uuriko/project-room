@@ -1,0 +1,18 @@
+// Existing offline CLI can audit a source; its stdout is not target authority.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,writeFileSync,existsSync,readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {RoomStore} from '../server/store.mjs';
+import {initialRoom} from '../server/bootstrap.mjs';
+import {event} from '../src/events.js';
+import {exportNdjsonText,createTableDigests} from '../server/room-export.mjs';
+import {auditRecovery} from '../server/recovery.mjs';
+const sha=value=>createHash('sha256').update(value).digest('hex');
+function fixture(t){const dir=mkdtempSync(join(tmpdir(),'offline-equivalence-')),store=new RoomStore(':memory:');t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true});});const seed=initialRoom();for(let n=0;n<24;n++)seed.push(event({id:'offline-event-'+n,roomId:'commons',actorId:'owner',type:'message.posted',data:{messageId:'offline-message-'+n,body:'Useful retained offline evidence '+n}}));store.initialize(seed,{representation:'normalized-current-v1'});store.issueAccessKey('commons','owner');return{dir,store,text:exportNdjsonText(store.db)};}
+const run=(input,target)=>spawnSync(process.execPath,['scripts/restore-room-backup.mjs','--from',input,'--to',target],{encoding:'utf8',timeout:30000,maxBuffer:4*1024*1024});
+test('existing offline file CLI independently audits exact immutable input and promotes a new checked file',t=>{const f=fixture(t),input=join(f.dir,'original.ndjson'),target=join(f.dir,'recovered.sqlite');writeFileSync(input,f.text,{mode:0o600});const before=sha(readFileSync(input)),result=run(input,target);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/"verified": true/);assert.equal(sha(readFileSync(input)),before);assert.equal(existsSync(target),true);const restored=new RoomStore(target,{readOnly:true});try{const report=auditRecovery(restored);assert.equal(report.checks.sqlite,true);assert.equal(report.checks.projectionReplay,true);assert.equal(report.events,26);assert.equal(restored.headSequence('commons'),f.store.headSequence('commons'));}finally{restored.close();}assert.notEqual(run(input,target).status,0,'existing destination remains protected');t.diagnostic(JSON.stringify({inputSha256:before,sourceSchema:45,offlineFullAudit:true,immutableInput:true,targetFile:true,remoteAdmissionAuthority:false}));});
+test('recomputed complete content trailer is insufficient when independent metadata invariants fail',t=>{const f=fixture(t),records=f.text.trim().split('\n').map(JSON.parse),record=records.find(row=>row.table==='current_room_records'&&row.row.domain==='metadata'&&row.row.record_key==='room');assert.ok(record);const value=JSON.parse(record.row.payload);record.row.payload=JSON.stringify({...value,name:'Different source with self-consistent content trailer'});record.row.payload_bytes=Buffer.byteLength(record.row.payload);record.row.payload_sha256=sha(record.row.payload);const digests=createTableDigests();for(const row of records)if(row.table)digests.add(row.table,row.row);records.at(-1).tables=digests.finish();const input=join(f.dir,'different-complete.ndjson'),target=join(f.dir,'must-not-promote.sqlite');writeFileSync(input,records.map(row=>JSON.stringify(row)).join('\n')+'\n',{mode:0o600});const result=run(input,target);assert.notEqual(result.status,0);assert.equal(existsSync(target),false);assert.match(result.stderr,/current_room_corrupt|requires.*reconciliation/);t.diagnostic(JSON.stringify({fullTrailerRecomputed:true,independentAuditRefused:true,targetNotPromoted:true,contentEqualityDoesNotImplyLogicalValidity:true}));});

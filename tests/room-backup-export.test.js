@@ -334,6 +334,10 @@ test("a version 1 KV manifest for today is rewritten; a current one is kept", as
 test("replay skips Durable Object runtime and retired tables and reports them", t => {
   const { directory, store } = openStore(t, 3);
   const extra = [
+    // These controls belong to the restore target. Even an exported open
+    // permit or pending admission must be ignored, never become authority.
+    { table: "current_room_writer_permit", row: { singleton: 1, enabled: 1, room_id: "commons", receipt_id: "forged-source" } },
+    { table: "current_restore_admission", row: { singleton: 1, state: "pending", restore_id: "forged-source", phase: "loading", revision: 0 } },
     { table: "room_writer_permit", row: { singleton: 1, version: 41 } },
     { table: "room_runtime_version", row: { singleton: 1, version: 41 } },
     { table: "emissary_journal", row: { room_id: "commons", id: "j1" } },
@@ -344,7 +348,19 @@ test("replay skips Durable Object runtime and retired tables and reports them", 
   const ndjson = `${exportNdjsonText(store.db)}${extra}\n`;
   const result = replayNdjson(ndjson, join(directory, "skip", "room.sqlite"));
   assert.equal(result.verified, true);
-  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1 });
+  assert.deepEqual(result.skippedTables, {
+    room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1,
+    // Each current control has the original seeded export row plus the
+    // adversarial row appended above. The fresh target keeps its own state.
+    current_room_writer_permit: 2, current_restore_admission: 2
+  });
+  const restored = new TrailerDb(join(directory, "skip", "room.sqlite"), { readOnly: true });
+  try {
+    assert.deepEqual({ ...restored.prepare("SELECT enabled,room_id,receipt_id FROM current_room_writer_permit WHERE singleton=1").get() }, { enabled: 0, room_id: null, receipt_id: null });
+    assert.deepEqual({ ...restored.prepare("SELECT state,restore_id,phase,revision,source_seal,coverage FROM current_restore_admission WHERE singleton=1").get() }, {
+      state: "clear", restore_id: null, phase: "clear", revision: 0, source_seal: null, coverage: null
+    });
+  } finally { restored.close(); }
   const unknown = `${exportNdjsonText(store.db)}${JSON.stringify({ table: "not_a_table", row: { a: 1 } })}\n`;
   assert.throws(() => replayNdjson(unknown, join(directory, "unknown", "room.sqlite")), /does not have/);
 });

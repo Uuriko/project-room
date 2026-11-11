@@ -1,6 +1,7 @@
 // Restore a nightly backup into a NEW sqlite store. Never touches a live
 // room: the destination must not exist, and nothing here writes to
-// Cloudflare. Prints counts and digests only, never row contents.
+// Cloudflare in local mode. Explicit --continue-receipt mode only resumes an
+// existing remote operation; it never begins a restore or uploads backup data.
 //
 //   node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore/room.sqlite --room muse-room
 //   node scripts/restore-room-backup.mjs --from room-export.ndjson --to /tmp/restore/room.sqlite
@@ -17,6 +18,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
 import { replayNdjson } from "../server/room-export.mjs";
+import { continueRemoteRestore } from "./restore-remote-continuation.mjs";
 import { backupObjectKey } from "../cloudflare/room-backup.mjs";
 
 export const DEFAULT_NAMESPACE_ID = "ee73a90c4e6749bb92ebe16fc57c117d";
@@ -76,8 +78,17 @@ const restoreOutcome = { promoted: false, cleanupFailed: false };
 async function main() {
   const { values } = parseArgs({ options: {
     from: { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
-    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }, "source-schema-version": { type: "string" }
+    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }, "source-schema-version": { type: "string" },
+    "continue-receipt": { type: "string" }, origin: { type: "string" }, checkpoint: { type: "string" }, "run-ms": { type: "string" }
   } });
+  if (values["continue-receipt"] || values.origin || values.checkpoint || values["run-ms"]) {
+    restoreOutcome.remote = true;
+    if (!values["continue-receipt"] || !values.origin || !values.checkpoint
+      || ["from", "kv", "namespace-id", "to", "room", "save", "audit", "source-schema-version"].some(key => values[key] !== undefined)) throw new Error("remote_restore_invalid_options");
+    const result = await continueRemoteRestore({ receiptFile: values["continue-receipt"], origin: values.origin, checkpointFile: values.checkpoint,
+      ...(values["run-ms"] === undefined ? {} : { runMs: Number(values["run-ms"]) }) });
+    process.stdout.write(JSON.stringify(result) + "\n");process.exitCode = result.status === "complete" ? 0 : 2;return;
+  }
   const sourceParam = values["source-schema-version"];
   const sourceSchemaVersion = sourceParam === undefined ? null : sourceParam === "42" ? 42 : sourceParam === "43" ? 43 : NaN;
   if (Number.isNaN(sourceSchemaVersion)) throw new Error("--source-schema-version must be 42 or 43");
@@ -130,6 +141,10 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(error => {
+    if (restoreOutcome.remote) {
+      const code = /^remote_restore_[a-z_]+$/.test(error?.message ?? "") ? error.message : "remote_restore_failed";
+      process.stderr.write(JSON.stringify({ status: "stopped", code }) + "\n");process.exitCode = 1;return;
+    }
     const destination = restoreOutcome.promoted ? "The destination was promoted; preserve it and inspect before retrying." : "The destination was not promoted.";
     const cleanup = restoreOutcome.cleanupFailed ? " Private staging cleanup failed; a private copy may remain beside the destination." : "";
     process.stderr.write(`Restore failed: ${String(error?.message ?? error).split("\n")[0]}. ${destination}${cleanup}\n`);

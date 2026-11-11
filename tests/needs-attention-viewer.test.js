@@ -125,3 +125,13 @@ test("real agent browser session keeps owner-only 403 while the card reads its p
   assert.equal(client.session, session);
   assert.equal(client.session.member.kind, "agent");
 });
+
+for (const native of [false, true]) test(`existing-agent sponsorship card preserves the typed approve and deny contract (${native ? 'native' : 'legacy'})`,async t=>{
+ const f=model(t,member('owner'));
+ // Legacy owner reports include the selected approval row; native reports
+ // explicitly leave membership requests to the separate authorized queue.
+ f.client.needsAttention=async()=>native ? {...report(),contractVersion:2} : {...report(),items:[{kind:'access_request',id:'adoption'}],itemCount:1};
+ f.client.request=async()=>({roomId:'commons',requests:[{requestId:'adoption',kind:'agent-sponsor-transfer',displayName:'Existing Claude',note:'John requests sponsorship; identity and permissions stay unchanged',requestedPermissions:[]}]});
+ await f.card.refresh();const html=f.target.querySelector('#attention-list').innerHTML;
+ assert.match(html,/Connect Existing Claude to the requesting human/);assert.match(html,/Agent sponsorship/);assert.doesNotMatch(html,/asks to join|Choose permissions/);
+});

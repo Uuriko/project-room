@@ -31,7 +31,7 @@ test('a reader that never resolves is bounded and receives cancellation', async 
 });
 test('edge allocation rollback alone never produces rollback_verified and rollback commands run once', async () => {
   const old = '11111111-1111-1111-1111-111111111111', fresh = '22222222-2222-2222-2222-222222222222';
-  const schema = revision => ({ version: 42, revision, blob: 'd'.repeat(40), definitions: 'same exact definitions' });
+  const schema = revision => ({ version: 42, revision, blob: 'd'.repeat(40), replyContractBlob: '9'.repeat(40), messageReaderBlob: '8'.repeat(40), definitions: 'same exact definitions' });
   const previous = sourceRevision => ({ known: true, versionId: old, sourceRevision, codeSchemaVersion: 42, schemaSource: schema(sourceRevision) });
   const snapshot = { targetSha: candidate, candidateCodeSchemaVersion: 42, candidateSchemaSource: schema(candidate), prod: previous(prod), entry: previous(entry) };
   const rolled = new Set(), c = clock();

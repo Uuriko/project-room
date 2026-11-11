@@ -1,7 +1,11 @@
   /api/owner/overview:
     get:
-      summary: Cross-room owner overview — merged Decisions + Exceptions (Owner Cockpit slice 1, #3342)
+      summary: Advanced legacy cross-room owner overview
       description: |
+        Legacy advanced API, no longer requested automatically by account Rooms.
+        An authorized normalized room on the requested page returns 409
+        current_room_context_required instead of a false owner refusal or empty
+        aggregate. Open that room's paged Needs you queue and membership approvals.
         Browser account-session route (account_session cookie plus
         X-Session-Binding), the same auth funnel as GET /api/account-rooms.
         Fans out over the rooms the account belongs to (50 per page, `after`
@@ -33,4 +37,5 @@
           description: "{ contractVersion: 1, generatedAt, window, viewer, rooms: { considered, included, label, nextCursor }, decisions: { total, waiting, overdue, oldestAgeMs, items }, exceptions: { total, items }, roomErrors }"
         '401': { description: unauthenticated }
         '403': { description: owner_required }
+        '409': { description: current_room_context_required; normalized cross-room overview unavailable, use per-room Needs you }
         '422': { description: invalid_overview_query, invalid_room or session_binding_required }

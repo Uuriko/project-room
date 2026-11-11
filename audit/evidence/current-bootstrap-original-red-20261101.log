@@ -1,0 +1,31 @@
+{"event":"room.cold_start","clockSemantics":"runtime-dependent","durationMs":42,"integrity":"eager","phases":{"schema":{"ms":11,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":9,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":44,"heapBytes":27887432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.store_initialized","initializationMs":42,"legacyColdStartMs":42,"clockSemantics":"runtime-dependent","cpuMeasured":false}
+✖ normalized room bootstrap is readable through the existing builder (50.799042ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 158.926083
+
+✖ failing tests:
+
+test at tests/current-bootstrap-contract.test.mjs:11:1
+✖ normalized room bootstrap is readable through the existing builder (50.799042ms)
+  Error: Use an addressed current Room read
+      at fail (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:461:49)
+      at RoomStore._readProjection (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:4109:40)
+      at RoomStore.room (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:4104:53)
+      at file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:5447:106
+      at run (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:699:22)
+      at Object.transaction (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:726:22)
+      at RoomStore.readTransaction (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:4059:39)
+      at RoomStore.snapshot (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/store.mjs:5441:17)
+      at readRoomSnapshot (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/snapshot-window.mjs:132:26)
+      at buildRoomBootstrap (file:///Users/johnpotter/src/pr-current-bootstrap-qualification-1101/server/room-bootstrap.mjs:25:20) {
+    status: 409,
+    code: 'current_room_context_required',
+    headers: null
+  }

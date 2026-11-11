@@ -1,6 +1,7 @@
 // One authorized read boundary for agent pickup. This is an observation, never
 // a reservation or permission to execute. Reuse the existing request semantics.
-import { observeSelectedRuns } from "../request-runs.mjs";
+import { observeSelectedRuns, validateSelectedRunOpenings } from "../request-runs.mjs";
+import {isCurrentRoom,readCurrentRecord,withCurrentReadContext} from '../current-room-repository.mjs';
 import { ownMember } from "../../src/events.js";
 
 // The standing refusals requestRuns.apply checks before a claim
@@ -29,10 +30,28 @@ export function readAgentWork(ctx) {
       ctx.reject(403, 'insufficient_scope', 'API key lacks the rooms:read scope');
     if ([...ctx.url.searchParams.keys()].some(key => key !== 'auth') || ctx.url.searchParams.getAll('auth').length > 1)
       ctx.reject(422, 'invalid_request', 'This read does not accept filters');
-    const { requests, evaluatedThrough } = ctx.store.replyRequests.list(selected.token, roomId,
-      { direction: 'incoming', status: 'open', expectedSessionBinding: fence });
+    const current=isCurrentRoom(ctx.store.db,roomId);
+    const selection = ctx.store.replyRequests.list(selected.token, roomId,
+      { direction: 'incoming', status: 'open', expectedSessionBinding: fence, ...(current?{limit:4}:{}) });
+    // This v1 combined view promises the complete open queue. Current request
+    // discovery is paginated; never turn its partial/empty first window into a
+    // complete work observation for existing clients.
+    if (selection.sourceWindow?.complete === false || selection.page?.hasMore === true)
+      ctx.reject(422, 'reply_list_too_large', 'Use room_list_requests / reply-requests and follow nextRead to finish this queue');
+    const {requests,evaluatedThrough}=selection;
+    validateSelectedRunOpenings(ctx.store,roomId,requests,auth.member.id);
     const runs = observeSelectedRuns(ctx.store, roomId, requests);
-    const member = auth.member, state = ctx.store.room(roomId).state;
+    const member = auth.member;
+    const state = current
+      ? withCurrentReadContext(ctx.store.db,roomId,()=>{
+          const room=readCurrentRecord(ctx.store.db,roomId,'metadata','room'),members={};
+          for(const id of new Set(requests.map(request=>request.requesterId))) {
+            const current=readCurrentRecord(ctx.store.db,roomId,'members',id);
+            if(current!==undefined)Object.defineProperty(members,id,{value:current,enumerable:true});
+          }
+          return {room,members};
+        })
+      : ctx.store.room(roomId).state;
     const pause = ctx.store.wakeQueue.pauseStatus(roomId, member.id);
     const blockedBy = {};
     for (const request of requests) {

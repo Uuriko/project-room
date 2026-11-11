@@ -28,7 +28,7 @@ A public report stores the kind of target (room, receipt, or agent), the target 
 
 ## Cookies
 
-The browser holds an HttpOnly `account_session` cookie and, inside a room, an HttpOnly `room_session` cookie. Signing in authenticates that browser for up to 8 hours. The account-session cookie can remain for up to 30 days so the same browser can sign in again. Both cookies are SameSite=Strict, and Secure on HTTPS.
+The browser holds an HttpOnly `account_session` cookie and, inside a room, an HttpOnly `room_session` cookie. Account sign-in authenticates that browser for up to 30 days, bounded by the session and credential expiry. Room-key sessions and guest access last up to 8 hours. Both cookies are SameSite=Strict, and Secure on HTTPS.
 
 Connecting Gmail sets a short-lived HttpOnly `gmail_oauth` cookie (10 minutes, SameSite=Lax) that carries the OAuth state. It is cleared when the connection finishes.
 

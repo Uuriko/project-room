@@ -1,3 +1,7 @@
+import { digestMessagePage } from "../src/message-digest.js";
+import { experimentArm } from "./experiments.mjs";
+import { filterMessagePage } from "../src/message-query.js";
+import {redactSelectedEventPage} from './current-room-events.mjs';
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
@@ -26,7 +30,6 @@ import { readBoard } from "./board-read.mjs";
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
-import { redactEventPage } from "./redact-read.mjs";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
@@ -92,12 +95,13 @@ function stampRoom(value, roomId) {
 async function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const latest = args.latest ?? false;
+  // EXP-1 cold_read_latest (ROOM_EXPERIMENTS, default off; qa- rooms only by default).
+  const coldRead = args.after === undefined && args.latest === undefined;
+  const latest = args.latest ?? (coldRead && experimentArm("cold_read_latest", memberId, { roomId }) === "latest");
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
-  const currentMessages = store.redactionMessages(roomId);
   const fetchPage = (cursor, pageLimit) =>
-    redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
+    redactSelectedEventPage(store, roomId, store.eventsAfter(secret, roomId, cursor, pageLimit));
   const mapMessage = ({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
     body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
@@ -109,19 +113,46 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {
     after, limit, latest,
     // Backward walk needs the log head; the bound is exclusive, so +1.
-    end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
+    end: latest ? store.headSequence(roomId) + 1 : null,
     mapMessage,
   });
   const mapped = messages.map(message => markIfOther(message, memberId, message.from));
   const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
-  return withContentTrust({
+  // History hint: a cold read (no after, not latest) starts at the oldest
+  // event. Point at the caller's existing catch-up marker so a joining or
+  // woken agent can skip history it already handled. Uses the saved
+  // marker point lookup; no counts, no new summary, and reading does not acknowledge.
+  const catchUp = args.after === undefined && !latest ? catchUpHint(store, roomId, memberId) : null;
+  const page = withContentTrust({
     roomId, messages: mapped,
     next: cursor.next, hasMore: cursor.hasMore,
+    ...(catchUp ? { catchUp } : {}),
   });
+  // Search filters the authorized page only; it never widens what is read.
+  const searched = args.query === undefined ? page : filterMessagePage(page, args.query);
+  return args.view === "digest" ? digestMessagePage(searched, memberId) : searched;
+}
+
+// Bounded: one cursors point lookup plus the protected history floor. No
+// event-suffix scan (catchUpCursor skips the caller's own-authored run, which
+// walks history); the follow-up read simply includes those own messages.
+export function catchUpHint(store, roomId, memberId) {
+  let after;
+  try {
+    const stored = store.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    const floor = store.historyFloor(roomId, memberId);
+    after = Math.max(stored, floor ? floor.sequence - 1 : 0);
+  } catch { return null; }
+  if (!Number.isSafeInteger(after) || after <= 0) return null;
+  return {
+    after, source: "saved_catch_up_marker", acknowledges: false,
+    nextRead: { tool: "room_read_messages", arguments: { roomId, after } },
+  };
 }
 
 function replyRead(store, secret, roomId, name, args) {
-  if (name === "room_list_requests") return store.replyRequests.list(secret, roomId, args);
+  // Hosted tool readers always get each ask's progress and lifecycle state.
+  if (name === "room_list_requests") return store.replyRequests.list(secret, roomId, { ...args, states: true });
   if (name === "room_read_request") {
     const { requestMessageId, ...options } = args;
     return store.replyRequests.selected(secret, roomId, requestMessageId, options);
@@ -273,6 +304,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       if (value.responseActions) value.responseActions = value.responseActions.map(action => ({
         ...action, arguments: { roomId, ...action.arguments }
       }));
+      if(value.contractVersion===2&&value.nextRead){
+        value.nextRead={...value.nextRead,arguments:{roomId,...value.nextRead.arguments}};
+        if(value.page)value.page={...value.page,nextRead:value.nextRead};
+      }
       if (value.nextReads) value.nextReads = value.nextReads.map(pointer => ({ ...pointer,
         nextRead: { ...pointer.nextRead, arguments: { roomId, ...pointer.nextRead.arguments } }
       }));
@@ -391,7 +426,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_inbox") {
-    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after ?? 0 });
+    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after, olderCursor:rest.olderCursor });
+    if(inbox.coverage?.mode==='native_bounded')return {value:{...inbox,boardAssignments:[],boardAssignmentsHasMore:false,boardReviewRequests:[],boardReviewRequestsHasMore:false},isError:false};
     // Dispatch and agentInbox already authenticate; OAuth also requires work:read.
     // Read fresh membership without materializing the full formal-work snapshot.
     const { members } = store.roomAuthority(roomId);
@@ -419,6 +455,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     } : row);
     return { value: { ...inbox, boardAssignments, boardAssignmentsHasMore: owned.length > 50, boardReviewRequests, boardReviewRequestsHasMore: reviews.length > 50, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
+  if (name === "room_mark_caught_up") return { value: { roomId, ...store.markCaughtUp(secret, roomId, rest.sequence), source: "saved_catch_up_marker" }, isError: false };
   if (name === "room_read_messages") return { value: await roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
   if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
@@ -475,7 +512,7 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       // Catalog visibility can span rooms. Write authority belongs to the
       // target room and must be checked inside the mutation/replay fence.
       enforceAutonomyTierForAction({ db: store.db, roomId,
-        state: { room: { ownerId: store.roomAuthority(roomId).ownerId } },
+        state: { room: { ownerId: store.roomOwnerId(roomId) } },
         actor: current.member, action: route });
       // F-X4-1: bounty claim/submit enforce the board's work-permission
       // gate, identical to the HTTP route (same helper, same refusal),

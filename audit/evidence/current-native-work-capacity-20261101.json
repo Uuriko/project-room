@@ -1,0 +1,427 @@
+{
+  "receipts": [
+    {
+      "name": "before",
+      "count": 32,
+      "accepted": {
+        "statements": 151,
+        "rowsRead": 412,
+        "rowsWritten": 39,
+        "unknown": 0
+      },
+      "acceptedRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 28,
+        "rowsRead": 135,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "cap": {
+        "statements": 103,
+        "rowsRead": 355,
+        "rowsWritten": 25,
+        "unknown": 0
+      },
+      "capRuntime": {
+        "statements": 1,
+        "rowsWritten": 1,
+        "unknown": 0
+      },
+      "capacityQueries": [],
+      "capTop": [
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "rowsRead": 84,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT body FROM events INDEXED BY events_room_type\n  WHERE room_id=? AND json_extract(body, '$.type') IN (\n    'work.proposed', 'work.accepted', 'work.started', 'work.blocked',\n    'work.blocker_resolved', 'work.completed', 'work.superseded',\n    'work.handoff_recorded', 'claim.acquired', 'claim.renewed',\n    'claim.released', 'verification.recorded', 'owner.decision_recorded'\n  ) ORDER BY sequence",
+          "rowsRead": 83,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?) ORDER BY rowid",
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "calls": 3
+        },
+        {
+          "sql": "INSERT INTO current_room_records VALUES(?,?,?,?,?,?,?) ON CONFLICT(room_id,domain,record_key)\n      DO UPDATE SET revision=excluded.revision,payload_bytes=excluded.payload_bytes,payload_sha256=excluded.payload_sha256,payload=excluded.payload",
+          "rowsRead": 18,
+          "rowsWritten": 2,
+          "calls": 2
+        },
+        {
+          "sql": "INSERT INTO current_room_record_proofs VALUES(?,?,?,?,?,?,?) ON CONFLICT(room_id,domain,record_key)\n      DO UPDATE SET revision=excluded.revision,present=excluded.present,payload_sha256=excluded.payload_sha256,receipt_id=excluded.receipt_id",
+          "rowsRead": 18,
+          "rowsWritten": 3,
+          "calls": 2
+        },
+        {
+          "sql": "SELECT revision,present,payload_sha256,receipt_id FROM current_room_record_proofs WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 14
+        },
+        {
+          "sql": "SELECT revision,payload_bytes,length(CAST(payload AS BLOB)) AS bytes,payload_sha256 FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 14
+        },
+        {
+          "sql": "SELECT payload FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 11
+        }
+      ]
+    },
+    {
+      "name": "before",
+      "count": 128,
+      "accepted": {
+        "statements": 155,
+        "rowsRead": 608,
+        "rowsWritten": 39,
+        "unknown": 0
+      },
+      "acceptedRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 28,
+        "rowsRead": 135,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "cap": {
+        "statements": 105,
+        "rowsRead": 549,
+        "rowsWritten": 25,
+        "unknown": 0
+      },
+      "capRuntime": {
+        "statements": 1,
+        "rowsWritten": 1,
+        "unknown": 0
+      },
+      "capacityQueries": [],
+      "capTop": [
+        {
+          "sql": "SELECT body FROM events INDEXED BY events_room_type\n  WHERE room_id=? AND json_extract(body, '$.type') IN (\n    'work.proposed', 'work.accepted', 'work.started', 'work.blocked',\n    'work.blocker_resolved', 'work.completed', 'work.superseded',\n    'work.handoff_recorded', 'claim.acquired', 'claim.renewed',\n    'claim.released', 'verification.recorded', 'owner.decision_recorded'\n  ) ORDER BY sequence",
+          "rowsRead": 275,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "rowsRead": 84,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?) ORDER BY rowid",
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "calls": 3
+        },
+        {
+          "sql": "INSERT INTO current_room_records VALUES(?,?,?,?,?,?,?) ON CONFLICT(room_id,domain,record_key)\n      DO UPDATE SET revision=excluded.revision,payload_bytes=excluded.payload_bytes,payload_sha256=excluded.payload_sha256,payload=excluded.payload",
+          "rowsRead": 18,
+          "rowsWritten": 2,
+          "calls": 2
+        },
+        {
+          "sql": "INSERT INTO current_room_record_proofs VALUES(?,?,?,?,?,?,?) ON CONFLICT(room_id,domain,record_key)\n      DO UPDATE SET revision=excluded.revision,present=excluded.present,payload_sha256=excluded.payload_sha256,receipt_id=excluded.receipt_id",
+          "rowsRead": 18,
+          "rowsWritten": 3,
+          "calls": 2
+        },
+        {
+          "sql": "SELECT revision,present,payload_sha256,receipt_id FROM current_room_record_proofs WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 14
+        },
+        {
+          "sql": "SELECT revision,payload_bytes,length(CAST(payload AS BLOB)) AS bytes,payload_sha256 FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 14
+        },
+        {
+          "sql": "SELECT payload FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "calls": 11
+        }
+      ]
+    },
+    {
+      "name": "after",
+      "count": 32,
+      "accepted": {
+        "statements": 104,
+        "rowsRead": 306,
+        "rowsWritten": 27,
+        "unknown": 0
+      },
+      "acceptedRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 28,
+        "rowsRead": 151,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "cap": {
+        "statements": 81,
+        "rowsRead": 205,
+        "rowsWritten": 6,
+        "unknown": 0
+      },
+      "capRuntime": {
+        "statements": 1,
+        "rowsWritten": 1,
+        "unknown": 0
+      },
+      "capacityQueries": [
+        {
+          "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_permanent WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='null' LIMIT ?)",
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_timed WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='integer' AND json_extract(payload,'$.until')>? LIMIT ?)",
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "calls": 1
+        }
+      ],
+      "capTop": [
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "rowsRead": 100,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?) ORDER BY rowid",
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "calls": 3
+        },
+        {
+          "sql": "SELECT revision,present,payload_sha256,receipt_id FROM current_room_record_proofs WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 13
+        },
+        {
+          "sql": "SELECT revision,payload_bytes,length(CAST(payload AS BLOB)) AS bytes,payload_sha256 FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 13
+        },
+        {
+          "sql": "SELECT payload FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 10
+        },
+        {
+          "sql": "SELECT domain,record_key FROM current_room_record_proofs WHERE room_id=? AND domain IN ('metadata','shape') AND present=1 ORDER BY domain,record_key LIMIT 33",
+          "rowsRead": 8,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "UPDATE current_room_writer_permit SET enabled=1,room_id=?,receipt_id=? WHERE singleton=1",
+          "rowsRead": 6,
+          "rowsWritten": 1,
+          "calls": 1
+        },
+        {
+          "sql": "UPDATE current_room_writer_permit SET enabled=0,room_id=NULL,receipt_id=NULL WHERE singleton=1",
+          "rowsRead": 5,
+          "rowsWritten": 1,
+          "calls": 1
+        }
+      ]
+    },
+    {
+      "name": "after",
+      "count": 128,
+      "accepted": {
+        "statements": 106,
+        "rowsRead": 308,
+        "rowsWritten": 27,
+        "unknown": 0
+      },
+      "acceptedRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "retry": {
+        "statements": 28,
+        "rowsRead": 151,
+        "rowsWritten": 0,
+        "unknown": 0
+      },
+      "retryRuntime": {
+        "statements": 2,
+        "rowsWritten": 2,
+        "unknown": 0
+      },
+      "cap": {
+        "statements": 81,
+        "rowsRead": 205,
+        "rowsWritten": 6,
+        "unknown": 0
+      },
+      "capRuntime": {
+        "statements": 1,
+        "rowsWritten": 1,
+        "unknown": 0
+      },
+      "capacityQueries": [
+        {
+          "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_permanent WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='null' LIMIT ?)",
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_timed WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='integer' AND json_extract(payload,'$.until')>? LIMIT ?)",
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "calls": 1
+        }
+      ],
+      "capTop": [
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "rowsRead": 100,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "SELECT rowid,name,sql FROM sqlite_master WHERE rowid IN (?,?,?,?) ORDER BY rowid",
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "calls": 3
+        },
+        {
+          "sql": "SELECT revision,present,payload_sha256,receipt_id FROM current_room_record_proofs WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 13
+        },
+        {
+          "sql": "SELECT revision,payload_bytes,length(CAST(payload AS BLOB)) AS bytes,payload_sha256 FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 13
+        },
+        {
+          "sql": "SELECT payload FROM current_room_records WHERE room_id=? AND domain=? AND record_key=?",
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "calls": 10
+        },
+        {
+          "sql": "SELECT domain,record_key FROM current_room_record_proofs WHERE room_id=? AND domain IN ('metadata','shape') AND present=1 ORDER BY domain,record_key LIMIT 33",
+          "rowsRead": 8,
+          "rowsWritten": 0,
+          "calls": 1
+        },
+        {
+          "sql": "UPDATE current_room_writer_permit SET enabled=1,room_id=?,receipt_id=? WHERE singleton=1",
+          "rowsRead": 6,
+          "rowsWritten": 1,
+          "calls": 1
+        },
+        {
+          "sql": "UPDATE current_room_writer_permit SET enabled=0,room_id=NULL,receipt_id=NULL WHERE singleton=1",
+          "rowsRead": 5,
+          "rowsWritten": 1,
+          "calls": 1
+        }
+      ]
+    }
+  ],
+  "ceilingProof": {
+    "count": 500,
+    "active": 499,
+    "cost": {
+      "statements": 83,
+      "rowsRead": 705,
+      "rowsWritten": 6,
+      "unknown": 0
+    },
+    "runtime": {
+      "statements": 1,
+      "rowsWritten": 1,
+      "unknown": 0
+    },
+    "capacityQueries": [
+      {
+        "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_permanent WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='null' LIMIT ?)",
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "calls": 1
+      },
+      {
+        "sql": "SELECT count(*) n FROM (SELECT 1 FROM current_room_records INDEXED BY current_native_capacity_timed WHERE room_id=? AND domain='workCapacity' AND json_extract(payload,'$.open')=1 AND json_type(payload,'$.until')='integer' AND json_extract(payload,'$.until')>? LIMIT ?)",
+        "rowsRead": 499,
+        "rowsWritten": 0,
+        "calls": 1
+      }
+    ]
+  },
+  "sourceBefore": "a75c9e0bf",
+  "sourceAfter": "f76d3c3be",
+  "syntheticNormalizedRooms": true,
+  "historyCertified": false,
+  "notes": [
+    "All hardware counters are actual Worker SQLite observations, unknown=0 for measured operations.",
+    "Cap command timing/counters exclude fixture configuration and forensic assertion queries.",
+    "Physical rolled-back writes remain counted; no committed business/audit changes on cap refusal.",
+    "Adapter and native runtime permit writes remain separate; retry adapter zero is not total physical zero.",
+    "Threshold COUNT is not constant work: 499 occupied timed slots produced499 actual indexed rowsRead, total operation705.",
+    "Source sizes32/128 compare useful accepted native work;500/499 is after-only legal current-work cap boundary.",
+    "Synthetic initialization is a storage-path causal harness, not existing-room/onboarding proof.",
+    "Native acquires/renews/supersedes remain explicitly unsupported.",
+    "Current shared dormancy is14days, imported rather than duplicated.",
+    "No live floor45/deploy or historical certification."
+  ]
+}

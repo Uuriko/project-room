@@ -1,3 +1,5 @@
+import {isCurrentRoom} from './current-room-repository.mjs';
+import {combineCurrentEventPages} from './current-room-events.mjs';
 import { messageRepository } from "./message-repository.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
@@ -159,6 +161,7 @@ function ackedWakes(store, roomId, memberId, flags) {
 }
 
 function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false } = {}) {
+  if(isCurrentRoom(store.db,roomId))throw new ServiceError(409,'current_updates_aggregate_unavailable',`Use GET /api/rooms/${encodeURIComponent(roomId)}/needs-me for bounded native attention; reading does not resolve work`,{Link:`</api/rooms/${encodeURIComponent(roomId)}/needs-me>; rel="alternate"`});
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
   const state = room.state;
@@ -696,8 +699,37 @@ export function orientSections(store, roomId, memberId, { limit = 10 } = {}) {
 
 export function readEventTail(store, token, roomId, tail, binding = null) {
   if (!Number.isSafeInteger(tail) || tail < 1 || tail > 200) fail(422, "invalid_event_cursor", "tail must be an integer from 1 to 200");
-  const sequence = store.roomAuthority(roomId).sequence;
+  const sequence = store.headSequence(roomId);
   const start = Math.max(0, sequence - tail);
+  // Loop the normalized reader like the legacy branch below: one selected
+  // window can hold fewer visible events than `tail` (invisible source, or a
+  // page bounded by the read budget), so keep paging from `start` until the
+  // tail is full or the head is reached. hasMore stays honest: it reports
+  // whether the scan reached the head, not whether the tail filled.
+  if (isCurrentRoom(store.db,roomId)) {
+    const pages = [];
+    let after = start;
+    let guard = 0;
+    let collected = 0;
+    while (collected < tail && guard < 256) {
+      const page = store.eventsAfter(token, roomId, after, Math.min(100, tail - collected), { expectedSessionBinding: binding });
+      pages.push(page);
+      collected += page.events.length;
+      if (!page.hasMore || page.next <= after) break;
+      after = page.next;
+      guard += 1;
+    }
+    if (pages.length === 1) return pages[0];
+    const combined = combineCurrentEventPages(roomId, pages);
+    // Return the registered object itself: combineCurrentEventPages keys
+    // the page's redaction context to this exact object identity, so a
+    // spread copy would make the HTTP redaction step refuse with 409
+    // current_room_context_unavailable. Setting hasMore on the object is
+    // safe — it was created by the combine call above and is owned solely
+    // by this return — and keeps the value identical to the old spread's.
+    combined.hasMore = combined.next < sequence;
+    return combined;
+  }
   const events = [];
   let after = start;
   let next = start;

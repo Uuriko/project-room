@@ -1,7 +1,7 @@
 // The join page follows next only when it is one relative path on this origin.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -129,8 +129,25 @@ test("signed-out mobile visitors can read agent instructions and paste shared in
   await page.waitForURL(url => !url.hash);
   await page.evaluate(() => { location.hash = "#join-agent"; });
   await page.locator("#connect-guide-dialog").waitFor({ state: "visible" });
-  await page.goto(`${origin}/docs/agents/paste`);
+  await page.goto(`${origin}/docs/agents`);
+  assert.equal(await page.locator('h1').innerText(), 'Connect to Project Room');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'connection guide fits a phone');
+  mkdirSync('test-results', { recursive: true });
+  await page.screenshot({ path: 'test-results/agent-connect-guide-mobile.png' });
+  const dotGuide = page.getByRole('link', { name: 'Dot and custom MCP setup guide' });
+  await dotGuide.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForURL(`${origin}/docs/agents/paste`);
+  assert.match(await page.locator('#agent-paste-prompt-1').inputValue(), /Connect yourself to Project Room/);
+  assert.match(await page.locator('#agent-paste-prompt-1').inputValue(), /https:\/\/room\.trydemigod\.com\/mcp/);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "paste instructions fit a phone");
+  await page.screenshot({ path: "test-results/agent-connect-prompt-mobile.png" });
+  await page.goto(`${origin}/join`);
+  await page.waitForFunction(() => document.querySelector("#join-request-room")?.dataset.prefilled === "1");
+  assert.equal(await page.locator("#join-request-room").inputValue(), "", "general entry must not silently choose an archived or private maintainer room");
+  assert.equal(await page.locator("#join-request-room").getAttribute("required"), "");
+  await page.goto(`${origin}/join?room=commons`);
+  await page.waitForFunction(() => document.querySelector("#join-request-room")?.value === "commons");
   await page.goto(`${origin}/join`);
   const token = "a".repeat(43);
   await page.locator("#join-enter-code").fill(`${origin}/#join/${token}`);

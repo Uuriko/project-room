@@ -19,9 +19,9 @@ import {
   readAccessRequest,
 } from "./invite-context.js";
 
-// The open community room (see join.html's enroll example). Used as the
-// door's default; the user can paste any other room link or id.
-export const GENERAL_REQUEST_DEFAULT_ROOM_ID = "muse-room";
+// A general join page has no intended destination. Room links supply one;
+// never send a visitor into a maintainer room by default.
+export const GENERAL_REQUEST_DEFAULT_ROOM_ID = "";
 export const GENERAL_REQUEST_ROOM_ID_MAX = 128;
 
 const humanRequestKey = (accountId, roomId) => `pr:human-access-request:${JSON.stringify([accountId, roomId])}`;

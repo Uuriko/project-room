@@ -1,0 +1,62 @@
+{
+  "source": "b6830da5b1d5eee2d899773b7e5fca095fffa989",
+  "base": "8c1c2bd451c278078e9cd3470ad344db83d28b4a",
+  "node": "v24.22.1",
+  "serverBehaviorChanged": false,
+  "results": {
+    "before": {
+      "tests": 2,
+      "pass": 1,
+      "fail": 1,
+      "exit": 1
+    },
+    "after": {
+      "tests": 9,
+      "pass": 9,
+      "skip": 0,
+      "exit": 0
+    }
+  },
+  "sha256": {
+    "docs/openapi.yaml": "12b423425a389c6a4a99a3b547f3304037dd812e7a205e79ca61d752658669fa",
+    "server/openapi/fragments/0036-api-rooms-roomId-search.yaml": "1288a35d37b9e0fb7f248bdde68b9e743e70f27e1dd73ee61e4c7d69e5a1594e",
+    "tests/qa200-reg12-openapi-parity.test.js": "7b4da4bcde3af5407dab9f23f96538bf775aac10fcc600f0a2e4516652d805ae"
+  },
+  "logs": [
+    {
+      "file": "before.log.gz",
+      "original": "/tmp/search-doc-contract-before-1102.log",
+      "exit": 1,
+      "bytes": 1222,
+      "sha256": "0037e4488964fecc4007c7f30549dfbe004e1057fa6d10f5bd8239d6c8435742"
+    },
+    {
+      "file": "after.log.gz",
+      "original": "/tmp/search-doc-contract-after-1102.log",
+      "exit": 0,
+      "bytes": 5975,
+      "sha256": "80342b9bff231ffccae2bb8539813238e6dc09b536b657efa14e73157cad5ed5"
+    },
+    {
+      "file": "generation.log.gz",
+      "original": "/tmp/search-doc-contract-generation-1102.log",
+      "exit": 0,
+      "bytes": 137,
+      "sha256": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e"
+    },
+    {
+      "file": "lint.log.gz",
+      "original": "/tmp/search-doc-contract-lint-1102.log",
+      "exit": 0,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "secret.log.gz",
+      "original": "/tmp/search-doc-contract-secret-1102.log",
+      "exit": 0,
+      "bytes": 24,
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d"
+    }
+  ]
+}

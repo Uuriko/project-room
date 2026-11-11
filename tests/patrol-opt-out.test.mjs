@@ -17,7 +17,7 @@ test('only exact string zero disables scheduled patrol before any eligibility, d
   const history = applyOutcomes({}, [{ job: 'patrol', ok: false, at: Date.now()-1000, error: 'prior failure' }]);
   const view = jobHealthView(history, Date.now(), env, store).jobs.find(job => job.name === 'patrol');
   assert.equal(view.status, 'disabled');assert.match(view.reason, /ROOM_PATROL_ENABLED=0/);
-  assert.equal(view.lastError, 'prior failure');assert.equal(view.pendingSinceAt, null);
+  assert.equal(history.patrol.lastError, 'prior failure');assert.equal(view.lastError, 'Job failed');assert.equal(view.pendingSinceAt, null);
   assert.equal(reads, 0, 'health and scheduling never reach patrol SQL');
   assert.deepEqual(await patrol.run(store, { env }), { skipped: 1, disabled: 1 });
   for (const value of [undefined, '', 'false', '00', ' 0', 0, false, '1']) {

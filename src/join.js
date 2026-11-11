@@ -108,9 +108,8 @@ export function joinRoomHint(search) {
 
 // Which room the request-access door files against, and whether the
 // visitor may change it. The room's own address fixes the room; a ?room=
-// hint prefills an editable field; the bare entry page defaults to the
-// open community room (the account panel door's behavior, consolidated
-// onto this page — human-map §8.1: one request-access door).
+// hint prefills an editable field; the bare entry page leaves the
+// destination empty so the visitor chooses the intended room.
 export function requestDoorRoom(pathname, search) {
   const pathRoom = joinRoomIdFromPath(pathname);
   if (pathRoom) return { roomId: pathRoom, fixed: true };

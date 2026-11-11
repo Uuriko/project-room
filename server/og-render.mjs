@@ -314,10 +314,10 @@ export async function renderOgPng({ title = "", subtitle = "", badges = [], foot
   if (subtitleLines.length) {
     y = drawLines(rgba, subtitleLines, { size: SUBTITLE_SIZE, x: TEXT_X, baseline: y + 8, color: MUTED, atlas, bitmaps });
   }
-  const badgeText = (Array.isArray(badges) ? badges : []).map(item => sanitizeOgText(item)).filter(Boolean).join(" · ");
+  const badgeText = (Array.isArray(badges) ? badges : []).map(item => sanitizeOgText(item)).filter(Boolean).join(" / ");
   const badgeLines = wrapOgText(badgeText, { size: SMALL_SIZE, maxWidth: TEXT_MAX_WIDTH, maxLines: 1, atlas });
   if (badgeLines.length) drawLines(rgba, badgeLines, { size: SMALL_SIZE, x: TEXT_X, baseline: y + 16, color: BLUE, atlas, bitmaps });
   const footerLines = wrapOgText(footer, { size: SMALL_SIZE, maxWidth: TEXT_MAX_WIDTH, maxLines: 1, atlas });
-  if (footerLines.length) drawLines(rgba, footerLines, { size: SMALL_SIZE, x: TEXT_X, baseline: 560, color: MUTED, atlas, bitmaps });
+  if (footerLines.length) drawLines(rgba, footerLines, { size: SMALL_SIZE, x: TEXT_X, baseline: 536, color: MUTED, atlas, bitmaps });
   return encodePng(OG_WIDTH, OG_HEIGHT, rgba);
 }

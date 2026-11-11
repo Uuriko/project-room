@@ -10,7 +10,8 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { claimThreadKind, mergeClaimThread } from '../server/claim-thread.mjs';
-import { AgentRooms, agentRoomSchema } from '../server/agent-rooms.mjs';
+import { agentRoomSchema } from '../server/agent-rooms.mjs';
+import { legacyAgentRoom } from './helpers/legacy-agent-room.mjs';
 import { createHostedRoomMcp } from '../server/mcp-room-profile.mjs';
 import { createWork } from '../server/work-claims.mjs';
 
@@ -86,7 +87,7 @@ test('MCP room_work_claim_thread returns the same thread as the route', async t 
   store.db.exec(agentRoomSchema);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const owner = store.identities.create('Owen');
-  const { roomId } = new AgentRooms(store).create(owner.secret, { title: 'Thread room', purpose: 'thread test', displayName: 'Owen' });
+  const { roomId } = legacyAgentRoom(store, owner, { roomId: 'historical-thread', title: 'Thread room', purpose: 'thread test', displayName: 'Owen' });
   store.workClaims.set(roomId, createWork({ id: 'root', title: 'Root' }, { now: '2026-10-30T00:00:00.000Z', agentId: 'coord' }));
   const mcp = createHostedRoomMcp(store);
   const call = claimId => mcp({ jsonrpc: '2.0', id: claimId, method: 'tools/call',

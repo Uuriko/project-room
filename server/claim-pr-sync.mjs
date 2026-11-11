@@ -24,8 +24,10 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { notifyConcurrentMerge } from "./agent-collisions.mjs";
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, ClaimError, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
+import { notifyLeaseExpired } from "./agent-collisions.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
@@ -489,6 +491,10 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       paths: settled.paths,
       pullRequest: { url: fresh.pullRequest.url, outcome: result.kind }
     });
+    if (result.kind === "merged") {
+      try { notifyConcurrentMerge(store, roomId, fresh, { url: result.url, mergedSha: result.mergedSha }); }
+      catch (error) { console.error("concurrent merge notice failed:", error?.message ?? error); }
+    }
     return true;
   }
   if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
@@ -577,15 +583,22 @@ function holdDue(store, roomId, items, until, nowMs) {
 // legacy no-exclusion shape (the loaders' catch already tolerates the
 // missing table). The per-row isPublicClaimNamespace check in each
 // loader stays as the mid-run backstop.
+// Lifecycle exclusion is selection only, not certification or authority.
+// Registry-only fixtures have no rooms table; production always has it.
+function archivedRoomSqlExclusion(store) {
+  if (!store?.db?.prepare) return '';
+  if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rooms'").get()) return '';
+  return " AND NOT EXISTS(SELECT 1 FROM rooms WHERE id=work_claims.room_id AND archived_at IS NOT NULL)";
+}
 export function publicNamespaceSqlExclusion(store) {
   if (!store?.db || typeof store.db.prepare !== 'function') return '';
   try {
     store.db.prepare("SELECT 1 FROM public_work_tasks LIMIT 1").get();
   } catch (error) {
-    if (/no such table: public_work_tasks(?:\s|$)/i.test(error?.message ?? "")) return "";
+    if (/no such table: public_work_tasks(?:\s|$)/i.test(error?.message ?? "")) return archivedRoomSqlExclusion(store);
     throw error;
   }
-  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)";
+  return " AND NOT EXISTS(SELECT 1 FROM public_work_tasks WHERE namespace_key = work_claims.room_id)" + archivedRoomSqlExclusion(store);
 }
 
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
@@ -735,7 +748,7 @@ function heldPullIndex(store) {
         COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
         COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url')) AS url
       FROM work_claims
-      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')${publicNamespaceSqlExclusion(store)}
     `).all();
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return new Map();
@@ -1064,9 +1077,10 @@ function validateRegistryRotation(store, nowMs, skipped, deadline) {
   const cursor = saved && typeof saved.roomId === "string" && typeof saved.claimId === "string" ? saved : null;
   const rows = claimCandidatePairs(store, cursor
     ? `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
-       WHERE room_id > ? OR (room_id = ? AND claim_id > ?)
+       WHERE (room_id > ? OR (room_id = ? AND claim_id > ?))${publicNamespaceSqlExclusion(store)}
        ORDER BY room_id, claim_id LIMIT ?`
     : `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+       WHERE 1=1${publicNamespaceSqlExclusion(store)}
        ORDER BY room_id, claim_id LIMIT ?`,
   cursor ? [cursor.roomId, cursor.roomId, cursor.claimId, VALIDATION_ROTATION_LIMIT] : [VALIDATION_ROTATION_LIMIT]);
   let last = cursor;
@@ -1173,6 +1187,7 @@ function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
       enqueueClaimWake(store, roomId, before.owner,
         `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
         { reason: "lease_expired", actorId: before.owner });
+      notifyLeaseExpired(store, roomId, before);
       released += 1;
     }
   });
@@ -1220,7 +1235,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
   let roomIds = [];
   try {
     roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims
-      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'`)
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'${publicNamespaceSqlExclusion(store)}`)
       .all().map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return 0;

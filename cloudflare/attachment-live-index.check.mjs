@@ -22,7 +22,11 @@ test('actual Workers admit optional index boundaries, preserve rollback/retry an
     const costPlan = await call('/plan', {}, 200, 'cost'); await call('/execute', { planHash: costPlan.planHash, requestId: 'cost-install' }, 200, 'cost');
     const after = await call('/stage', { id: 'after' }, 200, 'cost');
     assert.ok(after.costs.quota < before.costs.quota / 4); assert.ok(after.costs.quota < 32);
-    assert.ok(after.costs.expiry < before.costs.expiry / 4);
+    console.log(JSON.stringify({ fixture: 'runtime-attachment-expiry', before: before.costs, after: after.costs, beforePlan: before.expiryPlan, afterPlan: after.expiryPlan }));
+  assert.ok(Number.isSafeInteger(before.costs.expiry) && Number.isSafeInteger(after.costs.expiry));
+  assert.ok(after.costs.expiry < before.costs.expiry / 4);
+  assert.ok(after.costs.expiry < 32);
+  assert.ok(after.expiryPlan.some(row => row.detail.includes('room_attachments_live')));
     console.log(JSON.stringify({ fixture: 'runtime-attachment-stage', before: before.costs, after: after.costs }));
     const seeded = await call('/seed-boundary');
     const plan = await call('/plan');

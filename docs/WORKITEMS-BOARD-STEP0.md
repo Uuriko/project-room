@@ -1,6 +1,6 @@
 # workItems → board claims — Step 0 characterization (charter B-4)
 
-Status: **Step 0 complete. The council kill criterion is TRIGGERED — the
+Historical Step 0 status (see current normalized-storage amendment below): **Step 0 complete. The council kill criterion is TRIGGERED — the
 migration halts here and the council re-convenes with this census. No code
 was cut, no mapping was improvised.** The write-path sync
 (`syncWorkItemClaim`) stays, named and costed (§7), until the council
@@ -389,3 +389,61 @@ does not close reader-migration debt: it still enumerates the room's work items.
 2026-10-30 native Events amendment: `server/mcp-events-runtime.mjs` reads
 current work item revision and next-step ownership before webhook delivery,
 suppressing stale work notifications. It introduces no work item writer.
+
+
+## Normalized-storage census reconciliation (2026-11-02)
+
+The current census is **83 source files**, including the following 17 additions.
+The first 15 were reviewed at `988a8c236`; the search and work snapshot readers
+were reviewed against `ca7508fd5`. The older counts and council migration proposal above
+record their historical checkpoints; they are not the current serving contract.
+The legacy field-fate and rework/divergence tests remain unchanged.
+
+| Source | Role | Actual work dependency |
+|---|---|---|
+| `server/current-room-repository.mjs` | writer-reader-audit | Protected work references, addressed bodies and derived summaries/privacy/capacity; command writes retain canonical work_entities and shared reducer semantics. |
+| `server/current-search.mjs` | reader | Bounded authorized search matches selected canonical work bodies from protected summary windows; total remains unknown and continuations are viewer, credential and head bound. No work writer or board absorption. |
+| `server/current-work-capacity.mjs` | constraint | Derived canonical-work capacity index preserves legacy cap and dormancy rules; it is not a board claim writer. |
+| `server/current-work-list.mjs` | reader | Authorized paged native work discovery, selected result pointers and continuation; partial summaries are not a complete work map. |
+| `server/current-work-privacy.mjs` | derived-policy | Derives private request parties and work-request links from canonical work and requests; no board mapping. |
+| `server/current-work-snapshot.mjs` | reader | Bounded work-view pages load selected canonical work records, with protected private-party redaction and explicit partial coverage; no lifecycle writes or complete-map claim. |
+| `server/recovery-census-continuation.mjs` | recovery | Independent protected work-reference/body/summary/capacity/privacy census and complete membership counts. |
+| `server/recovery-checkpoint-seed.mjs` | recovery | Partitions checkpoint work maps into restore scratch and applies existing control defaults; scratch is not serving authority. |
+| `server/recovery-reminder-consumption.mjs` | recovery-oracle | Preserves default reminder oracle work lookups and consumes only independently qualified reminder coverage in operator scope. |
+| `server/recovery-reminder-continuation.mjs` | recovery | Checks selected member and hydrated canonical work dependencies for reminder eligibility. |
+| `server/recovery-replay-continuation.mjs` | recovery | Resumable historical replay counts and ordered claim-overlap work dependencies, with explicit deferred cases. |
+| `server/recovery-replay-step.mjs` | recovery-reducer | Loads selected work and authority dependencies, invokes existing reducers and checkpoints derived replay work changes. |
+| `server/recovery-reply-continuation.mjs` | recovery | Tracks historical work existence for reply-request event validation, not replacement work bodies. |
+| `server/recovery-reply-rules.mjs` | shared-audit-rules | Original and resumable reply audits share work-proposal membership rules. |
+| `server/recovery-work-help.mjs` | recovery | Checks historical work/help state and help-offer invariants through bounded checkpoint and event scans. |
+| `server/replay-cutover.mjs` | migration | Independently qualifies H work fields/references and converts to the same protected current representation; reconciled legacy work is required at publication. |
+| `server/replay-projection-codec.mjs` | codec | Partitions workItems maps into bounded source records; no lifecycle mutation or board absorption. |
+
+The storage conversion preserves the canonical work aggregate rather than
+absorbing it into board claims. `work_entities` retains full work bodies;
+protected `workItems` records provide membership/reference proofs, and derived
+summary, capacity and privacy records serve bounded readers and constraints.
+A returned summary page is explicitly partial, not a full room work map.
+Recovery scratch and checkpoint-codec records are intermediate verification
+state, never another serving work authority. Independent phases cover named
+invariants; unsupported historical grammar remains deferred and the remaining
+final oracle remains mandatory.
+
+`Store.command` invokes `syncWorkItemClaim` for the 12 named event types only on
+the legacy path (`!messageContext?.current`). Normalized commands persist through
+the protected current writer instead. Before publication,
+`assertLegacyWorkReconciled` refuses independently active legacy assignments;
+mapped mirrors need explicit reviewed retirement without closing their native
+canonical task. After activation the existing legacy write guard refuses new
+or reopened assignments while retaining close/release and history inspection.
+This does not delete the board history, authorize an unresolved assignment to
+disappear, or establish that every old board operation has a native equivalent.
+The native capacity derivation retains the existing cap/dormancy constraint;
+its indexed COUNT cost is real work, not a claim of constant physical cost.
+
+Consequently the historical lossy field-fate evidence still rules out replacing
+canonical work with board rows. The old statement that every sync event always
+replans a room applies to the legacy path, not normalized serving. This census
+update changes no reducer, storage owner, permission, guard or migration gate.
+It is source reconciliation and does not claim production activation or complete
+removal of the blob/recovery cost problem.

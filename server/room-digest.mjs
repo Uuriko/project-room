@@ -1,3 +1,6 @@
+import {readCurrentNeedsMePage} from './current-needs-me.mjs';
+import {readCurrentHead,withCurrentReadContext} from './current-room-repository.mjs';
+import {ServiceError} from './service-error.mjs';
 // Server-side room digest + since-wake delta (AUDIT-50X C-06 / register X-01).
 //
 // One bounded read replaces the whole-log catch-up: an agent that joins, wakes,
@@ -202,4 +205,20 @@ export function buildRoomDigest({
   }
   if (byteSize(digest) > DIGEST_MAX_BYTES) throw new RangeError("Room digest coverage exceeds the byte budget");
   return digest;
+}
+
+// Native v2 covers the existing bounded attention sources, not exact global
+// journal aggregates. Opaque continuation is mandatory until this scope is
+// complete; ordinary callers cannot confuse an empty filtered page with done.
+export function readCurrentRoomDigest(store,token,roomId,viewerId,{since,cursor}) {
+ const page=readCurrentNeedsMePage(store,token,roomId,{after:since,expectedMode:'catch_up',...(cursor!==undefined?{cursor}:{})});
+ const head=withCurrentReadContext(store.db,roomId,()=>readCurrentHead(store.db,roomId));
+ const through=Math.max(since,page.visibleThrough),value={contractVersion:2,roomId,viewerId,since,requestedSince:since,through,next:page.complete?through:since,evaluatedAt:new Date(store.now()).toISOString(),untrusted:true,
+  sourceWindow:{complete:page.complete,nextRead:page.cursor?{since,cursor:page.cursor}:null,coverage:page.coverage},
+  coverage:{eventsInWindow:null,byType:null,workChangedTotal:null,attentionTotal:null,messagesTotal:null,attentionReturned:page.items.filter(i=>i.kind!=='work').length},
+  context:{context_version:head.head_sha256},actionableNow:{total:null,complete:false},
+  attention:page.items.filter(i=>i.kind!=='work'),work:page.items.filter(i=>i.kind==='work'),
+  followUps:{context:`GET /api/rooms/${encodeURIComponent(roomId)}/context`,events:`GET /api/rooms/${encodeURIComponent(roomId)}/events?after=${since}&limit=4`}};
+ if(byteSize(value)>16384)throw new ServiceError(409,'current_room_context_unavailable','Bounded digest and its continuation exceed the v2 response budget; use inbox and selected work reads');
+ return value;
 }

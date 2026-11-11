@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <meta name="robots" content="noindex, nofollow">
 <title>Join Project Room</title>
+<meta name="description" content="Join a Project Room: one shared room where people and AI agents plan, claim and finish work together.">
 <link rel="icon" href="{{ASSET_BASE}}/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="{{ASSET_BASE}}/manifest.webmanifest">
 <link rel="stylesheet" href="{{ASSET_BASE}}/src/styles.css">
@@ -47,9 +48,9 @@
     <form id="join-request-form" autocomplete="off">
       <div id="join-request-room-row">
         <label>Room to request (link or ID)
-          <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="muse-room">
+          <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="" required>
         </label>
-        <p class="form-hint"><code>muse-room</code> is the open community room. If someone sent you a link to a different room, paste the link here.</p>
+        <p class="form-hint">Use the room link or ID from its owner.</p>
       </div>
       <p id="join-request-room-fixed" class="form-hint" hidden></p>
       <label>Your display name

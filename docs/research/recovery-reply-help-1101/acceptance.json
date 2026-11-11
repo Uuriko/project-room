@@ -1,0 +1,61 @@
+{
+  "runtime": "eb70205c5",
+  "replyModule": "f99763428",
+  "originalRules": "1116642a2",
+  "workHelpOriginalPins": [
+    "a946f3460",
+    "dccd3b355"
+  ],
+  "protocol": 15,
+  "reportVersion": 1,
+  "writerFormat": "normalized-current-v1-native-work-5",
+  "fullOracleRequired": true,
+  "checks": {
+    "affectedNode": {
+      "pass": 29,
+      "fail": 0,
+      "skip": 0
+    },
+    "originalReplyParity": 50,
+    "actualNodeOperator": {
+      "pass": 1,
+      "retainedCheckpoint": true,
+      "archivedCanonicalMessages": true,
+      "coldEveryContinuation": true,
+      "exactLatestRetry": true,
+      "pending503": true,
+      "fullOracle": true
+    },
+    "actualNative": {
+      "pass": 1,
+      "rooms": 2,
+      "differentOwners": true,
+      "steps": 88,
+      "retainedCheckpoint": true,
+      "archivedCanonicalMessages": true,
+      "mixedWarmAndCold": true,
+      "exactLatestRetry": true,
+      "exactRequestsMessagesOffers": true,
+      "fullOracle": true,
+      "finalColdReady": true,
+      "elapsedMsClockOnly": 9857.172333
+    },
+    "genuinePrior14ColdAndPreopenedRefusal": 2,
+    "runtimeClosure": true
+  },
+  "sourceAuthority": {
+    "archiveCaptureBasis": "existing explicit current-write-proofs operator plan",
+    "historyProvenance": "unknown",
+    "certified": false,
+    "historicalReceiptOverwritten": false
+  },
+  "limits": [
+    "Original full oracle still repeats per-room checks and all global subsystems/report digest; no whole recovery boundedness or net speedup claimed.",
+    "Legacy rooms retain original full audit; normalized phase coverage is explicit.",
+    "Codec-unsupported legal checkpoint shapes or oversized staged atoms return deferred with reason and are reported as deferred, never independently complete.",
+    "One legally sealed atom may exceed nominal4MiB; actual Worker SQL-row platform refusals unchanged.",
+    "SQLite engine atoms remain measured mandatory atomic checks, not strictCPUbounded.",
+    "Final package/deploy/live qualification belongs to root and is not claimed here.",
+    "Initial Native fixture hardcoded retained-message expectation4; actual independently audited source retained6. Corrected assertion to source messages length, then final cold/full flow passed."
+  ]
+}

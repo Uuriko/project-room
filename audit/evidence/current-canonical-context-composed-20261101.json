@@ -1,0 +1,55 @@
+{
+  "scope": "offline composed canonical/archive migration plus bounded default context; no live floor or deployment",
+  "base": "799bc5abd",
+  "sourceSha256": {
+    "server/current-room-repository.mjs": "3130c46e5149d279c983874cc77a17d24cdc9a0153fe356b4d67563c40cca082",
+    "server/current-work-summary.mjs": "dc5d7c6decbc00a895e15e785ecd0b94219d403867a039dbf139e4f5942a5600",
+    "server/replay-cutover.mjs": "1ec06bad47f91efe4fa584c159e6e0b81f8ae9c911c1b02b1b39658c4083ffd4",
+    "server/replay-canonical-h.mjs": "1313255efc827750ac7414cb9f12bf90aab6002551fca8f7bdd3b74ac0ce73b2",
+    "server/current-room-archive.mjs": "4ae05cf93b30184aa8f31dde8f53b02fd0bdad443725892e1fcaa3f2e93b0804",
+    "server/store.mjs": "aa0fbfd23ccca2d24c40177ee6ae8bf55193e136e1e26c8d788dbfdd49d8bb77"
+  },
+  "checks": {
+    "composedNode": {
+      "pass": 64,
+      "log": "/tmp/current-canonical-composed-final-node.log"
+    },
+    "finalAffectedNodeIncludingLegacyGuide": {
+      "pass": 16,
+      "log": "/tmp/current-canonical-final-controls.log"
+    },
+    "actualWorkerCanonicalArchivedContext": {
+      "pass": 1,
+      "sizes": [
+        32,
+        128
+      ],
+      "workItems": 19,
+      "pages": 3,
+      "warmRowsRead": [
+        356,
+        356,
+        298
+      ],
+      "coldRowsRead": 1984,
+      "adapterWrites": 0,
+      "contextUnknown": 0,
+      "captureUnknown": 28,
+      "log": "/tmp/current-canonical-context-composed-worker.log"
+    },
+    "earlierComposedWorkerInlineAndCanonical": {
+      "pass": 2,
+      "log": "/tmp/current-canonical-context-worker.log"
+    },
+    "lintErrors": 0
+  },
+  "importantScope": [
+    "Canonical H native work existed before capture and reached default context/Orient/Begin/selected work with full room hydration trapped",
+    "Archived canonical migration preserves all historical conversation access plus exact retained legacy reducer state",
+    "Unknown physical capture counters are real size-probe failures; not a complete capture cost claim",
+    "Stale canonical global content checkpoint still refuses; no current/historical proof invented",
+    "Work summary is derived from independently proven existing work ref/body with same reducer selectors; blocker note and verifier identity preserved",
+    "Restore/recovery on this exact composed summary/archive format still awaits independent qualification",
+    "Partial abandoned target cleanup/recapture, larger members/reply contexts and unported ordinary agent reads remain open"
+  ]
+}

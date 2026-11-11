@@ -5,13 +5,13 @@ import {parse} from 'yaml';
 import {liveSmoke,DISCOVERY,PUBLIC_PAGES,LIVE_ORIGIN} from '../scripts/live-smoke.mjs';
 import {agentCard} from '../server/agent-discovery.mjs';
 const origin='https://staging.example.test',revision='a'.repeat(40),githubApi='https://github-api.example.test';
-function fixture(t,{a2a=405,redirect=false}={}){
+function fixture(t,{a2a=405,redirect=false,mainRevision=revision,versionStatus=200,liveRevision=revision}={}){
  const calls=[],card=JSON.stringify({url:LIVE_ORIGIN+'/a2a',entry:'https://www.getdasha.com/room/a2a',provider:'https://accounts.google.com/o/oauth2/v2/auth',marketing:'https://www.getdasha.com/pricing',networkPath:LIVE_ORIGIN+'//provider.example/a2a'});
  t.mock.method(globalThis,'fetch',async(raw,init={})=>{
   const u=new URL(raw);calls.push({url:u.href,redirect:init.redirect});
-  if(u.origin===githubApi)return Response.json({sha:revision});
+  if(u.origin===githubApi)return Response.json(u.pathname.endsWith('/commits/main')?{sha:mainRevision}:{status:'diverged',ahead_by:1,behind_by:1,commits:[]});
   if(u.origin!==origin)return new Response('production unavailable',{status:503});
-  if(u.pathname==='/api/version')return Response.json({sourceRevision:revision});
+  if(u.pathname==='/api/version')return Response.json({sourceRevision:liveRevision},{status:versionStatus});
   if(u.pathname==='//provider.example/a2a')return new Response('{}',{status:405});
   if(u.pathname==='/a2a')return new Response('{}',{status:redirect?302:a2a,headers:{'content-type':'application/json',...(redirect?{location:LIVE_ORIGIN+'/a2a'}:{})}});
   const doc=DISCOVERY.find(d=>d.path===u.pathname);
@@ -51,7 +51,38 @@ test('staging explicitly scopes smoke and uploads failure artifacts only after i
  const workflow=parse(readFileSync(new URL('../.github/workflows/staging.yml',import.meta.url),'utf8'));
  const steps=workflow.jobs.deploy.steps;
  assert.equal(steps.find(s=>s.name==='Smoke and browser checks').env.ROOM_SMOKE_ISOLATED,'1');
+ assert.equal(steps.find(s=>s.name==='Smoke and browser checks').env.ROOM_SMOKE_EXPECTED_REVISION,'${{ github.sha }}');
  assert.equal(steps.find(s=>s.uses?.startsWith('actions/upload-artifact@')).if,"always() && steps.gate.outputs.ready == 'true'");
  assert.ok(steps.find(s=>s.name==='Deploy isolated staging').env.ROOM_AGENT_CARD_SIGNING_KEY);
  assert.ok(steps.find(s=>s.name==='Deploy isolated staging').run.includes('--env staging'));
+});
+
+
+test('isolated candidate smoke requires exact expected revision without main ancestry',async t=>{
+ const f=fixture(t,{mainRevision:'b'.repeat(40)}),report=await liveSmoke({origin,githubApi,isolated:true,expectedRevision:revision});
+ assert.equal(report.ok,true,JSON.stringify(report.findings));
+ assert.equal(report.deploy.basis,'isolated-expected-revision');assert.equal(report.deploy.expectedRevision,revision);assert.equal(report.deploy.status,'expected');
+ assert.ok(f.calls.every(call=>new URL(call.url).origin!==githubApi),'exact candidate equality does not depend on main ancestry');
+ assert.ok(f.calls.some(call=>new URL(call.url).pathname==='/a2a'),'existing discovery endpoints still checked');
+ assert.ok(f.calls.some(call=>new URL(call.url).pathname===PUBLIC_PAGES[0]),'existing public checks still run');
+});
+test('isolated candidate smoke fails a wrong deployed revision and still runs ordinary endpoint checks',async t=>{
+ const f=fixture(t),report=await liveSmoke({origin,githubApi,isolated:true,expectedRevision:'b'.repeat(40)});
+ assert.equal(report.ok,false);assert.ok(report.findings.some(finding=>finding.code==='deploy_revision_mismatch'&&finding.severity==='fail'));
+ assert.equal(report.deploy.status,'mismatch');assert.ok(f.calls.some(call=>new URL(call.url).pathname==='/a2a'));
+});
+test('expected revision cannot bypass production ancestry or accept malformed input',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>assert.fail('invalid configuration must fail before network'));
+ await assert.rejects(liveSmoke({origin,expectedRevision:revision}),/isolated/);
+ await assert.rejects(liveSmoke({origin:LIVE_ORIGIN,isolated:true,expectedRevision:revision}),/separate environment/);
+ for(const expectedRevision of ['',revision.slice(1),'g'.repeat(40),revision+'a',123])await assert.rejects(liveSmoke({origin,isolated:true,expectedRevision}),/40 lowercase hex/);
+});
+test('isolated smoke without an explicit expected revision retains existing main ancestry checks',async t=>{
+ fixture(t,{mainRevision:'b'.repeat(40)});const report=await liveSmoke({origin,githubApi,isolated:true});
+ assert.equal(report.ok,false);assert.ok(report.findings.some(finding=>finding.code==='deploy_diverged'));
+});
+
+for(const version of [{versionStatus:503},{liveRevision:'invalid'}])test('expected revision never verifies an invalid version response '+JSON.stringify(version),async t=>{
+ fixture(t,version);const report=await liveSmoke({origin,githubApi,isolated:true,expectedRevision:revision});
+ assert.equal(report.ok,false);assert.equal(report.deploy.status,'unverified');assert.ok(report.findings.some(finding=>finding.code==='version'&&finding.severity==='fail'));
 });

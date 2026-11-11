@@ -1,0 +1,41 @@
+{
+  "base": "d947b3dfeaedbc79e1699e731d4b155fa3db911f",
+  "node": "v24.22.1",
+  "before": "Actual authorized HTTP plan returns404 on original d947 Store/operator routes; unchanged new positive test expects200. One causal fail.",
+  "after": {
+    "node": 13,
+    "native": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "native": {
+    "compatibilityDate": "2026-07-30",
+    "workerd": "1.20260730.1",
+    "runtime": "local Native SQLite Miniflare; no live call"
+  },
+  "commands": [
+    "node --test --test-name-pattern=actual\\ operator\\ HTTP tests/operator-lifecycle-archive.test.mjs",
+    "node --test tests/operator-lifecycle-archive.test.mjs tests/operator-qa-retirement.test.js tests/archived-claim-retirement.test.mjs",
+    "node --test cloudflare/operator-lifecycle-archive.check.mjs",
+    "node scripts/openapi-gen.mjs --write",
+    "node scripts/untested-modules-lint.mjs"
+  ],
+  "scope": [
+    "Only roomId=confirmRoomId=muse-room admitted; existing Operator credential required by HTTP.",
+    "Existing source-owner archive event, explicitly operator_on_owner_behalf in immutable operator_actions; no claim caller is owner.",
+    "All credential/account/identity/grant tables preserved; QA destructive retirement is not reused.",
+    "Exact request retry, conflicting body refusal, stale head/source basis, atomic audit-save rollback, source agent-shaped owner and full literal recovery audit qualified.",
+    "Existing event format remains room.archived; no event/reducer/schema format change.",
+    "Plan and execution each hydrate legacy state once; not a bounded one-time CPU claim.",
+    "No deploy/archive/live mutation."
+  ],
+  "logs": {
+    "operator-lifecycle-before-1102.log": "05a4b4e2e7238e8aa2c42478c0e395005883888e936b4d75a54e7d4a632a7b8a",
+    "operator-lifecycle-composed-final-1102.log": "4b0f30fd37efc0eaf4d37729aca0b546690e63816d4bcf7d889f7c1e86df725b",
+    "operator-lifecycle-native-final-1102.log": "1ef2c9fd3316ed46c5e5290de5f3b854db22f34d0bef04c08c1d230929b17eba",
+    "operator-lifecycle-openapi-1102.log": "d27d074bd2d6ca8e91d89adfec46f59e934427d590ec418d7a715fdb940c541e",
+    "operator-lifecycle-lint-1102.log": "f5b48b0193d94de89466b4f3b0bb014cf96f45761a83d4b54d517b8511f094e6",
+    "operator-lifecycle-secret-1102.log": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+    "operator-lifecycle-coverage-1102.log": "a178ac21762a9f614def430c1d07d86907da518b09a494ff6951ce1ab645f095"
+  }
+}

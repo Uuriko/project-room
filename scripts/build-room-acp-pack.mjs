@@ -7,9 +7,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const roomAcpInputs = Object.freeze(['package.json', 'README.md',
-  ...['agent-host', 'agents', 'args', 'bridge', 'cli', 'credentials', 'join',
-    'jsonrpc', 'link', 'permission', 'prompt', 'queue', 'redact', 'render',
-    'room', 'run', 'sessions', 'private-state'].map(name => `src/${name}.mjs`)]);
+  ...['agent-host', 'agents', 'args', 'bridge', 'cli', 'credentials', 'join', 'import-identity',
+    'jsonrpc', 'link', 'node-version', 'permission', 'prompt', 'queue', 'redact', 'render',
+    'room', 'run', 'stage-observer', 'sessions', 'private-state', 'private-files', 'formal-delivery', 'cloud-notify', 'notification-receiver'].map(name => `src/${name}.mjs`)]);
 
 export function buildRoomAcpPack(root) {
   const out = mkdtempSync(join(tmpdir(), 'room-acp-pack-'));

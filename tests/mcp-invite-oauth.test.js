@@ -5,7 +5,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { RoomStore } from '../server/store.mjs';
-import { createMcpInviteOAuth } from '../server/mcp-invite-oauth.mjs';
+import { runInNewContext } from 'node:vm';
+import { createMcpInviteOAuth, PUBLIC_LOBBY_PROOF_SCRIPT } from '../server/mcp-invite-oauth.mjs';
+import { solveIdentityMintProof } from '../server/agent-identities.mjs';
 import { mcpOAuthPrincipalDescriptor, resolveMcpOAuthPrincipal, authorizeMcpOAuthDescriptor, listMcpOAuthAgents, validateMcpOAuthBinding } from '../server/mcp-oauth.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
@@ -364,4 +366,190 @@ test('hosted Claude public client retains explicit invitation consent at the pub
   assert.equal(redirect.searchParams.get('iss'), origin);
   const tokens = await (await f.exchange({ grant_type: 'authorization_code', code: redirect.searchParams.get('code') })).json();
   assert.equal(typeof tokens.access_token, 'string');
+});
+
+test('public lobby native OAuth connects a guest without an invitation and fences removal', async t => {
+  const f = await setup(t);
+  const room = 'project-room-lobby';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'});
+  const owner = f.store.issueAccessKey(room, 'owner');
+  f.store.command(owner, room, { id:'publish-lobby', type:'room.public_page_set', data:{enabled:true} });
+  f.store.command(owner, room, { id:'open-lobby', type:'room.join_link_set', data:{enabled:true} });
+  f.store.publicFace.enable(room, 'owner');
+  const accountsBefore = f.store.db.prepare('SELECT count(*) n FROM accounts').get().n;
+  const start = await f.start();
+  const html = await start.text();
+  assert.match(html, /Join the public lobby/);
+  const nonce = html.match(/name="nonce" value="([^"]+)"/)[1];
+  const cookie = start.headers.get('set-cookie').split(';')[0];
+  const submit = (name='Lobby agent') => fetch(f.base + '/oauth/invite', {method:'POST', headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:name})});
+  f.store.room=()=>{throw Error('whole room hydration forbidden during lobby connection');};
+  const allowed = await submit(); assert.equal(allowed.status,302,await allowed.clone().text());
+  assert.equal((await submit()).headers.get('location'),allowed.headers.get('location'));
+  assert.equal((await submit('Other name')).status,400);
+  const code = new URL(allowed.headers.get('location')).searchParams.get('code');
+  const token = await f.exchange({grant_type:'authorization_code',code}); assert.equal(token.status,200,await token.clone().text());
+  const tokens = await token.json();
+  const grant = f.store.db.prepare('SELECT * FROM oauth_invite_grants').get();
+  assert.equal(grant.room_id,room); assert.equal(grant.invite_hash,'public-lobby-guest-v1');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n,accountsBefore);
+  const access = await f.rpc(tokens.access_token); assert.equal(access.status,200,JSON.stringify(access.body));
+  const listing = await f.rpc(tokens.access_token,'room_list_work',{focus:'all'});
+  assert.equal(listing.status,200,JSON.stringify(listing.body));
+  assert.notEqual(listing.body.result?.isError,true,JSON.stringify(listing.body));
+  const denied = await f.rpc(tokens.access_token,'room_create_agent_invite',{}); assert.ok(denied.body.error || denied.body.result?.isError);
+  const refreshed=await f.exchange({grant_type:'refresh_token',refresh_token:tokens.refresh_token});
+  assert.equal(refreshed.status,200,await refreshed.clone().text());
+  const refreshedTokens=await refreshed.json();
+  assert.equal((await f.rpc(refreshedTokens.access_token)).status,200);
+  const member = f.store.roomAuthority(room,{memberId:grant.member_id}).members[grant.member_id];
+  f.store.command(owner, room, { id:'remove-lobby-agent', type:'member.access_changed', data:{memberId:member.id,expectedMemberRevision:member.revision,active:false,permissions:member.permissions} });
+  assert.equal((await f.rpc(refreshedTokens.access_token)).status,401);
+  assert.equal((await f.exchange({grant_type:'refresh_token',refresh_token:refreshedTokens.refresh_token})).status,400);
+});
+
+test('public lobby consent requires current publication, open join and CSRF, with no partial identity', async t => {
+  const f=await setup(t), room='project-room-lobby';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'});
+  const owner=f.store.issueAccessKey(room,'owner');
+  f.store.command(owner,room,{id:'publish',type:'room.public_page_set',data:{enabled:true}});
+  f.store.command(owner,room,{id:'open',type:'room.join_link_set',data:{enabled:true}});
+  f.store.publicFace.enable(room,'owner');
+  const start=await f.start(), html=await start.text(), nonce=html.match(/name="nonce" value="([^"]+)"/)[1], cookie=start.headers.get('set-cookie').split(';')[0];
+  const submit=(selectedCookie=cookie) => fetch(f.base+'/oauth/invite',{method:'POST',headers:{Cookie:selectedCookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:'Open guest'})});
+  const before=f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n;
+  assert.equal((await submit('')).status,403);
+  f.store.command(owner,room,{id:'close',type:'room.join_link_set',data:{enabled:false}});
+  const closed=await submit(); assert.equal(closed.status,400);
+  const closedBody=await closed.json();
+  assert.match(closedBody.error_description,/lobby is unavailable or not open for guest joining/i);
+  assert.match(closedBody.recovery,/ask the room owner/i);
+  assert.doesNotMatch(closedBody.recovery,/no invitation is required/i);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n,before);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,0);
+  f.store.command(owner,room,{id:'reopen',type:'room.join_link_set',data:{enabled:true}});
+  f.store.publicFace.disable(room,'owner');
+  assert.equal((await submit()).status,400);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM agent_identities').get().n,before);
+});
+
+test('public lobby consent keeps anonymous mint proof and supports a browser challenge', async t => {
+  const f=await setup(t), room='project-room-lobby';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'}); const owner=f.store.issueAccessKey(room,'owner');
+  f.store.command(owner,room,{id:'publish',type:'room.public_page_set',data:{enabled:true}});
+  f.store.command(owner,room,{id:'open',type:'room.join_link_set',data:{enabled:true}});
+  f.store.publicFace.enable(room,'owner');
+  f.store.identities.proofFreePerAddress=0;
+  const start=await f.start(),html=await start.text(),nonce=html.match(/name="nonce" value="([^"]+)"/)[1],cookie=start.headers.get('set-cookie').split(';')[0];
+  const submit=proof=>fetch(f.base+'/oauth/invite',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:'Proof agent',...(proof?{proof}:{})})});
+  const challenge=await submit(); assert.equal(challenge.status,200); assert.match(challenge.headers.get('content-security-policy'),/script-src 'sha256-/);
+  assert.match(await challenge.text(),/Verifying your connection/);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,0);
+  const proof=solveIdentityMintProof('Proof agent',f.store.now(),f.store.identities.powBits);
+  assert.equal((await submit(proof)).status,302);
+});
+
+for (const mutation of ['identity-revoked', 'identity-rotated', 'grant-expired', 'grant-revoked']) test(`public guest OAuth stops after ${mutation}`, async t => {
+  const f=await setup(t), room='project-room-lobby';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'}); const owner=f.store.issueAccessKey(room,'owner');
+  f.store.command(owner,room,{id:'publish',type:'room.public_page_set',data:{enabled:true}});
+  f.store.command(owner,room,{id:'open',type:'room.join_link_set',data:{enabled:true}});
+  f.store.publicFace.enable(room,'owner');
+  const start=await f.start(),html=await start.text(),nonce=html.match(/name="nonce" value="([^"]+)"/)[1],cookie=start.headers.get('set-cookie').split(';')[0];
+  const submit=()=>fetch(f.base+'/oauth/invite',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:'Fence agent'})});
+  const allowed=await submit(); assert.equal(allowed.status,302,await allowed.clone().text());
+  const code=new URL(allowed.headers.get('location')).searchParams.get('code');
+  const exchanged=await f.exchange({grant_type:'authorization_code',code}); assert.equal(exchanged.status,200);
+  const tokens=await exchanged.json(),grant=f.store.db.prepare('SELECT * FROM oauth_invite_grants').get();
+  if(mutation==='identity-revoked') f.store.db.prepare('UPDATE agent_identities SET revoked_at=? WHERE identity_id=?').run(Date.now(),grant.identity_id);
+  if(mutation==='identity-rotated') f.store.db.prepare('UPDATE agent_identities SET secret_hash=? WHERE identity_id=?').run('changed-verifier',grant.identity_id);
+  if(mutation==='grant-expired') f.store.db.prepare('UPDATE oauth_invite_grants SET expires_at=? WHERE id=?').run(f.store.now()-1,grant.id);
+  if(mutation==='grant-revoked') f.store.db.prepare('UPDATE oauth_invite_grants SET revoked_at=? WHERE id=?').run(Date.now(),grant.id);
+  assert.equal((await f.rpc(tokens.access_token)).status,401);
+  assert.equal((await f.exchange({grant_type:'refresh_token',refresh_token:tokens.refresh_token})).status,400);
+  assert.equal((await submit()).status,400);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,1);
+});
+
+test('active public guest refresh keeps the same seat beyond thirty days', async t=>{
+  const f=await setup(t),room='project-room-lobby';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'});
+  const owner=f.store.issueAccessKey(room,'owner');
+  f.store.command(owner,room,{id:'publish',type:'room.public_page_set',data:{enabled:true}});
+  f.store.command(owner,room,{id:'open',type:'room.join_link_set',data:{enabled:true}});
+  f.store.publicFace.enable(room,'owner');
+  const initial=await f.start(),html=await initial.text(),nonce=html.match(/name="nonce" value="([^"]+)"/)[1],cookie=initial.headers.get('set-cookie').split(';')[0];
+  const allowed=await fetch(f.base+'/oauth/invite',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:'Long running guest'})});
+  assert.equal(allowed.status,302,await allowed.clone().text());
+  const code=new URL(allowed.headers.get('location')).searchParams.get('code');
+  let tokens=await (await f.exchange({grant_type:'authorization_code',code})).json();
+  const grant=f.store.db.prepare('SELECT * FROM oauth_invite_grants').get(),start=f.store.now();
+  for(const day of [29,31,59]){
+    f.store.now=()=>start+day*86400000;
+    const response=await f.exchange({grant_type:'refresh_token',refresh_token:tokens.refresh_token});
+    assert.equal(response.status,200,await response.clone().text());tokens=await response.json();
+    const access=await f.rpc(tokens.access_token);assert.equal(access.status,200,JSON.stringify(access.body));
+    assert.equal(access.body.result.structuredContent.memberId,grant.member_id);
+  }
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM oauth_invite_grants').get().n,1);
+});
+
+test('browser verification retries with a fresh nonce range after a failed attempt',async()=>{
+  const status={textContent:''},retry={hidden:true,disabled:false},field={value:''},inputs=[];
+  let listener,seeds=0,submits=0;
+  retry.addEventListener=(_event,callback)=>{listener=callback;};
+  const form={dataset:{prefix:'0',challenge:'bucket:Agent'},elements:{proof:field},requestSubmit(){submits++;}};
+  runInNewContext(PUBLIC_LOBBY_PROOF_SCRIPT,{document:{getElementById:id=>id==='public-proof'?form:id==='proof-status'?status:retry},TextEncoder,Uint32Array,Uint8Array,crypto:{
+    getRandomValues:array=>{array.fill(++seeds);return array;},
+    subtle:{digest:async(_kind,data)=>{inputs.push(new TextDecoder().decode(data));if(inputs.length===1)throw Error('interrupted verification');return new Uint8Array(32).buffer;}}
+  }});
+  await new Promise(setImmediate);assert.equal(retry.hidden,false);assert.equal(retry.disabled,false);assert.equal(submits,0);
+  await listener();
+  assert.equal(seeds,2);assert.notEqual(inputs[0],inputs[1]);assert.equal(submits,1);assert.ok(field.value);
+});
+
+test('native public guest completes a reviewed first task after explicit contribution grant, with exact result and duplicate-safe submission',async t=>{
+  const f=await setup(t),room='project-room-lobby',workItemId='first-useful-task';
+  f.store.initialize(initialRoom(room),{representation:'normalized-current-v1'});
+  const owner=f.store.issueAccessKey(room,'owner');
+  const command=(id,type,data)=>f.store.command(owner,room,{id,type,data});
+  command('publish','room.public_page_set',{enabled:true});command('open','room.join_link_set',{enabled:true});f.store.publicFace.enable(room,'owner');
+  const accountsBefore=f.store.db.prepare('SELECT count(*) n FROM accounts').get().n;
+  const initial=await f.start(),html=await initial.text(),nonce=html.match(/name="nonce" value="([^"]+)"/)[1],cookie=initial.headers.get('set-cookie').split(';')[0];
+  const allowed=await fetch(f.base+'/oauth/invite',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({nonce,decision:'allow_public',display_name:'First task collaborator'})});
+  assert.equal(allowed.status,302,await allowed.clone().text());
+  const code=new URL(allowed.headers.get('location')).searchParams.get('code');
+  const exchanged=await f.exchange({grant_type:'authorization_code',code});assert.equal(exchanged.status,200,await exchanged.clone().text());
+  const tokens=await exchanged.json(),memberId=(await f.rpc(tokens.access_token)).body.result.structuredContent.memberId;
+  const call=async(name,args={})=>{const response=await f.rpc(tokens.access_token,name,args);assert.equal(response.status,200,JSON.stringify(response.body));assert.equal(response.body.error,undefined,JSON.stringify(response.body));assert.notEqual(response.body.result?.isError,true,JSON.stringify(response.body));return response.body.result.structuredContent;};
+  // A short useful collaboration needs no contribution grant or formal task.
+  command('short-review-request','message.posted',{messageId:'short-review-request',toMemberId:memberId,requestKind:'reply',body:'Review the public connection instruction and give one concrete finding.'});
+  const context=await call('room_read_request',{requestMessageId:'short-review-request'});
+  assert.equal(context.page.hasMore,false);
+  assert.ok(context.current.answerBasis);
+  const template=context.responseActions.find(action=>action.arguments.responseOutcome==='answered');
+  const shortAnswer={...template.arguments,requestId:'short-review-answer',body:'The native connection should offer the public lobby without an invitation.'};
+  const answered=await call('room_respond_to_request',shortAnswer),answerRetry=await call('room_respond_to_request',shortAnswer);
+  assert.equal(answerRetry.duplicate,true);assert.equal(answerRetry.eventId,answered.eventId);
+  assert.equal((await call('room_read_request',{requestMessageId:'short-review-request'})).request.status,'answered');
+  assert.deepEqual((await call('room_check_access')).permissions,[]);
+  command('propose-first-task','work.proposed',{workItemId,title:'Review a connection instruction',definitionOfDone:'Save a concrete finding and have another member verify its exact text',accountableMemberId:memberId,verifierMemberId:'owner',independentVerificationRequired:true,ownerDecisionRequired:false,mode:'read'});
+  const beforeGrant=await f.rpc(tokens.access_token,'room_accept_work',{requestId:'accept-first-task',workItemId,expectedRevision:0});
+  assert.ok(beforeGrant.body.error||beforeGrant.body.result?.isError,'read/chat admission must not silently grant task authority');
+  command('contribution-grant','member.access_changed',{memberId,expectedMemberRevision:0,active:true,permissions:['accept_work','complete_work']});
+  f.store.room=()=>{throw Error('whole room hydration forbidden during first useful task');};
+  await call('room_list_work',{focus:'needs_me'});await call('room_read_work',{workItemId});
+  await call('room_accept_work',{requestId:'accept-first-task',workItemId,expectedRevision:0});
+  await call('room_start_work',{requestId:'start-first-task',workItemId,expectedRevision:1});
+  const body='Finding: the first connection should use the public lobby without requesting an invitation. Evidence: consent exposes Connect to the lobby.';
+  const posted=await call('room_post_message',{id:'first-task-evidence',messageId:'first-task-evidence',workItemId,body});
+  await call('room_read_result',{workItemId,draftMessageId:'first-task-evidence'});
+  const evidenceVersion='sha256:'+createHash('sha256').update(body).digest('hex');
+  const input={requestId:'submit-first-task',workItemId,expectedRevision:2,summary:'Reviewed connection instruction',nextAction:'Review the saved finding',evidenceMessageId:'first-task-evidence',evidenceMessageEventId:posted.event.id,evidenceVersion,previousCompletionEventId:null,producerId:memberId};
+  const done=await call('room_submit_text_result',input),again=await call('room_submit_text_result',input);
+  assert.equal(again.duplicate,true);assert.equal(again.eventId,done.eventId);
+  command('verify-first-task','verification.recorded',{workItemId,expectedRevision:3,result:'pass',completionEventId:done.eventId,evidenceVersion,summary:'Another member checked the exact saved finding against the instruction'});
+  const result=await call('room_read_result',{workItemId,completionEventId:done.eventId});
+  assert.equal(result.result.text.body,body);assert.equal(result.result.text.evidenceVersion,evidenceVersion);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM accounts').get().n,accountsBefore);
 });

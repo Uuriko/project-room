@@ -12,6 +12,7 @@ import {createRuntimePackage} from '../scripts/runtime-package.mjs';
 import {exportNdjsonText,replayNdjson} from '../server/room-export.mjs';
 import {replayNdjsonInto,createBackupReplaySession,operatorRestoreResponse,operatorRestoreFromBackupResponse} from '../server/restore-ndjson.mjs';
 import {projectionDigest} from '../server/write-integrity.mjs';
+import {STORE_SCHEMA_VERSION} from '../server/writer-fence.mjs';
 import {writeKvBackup} from '../cloudflare/room-backup.mjs';
 
 const methods=['file','buffered','stream'];
@@ -101,7 +102,10 @@ for(const [variant,version,commit] of [
 test('current schema marker prevents legacy attestation from blessing missing proofs',async t=>{
  const root=fixture(t),s=new RoomStore(join(root,'current.sqlite'));let ndjson;
  try{s.initialize(initialRoom());s.db.exec('DELETE FROM integrity_room_state');ndjson=exportNdjsonText(s.db);}finally{s.close();}
- assert.equal(JSON.parse(ndjson.split('\n')[0]).sourceSchemaVersion,44);
+ // This is a current-writer export, not a frozen schema44 fixture. Keep
+ // current exports outside the explicitly attested legacy42/43 path.
+ assert.ok(STORE_SCHEMA_VERSION>=44);
+ assert.equal(JSON.parse(ndjson.split('\n')[0]).sourceSchemaVersion,STORE_SCHEMA_VERSION);
  for(const method of methods){
   const filename=join(root,`${method}.sqlite`);replay(method,ndjson,filename);missingProofRefuses(filename);
   assert.throws(()=>replay(method,ndjson,join(root,`${method}-conflict.sqlite`),{sourceSchemaVersion:42}),/attestation conflicts/);

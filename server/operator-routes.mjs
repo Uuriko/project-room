@@ -1,3 +1,5 @@
+import {operatorLifecycleArchive} from './operator-lifecycle-archive.mjs';
+import {operatorNormalization} from './operator-normalization.mjs';
 import { operatorWakeIndex } from './operator-wake-index.mjs';
 import { operatorAttachmentIndex } from './operator-attachment-index.mjs';
 import { operatorMessageAuthority } from './operator-message-authority.mjs';
@@ -15,6 +17,8 @@ import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
 import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
 import { listOperatorRooms, operatorRoomExport } from "./operator-rooms.mjs";
+import { writeGrantCensus } from "./operator-write-grant-census.mjs";
+import { firstConnectReport } from "./first-connect-task.mjs";
 
 const POST = "POST";
 const GET = "GET";
@@ -24,6 +28,10 @@ const GET = "GET";
 const ROOM_EXPORT_ROUTE = "/api/operator/rooms/{roomId}/export";
 const ROOM_EXPORT_PATH = /^\/api\/operator\/rooms\/([^/]+)\/export$/;
 const ROUTES = Object.freeze({
+  "/api/operator/lifecycle-archive/plan": POST,
+  "/api/operator/lifecycle-archive/execute": POST,
+  "/api/operator/normalization/plan": POST,
+  "/api/operator/normalization/execute": POST,
   "/api/operator/wakes/ordered-indexes/plan": POST,
   "/api/operator/wakes/ordered-indexes/execute": POST,
   "/api/operator/attachments/live-index/plan": POST,
@@ -45,6 +53,8 @@ const ROUTES = Object.freeze({
   "/api/operator/status": GET,
   "/api/operator/drift": GET,
   "/api/operator/rooms": GET,
+  "/api/operator/write-grants/census": GET,
+  "/api/operator/first-connect": GET,
   [ROOM_EXPORT_ROUTE]: GET
 });
 
@@ -82,6 +92,21 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     if (!expected) reject(404, "not_found", "Not found");
     if (req.method !== expected) reject(405, "method_not_allowed", "Method not allowed");
     res.setHeader("Cache-Control", "no-store");
+    if (routeKey === "/api/operator/first-connect") {
+      const raw = url.searchParams.get("days");
+      let report;
+      try { report = firstConnectReport(store.db, { now: store.now(), days: raw == null ? 14 : Number(raw) }); }
+      catch (error) { if (error?.code === "invalid_days") reject(422, "invalid_days", error.message); throw error; }
+      json(res, 200, report);
+      return true;
+    }
+    if (routeKey === "/api/operator/write-grants/census") {
+      let result;
+      try { result = writeGrantCensus(store, { after: url.searchParams.get("after"), scan: url.searchParams.get("scan") }); }
+      catch (error) { if (error?.code === "invalid_scan" || error?.code === "invalid_cursor") reject(422, error.code, error.message); throw error; }
+      json(res, 200, result);
+      return true;
+    }
     if (routeKey === "/api/operator/rooms") {
       json(res, 200, listOperatorRooms(store, url.searchParams.get("limit")));
       return true;
@@ -108,6 +133,10 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     if (path === "/api/operator/wakes/ordered-indexes/plan" || path === "/api/operator/wakes/ordered-indexes/execute") {
       json(res, 200, operatorWakeIndex(store, await body(req), path.endsWith('/execute'), requestId));
       return true;
+    }
+    if(path==='/api/operator/lifecycle-archive/plan'||path==='/api/operator/lifecycle-archive/execute'){json(res,200,operatorLifecycleArchive(store,await body(req),path.endsWith('/execute')));return true;}
+    if (path === '/api/operator/normalization/plan' || path === '/api/operator/normalization/execute') {
+      json(res,200,operatorNormalization(store,await body(req),path.endsWith('/execute')));return true;
     }
     if (path === "/api/operator/attachments/live-index/plan" || path === "/api/operator/attachments/live-index/execute") {
       json(res, 200, operatorAttachmentIndex(store, await body(req), path.endsWith('/execute'), requestId));
@@ -195,4 +224,16 @@ export const OPERATOR_WAKE_INDEX_ROUTES = Object.freeze(['plan', 'execute'].map(
     const handled = await ctx.operatorRoutes(ctx.req, ctx.res, { url: ctx.url, remoteAddress: ctx.remoteAddress, requestId: ctx.operationId });
     if (!handled) ctx.reject(404, 'not_found', 'Not found');
   }
+})));
+
+export const OPERATOR_NORMALIZATION_ROUTES=Object.freeze(['plan','execute'].map(phase=>Object.freeze({
+ id:'operator.normalization.'+phase,method:'POST',path:'/api/operator/normalization/'+phase,mount:true,auth:'none',capability:null,scope:'worker',events:[],
+ parity:'exempt:existing operator-token-only explicit one-time materialization',schema:{body:{type:'object'},response:{type:'object'}},
+ async handler(ctx){const handled=await ctx.operatorRoutes(ctx.req,ctx.res,{url:ctx.url,remoteAddress:ctx.remoteAddress,requestId:ctx.operationId});if(!handled)ctx.reject(404,'not_found','Not found');}
+})));
+
+export const OPERATOR_LIFECYCLE_ARCHIVE_ROUTES=Object.freeze(['plan','execute'].map(phase=>Object.freeze({
+ id:'operator.lifecycle-archive.'+phase,method:'POST',path:'/api/operator/lifecycle-archive/'+phase,mount:true,auth:'none',capability:null,scope:'worker',events:[],
+ parity:'exempt:existing operator-token-only explicit legacy room retirement',schema:{body:{type:'object'},response:{type:'object'}},
+ async handler(ctx){const handled=await ctx.operatorRoutes(ctx.req,ctx.res,{url:ctx.url,remoteAddress:ctx.remoteAddress,requestId:ctx.operationId});if(!handled)ctx.reject(404,'not_found','Not found');}
 })));

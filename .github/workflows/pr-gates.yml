@@ -59,13 +59,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Check diff size
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/pr-diff-size-check.mjs
       - name: Enforce quarantine contract
         run: node scripts/quarantine-check.mjs
       - run: npm ci

@@ -1,3 +1,4 @@
+import { safelyObserve } from './stage-observer.mjs';
 // One ACP agent process with one ACP session per Room thread.
 import { spawnAgent, initialize } from "./agents.mjs";
 import { TurnRecorder } from "./render.mjs";
@@ -18,11 +19,21 @@ export class AgentHost {
       onRequest: (method, params) => this.#agentRequest(method, params),
     });
     this.process = spawned;
+    let initialized = false;
     const exited = new Promise(resolve => spawned.child.once("exit", (code, signal) => resolve({ code, signal })));
-    exited.then(info => { if (this.process === spawned) { this.process = null; this.sessions.clear(); this.threadOf.clear(); for (const listener of this.exitListeners) listener(info); } });
+    exited.then(info => { if (this.process === spawned) { this.process = null; this.capabilities = null; this.sessions.clear(); this.threadOf.clear(); if (initialized) for (const listener of this.exitListeners) listener(info); } });
     spawned.child.once("error", error => this.log(`agent failed to start: ${error.message}`));
-    this.capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
-    return this.capabilities;
+    try {
+      const capabilities = await Promise.race([initialize(spawned.peer, { timeoutMs }), exited.then(info => { throw new Error(`agent exited during initialize (code ${info.code})`); })]);
+      if (this.process !== spawned) throw new Error('agent stopped during initialize');
+      this.capabilities = capabilities;
+      initialized = true;
+      return capabilities;
+    } catch (error) {
+      if (this.process === spawned) { this.process = null; this.capabilities = null; }
+      spawned.peer.close(); spawned.child.kill();
+      throw error;
+    }
   }
 
   async #agentRequest(method, params) {
@@ -40,32 +51,47 @@ export class AgentHost {
     // After a restart, resume the thread's saved session when the agent can.
     const saved = this.savedSessions?.get(threadKey);
     if (saved && this.capabilities?.loadSession) {
+      let loaded = false;
       try {
         const recorder = { update() {} }; // replayed history is not re-posted
         this.recorders.set(saved, recorder);
         await this.process.peer.request("session/load", { sessionId: saved, cwd: this.cwd, mcpServers: [] }, { timeoutMs });
-        this.recorders.delete(saved);
+        loaded = true;
+      } catch (error) { this.log(`could not resume the saved session (${error.message}); starting fresh`); }
+      finally { this.recorders.delete(saved); }
+      if (loaded) {
+        // Mode refusal is not a load failure: never fall back or prompt past it.
+        if (this.mode) await this.process.peer.request("session/set_mode", { sessionId: saved, modeId: this.mode }, { timeoutMs: 15000 });
         this.sessions.set(threadKey, saved); this.threadOf.set(saved, threadKey);
         return { sessionId: saved, created: false, loaded: true };
-      } catch (error) { this.recorders.delete(saved); this.log(`could not resume the saved session (${error.message}); starting fresh`); }
+      }
     }
     const { sessionId } = await this.process.peer.request("session/new", { cwd: this.cwd, mcpServers: [] }, { timeoutMs });
     if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("ACP agent returned no usable session ID");
-    if (this.mode) await this.process.peer.request("session/set_mode", { sessionId, modeId: this.mode }, { timeoutMs: 15000 }).catch(error => this.log(`set_mode ${this.mode} failed: ${error.message}`));
+    if (this.mode) await this.process.peer.request("session/set_mode", { sessionId, modeId: this.mode }, { timeoutMs: 15000 });
     this.sessions.set(threadKey, sessionId); this.threadOf.set(sessionId, threadKey);
     this.savedSessions?.set(threadKey, sessionId);
     return { sessionId, created: true };
   }
 
   // Run one prompt turn on the thread's session. Returns the recorder and stopReason.
-  async prompt(threadKey, prompt, { sessionId } = {}) {
+  async prompt(threadKey, prompt, { sessionId, onDispatched = null, onFirstOutput = null } = {}) {
     if (!this.process) throw new Error("agent is not running");
     const id = sessionId ?? (await this.session(threadKey)).sessionId;
     const recorder = new TurnRecorder();
-    this.recorders.set(id, recorder);
+    let observed = false;
+    this.recorders.set(id, { update: update => {
+      recorder.update(update);
+      const kind = update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text'
+        && typeof update.content.text === 'string' && update.content.text.trim() ? 'text'
+        : update?.sessionUpdate === 'tool_call' && typeof update.toolCallId === 'string' && update.toolCallId.trim() ? 'tool' : null;
+      if (!observed && kind) { observed = true; safelyObserve(onFirstOutput, kind); }
+    } });
     const peer = this.process.peer;
     try {
-      const result = await peer.request("session/prompt", { sessionId: id, prompt });
+      const pending = peer.request("session/prompt", { sessionId: id, prompt });
+      safelyObserve(onDispatched);
+      const result = await pending;
       return { recorder, stopReason: result?.stopReason ?? "end_turn" };
     } finally { this.recorders.delete(id); }
   }
@@ -80,7 +106,7 @@ export class AgentHost {
   get running() { return Boolean(this.process); }
 
   stop() {
-    const current = this.process; this.process = null; this.stopped = true;
+    const current = this.process; this.process = null; this.capabilities = null; this.stopped = true;
     if (current) { current.peer.close(); current.child.kill(); }
   }
 }

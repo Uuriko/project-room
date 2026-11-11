@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {RoomStore} from '../../../server/store.mjs';
+import {initialRoom} from '../../../server/bootstrap.mjs';
+import {createRule,setRuleEnabled,runAutomations} from '../../../server/event-automations.mjs';
+import {createWork,claimWork} from '../../../server/work-claims.mjs';
+const s=new RoomStore(':memory:');s.initialize(initialRoom());
+const {rule}=createRule(s.db,{roomId:'commons',name:'Synthetic',createdBy:'former-owner',trigger:{actions:['created']},action:{type:'open_task',title:'Synthetic'}});
+setRuleEnabled(s.db,{roomId:'commons',ruleId:rule.ruleId,enabled:true});
+const ev={id:'synthetic-event',data:{action:'created'}}, item={id:'source',tags:[]};
+const deps={createWork,claimWork,emitWorkClaimEvent:()=>{},enqueueClaimWake:()=>{throw Error('unexpected wake');}};
+const first=runAutomations(s,'commons',ev,item,deps,{ROOM_AUTOMATIONS:'1'});
+const replay=runAutomations(s,'commons',ev,item,deps,{ROOM_AUTOMATIONS:'1'});
+assert.equal(first[0].result,'opened');assert.deepEqual(replay,[]);
+const task=s.workClaims.get('commons',first[0].claimId);
+assert.equal(task.history[0].agentId,'former-owner');
+console.log(JSON.stringify({currentOwner:s.roomAuthority('commons').ownerId,creatorNotMember:true,result:first[0].result,recordedActor:task.history[0].agentId,replayRuns:replay.length,scope:'Synthetic persisted rule attributed to absent former owner; actual state helpers and SQLite registry, event emitter stubbed, no provider'}));s.close();

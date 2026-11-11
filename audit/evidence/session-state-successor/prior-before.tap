@@ -1,0 +1,54 @@
+{"count":3,"storedHistory":6,"omitted":0,"storedState":"stale","cappedState":"active","routeState":"active"}
+{"count":200,"storedHistory":200,"omitted":3,"storedState":"active","cappedState":"active","routeState":"active"}
+✖ owner activity remains stale after 3 other-agent stamps (2.29475ms)
+✖ owner activity remains stale after 200 other-agent stamps (2.193833ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 105.999917
+
+✖ failing tests:
+
+test at audit/evidence/session-state-successor/prior-control.probe.mjs:8:43
+✖ owner activity remains stale after 3 other-agent stamps (2.29475ms)
+  AssertionError [ERR_ASSERTION]: list truncation cannot make owner active
+  
+  'active' !== 'stale'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/session-state-successor/audit/evidence/session-state-successor/prior-control.probe.mjs:15:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'active',
+    expected: 'stale',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at audit/evidence/session-state-successor/prior-control.probe.mjs:8:43
+✖ owner activity remains stale after 200 other-agent stamps (2.193833ms)
+  AssertionError [ERR_ASSERTION]: non-owner activity cannot make stored claim active
+  
+  'active' !== 'stale'
+  
+      at TestContext.<anonymous> (file:///Users/johnpotter/Documents/Codex/2026-11-03/task/session-state-successor/audit/evidence/session-state-successor/prior-control.probe.mjs:14:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'active',
+    expected: 'stale',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

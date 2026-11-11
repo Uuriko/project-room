@@ -1,0 +1,67 @@
+{
+  "scope": "offline normalized-current default context; existing legacy room migration and synthetic identity fixture; not release or deployment",
+  "base": "4123bdc25",
+  "sourceSha256": {
+    "server/current-room-repository.mjs": "e8531fe4160c155eaaeae8e61863453aac03346516dfe4e7c17947d666489402",
+    "server/current-work-summary.mjs": "7cc410181a961adc64f98891d32f49a492734e043738419407a18a8dad4f0e27",
+    "server/store.mjs": "aa0fbfd23ccca2d24c40177ee6ae8bf55193e136e1e26c8d788dbfdd49d8bb77",
+    "server/orient.mjs": "ad13349bc7aa3338ab5020fa0f26d59416ce0fe173da50ea56651b05d18ccdda",
+    "server/room-activation-pack.mjs": "654b7b140b62daf98ab0b6d6896747c6ea0fa04455123fe19c9da2a55d40a937",
+    "server/mcp-room-profile.mjs": "ce2c72994f30ed6139603457e895d1caee977d118921e49684d30b69721b7bd5",
+    "server/room-guide.mjs": "d8baeeffa0b47ae37093d1b64fe2f61b6170c604ff5be14b5299cadc6a257fdc"
+  },
+  "node": {
+    "tests": 28,
+    "passed": 28,
+    "log": "/tmp/current-overview-qualified-node.log"
+  },
+  "actualWorker": {
+    "tests": 1,
+    "passed": 1,
+    "initialLegacyMessages": 32,
+    "admittedConcurrentArrivals": 10,
+    "normalizedNativeWorkItems": 19,
+    "workContextPages": 3,
+    "roomHydrationTrap": true,
+    "restart": true,
+    "faultRetryDuringMigration": true,
+    "contextPageCosts": [
+      {
+        "statements": 138,
+        "rowsRead": 351,
+        "adapterWrites": 0,
+        "rawNativeWrites": 0
+      },
+      {
+        "statements": 138,
+        "rowsRead": 351,
+        "adapterWrites": 0,
+        "rawNativeWrites": 0
+      },
+      {
+        "statements": 86,
+        "rowsRead": 293,
+        "adapterWrites": 0,
+        "rawNativeWrites": 0
+      }
+    ],
+    "coldContext": {
+      "statements": 138,
+      "rowsRead": 1975,
+      "adapterWrites": 0,
+      "rawNativeWrites": 0
+    },
+    "unknownCounters": 0,
+    "log": "/tmp/current-overview-worker-final.log"
+  },
+  "limitations": [
+    "Canonical-authority/archive migration peer source not yet composed in this pin",
+    "Work windows default8; summaries are protected derived records bound to existing work revision/digest, not new body authority",
+    "Orient q corpus semantics are explicitly unsupported, not replaced by generic search",
+    "Visible cursor inspects16 indexed event envelopes then refuses long excluded tails",
+    "Complete bounded member authority currently100; selected work reply context currently<=8 requests",
+    "Legacy client focus/query full work snapshot and bootstrap/needs-me/updates/event read ports remain unfinished",
+    "Optional legacy demo Room Guide disabled for normalized rooms",
+    "Current45 format has not been deployed; no live migration or historical certification"
+  ]
+}

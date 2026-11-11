@@ -150,6 +150,85 @@ function postAlert(store, roomId, { material, body, memberIds, members }) {
   return posted ? messageId : messageId;
 }
 
+// Lease-expiry notice. When a lapsed lease is auto-released, the sweep wakes
+// only the lapsed owner; agents whose live claims overlap the freed paths
+// never learn the item is free. Tell each overlapping live claim holder (a
+// different owner, same repo when both name one) once per lapse. Advisory
+// only, same flag and post path as collision alerts. Pure selector first.
+export function leaseExpiryTargets(claims, expired) {
+  if (!expired?.id) return Object.freeze([]);
+  const freed = slotsOf(expired);
+  if (!freed.length) return Object.freeze([]);
+  const targets = [];
+  for (const claim of liveClaims(claims)) {
+    if (claim.id === expired.id || !claim.owner || claim.owner === expired.owner) continue;
+    if (expired.repo && claim.repo && claim.repo !== expired.repo) continue;
+    const overlap = [];
+    for (const a of slotsOf(claim)) for (const b of freed) {
+      if (slotsOverlap(a, b) && !overlap.includes(b.path)) overlap.push(b.path);
+    }
+    if (overlap.length) targets.push(Object.freeze({ claimId: claim.id, owner: claim.owner, overlap: Object.freeze(overlap) }));
+  }
+  targets.sort((a, b) => (a.claimId < b.claimId ? -1 : 1));
+  return Object.freeze(targets);
+}
+
+// Who handed this claim to its holder, from history already on the claim:
+// the latest "reassigned:<owner>" stamp, else the "created" stamp. No new
+// field. A trimmed history (SEC-2 cap) or a system or self create yields null.
+export function leaseExpiryProposer(expired) {
+  const history = Array.isArray(expired?.history) ? expired.history : [];
+  const owner = expired?.owner;
+  if (!owner) return null;
+  let by = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const action = history[i]?.action;
+    if (action === `reassigned:${owner}` || action === "created") { by = history[i]?.agentId ?? null; break; }
+  }
+  if (typeof by !== "string" || !by || by === "system" || by === owner) return null;
+  return by;
+}
+
+// Never throws. Idempotent per (room, expired claim, lapsed lease time,
+// target claim): a repeat sweep of the same lapse coalesces on the post id.
+export function notifyLeaseExpired(store, roomId, expired) {
+  try {
+    if (!collisionAlertsEnabled(store, roomId)) return [];
+    if (!store?.room || !store?.workClaims?.list) return [];
+    const claims = store.workClaims.list(roomId);
+    const members = store.room(roomId)?.state?.members ?? {};
+    const lapse = String(expired?.leaseExpiresAt ?? "");
+    const sent = [];
+    for (const target of leaseExpiryTargets(claims, expired)) {
+      if (members?.[target.owner]?.kind !== "agent") continue;
+      const paths = target.overlap.slice(0, 8).map(plain).join(", ") + (target.overlap.length > 8 ? ` and ${target.overlap.length - 8} more` : "");
+      const body = `${memberName(members, target.owner)} (${plain(target.claimId)}): the lease on ${plain(expired.id)} held by ${memberName(members, expired.owner)} expired and was released. Paths it held that overlap your claim are now free: ${paths}. The item is unclaimed; check the Board before taking it.`;
+      const material = `${roomId}\0lease_expired\0${expired.id}\0${lapse}\0${target.claimId}`;
+      try {
+        postAlert(store, roomId, { material, body, memberIds: [target.owner], members });
+        sent.push(material);
+      } catch (error) {
+        console.error("lease expiry notice failed:", error?.message ?? error);
+      }
+    }
+    const proposer = leaseExpiryProposer(expired);
+    if (proposer && members?.[proposer]?.kind === "agent") {
+      const body = `${memberName(members, proposer)}: the lease on ${plain(expired.id)}, which you handed to ${memberName(members, expired.owner)}, expired and was released with no result. The item is unclaimed; reassign it or take it from the Board.`;
+      const material = `${roomId}\0lease_expired_proposer\0${expired.id}\0${lapse}\0${proposer}`;
+      try {
+        postAlert(store, roomId, { material, body, memberIds: [proposer], members });
+        sent.push(material);
+      } catch (error) {
+        console.error("lease expiry notice failed:", error?.message ?? error);
+      }
+    }
+    return sent;
+  } catch (error) {
+    console.error("lease expiry notice failed:", error?.message ?? error);
+    return [];
+  }
+}
+
 function pairInvolvesAgent(members, pair) {
   return members?.[pair.left.owner]?.kind === "agent" || members?.[pair.right.owner]?.kind === "agent";
 }
@@ -202,6 +281,59 @@ export function alertLeaseRefusal(store, roomId, { claimId, callerId, conflict }
       sent.push(material);
     } catch (error) {
       console.error("collision alert failed:", error?.message ?? error);
+    }
+  }
+  return sent;
+}
+
+// Concurrent-change notice. A clean textual merge does not mean the other
+// live work still fits: nearly half of agent merge conflicts hit PRs with no
+// shared files (MergeGym, arXiv 2610.04779), and telling an agent what the
+// concurrent change was recovered most semantic breakages (arXiv 2609.25396).
+// When a claim's pull request merges, every other live claim in the same
+// repository is told what landed, which of its paths overlap, and to rebase
+// and re-run its tests. Same flag and post path as collision alerts; advisory
+// only, never a lease change. Pure selector first so it is testable alone.
+export function concurrentMergeTargets(claims, merged) {
+  if (!merged?.id || typeof merged.repo !== "string" || !merged.repo) return Object.freeze([]);
+  const mergedSlots = slotsOf(merged);
+  const targets = [];
+  for (const claim of liveClaims(claims)) {
+    if (claim.id === merged.id || claim.repo !== merged.repo) continue;
+    if (merged.owner && claim.owner === merged.owner && claim.branch && claim.branch === merged.branch) continue;
+    const overlap = [];
+    for (const a of slotsOf(claim)) for (const b of mergedSlots) {
+      if (slotsOverlap(a, b) && !overlap.includes(a.path)) overlap.push(a.path);
+    }
+    targets.push(Object.freeze({ claimId: claim.id, owner: claim.owner, overlap: Object.freeze(overlap) }));
+  }
+  targets.sort((a, b) => (a.claimId < b.claimId ? -1 : 1));
+  return Object.freeze(targets);
+}
+
+export function notifyConcurrentMerge(store, roomId, merged, { url, mergedSha } = {}) {
+  if (!collisionAlertsEnabled(store, roomId)) return [];
+  if (!store?.room || !store?.workClaims?.list || typeof url !== "string" || !url) return [];
+  let claims = [];
+  try { claims = store.workClaims.list(roomId); } catch { return []; }
+  let members = {};
+  try { members = store.room(roomId)?.state?.members ?? {}; } catch { return []; }
+  const sent = [];
+  const paths = slotsOf(merged).map(slot => slot.path);
+  const sha = typeof mergedSha === "string" && /^[0-9a-f]{7,40}$/.test(mergedSha) ? ` at ${mergedSha.slice(0, 12)}` : "";
+  for (const target of concurrentMergeTargets(claims, merged)) {
+    if (members?.[target.owner]?.kind !== "agent") continue;
+    const touched = paths.length ? `It changed ${paths.slice(0, 8).map(plain).join(", ")}${paths.length > 8 ? ` and ${paths.length - 8} more` : ""}.` : "Its changed files are not on the claim.";
+    const overlapText = target.overlap.length
+      ? `Overlap with your claim: ${target.overlap.slice(0, 8).map(plain).join(", ")}.`
+      : "No shared paths, but merges between disjoint PRs can still conflict or break callers.";
+    const body = `${memberName(members, target.owner)} (${plain(target.claimId)}): ${plain(url)} merged${sha} from ${plain(merged.id)}. ${touched} ${overlapText} Rebase onto the new base and re-run your tests before handing off.`;
+    const material = `${roomId}\0merged\0${merged.id}\0${url}\0${target.claimId}`;
+    try {
+      postAlert(store, roomId, { material, body, memberIds: [target.owner], members });
+      sent.push(material);
+    } catch (error) {
+      console.error("concurrent merge notice failed:", error?.message ?? error);
     }
   }
   return sent;

@@ -39,9 +39,11 @@ for (const durable of [false, true]) {
     assert.throws(() => f.exchange(code, 'https://evil.example/mcp'), /resource/);
     assert.throws(() => f.provider.exchangeCode({ code, clientId: request.clientId, redirectUri: request.redirectUri, codeVerifier: verifier }), /resource/);
     assert.ok(f.exchange(code).accessToken); // rejected exchange did not consume code
-    assert.throws(() => f.provider.refresh({ refreshToken: f.pair.refreshToken, clientId: request.clientId }), /resource/);
-    const next = f.provider.refresh({ refreshToken: f.pair.refreshToken, clientId: request.clientId, resource });
+    assert.throws(() => f.provider.refresh({ refreshToken: f.pair.refreshToken, clientId: request.clientId, resource: 'https://evil.example/mcp' }), /resource/);
+    const next = f.provider.refresh({ refreshToken: f.pair.refreshToken, clientId: request.clientId }); // RFC 8707: omission retains the original resource, never removes its binding.
     assert.deepEqual(f.provider.verifyAccessToken(next.accessToken, { resource }).binding, binding);
+    assert.equal(f.provider.verifyAccessToken(next.accessToken), null);
+    assert.equal(f.provider.verifyAccessToken(next.accessToken, { resource: 'https://evil.example/mcp' }), null);
     if (durable) {
       const restarted = createOAuthProvider({ db: f.db });
       assert.deepEqual(restarted.verifyAccessToken(next.accessToken, { resource }).binding, binding);

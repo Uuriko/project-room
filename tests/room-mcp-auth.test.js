@@ -1,3 +1,4 @@
+import { readCurrentMessage, withCurrentReadContext } from '../server/current-room-repository.mjs';
 import { initialRoom } from "../server/bootstrap.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -129,9 +130,12 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(access.value.memberId, created.ownerMemberId);
   assert.equal(JSON.stringify(access.body).includes(owner.secret), false);
 
+  // A destination-free join targets the public lobby, not an invitation form.
+  // This isolated fixture has no published lobby; do not mint another room.
   const emptyJoin = await rpc(origin, "tools/call", { name: "room_join", arguments: {} }, owner.secret);
   const emptyJoinBody = await emptyJoin.json();
-  assert.deepEqual(emptyJoinBody.error.data.missing, ["linkToken or inviteCode"], "empty room_join names what to pass");
+  assert.equal(emptyJoinBody.result?.isError, true, JSON.stringify(emptyJoinBody));
+  assert.equal(emptyJoinBody.result?.structuredContent?.code, "room_not_found", JSON.stringify(emptyJoinBody));
   const roomsOnly = await call(origin, "room_check_access", {}, owner.secret);
   assert.equal(roomsOnly.value.rooms[0].roomId, created.roomId);
   assert.equal(roomsOnly.value.archivedRooms, 0, "live rooms are listed, archived ones only counted");
@@ -178,7 +182,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   }, owner.secret);
   assert.equal(conflict.value.isError ?? conflict.body.result.isError, true);
   assert.equal(conflict.value.code, "idempotency_conflict");
-  const stored = store.room(created.roomId).state.messages.find(message => message.id === "msg-1");
+  const stored = withCurrentReadContext(store.db, created.roomId, () => readCurrentMessage(store.db, created.roomId, "msg-1").value);
   assert.equal(stored.body, "hello from hosted MCP");
 
   const events = await call(origin, "room_list_events", { roomId: created.roomId, after: 0, limit: 50 }, owner.secret);

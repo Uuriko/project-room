@@ -63,13 +63,17 @@ export function renderMarkdown(markdown) {
   return html.join("");
 }
 
-function pageHtml({ title, main }) {
+// Canonical <link> mirrors the Link: rel=canonical header the legal routes
+// already send, for readers that only see the HTML. /terms is left as is.
+const LEGAL_CANONICAL_ORIGIN = "https://room.trydemigod.com";
+function pageHtml({ title, main, path = null }) {
   const description = `${title} for Project Room at room.trydemigod.com, operated by Demigod Labs, Inc.`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
-<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
+${path && path !== "/terms" ? `<link rel="canonical" href="${LEGAL_CANONICAL_ORIGIN}${path}">\n` : ""}<style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#1c1b22}a{color:#33339a}code{overflow-wrap:anywhere}footer{margin-top:2rem;font-size:.875rem}</style>
 </head><body>
 <main>${main}</main>
 <footer>${LEGAL_FOOTER_LINKS}</footer>
@@ -80,14 +84,14 @@ function subprocessorsHtml() {
   const rows = JSON.parse(readLegalFile("subprocessors.json"));
   const items = rows.map(row => `<article><h2>${escapeHtml(row.name)}</h2><p>${escapeHtml(row.purpose)}</p><p>Region: ${escapeHtml(row.region)}</p></article>`).join("");
   return pageHtml({
-    title: "Subprocessors",
+    title: "Subprocessors", path: "/subprocessors",
     main: `<h1>Subprocessors</h1><p>Version: ${escapeHtml(TERMS_VERSION)}</p><p>These companies process data for Project Room at room.trydemigod.com. Demigod Labs, Inc. operates the service.</p>${items}`,
   });
 }
 
 function indexHtml() {
   return pageHtml({
-    title: "Legal",
+    title: "Legal", path: "/legal",
     main: `<h1>Legal</h1><p>Version: ${escapeHtml(TERMS_VERSION)}. Project Room at room.trydemigod.com is operated by Demigod Labs, Inc.</p>
 <ul>
 <li><a href="/terms">Terms of Service</a></li>
@@ -105,12 +109,13 @@ export function legalPageHtml(pathname) {
   if (!file) return null;
   const markdown = readLegalFile(file);
   const title = /^# (.+)$/m.exec(markdown)?.[1] ?? "Project Room";
-  return pageHtml({ title, main: renderMarkdown(markdown) });
+  return pageHtml({ title, main: renderMarkdown(markdown), path: pathname });
 }
 
 export function reportPageHtml() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="help" type="text/plain" href="/llms.txt" title="Agent instructions">
 <meta name="robots" content="noindex"><title>Report</title>
 <style>body{font:1rem/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}label{display:block;margin:.75rem 0}textarea,input,select{width:100%;max-width:36rem}</style>
 </head><body>

@@ -1,6 +1,6 @@
 # Project Room service
 
-This is a map of the service at this checkout, not a release receipt. Current schema is 44; `server/writer-fence.mjs` defines it and
+This is a map of the service at this checkout, not a release receipt. Current schema is 46; `server/writer-fence.mjs` defines it and
 `scripts/check-schema-version.mjs` checks the documentation against that source.
 To establish what is live, verify the serving revision using the
 [deployment runbook](ROOM-DEPLOYMENT.md) and [release records](RELEASE-RECORD.md).
@@ -22,7 +22,7 @@ A historical proposal to require PostgreSQL/RLS is not a current deployment gate
 
 ## Data and authority
 
-- SQLite WAL, foreign keys and explicit transactions describe the local Node store, schema version 44. Hosted storage uses the Durable Object adapter; do not apply Node file-backup instructions to it. See [Cloudflare implementation](../cloudflare/README.md) and [backup and recovery](BACKUP-DR.md).
+- SQLite WAL, foreign keys and explicit transactions describe the local Node store, schema version 46. Hosted storage uses the Durable Object adapter; do not apply Node file-backup instructions to it. See [Cloudflare implementation](../cloudflare/README.md) and [backup and recovery](BACKUP-DR.md).
 - An account and a room membership are distinct. Authentication does not by itself grant access to a room. See [identity lifecycle](IDENTITY-LIFECYCLE.md) and the [route authorization table](ROUTE-AUTH-TABLE.md).
 - Direct messages are private to their participants on authorized application read surfaces; they are not room-wide broadcasts. This is server-enforced visibility, not end-to-end encryption. Message edits and other follow-up events must retain that boundary; see [visibility implementation](../server/dm-event-visibility.mjs).
 - Browser account and room sessions are separate credentials. Login can rotate the account-session cookie and invalidate an older room credential. Do not rely on the pilot's historical promise of a stable cookie across login. The current contract is in [OpenAPI](openapi.yaml) and the implementation in [HTTP handling](../server/http.mjs).

@@ -1,3 +1,4 @@
+import {currentInviteContext,isCurrentRoom,readCurrentRecord,withCurrentReadContext} from './current-room-repository.mjs';
 // Multi-room agent identities (round-2 task #101).
 //
 // Today an agent working in N rooms is provisioned N times: N member
@@ -759,7 +760,7 @@ export class AgentIdentities {
   // accepted from the identity-links route whitelist.
   link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, identityLinkCode, settleAccessRequests = true, decidedRequestId = null }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-    const authority = this.store.roomAuthority(roomId);
+    const authority = this.store.roomAuthority(roomId, { memberId: auth.member.id });
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration required: room owner, a member with manage_members, or a membership administration grant");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
     const identity = this.get(identityId);
@@ -800,7 +801,8 @@ export class AgentIdentities {
       // identity_conflict ("Member id is already taken"). memberOf reads own
       // properties only; a name that exists solely on the prototype is a
       // reserved name and is refused with a clean 422 here.
-      const roomMembers = this.store.roomAuthority(roomId).members ?? {};
+      const roomMembers = (currentInviteContext(this.store, roomId, { census: true })?.room.state.members
+        ?? this.store.roomAuthority(roomId).members) ?? {};
       if (!Object.hasOwn(roomMembers, resolvedMemberId) && resolvedMemberId in roomMembers)
         fail(422, "invalid_identity", "memberId is a reserved name");
       const roomMember = memberOf(roomMembers, resolvedMemberId);
@@ -837,7 +839,7 @@ export class AgentIdentities {
       // deceptive alternate spellings, mixed scripts, and invisible characters
       // before that command. Same-identity relinks keep the path above.
       const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
-      const activeNames = Object.values(this.store.room(roomId).state.members)
+      const activeNames = Object.values(roomMembers)
         .filter(member => member.active !== false && member.id !== resolvedMemberId
           && canonical(member.displayName) !== canonical(memberName))
         .map(member => ({ memberId: member.id, displayName: member.displayName }));
@@ -1416,7 +1418,7 @@ export class AgentIdentities {
     if (!roomId || typeof identityId !== "string" || !identityId) return null;
     const link = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
     if (!link) return null;
-    const member = memberOf(this.store.roomAuthority(roomId).members, link.member_id);
+    const member = memberOf(this.store.roomAuthority(roomId, { memberId: link.member_id }).members, link.member_id);
     if (!member || member.active === false) return null;
     if (!this.store.agentConnections.identityAuthority(roomId, member.id)) return null;
     this.noteActivated(identityId);
@@ -1445,20 +1447,27 @@ export class AgentIdentities {
       WHERE l.identity_id = ?
       ORDER BY l.linked_at DESC
     `).all(identityId);
-    // Filter to active members only, and get room titles from projection
+    // Filter active linked principals using addressed authority. Current titles
+    // live in protected metadata, never in the small rooms.projection carrier.
     return rows.filter(row => {
       try {
-        const member = memberOf(this.store.roomAuthority(row.roomId).members, row.memberId);
-        if (!member || member.active === false) return false;
-        // Get title from room projection
-        const roomRow = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.roomId);
-        if (roomRow) {
-          const proj = JSON.parse(roomRow.projection);
-          row.title = proj?.room?.title || row.roomId;
-        } else {
-          row.title = row.roomId;
-        }
-        return true;
+        return withCurrentReadContext(this.db,row.roomId,()=>{
+          const member = memberOf(this.store.roomAuthority(row.roomId,{memberId:row.memberId}).members, row.memberId);
+          if (!member || member.active === false) return false;
+          if(isCurrentRoom(this.db,row.roomId)) {
+            const room=readCurrentRecord(this.db,row.roomId,'metadata','room');
+            row.title=room?.title||row.roomId;
+            return true;
+          }
+          const roomRow = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.roomId);
+          if (roomRow) {
+            const proj = JSON.parse(roomRow.projection);
+            row.title = proj?.room?.title || row.roomId;
+          } else {
+            row.title = row.roomId;
+          }
+          return true;
+        });
       } catch {
         return false;
       }

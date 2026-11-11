@@ -1,0 +1,8 @@
+{
+  "revision": "aba88f091",
+  "tests": 44,
+  "pass": 44,
+  "fail": 0,
+  "productionChanges": false,
+  "scope": "normalized purge, operator authorization/rollback, replay abandonment"
+}

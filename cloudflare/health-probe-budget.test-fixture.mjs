@@ -56,7 +56,7 @@ export class ObservedProjectRoom extends ProjectRoom {
     let statements = 0;
     this.store.db.prepare = (...args) => {
       statements++;
-      if (mode === 'sql-error') throw sentinel;
+      if (mode === 'sql-error' && args[0] === 'SELECT 1 AS ok') throw sentinel;
       return originalPrepare.apply(this.store.db, args);
     };
     this.paused = mode === 'paused';

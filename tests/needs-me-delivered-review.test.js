@@ -1,3 +1,5 @@
+// Existing legacy-board semantics are retained below using an explicit historical journal fixture.
+// New-product canonical behavior is qualified separately in this file.
 // Regression: needs-me delivered-state exclusion + queue completion
 // (B-SURFACES F1/F2; UT-MIXED X3 cell 5 / register rows 1/6/30 family).
 // A delivered item awaiting review must appear in its named reviewer's
@@ -7,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
-import { AgentRooms } from "../server/agent-rooms.mjs";
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 import { collectNeedsMe } from "../server/needs-me.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createWork, claimWork, updateWork, recordReview } from "../server/work-claims.mjs";
@@ -21,11 +23,10 @@ function setup(t) {
   // lease liveness from store.now() (same pin as needs-me-open-work).
   const store = new RoomStore(":memory:", { now: () => Date.parse("2026-10-01T00:00:00Z") });
   t.after(() => store.close());
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create("Owen");
   const worker = store.identities.create("Wanda");
   const reviewer = store.identities.create("Rita");
-  rooms.create(owner.secret, { roomId: "board", title: "board", purpose: "delivered review asks", kind: "personal" });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: "board", title: "board", purpose: "delivered review asks", kind: "personal" });
   linkWithProof(store, owner.secret, "board", worker, { displayName: "Wanda", permissions: WRITER });
   linkWithProof(store, owner.secret, "board", reviewer, { displayName: "Rita", permissions: WRITER });
   const memberOf = identityId => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(identityId, "board").m;
@@ -42,7 +43,7 @@ function setup(t) {
   return { store, owner, worker, reviewer, ids, now, deliver, askFor };
 }
 
-test("delivered (no PR) item appears in the named reviewer's needs-me", t => {
+test("[legacy compatibility] delivered (no PR) item appears in the named reviewer's needs-me", t => {
   const { store, reviewer, ids, now, deliver, askFor } = setup(t);
   let item = deliver("task-a");
   assert.equal(askFor(reviewer.secret, "task-a")?.phase, "review", "in_progress already asks");
@@ -55,7 +56,7 @@ test("delivered (no PR) item appears in the named reviewer's needs-me", t => {
   assert.match(ask.next, /\/work-claims\/task-a\/review$/);
 });
 
-test("queue completion: an approve verdict keeps the ask, pointing at the done call, until the claim is done", t => {
+test("[legacy compatibility] queue completion: an approve verdict keeps the ask, pointing at the done call, until the claim is done", t => {
   const { store, reviewer, ids, now, deliver, askFor } = setup(t);
   let item = deliver("task-a");
   item = updateWork(item, ids.worker, { state: "delivered", now });
@@ -73,7 +74,7 @@ test("queue completion: an approve verdict keeps the ask, pointing at the done c
   assert.equal(askFor(reviewer.secret, "task-a"), undefined, "the ask retires when the work actually completes");
 });
 
-test("queue send-back: a changes_requested verdict keeps the ask, pointing at the in_progress call", t => {
+test("[legacy compatibility] queue send-back: a changes_requested verdict keeps the ask, pointing at the in_progress call", t => {
   const { store, reviewer, ids, now, deliver, askFor } = setup(t);
   let item = deliver("task-b");
   item = updateWork(item, ids.worker, { state: "delivered", now });
@@ -88,13 +89,12 @@ test("queue send-back: a changes_requested verdict keeps the ask, pointing at th
   assert.equal(askFor(reviewer.secret, "task-b"), undefined, "after send-back the reviewer owes nothing until a new delivery");
 });
 
-test("audit sequence over the real HTTP and MCP faces", { timeout: 120000 }, async t => {
+test("[legacy compatibility] audit sequence over the real HTTP and MCP faces", { timeout: 120000 }, async t => {
   const store = new RoomStore(":memory:");
-  const rooms = new AgentRooms(store);
   const owner = store.identities.create("Owen");
   const worker = store.identities.create("Wanda");
   const reviewer = store.identities.create("Rita");
-  rooms.create(owner.secret, { roomId: "board", title: "board", purpose: "needs-me audit", kind: "personal" });
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: "board", title: "board", purpose: "needs-me audit", kind: "personal" });
   linkWithProof(store, owner.secret, "board", worker, { displayName: "Wanda", permissions: WRITER });
   linkWithProof(store, owner.secret, "board", reviewer, { displayName: "Rita", permissions: WRITER });
   const reviewerMember = store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(reviewer.identityId, "board").m;
@@ -132,4 +132,21 @@ test("audit sequence over the real HTTP and MCP faces", { timeout: 120000 }, asy
   assert.equal(done.status, 200);
   assert.equal(done.json.state, "done", "the queue-suggested action completes the review end-to-end");
   assert.equal(await httpAsk("task-a"), undefined, "queue empties once the work is done");
+});
+
+import {canonicalNeedsMeRoom,drainCanonicalNeedsMe} from './helpers/canonical-needs-me-room.mjs';
+test('canonical saved result keeps independent reviewer attention until exact evidence passes',async t=>{
+ const f=canonicalNeedsMeRoom(t),{store,worker,reviewer,other,roomId}=f;f.propose('review-task',{review:true});f.send(worker,'work.accepted',{workItemId:'review-task',expectedRevision:0});const done=f.finish('review-task');
+ const ask=()=>drainCanonicalNeedsMe(store,reviewer).items.filter(x=>x.kind==='work'&&x.id==='review-task');
+ assert.equal(ask().length,1);assert.equal(drainCanonicalNeedsMe(store,other).items.some(x=>x.kind==='work'&&x.id==='review-task'),false);
+ const verify=(who,result,version=done.version)=>f.send(who,'verification.recorded',{workItemId:'review-task',expectedRevision:f.item('review-task').revision,result,completionEventId:done.receipt.event.id,evidenceVersion:version,summary:'Checked exact saved evidence'});
+ assert.throws(()=>verify(worker,'pass'),e=>e.status===403||e.status===422);assert.throws(()=>verify(reviewer,'pass','wrong-version'),e=>e.status===409||e.status===422);assert.equal(ask().length,1);
+ const server=createRoomServer({store});t.after(async()=>{server.closeStreams();server.closeAllConnections();if(server.listening)await new Promise(resolve=>server.close(resolve));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
+ const http=await fetch(origin+'/api/needs-me?roomId='+roomId,{headers:{Authorization:`Bearer ${reviewer.secret}`}});assert.equal(http.status,200);assert.ok((await http.json()).items.some(x=>x.kind==='work'&&x.id==='review-task'));
+ const rpc=await fetch(origin+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${reviewer.secret}`,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'room_needs_me',arguments:{roomId}}})});const packet=await rpc.json();assert.ok(packet.result?.structuredContent?.items.some(x=>x.kind==='work'&&x.id==='review-task'),JSON.stringify(packet));
+ verify(reviewer,'pass');assert.deepEqual(ask(),[],'only exact independent pass retires this review obligation');
+ f.propose('rejected-task',{review:true});f.send(worker,'work.accepted',{workItemId:'rejected-task',expectedRevision:0});const rejected=f.finish('rejected-task');
+ f.send(reviewer,'verification.recorded',{workItemId:'rejected-task',expectedRevision:f.item('rejected-task').revision,result:'fail',completionEventId:rejected.receipt.event.id,evidenceVersion:rejected.version,summary:'A criterion still needs work'});
+ assert.ok(drainCanonicalNeedsMe(store,worker).items.some(x=>x.kind==='work'&&x.id==='rejected-task'),'failed verification returns a concrete revision obligation to the accountable worker');
+ assert.equal(drainCanonicalNeedsMe(store,reviewer).items.some(x=>x.kind==='work'&&x.id==='rejected-task'),false,'the reviewer does not receive a duplicate dispatch while revision is owed');
 });

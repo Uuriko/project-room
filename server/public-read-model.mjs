@@ -1,5 +1,8 @@
+import {ServiceError} from './service-error.mjs';
+import {readCurrentPublicWork, currentPublicPageListed} from './current-public-work.mjs';
 import { hydrateWorkItems } from "./work-repository.mjs";
-// Public pages read these tables and nothing from rooms.projection.
+// Public pages read explicit publication plus protected selected current tasks,
+// never rooms.projection or unrelated private work/conversation payloads.
 // Rows are written when an owner opts in, updated in the same transaction
 // as the change, and removed when they opt out. The cron backfill copies
 // rooms that opted in before the tables existed. It never runs from the
@@ -287,6 +290,29 @@ function rowToPublic(row) {
 
 const RECEIPT_COLUMNS = `id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, verification_state, hashes_json, at, start_href`;
 
+// A public-work receipt lives in two stores: this mirror, which the
+// HTML faces serve, and public_work_receipts, which the API face
+// serves. The two are written together at submission, but nothing
+// keeps them in agreement afterwards — restore skew between the
+// tables, a backfill that has not yet projected a legacy receipt,
+// manual repair — and the faces then disagreed about whether the
+// receipt is available at all (A6): a mirror-only row served in full
+// here while the API face 404'd, a source-only row the reverse. Fail
+// closed, this module's doctrine (and rederivePublicReceipt's): a
+// 'public-work' row is public only while its source row exists. The
+// other sources carry no public_work_receipts row by design and are
+// untouched. A store predating the public-work tables can hold no
+// 'public-work' rows, so the fragment is omitted there — the standing
+// degrade on a predating schema, not a fail-closed throw
+// (publicWorkTablesReadable's own present-but-unreadable errors still
+// propagate, as they do for every other leg).
+const SOURCE_AGREEMENT = `(public_receipts.source <> 'public-work'
+  OR EXISTS (SELECT 1 FROM public_work_receipts pwr WHERE pwr.receipt_id = public_receipts.id))`;
+
+function sourceAgreementSql(db) {
+  return publicWorkTablesReadable(db) ? ` AND ${SOURCE_AGREEMENT}` : "";
+}
+
 function insertReceipt(store, row) {
   // agent_ids_json rides outside RECEIPT_COLUMNS (the read list): the
   // credited identity ids are bookkeeping for the directory count, not
@@ -305,16 +331,26 @@ function insertReceipt(store, row) {
     JSON.stringify(Array.isArray(row.agentIds) ? row.agentIds : []));
 }
 
-function listedRoomFields(state, listed) {
+// The room's public directory title (public_rooms.title, itself the
+// slug when the room set no title — see the public_rooms insert below).
+// Read only for rooms that are listed: an unlisted room's title is not
+// directory data and is never borrowed for a receipt face.
+function directoryRoomTitle(store, roomId) {
+  try {
+    return cleanName(store.db.prepare("SELECT title FROM public_rooms WHERE slug=?").get(roomId)?.title ?? null);
+  } catch { return null; }
+}
+
+function listedRoomFields(store, state, listed) {
   if (!listed || !state?.room?.id) return { roomId: null, roomTitle: null };
-  return { roomId: state.room.id, roomTitle: cleanName(state.room.title) };
+  return { roomId: state.room.id, roomTitle: cleanName(state.room.title) ?? directoryRoomTitle(store, state.room.id) };
 }
 
 function optedInRows(store, state) {
   const roomId = state?.room?.id;
   if (!roomId || publicReceipts(state).enabled !== true) return [];
   const listed = isListed(store, roomId);
-  const room = listedRoomFields(state, listed);
+  const room = listedRoomFields(store, state, listed);
   const owner = credit(state, state.room?.ownerId);
   const href = startHref(owner?.name);
   // Credited member ids become identity ids through this room's links;
@@ -404,7 +440,11 @@ function optedInRows(store, state) {
       agents, humans, agentIds: creditedIds(agentIds),
       pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
       mergedAt: null,
-      verificationState: null,
+      // The room recorded this item complete and issued the receipt;
+      // that is the whole claim (receipt-share.mjs "room-recorded
+      // completion"), stated on the .json face too instead of the
+      // verification key vanishing while the HTML face claims it.
+      verificationState: "room_recorded",
       hashes: hashList(version ? [version] : []),
       at: iso(item.updatedAt) ?? new Date(0).toISOString(),
       startHref: href,
@@ -425,7 +465,7 @@ function touchPublicWorkListing(store, state) {
   const roomId = state?.room?.id;
   if (!roomId) return;
   const listed = isListed(store, roomId);
-  const title = listed ? cleanName(state.room?.title) : null;
+  const title = listed ? cleanName(state.room?.title) ?? directoryRoomTitle(store, roomId) : null;
   const href = startHref(listed ? credit(state, state.room?.ownerId)?.name : null);
   store.db.prepare(`UPDATE public_receipts SET room_id=?, room_title=?, start_href=?
     WHERE origin_room_id=? AND source='public-work'`).run(roomId, title, href, roomId);
@@ -513,6 +553,49 @@ function upsertPublicRoom(store, state, auth) {
     typeof setAt === "string" ? setAt : null, updatedAt);
 }
 
+// Native publication caches room metadata only. The current public-task reader
+// qualifies selected tasks independently; receipt listings remain unavailable.
+// This hook runs after the protected transition, inside the originating writer TX.
+export function syncCurrentRoomPublication(store,{roomId,previous,state,event,changes,current,charge}) {
+  const on=publicPage(state).enabled===true,was=publicPage(previous).enabled===true;
+  if(!on){if(was)store.db.prepare('DELETE FROM public_rooms WHERE slug=?').run(roomId);return;}
+  const first=!was,memberChanges=changes.filter(change=>change.domain==='members');
+  const roomChanged=changes.some(change=>change.domain==='metadata'&&change.key==='room');
+  if(!first&&!memberChanges.length&&!roomChanged)return;
+  const publicMember=m=>({id:m.id,kind:m.kind,name:publicName(m).enabled===true?cleanName(m.displayName):null});
+  let members;
+  if(first)members=Object.values(state.members).filter(m=>m&&m.active!==false).map(publicMember);
+  else {
+    const scalar=store.db.prepare('SELECT length(CAST(members_json AS BLOB)) bytes FROM public_rooms WHERE slug=?').get(roomId);
+    if(!scalar||!Number.isSafeInteger(scalar.bytes)||scalar.bytes<2||scalar.bytes>131072)throw Error('current_room_corrupt: public member projection unavailable');
+    charge(scalar.bytes+256);
+    const row=store.db.prepare('SELECT members_json FROM public_rooms WHERE slug=?').get(roomId);
+    members=JSON.parse(row.members_json);
+    if(!Array.isArray(members)||members.length>100||members.some(m=>!m||!['human','agent'].includes(m.kind))
+      ||new Set(members.map(m=>m.id)).size!==members.length)
+      throw new ServiceError(409,'current_room_context_unavailable','Public member projection needs an explicit public-page off/on rebuild before membership changes');
+    for(const change of memberChanges){
+      const before=current.before.get(JSON.stringify(['members',change.key]));
+      const at=members.findIndex(m=>m.id===change.key);
+      if((before?.active!==false&&before!==undefined)!==(at>=0))throw Error('current_room_corrupt: public member projection membership differs');
+      if(at>=0)members.splice(at,1);
+      if(change.value&&change.value.active!==false)members.push(publicMember(change.value));
+    }
+  }
+  // The existing projection stores only opted-in display names and aggregate counts.
+  const projected=members;
+  if(projected.length>100)throw Error('current_room_corrupt: public roster exceeds admission');
+  const agents=projected.filter(m=>m.kind==='agent').length;
+  const join={mode:joinLink(state).enabled===true?'open':'request',token:null,ownerId:state.room.ownerId};
+  const at=event.at;
+  store.db.prepare(`INSERT INTO public_rooms(slug,title,purpose,humans,agents,names_json,tasks_json,members_json,receipts_enabled,join_mode,join_token,owner_member_id,set_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(slug) DO UPDATE SET title=excluded.title,purpose=excluded.purpose,
+    humans=excluded.humans,agents=excluded.agents,names_json=excluded.names_json,members_json=excluded.members_json,
+    join_mode=excluded.join_mode,join_token=excluded.join_token,owner_member_id=excluded.owner_member_id,set_at=excluded.set_at,updated_at=excluded.updated_at`)
+    .run(roomId,state.room.title??roomId,state.room.purpose??'',projected.length-agents,agents,JSON.stringify(projected.filter(m=>m.name).map(m=>m.name)),
+      '[]',JSON.stringify(projected),0,join.mode,join.token,join.ownerId,state.room.publicPage.setAt??null,at);
+}
+
 export function refreshLinkedDirectory(store, roomId) {
   const links = store.db.prepare("SELECT DISTINCT identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId);
   for (const link of links) refreshDirectoryIdentity(store, link.identityId);
@@ -563,6 +646,9 @@ export function refreshDirectoryForReceipt(store, receiptId) {
 // Same transaction as the event write when the caller is already inside one.
 export function syncRoomPublication(store, { roomId, state, previous = null, auth = null } = {}) {
   if (!roomId || !state?.room) return;
+  // Normalized publication is maintained from protected transition deltas,
+  // never the intentionally sparse command context.
+  if (store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(roomId)) return;
   const pageOn = publicPage(state).enabled === true;
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
@@ -676,7 +762,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   if (listed) {
     try {
       const state = store.room(roomId).state;
-      roomTitle = cleanName(state?.room?.title);
+      roomTitle = cleanName(state?.room?.title) ?? directoryRoomTitle(store, roomId);
       ownerName = credit(state, state?.room?.ownerId)?.name ?? null;
     } catch { /* the room is gone; the receipt still publishes without its title */ }
   }
@@ -734,7 +820,7 @@ function directoryCounts(store, agentId, identityId) {
     try {
       const visibility = receiptVisibilitySqlFor(store.db);
       const row = store.db.prepare(`SELECT COUNT(*) AS n FROM public_receipts
-        WHERE ${visibility} AND EXISTS (
+        WHERE ${visibility}${sourceAgreementSql(store.db)} AND EXISTS (
           SELECT 1 FROM json_each(COALESCE(public_receipts.agent_ids_json, '[]'))
           WHERE value IN (SELECT value FROM json_each(?)))`).get(JSON.stringify(keys));
       receiptCount = row?.n ?? 0;
@@ -904,6 +990,11 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   // by hand, so it must name the leg itself or an opted-out room's
   // receipts would serve here while hidden everywhere else, R08-F1).
   if (recordedSettingReadable(store.db)) visibility.push(recordedOptOutReceiptSql({ taskRoomLeg }));
+  // The source-agreement leg (A6): a 'public-work' row whose source
+  // record is gone is not a receipt this list could serve, either as
+  // a page row or as a cursor position. taskRoomLeg is exactly the
+  // public-work-tables probe the fragment degrades on.
+  if (taskRoomLeg) visibility.push(SOURCE_AGREEMENT);
   let after = "";
   const afterParams = [];
   if (cursor != null) {
@@ -936,7 +1027,7 @@ export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const visibility = receiptVisibilitySqlFor(store.db);
-  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${visibility}`).get(id);
+  const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${visibility}${sourceAgreementSql(store.db)}`).get(id);
   if (!row) return null;
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
@@ -1229,42 +1320,52 @@ export function publicLotReceiptById(store, id) {
 
 export function collectPublicReceipts(store) {
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC`).all()
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   const visibility = receiptVisibilitySqlFor(store.db);
-  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
+  return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${visibility}${sourceAgreementSql(store.db)} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
     path: `/receipts/${row.id}`,
     lastmod: typeof row.at === "string" ? row.at.slice(0, 10) : null,
   }));
 }
 
-export function loadPublicRoom(store, slug) {
+export function loadPublicRoom(store, slug, {workAfter = ''} = {}) {
+  return store.readTransaction(() => {
   if (!SLUG.test(slug) || isUnpublished(store.db, "room", slug)) return null;
-  const row = store.db.prepare(`SELECT slug, title, purpose, humans, agents, names_json, tasks_json, receipts_enabled, join_mode, join_token, set_at
-    FROM public_rooms WHERE slug=?`).get(slug);
+  const native=Boolean(store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(slug));
+  const row = store.db.prepare(`SELECT slug, title, purpose, humans, agents, names_json, CASE WHEN ? THEN '[]' ELSE tasks_json END AS tasks_json, receipts_enabled, join_mode, join_token, set_at
+    FROM public_rooms WHERE slug=?`).get(native?1:0,slug);
   if (!row) return null;
+  const currentWork = native ? readCurrentPublicWork(store, slug, {after:workAfter}) : null;
+  if (native && !currentWork) return null;
   return {
+    ...(native?{openAdmission:row.join_mode==='open',coverage:{tasks:currentWork.coverage,receipts:{available:false}}}:{}),
     slug: row.slug,
     title: row.title,
     purpose: row.purpose,
     counts: { humans: row.humans, agents: row.agents },
     names: parseJson(row.names_json, []),
-    tasks: parseJson(row.tasks_json, []),
-    receiptsEnabled: row.receipts_enabled === 1,
-    joinMode: row.join_mode === "link" && row.join_token ? "link" : "request",
+    tasks: native?currentWork.tasks:parseJson(row.tasks_json, []),
+    receiptsEnabled: !native&&row.receipts_enabled === 1,
+    joinMode: native&&row.join_mode === "open" ? "open" : row.join_mode === "link" && row.join_token ? "link" : "request",
     joinToken: row.join_mode === "link" ? row.join_token : null,
     setAt: row.set_at,
   };
+  });
 }
 
 export function listPublicRoomSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC LIMIT ?").all(cap)
-    .filter(row => !isUnpublished(store.db, "room", row.slug))
+    // List only slugs loadPublicRoom would serve: a valid slug, not
+    // unpublished, and for a native room a published, unarchived page.
+    .filter(row => SLUG.test(row.slug) && !isUnpublished(store.db, "room", row.slug)
+      && (!store.db.prepare("SELECT 1 FROM current_room_head WHERE room_id=?").get(row.slug)
+        || currentPublicPageListed(store, row.slug)))
     .map(row => ({
       slug: row.slug,
       setAt: row.set_at,
@@ -1300,7 +1401,7 @@ export function proofLevelOf(receipt) {
 export function roomProofRows(store, slug) {
   const visibility = receiptVisibilitySqlFor(store.db);
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
-    WHERE ${visibility} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
+    WHERE ${visibility}${sourceAgreementSql(store.db)} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
 }
 
@@ -1317,7 +1418,7 @@ export function roomPageReceipts(store, slug, receiptsEnabled, { limit = 5, afte
   params.push(cap);
   const visibility = receiptVisibilitySqlFor(store.db);
   return store.db.prepare(`SELECT id, title, at FROM public_receipts
-    WHERE ${visibility} AND (room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item')))${cursor}
+    WHERE ${visibility}${sourceAgreementSql(store.db)} AND (room_id=? OR (?=1 AND origin_room_id=? AND source IN ('work-claim','work-item')))${cursor}
     ORDER BY at DESC, id ASC LIMIT ?`).all(...params);
 }
 

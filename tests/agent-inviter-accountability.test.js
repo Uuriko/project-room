@@ -28,7 +28,7 @@ for (const door of ["code", "share"]) test(`agent-owned room admits a peer throu
     const peer = store.identities.create("Peer agent");
     joined = store.shareLinks.joinAgent(peer.secret, linkToken, "Peer agent");
   }
-  const state = store.room(room.roomId).state;
+  const state = {members:store.roomAuthority(room.roomId).members};
   const event = admissionEvent(store, room.roomId, joined.memberId);
   assert.equal(event.actorId, room.ownerMemberId);
   assert.equal(Object.hasOwn(event.data, "accountableHumanId"), false);

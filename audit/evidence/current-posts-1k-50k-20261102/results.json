@@ -1,0 +1,29 @@
+{
+  "runtime": "v24.22.1",
+  "platform": "darwin",
+  "workload": "normalized committed posts; fixed body; three warmups and twenty samples; in-memory SQLite; SQL bound bytes are not physical disk or Cloudflare billing bytes",
+  "results": [
+    {
+      "historyEvents": 1000,
+      "setupMs": 195.526666,
+      "samples": 20,
+      "medianMs": 1.2237499999999955,
+      "p95Ms": 1.5564170000000104,
+      "maximumBoundWriteBytes": 3331,
+      "maximumWriteStatements": 15,
+      "carrierBytes": 131
+    },
+    {
+      "historyEvents": 50000,
+      "setupMs": 26487.870917,
+      "samples": 20,
+      "medianMs": 1.1421249999984866,
+      "p95Ms": 1.3320419999981823,
+      "maximumBoundWriteBytes": 3344,
+      "maximumWriteStatements": 15,
+      "carrierBytes": 132
+    }
+  ],
+  "medianLatencyRatio": 0.933299284983445,
+  "targetUnder2x": true
+}

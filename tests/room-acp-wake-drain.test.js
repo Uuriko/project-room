@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Bridge, MAX_POLL_PAGES } from '../room-acp/src/bridge.mjs';
-import { RoomClient } from '../room-acp/src/room.mjs';
+import { RoomClient, RoomError } from '../room-acp/src/room.mjs';
 
 function fixture(pollImpl) {
   const bridge = new Bridge({
@@ -17,6 +17,7 @@ function fixture(pollImpl) {
   });
   bridge.room.heartbeat = async () => ({ listener: { acquired: true, fencingToken: 'tok', leaseExpiresAt: Date.now() + 60000 } });
   bridge.room.poll = pollImpl;
+  bridge.minPollIntervalMs = 0;
   bridge.refreshRoom = async () => {};
   const accepted = [];
   bridge.accept = async signal => { accepted.push(signal.signalId); };
@@ -24,6 +25,37 @@ function fixture(pollImpl) {
 }
 
 const sig = id => ({ signalId: id, messageId: `m-${id}`, kind: 'mention' });
+
+test('continuation pages are paced and an interrupted wait preserves the cursor', async () => {
+  const times=[];
+  const {bridge}=fixture(async ({cursor})=>{times.push(Date.now());return cursor?{pendingWakes:[],more:false}:{pendingWakes:[],more:true,nextCursor:'next'};});
+  bridge.minPollIntervalMs=40;
+  await bridge.pollOnce();assert.equal(times.length,2);assert.ok(times[1]-times[0]>=35,'each page must respect the interval');
+  bridge.room.poll=async()=>({pendingWakes:[],more:true,nextCursor:'pending'});
+  bridge.lastPollAt=0;const running=bridge.pollOnce();
+  while(bridge.wakeCursor!=='pending')await new Promise(resolve=>setTimeout(resolve,1));
+  bridge.stop();await running;assert.equal(bridge.wakeCursor,'pending');
+});
+
+test('continuation rechecks the lease and preserves its cursor when ownership is lost', async () => {
+  let calls=0;
+  const {bridge}=fixture(async()=>{calls++;return {pendingWakes:[],more:true,nextCursor:'next'};});
+  let leases=0;bridge.lease=async()=>++leases===1;
+  await bridge.pollOnce();assert.equal(calls,1);assert.equal(bridge.wakeCursor,'next');
+});
+
+test('a rate-limited continuation preserves its cursor and retry hint', async () => {
+  const seen=[];let throttled=false;
+  const {bridge}=fixture(async ({cursor})=>{
+    seen.push(cursor);
+    if(!cursor)return {pendingWakes:[],more:true,nextCursor:'page-2'};
+    if(!throttled){throttled=true;throw new RoomError(429,'rate_limited','slow down',1234);}
+    return {pendingWakes:[sig('later')],more:false};
+  });
+  await assert.rejects(bridge.pollOnce(),error=>error.status===429&&error.retryAfterMs===1234);
+  assert.equal(bridge.wakeCursor,'page-2');
+  await bridge.pollOnce();assert.deepEqual(seen,[null,'page-2','page-2']);assert.equal(bridge.wakeCursor,null);
+});
 
 test('pollOnce follows nextCursor until the wake queue is drained', async () => {
   const cursors = [];
@@ -53,12 +85,13 @@ test('RoomClient.poll sends the cursor when one is given, and omits it otherwise
   const urls = [];
   const fetchImpl = async url => {
     urls.push(String(url));
-    return { ok: true, headers: { get: () => null }, json: async () => ({ pendingWakes: [] }) };
+    return { ok: true, headers: { get: () => null }, json: async () => ({ roomId: 'r', pendingWakes: [] }) };
   };
   const client = new RoomClient({ apiBase: 'http://localhost', roomId: 'r', memberId: 'agent', credential: 'x', fetchImpl });
   await client.poll({ hostId: 'h', waitMs: 0 });
   await client.poll({ hostId: 'h', waitMs: 0, cursor: 'cur sor/1' });
   assert.equal(urls.length, 2);
+  assert.equal(new URL(urls[0]).searchParams.get('roomId'), 'r');
   assert.ok(!urls[0].includes('cursor='));
   assert.ok(urls[1].includes(`cursor=${encodeURIComponent('cur sor/1')}`));
 });

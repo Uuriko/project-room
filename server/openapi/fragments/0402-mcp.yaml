@@ -64,6 +64,10 @@
         room_put_file, room_list_files, room_get_file, room_discard_file, and
         room_commit_file stage, fetch, and commit room file bytes in
         room_attachments (canonical base64, 1 MiB, 24 hours while staged).
+        room_list_files requires messageIds (1–8 visible message ids) in
+        normalized rooms and follows page.nextCursor as cursor with the same
+        selection; metadata coverage is selected messages only. Retain the
+        staging receipt/id to read or commit unbound staged bytes.
         room_commit_file sets message_id and state committed on a message
         this identity posted. Wake and push settings on this bearer:
         wake_register, wake_clear (HTTPS wakeUrl, same checks as

@@ -35,7 +35,10 @@ export const CORE_REST_TWINS = Object.freeze({
   add_land_item: ["POST /api/rooms/{roomId}/add_land_item"],
   list_land_queue: ["GET /api/rooms/{roomId}/list_land_queue"],
   wake_pause: ["POST /api/rooms/{roomId}/agent-pause"],
-  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"]
+  wake_resume: ["POST /api/rooms/{roomId}/agent-pause"],
+  // Flag ROOM_BOARD_CLAIM_TOOLS: listed in core only when on.
+  ...(/^(1|true|on)$/i.test(String(process.env.ROOM_BOARD_CLAIM_TOOLS ?? "").trim()) ? {
+    room_work_claim: ["POST /api/rooms/{roomId}/work-claims/{claimId}/claim", "POST /api/rooms/{roomId}/work-claims/{claimId}/update"] } : {})
 });
 
 // Static join documents, served as plain files rather than API routes.

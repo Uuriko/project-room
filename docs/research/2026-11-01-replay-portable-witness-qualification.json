@@ -1,0 +1,244 @@
+{
+  "status": "unwired portable primitive; no lifecycle certification or activation",
+  "parentWitnessPin": "4bc6c411d",
+  "sourceSha256": {
+    "server/replay-sha256.mjs": "2359d20db5816a807356108c0c60e50851d378bb61715050e4abe4349ca5112d",
+    "tests/replay-sha256.test.mjs": "97814798169f7d0b42a186e69b281c1fa9325e1ee28b0cc9d385e64102c4ade1",
+    "tests/replay-projection-witness.test.mjs": "ecaa81ec5e20a51f42f537318ae3192d721110bde382c6161ee950db86bf36fe",
+    "cloudflare/replay-projection-witness.check.mjs": "2684ea1d400bdc462b3c565d55988090d637fb6bed6347b6995c4687cb943116",
+    "cloudflare/replay-projection-witness.test-fixture.mjs": "89c58fda39b56c01f57af091f603d51570183217f67e7e7f214661d6d696d107"
+  },
+  "nodeCommand": "/Users/johnpotter/.local/bin/node --test tests/replay-sha256.test.mjs tests/replay-projection-witness.test.mjs",
+  "workerCommand": "MINIFLARE_WORKERD_PATH=/Users/johnpotter/.npm/_npx/c943b712072b77c4/node_modules/workerd/bin/workerd WITNESS_PORTABLE_HASH=1 WITNESS_MODE=whole WITNESS_SIZES=2376000,8388608 /Users/johnpotter/.local/bin/node --test cloudflare/replay-projection-witness.check.mjs",
+  "nodePass": 48,
+  "workerPass": 1,
+  "focusedESLint": "pass",
+  "untestedModulesGate": "442 modules; no new untested modules",
+  "workerMeasurements": [
+    {
+      "mode": "whole",
+      "requestedBytes": 2376000,
+      "admitted": true,
+      "legacyFixture": false,
+      "runtime": {
+        "storage": {
+          "valueLimitBytes": 8388642
+        }
+      },
+      "seedFailure": null,
+      "capturedBytes": 2376000,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 8,
+        "rowsWritten": 4,
+        "unknown": 0
+      },
+      "hostWallMs": 217.72804199999882,
+      "processResources": null,
+      "standaloneSql": {
+        "octet": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 2376000
+            },
+            "wallMs": 0,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        },
+        "cast": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 2376000
+            },
+            "wallMs": 1,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        },
+        "slice": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 16384
+            },
+            "wallMs": 1,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        }
+      },
+      "portableHash": {
+        "head": 2,
+        "bytes": 2376000,
+        "controlBytes": 135,
+        "complete": true,
+        "matchesIndependentProof": true
+      },
+      "slicesWallMs": 4143.665958000001,
+      "sliceProcessResources": null,
+      "sliceCost": {
+        "statements": 147,
+        "rowsRead": 147,
+        "rowsWritten": 0
+      },
+      "maxSliceSqlWallMs": 70,
+      "heapBefore": {
+        "usedSize": 20605112,
+        "totalSize": 27475968,
+        "embedderHeapUsedSize": 515872,
+        "backingStorageSize": 5894325
+      },
+      "heapAfter": {
+        "usedSize": 20854176,
+        "totalSize": 27475968,
+        "embedderHeapUsedSize": 515872,
+        "backingStorageSize": 5894325
+      },
+      "sampledActiveCpuUs": 37047,
+      "inspectorLimitation": null,
+      "maxSlice": 16384,
+      "appendStatus": 200,
+      "appendError": null,
+      "duplicateCost": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 0,
+        "unknown": 0
+      }
+    },
+    {
+      "mode": "whole",
+      "requestedBytes": 8388608,
+      "admitted": true,
+      "legacyFixture": false,
+      "runtime": {
+        "storage": {
+          "valueLimitBytes": 8388642
+        }
+      },
+      "seedFailure": null,
+      "capturedBytes": 8388608,
+      "cost": {
+        "statements": 5,
+        "rowsRead": 8,
+        "rowsWritten": 4,
+        "unknown": 0
+      },
+      "hostWallMs": 245.35491600000387,
+      "processResources": null,
+      "standaloneSql": {
+        "octet": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 8388608
+            },
+            "wallMs": 0,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        },
+        "cast": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 8388608
+            },
+            "wallMs": 7,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        },
+        "slice": {
+          "status": 200,
+          "body": {
+            "result": {
+              "bytes": 16384
+            },
+            "wallMs": 4,
+            "cost": {
+              "statements": 1,
+              "rowsRead": 1,
+              "rowsWritten": 0,
+              "unknown": 0
+            }
+          }
+        }
+      },
+      "portableHash": {
+        "head": 2,
+        "bytes": 8388608,
+        "controlBytes": 138,
+        "complete": true,
+        "matchesIndependentProof": true
+      },
+      "slicesWallMs": 17037.135792,
+      "sliceProcessResources": null,
+      "sliceCost": {
+        "statements": 513,
+        "rowsRead": 513,
+        "rowsWritten": 0
+      },
+      "maxSliceSqlWallMs": 253,
+      "heapBefore": {
+        "usedSize": 38637004,
+        "totalSize": 45776896,
+        "embedderHeapUsedSize": 515872,
+        "backingStorageSize": 9530709
+      },
+      "heapAfter": {
+        "usedSize": 38886068,
+        "totalSize": 45776896,
+        "embedderHeapUsedSize": 515872,
+        "backingStorageSize": 9530709
+      },
+      "sampledActiveCpuUs": 66868,
+      "inspectorLimitation": null,
+      "maxSlice": 16384,
+      "appendStatus": 409,
+      "appendError": {
+        "code": "pilot_limit",
+        "phase": "/append",
+        "message": "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.",
+        "nativeFailure": null
+      },
+      "duplicateCost": {
+        "statements": 2,
+        "rowsRead": 2,
+        "rowsWritten": 0,
+        "unknown": 0
+      }
+    }
+  ],
+  "limitations": [
+    "Synthetic source only; no current Muse eligibility or production call",
+    "Fixture KV is only restart qualification, not production checkpoint authority",
+    "No source epoch, format fencing, semantic restore or final publication implementation yet",
+    "48 tests include original 21 capture controls; old qualification record remains frozen",
+    "Shared codec and independent archive proof checks reused; no second normalizer",
+    "Whole-value SQL read may materialize admitted fixed-size capture; output size is not native SQL work size"
+  ]
+}

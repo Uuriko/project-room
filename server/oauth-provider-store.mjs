@@ -112,8 +112,11 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
   let pruned = 0;
   for (const [table, key] of PRUNE) {
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
+    // Match the native grant expiry index: retain durable public guests,
+    // while expired invitation grants (including zero) still get pruned.
+    const lowerBound = table === "oauth_invite_grants" ? "(expires_at != 0 OR invite_hash != 'public-lobby-guest-v1' OR room_id != 'project-room-lobby') AND " : "";
     const result = db.prepare(
-      `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE expires_at <= ? LIMIT ?)`
+      `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE ${lowerBound}expires_at <= ? LIMIT ?)`
     ).run(now, limit);
     pruned += result.changes ?? 0;
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthCacheMs, MAX_HEALTH_CACHE_MS, healthLivenessResponse, readyProbeResponse, workerLivenessResponse, jobHealthSnapshotStatus } from './health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 
@@ -139,4 +139,26 @@ test('unknown or malformed job health cannot claim service health while Worker l
     assert.equal(response.status, 200);
     const body = await response.json(); assert.equal(body.status, 'degraded'); assert.equal(body.liveness, 'ok'); assert.equal(body.jobs.status, 'unknown');
   }
+});
+
+test('job-health cache is off by default and reuses only a good snapshot within cacheMs', async () => {
+  assert.equal(healthCacheMs(undefined), 0);
+  assert.equal(healthCacheMs('abc'), 0);
+  assert.equal(healthCacheMs('-5'), 0);
+  assert.equal(healthCacheMs('5000'), 5000);
+  assert.equal(healthCacheMs('999999'), MAX_HEALTH_CACHE_MS);
+  const run = async (cacheMs, status = 200) => {
+    const probe = createHealthProbe(); let starts = 0;
+    const start = async () => { starts++; return Response.json({ ok: true }, { status }); };
+    const opts = { start, timeoutMs: 200, cacheMs, onSnapshot: s => new Response(null, { status: s.status }), onUnready: () => new Response(null, { status: 503 }) };
+    await probe(opts); await probe(opts); await probe(opts);
+    return starts;
+  };
+  assert.equal(await run(0), 3);
+  assert.equal(await run(5000), 1);
+  assert.equal(await run(5000, 500), 3);
+  const probe = createHealthProbe(); let starts = 0;
+  const opts = { start: async () => { starts++; return Response.json({}); }, timeoutMs: 200, cacheMs: 20, onSnapshot: () => new Response(null), onUnready: () => new Response(null) };
+  await probe(opts); await new Promise(r => setTimeout(r, 40)); await probe(opts);
+  assert.equal(starts, 2);
 });

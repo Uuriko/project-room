@@ -1,0 +1,44 @@
+{
+  "base": "53b98a642",
+  "runtime": "400ff20c663ad0000ee6ea5ae06b56163d4bbb18",
+  "syntheticOnly": true,
+  "before": {
+    "command": "node --test tests/jev-shadow-http.test.js",
+    "tests": 7,
+    "pass": 6,
+    "fail": 1,
+    "failure": "first-room join201 succeeds but join:first-room admission journal absent"
+  },
+  "after": {
+    "command": "node --test tests/jev-shadow-http.test.js tests/jev-admission.test.js",
+    "tests": 20,
+    "pass": 20,
+    "skipped": 0
+  },
+  "change": "Use existing protected complete membership authority in consistent read transaction instead of whole-room content hydration. Scorer rules, self exclusion, velocity accounting, journal writes and shadow-only catch remain unchanged.",
+  "regression": "Normalized first-room whole hydration forbidden; exactly one normal admission entry, actual identity binding, all three existing signals and sybil self-match zero. Existing legacy invite/delegation/receipt/owner diagnostics behavior stays tested.",
+  "limits": "No maximum-roster/large-profile performance or Native cost qualification claimed; existing authority admission bounds and shadow-only error handling remain. No model/service/auth/policy change or production calls.",
+  "lint": {
+    "errors": 0,
+    "warnings": 1,
+    "inherited": "server/http.mjs:1075 timer prefer-const"
+  },
+  "logs": {
+    "jev-shadow-native-before": {
+      "sha256": "07d648ec3300e03e9e8c2d1191a248d600d22fcceee60414cd5e6b4561769711",
+      "bytes": 5774
+    },
+    "jev-shadow-native-after": {
+      "sha256": "5796627de4362c8d78d975b4fa46c067213d1729d55b23e6397239ae1c999cec",
+      "bytes": 6034
+    },
+    "jev-shadow-native-lint": {
+      "sha256": "ea21b02d2aec22f42f4b1184fdfe1c0b387573d5c78927a57d2043f9175ce97f",
+      "bytes": 192
+    }
+  },
+  "sourceSha256": {
+    "server/http.mjs": "87896b9d7e3eb7597e455c57e99f528245d62aa55a77c2569fc9d7021ddc0e6b",
+    "tests/jev-shadow-http.test.js": "9d1983f1ee4a15f1aa41da28286b5eab8ccb5fb595bdac7aada2b1692eb35056"
+  }
+}

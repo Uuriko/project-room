@@ -1,7 +1,14 @@
+import { currentRecordReplyCount,currentRecordReplyOwner } from './current-record-context.js';
 // Shared request semantics. Deliberately independent of events, storage and UI.
 export const REPLY_CANCELLED = "reply_request.cancelled";
+export const REPLY_PROGRESSED = "reply_request.progressed";
+export const REPLY_PROGRESS_STATES = Object.freeze(["acknowledged", "working", "needs_input", "error"]);
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
+// Keep a worst-case escaped answer plus its envelope inside one 64 KiB
+// selected-context page. Questions and cancellation reasons retain 4,096.
+export const MAX_REPLY_RESPONSE_CHARS = 8192;
+export const MAX_REPLY_RESPONSE_COMMAND_BYTES = 65536;
 // Which credential route closed a request, stamped by the server on a response
 // (never taken from the caller). "account_session": the response arrived on a
 // human member's signed-in account session. That attests the route the server
@@ -14,7 +21,7 @@ export const REPLY_FIELDS = Object.freeze(["requestKind", "responseToRequestId",
 const own = (value, key) => Object.hasOwn(value, key);
 const id = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
-const text = value => typeof value === "string" && value.length <= 4096 && value.trim().length > 0;
+const text = (value, maximum = 4096) => typeof value === "string" && value.length <= maximum && value.trim().length > 0;
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const requireValid = (valid, message) => { if (!valid) throw new Error(message); };
 
@@ -114,7 +121,7 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 export function replyPostMode(data) {
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
-  const bodyKept = text(data.body) || (data.redacted === true && data.body == null);
+  const bodyKept = text(data.body, own(data, "responseToRequestId") ? MAX_REPLY_RESPONSE_CHARS : 4096) || (data.redacted === true && data.body == null);
   requireValid(id(data.messageId) && bodyKept, "Reply requests require an explicit message and text");
   requireValid(!["packetId", "basisRevision", "allowOlderBasis"].some(key => own(data, key)), "Reply requests cannot include proposal fields");
   if (own(data, "requestKind")) {
@@ -157,7 +164,7 @@ export function prepareReplyPost(state, incoming) {
     "Invalid answer credential");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");
-    requireValid(Object.keys(state.replyRequests ?? {}).length < MAX_REPLY_REQUESTS, "Reply request capacity reached");
+    requireValid((currentRecordReplyCount(state) ?? Object.keys(state.replyRequests ?? {}).length) < MAX_REPLY_REQUESTS, "Reply request capacity reached");
   } else {
     const request = replyRequest(state, data.responseToRequestId);
     openRevision(request, data.expectedRequestRevision);
@@ -171,14 +178,19 @@ export function prepareReplyPost(state, incoming) {
 
 // Each message belongs to its nearest explicit request, until a different-work
 // branch intervenes. Descendants cannot escape an excluded branch accidentally.
+export function deriveReplyContextOwner(message,requests,parentOwner) {
+ if(own(requests,message.id))return message.id;
+ const request=parentOwner&&requests[parentOwner];
+ return request&&(!message.workItemId||message.workItemId===request.workItemId)?parentOwner:null;
+}
 export function replyContextOwners(state) {
-  const owners = new Map(), requests = state.replyRequests ?? {};
-  for (const message of state.messages) {
-    if (own(requests, message.id)) { owners.set(message.id, message.id); continue; }
-    const parent = owners.get(message.replyToId), request = parent && requests[parent];
-    if (request && (!message.workItemId || message.workItemId === request.workItemId)) owners.set(message.id, parent);
-  }
-  return owners;
+ const owners=new Map(),requests=state.replyRequests??{};
+ for(const message of state.messages){
+  const supplied=currentRecordReplyOwner(state,message.id);
+  const owner=own(requests,message.id)?message.id:supplied!==undefined?supplied:deriveReplyContextOwner(message,requests,owners.get(message.replyToId));
+  if(owner!==null&&owner!==undefined)owners.set(message.id,owner);
+ }
+ return owners;
 }
 
 export function recordReplyPost(state, incoming, mode) {
@@ -204,6 +216,28 @@ export function recordReplyPost(state, incoming, mode) {
     const requestId = replyContextOwners(state).get(messageId), request = requestId && state.replyRequests[requestId];
     if (request?.status === "open") Object.assign(request, { contextEventId: incoming.id, contextMessageId: messageId });
   }
+}
+
+// The recipient says where an open request stands, so the asker stops polling
+// chat. Not terminal: the request stays open and its revision is unchanged,
+// so a later answer still uses the revision it read. needs_input and error
+// mark a stop; acknowledged or working clears it.
+export function progressReplyRequest(state, incoming) {
+  const data = incoming.data, actor = state.members[incoming.actorId];
+  requireValid(Object.keys(data).every(key => ["requestMessageId", "expectedRequestRevision", "progress", "note"].includes(key))
+    && ["requestMessageId", "expectedRequestRevision", "progress"].every(key => Object.hasOwn(data, key)), "Unexpected reply progress fields");
+  const request = replyRequest(state, data.requestMessageId);
+  requireValid(actor && actor.active !== false, "Inactive reply request actor");
+  requireValid(incoming.actorId === request.recipientId, "Only the recipient may report progress on a request");
+  requireValid(REPLY_PROGRESS_STATES.includes(data.progress), "Progress must be acknowledged, working, needs_input or error");
+  requireValid(data.note === undefined || text(data.note) && data.note.length <= 1000, "Progress note must be 1..1000 characters");
+  openRevision(request, data.expectedRequestRevision);
+  const at = incoming.at;
+  Object.assign(request, { acknowledgedAt: request.acknowledgedAt ?? at, lastActivityAt: at,
+    progressState: data.progress, progressNote: data.note ?? null, progressEventId: incoming.id });
+  if (data.progress === "needs_input") request.needsInputAt = at;
+  else if (data.progress === "error") request.errorAt = at;
+  else { delete request.needsInputAt; delete request.errorAt; }
 }
 
 export function cancelReplyRequest(state, incoming) {

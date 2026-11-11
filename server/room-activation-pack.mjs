@@ -1,3 +1,4 @@
+import {readCurrentPinsWindow} from './current-pins.mjs';
 // Room activation pack (quill lane, RC-2026-09-18-040).
 //
 // One machine-readable fetch giving an agent everything it needs to start
@@ -156,6 +157,18 @@ const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
 // (#3222), so the cursor this pack handed out could not be used anywhere.
 
 export function buildActivationPack(store, roomSlug, viewerId = null, options = {}) {
+  const overview=store.currentOverview?.(roomSlug,viewerId,{workAfter:options.workAfter??''});
+  if(overview) {
+    const {state,visibleSequence:sequence,workWindow}=overview;
+    const pins=store.readTransaction(()=>readCurrentPinsWindow(store,roomSlug,viewerId));
+    return withContentTrust({room:{slug:state.room.id,title:state.room.title,state:state.room.archivedAt?'archived':'active',kind:roomKind(state.room),owner:state.room.ownerId},
+      members:Object.values(state.members).filter(member=>member.active!==false).map(memberOf),
+      openWork:Object.values(state.workItems).filter(item=>OPEN_WORK_STATES.has(item.state)).map(item=>workOf(item,new Date(store.now()).toISOString())),
+      workWindow,workScope:'workWindow',participationRules:{...roomPolicy(state),trust:roomTrust(state).enabled},coordinationNorms:{...COORDINATION_NORMS},
+      pinnedResources:pins.items.map(pinnedOf),pinWindow:{sourceWindow:pins.sourceWindow,page:pins.page},
+      omitted:['board_claims',...(pins.page.hasMore?['additional_pinned_message_bodies']:[]),'full_room_orientation'],eventCursor:sequence,generatedAt:new Date(store.now()).toISOString(),
+      orient:buildOrient(store,roomSlug,viewerId,{text:false,workAfter:options.workAfter??''})});
+  }
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
   // PERF-10X L4: one decoded board per request, shared by the pack's
@@ -257,7 +270,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
   listed.sort((a, b) => (a.state === b.state ? (seen(b.lastSeenAt) || 0) - (seen(a.lastSeenAt) || 0) : a.state === "online" ? -1 : 1));
   const around = listed.slice(0, BRIEF_AROUND);
   const you = pack.members.find(member => member.id === viewerId) ?? null;
-  const claims = pack.openClaims.slice(0, BRIEF_ITEMS).map(claim => ({
+  const claims = (pack.openClaims ?? []).slice(0, BRIEF_ITEMS).map(claim => ({
     id: claim.id, title: clip(claim.title, 100), untrusted: true, claimAction: claim.claimAction }));
   const unclaimed = pack.openWork.filter(item => !item.claimant).slice(0, BRIEF_ITEMS - claims.length)
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
@@ -279,7 +292,8 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     // payload itself (REGISTER row 59).
     recentWindowMs: BRIEF_ACTIVE_MS,
     pickUp: [...claims, ...unclaimed],
-    openWorkTotal: pack.openWork.length,
+    openWorkTotal: pack.workWindow ? null : pack.openWork.length,
+    ...(pack.workWindow ? {workWindow: pack.workWindow, workScope: pack.workScope, omitted: pack.omitted} : {}),
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
       .map(decision => ({ statement: clip(decision.statement, 140), at: decision.at ?? null })),
     rules: { ...pack.coordinationNorms, ...pack.participationRules },

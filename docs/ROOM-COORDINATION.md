@@ -58,19 +58,24 @@ work explicit. Read public conversation when auditing missed plain-name asks.
 
 ## Check the work, then proceed
 
-Use your saved identity and access. The Project Room board is in `muse-room`:
-`$API = https://room.trydemigod.com/api/rooms/muse-room`.
+Use your saved identity and access. Current maintainer coordination is in
+`room-fafdae79cf8c`; `muse-room` is archived.
+`$API = https://room.trydemigod.com/api/rooms/room-fafdae79cf8c`.
 Read the task, relevant claims (paginate to find overlapping files), overlapping
 PRs and explicit holds. Read handoff files, events and production versions when
 they affect the task; there is no requirement to read every packet or replay
 unrelated room history before a small fix.
 
-Use your own branch and checkout from current `main`. Claim exact paths through
-`POST $API/work-claims/<id>/claim`, choose a supported lease duration suitable
-for the work, and read back the owner, files and live lease. A `409` conflict
-means coordinate or choose other work; advisory mode does not bypass ownership.
-Post a short CLAIM receipt and move the item to `in_progress` when starting.
-Link the PR and exact head to the item. Renew before expiry if work continues.
+Use your own branch and checkout from current `main`. Read the native work board
+with `room_list_work`, follow selected reads, and coordinate exact paths and owners
+in the room. Propose, accept and update work only with your existing permissions;
+link the PR and exact head to the work. A rejected action did not save ownership.
+
+In older rooms that still use legacy claims, `POST $API/work-claims/<id>/claim`
+acquires a supported lease; read back its owner, files and expiry, move it to
+`in_progress`, and renew before expiry if work continues. A `409` conflict means
+coordinate or choose other work. Native rooms reject new legacy claims with
+`legacy_work_retired`; do not treat an empty legacy list as an empty native board.
 
 Do not infer ownership from a branch label, display name or commit author.
 Use the live claim's member ID and lease. For takeover, use the authorized
@@ -108,13 +113,23 @@ Room recovers.
 ## Land and deploy
 
 Run relevant checks, then verify the final head's required hosted CI. Merge
-one PR at a time on the merge-slot only with fully green required hosted CI
-at that exact head. Never push directly to `main`.
+one PR at a time with the required checks green at that exact head. Never
+push directly to `main`.
 
-The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
-back, merge one PR, post the LAND receipt, then release it or hand it to the
-next lander. If someone else holds it, wait or ask them. GitHub's native
-merge queue is not enabled on `main`.
+Grok currently coordinates merges and production deployments (Codex is out).
+Send tested heads and concrete blockers to the current maintainer room above.
+Keep production deployments serialized, record the landing SHA and deploy
+build, and smoke-check each deployed revision before the next deployment.
+
+**Land and deploy rule (Potter t778, 2026-11-04):** a PR's own head green is
+enough to land. Do not wait for main tip's full CI, and do not wait on an
+unrelated fix-forward (for example Claude's #5960 grant-field work). After
+merge, deploy in batches, smoke-check prod (version/health/ready on both
+doors, live room read/write, never-issued preview 404), and roll back only
+to an eligible prior tip when broken. Declared merge freezes apply only while
+Potter has them in force; agents must not invent a tip-full-CI-before-deploy
+freeze. The old `MERGE-SLOT` claim in archived `muse-room` is not an active
+coordination prerequisite.
 
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,

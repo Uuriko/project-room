@@ -23,6 +23,7 @@
 // the tick. No new secret is added.
 
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { isCurrentRoom, currentInviteContext } from "./current-room-repository.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, ownMember, validId } from "../src/events.js";
 import { claimWork, createWork, reassignWork, isTerminalClaimState, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
@@ -539,7 +540,9 @@ function syncMirroredLandClaimOwner(store, row) {
 }
 
 function mirrorLandClaim(store, row) {
-  if (!row || !store?.workClaims) return false;
+  // Native rooms use the queue row plus append-only receipts; the legacy
+  // work board must not be recreated as a second source of assignment truth.
+  if (!row || !store?.workClaims || isCurrentRoom(store.db, row.room_id)) return false;
   if (store.workClaims.has(row.room_id, row.item_id)) {
     // The claim already exists: create nothing, but never leave its owner
     // pointing at a previous claimant when the row has moved on.
@@ -659,7 +662,7 @@ export class LandQueue {
     // resolves inherited Object.prototype names ("toString", "constructor",
     // ...) that pass validId but are not room members. Resolve through
     // ownMember (Object.hasOwn) like src/events.js / server/grants.mjs.
-    const member = ownMember(this.store.room(roomId).state.members, memberId);
+    const member = ownMember(this.store.roomAuthority(roomId, { memberId }).members, memberId);
     if (!member || member.active === false) fail(422, "invalid_land_item", "claimant must be an active room member");
     return member;
   }
@@ -758,6 +761,11 @@ export class LandQueue {
 
   list(roomId, memberId) {
     this.#member(roomId, memberId);
+    if (isCurrentRoom(this.db, roomId)) {
+      const rows = this.db.prepare("SELECT * FROM land_queue WHERE room_id=? ORDER BY created_at, item_id LIMIT ?").all(roomId, MAX_ITEMS + 1);
+      if (rows.length > MAX_ITEMS) fail(409, "land_queue_full", "Stored land queue exceeds its bounded capacity");
+      return { roomId, items: rows.map(viewFromRow) };
+    }
     migrateLandQueueClaims(this.store);
     const claims = this.store.workClaims.list(roomId).filter(item => item.kind === "land");
     const items = claims.map(item => {
@@ -852,7 +860,7 @@ export class LandQueue {
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
     const removed = viewFromRow(row);
     this.store.transaction(() => {
-      const claim = typeof this.store.workClaims?.get === "function"
+      const claim = !isCurrentRoom(this.db, roomId) && typeof this.store.workClaims?.get === "function"
         ? this.store.workClaims.get(roomId, itemId)
         : null;
       const dependents = claim ? this.#dependentsOf(roomId, itemId) : [];
@@ -861,7 +869,7 @@ export class LandQueue {
       // receipt (changed ["removed"]) in the same transaction as the row, so
       // a removal never lands silently in the event log.
       this.#emitBoardReceipt(roomId, removed, ["removed"]);
-      if (typeof this.store.workClaims.delete === "function") {
+      if (!isCurrentRoom(this.db, roomId) && typeof this.store.workClaims.delete === "function") {
         this.store.workClaims.delete(roomId, itemId);
         // Issue #1527: the mirrored claim is gone, so any claim that depended
         // on it is stranded. Emit the deletion receipt (fail-safe: the receipt
@@ -910,7 +918,7 @@ export class LandQueue {
         WHERE room_id=? AND item_id=?`)
         .run(nextTip.sourceRevision, nextTip.buildId, now, roomId, itemId);
       item = viewFromRow(this.#row(roomId, itemId));
-      const claim = this.store.workClaims.get(roomId, itemId);
+      const claim = isCurrentRoom(this.db, roomId) ? null : this.store.workClaims.get(roomId, itemId);
       if (claim && nextTip.sourceRevision && claim.revision !== nextTip.sourceRevision) {
         this.store.workClaims.set(roomId, { ...claim, revision: nextTip.sourceRevision });
       }
@@ -1016,7 +1024,7 @@ export class LandQueue {
       // polled) and the manual remove().
       if (error?.code === "pr_not_found" && !duplicate && !cron) {
         this.store.transaction(() => {
-          const claim = typeof this.store.workClaims?.get === "function"
+          const claim = !isCurrentRoom(this.db, item.roomId) && typeof this.store.workClaims?.get === "function"
             ? this.store.workClaims.get(item.roomId, item.itemId)
             : null;
           const dependents = claim ? this.#dependentsOf(item.roomId, item.itemId) : [];
@@ -1024,7 +1032,7 @@ export class LandQueue {
           // Same board-write receipt as remove(): the auto-delete is a board
           // mutation and commits its land.updated (changed ["removed"]) here.
           this.#emitBoardReceipt(item.roomId, item, ["removed"]);
-          if (typeof this.store.workClaims?.delete === "function") {
+          if (!isCurrentRoom(this.db, item.roomId) && typeof this.store.workClaims?.delete === "function") {
             this.store.workClaims.delete(item.roomId, item.itemId);
             // Issue #1527: same stranded-dependent receipt as remove().
             if (claim) this.#receiptClaimDeleted(item.roomId, { actorId: item.claimantMemberId, claim, dependents });
@@ -1131,13 +1139,23 @@ export class LandQueue {
     return this.#appendRoomEvent(roomId, incoming);
   }
 
+  #receiptRoom(roomId, memberId) {
+    return isCurrentRoom(this.db, roomId)
+      ? currentInviteContext(this.store, roomId, { memberIds: [memberId] }).room
+      : this.store.room(roomId);
+  }
+
   #appendRoomEvent(roomId, incoming) {
-    const room = this.store.room(roomId);
-    const state = applyEvent(room.state, incoming);
-    const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-    const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-    this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, this.store.storedProjection(roomId, compact), roomId);
+    if (isCurrentRoom(this.db, roomId)) {
+      this.store.appendSideTableEvent(roomId, incoming);
+    } else {
+      const room = this.store.room(roomId);
+      const state = applyEvent(room.state, incoming);
+      const sequence = room.sequence + 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      this.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, this.store.storedProjection(roomId, compact), roomId);
+    }
     try {
       if (this.store.agentPlugin) this.store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
     } catch (error) {
@@ -1148,7 +1166,7 @@ export class LandQueue {
 
   #emit(roomId, item, changed) {
     const payload = landWakePayload(item, changed);
-    const room = this.store.room(roomId);
+    const room = this.#receiptRoom(roomId, item.claimantMemberId);
     const claimant = ownMember(room.state.members, item.claimantMemberId);
     const actorId = claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId;
     const incoming = event({
@@ -1177,7 +1195,7 @@ export class LandQueue {
   // in the event log. Runs inside the caller's board transaction so the row
   // write and its event commit together.
   #emitBoardReceipt(roomId, item, changed) {
-    const room = this.store.room(roomId);
+    const room = this.#receiptRoom(roomId, item.claimantMemberId);
     if (isRoomArchived(room.state)) return null;
     const claimant = ownMember(room.state.members, item.claimantMemberId);
     const incoming = event({

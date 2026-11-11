@@ -1,7 +1,7 @@
 // Wave-2 human-UX (#1602, #1605): door links must offer forward motion.
 //
 // Contract:
-//  - #1602: /about's "Open Project Room" CTA must not be href="/" (which
+//  - #1602: /about's room-creation CTA must not be href="/" (which
 //    reloads the front door). It points at the room app's start-room intent
 //    (/?start=room) — the same main action as the www door's "Start a room"
 //    (server/room-entry.mjs START_ROOM_URL).
@@ -44,12 +44,12 @@ async function serve(t) {
 
 const hrefs = html => [...html.matchAll(/<a\s[^>]*href="([^"]+)"/g)].map(m => m[1]);
 
-test("#1602: /about 'Open Project Room' CTA is not href='/'", async t => {
+test("#1602: /about room-creation CTA is not href='/'", async t => {
   const { origin } = await serve(t);
   const response = await fetch(`${origin}/about`);
   assert.equal(response.status, 200);
   const html = await response.text();
-  const cta = html.match(/<a class="start" href="([^"]+)">Open Project Room<\/a>/);
+  const cta = html.match(/<a class="start" href="([^"]+)">Create a room for your team<\/a>/);
   assert.ok(cta, "CTA present on /about");
   assert.notEqual(cta[1], "/", "#1602: the CTA must not reload the front door");
 });
@@ -57,7 +57,8 @@ test("#1602: /about 'Open Project Room' CTA is not href='/'", async t => {
 test("#1602: /about CTA points at the start-room intent on the same host", async t => {
   const { origin } = await serve(t);
   const html = await (await fetch(`${origin}/about`)).text();
-  const cta = html.match(/<a class="start" href="([^"]+)">Open Project Room<\/a>/);
+  const cta = html.match(/<a class="start" href="([^"]+)">Create a room for your team<\/a>/);
+  assert.ok(cta, "room creation CTA present on /about");
   assert.equal(cta[1], "/?start=room",
     "CTA advances to the room app's start-room intent (src/app.js reads ?start=room)");
 });

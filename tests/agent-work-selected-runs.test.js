@@ -1,3 +1,6 @@
+import {withCurrentRoomWriter,isCurrentRoom} from '../server/current-room-repository.mjs';
+import {auditRecovery} from '../server/recovery.mjs';
+import {seedHistoricalNeedsMeRoom} from './helpers/historical-needs-me-room.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
@@ -6,10 +9,10 @@ import { observeSelectedRuns } from '../server/request-runs.mjs';
 import { readAgentWork } from '../server/routes/agent-work.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 
-export function fixture() {
+export function fixture({legacy=false}={}) {
   const store = new RoomStore(':memory:'), rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen'), worker = store.identities.create('Worker');
-  rooms.create(owner.secret, { roomId: 'commons', title: 'Pickup', purpose: 'Test', kind: 'personal' });
+  if(legacy)seedHistoricalNeedsMeRoom(store,owner,{roomId:'commons',title:'Pickup',purpose:'Test',kind:'personal'});else rooms.create(owner.secret,{roomId:'commons',title:'Pickup',purpose:'Test',kind:'personal'});
   linkWithProof(store, owner.secret, 'commons', worker, { displayName: 'Worker', permissions: [] });
   store.dmConsents.request('commons', owner.identityId, worker.identityId, 'Fixture');
   store.dmConsents.decide('commons', worker.identityId, owner.identityId, 'approve');
@@ -25,8 +28,8 @@ export function fixture() {
   return { store, owner, worker, read, post };
 }
 
-test('pickup observes only selected canonical openings and retains canonical room validation', t => {
-  const f = fixture(); t.after(() => f.store.close());
+for(const legacy of [false,true])test(`pickup observes selected canonical openings and validates its representation legacy=${legacy}`, t => {
+  const f = fixture({legacy}); t.after(() => f.store.close());
   f.store.db.prepare("INSERT INTO request_runs VALUES(?,?,?,?,?,'delivered',?)")
     .run('commons', 'stale-opening', 'open', f.worker.identityId, 'stale-attempt', f.store.now());
   const expected = f.read();
@@ -37,7 +40,8 @@ test('pickup observes only selected canonical openings and retains canonical roo
   const actual = f.read();
   actual.observedAt = expected.observedAt;
   assert.deepEqual(actual, expected);
-  assert.equal(roomReads, 1, "one retained canonical hydration, no duplicate run-list hydration");
+  assert.equal(roomReads,legacy?1:0,legacy?"one retained historical canonical hydration, no duplicate run-list hydration":"normalized selection never hydrates a whole room");
+  assert.equal(isCurrentRoom(f.store.db,'commons'),!legacy);
   assert.equal(statements.some(sql => /SELECT \* FROM request_runs WHERE room_id=\?/.test(sql)), false);
 });
 
@@ -55,8 +59,8 @@ test('pickup keeps fresh request closure, viewer revocation and run ownership', 
 });
 
 
-test('pickup refuses a corrupt canonical message entity even when no body is returned', t => {
-  const f = fixture(); t.after(() => f.store.close());
+test('historical pickup refuses a corrupt canonical message entity even when no body is returned', t => {
+  const f = fixture({legacy:true}); t.after(() => f.store.close());
   f.store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.messages[0]',json(?)) WHERE id='commons'").run(JSON.stringify({id:'open',_entity:1}));
   f.store.db.prepare("UPDATE messages SET body='drift' WHERE message_id='open'").run();
   f.store._projectionCache?.clear();
@@ -80,4 +84,12 @@ test('selected run query searches both primary-key columns rather than enumerati
   const detail = plan.map(row => row.detail).join('\n');
   assert.match(detail, /SEARCH r USING INDEX .*\(room_id=\? AND opening_id=\?\)/,
     'selected openings must drive full primary-key searches: ' + detail);
+});
+
+test('normalized pickup refuses guarded message drift, rolls back an interrupted injection and recovers exact original proof',t=>{
+ const f=fixture();t.after(()=>f.store.close());const db=f.store.db,original=db.prepare("SELECT * FROM messages WHERE room_id='commons' AND message_id='open'").get(),guards=()=>db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name").all(),beforeGuards=guards(),saved=()=>Object.fromEntries(['messages','current_room_head','current_room_record_proofs','operator_actions'].map(table=>[table,db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()]));
+ assert.throws(()=>db.prepare("UPDATE messages SET body='drift' WHERE room_id='commons' AND message_id='open'").run(),/unsupported current room writer/);assert.equal(db.prepare("SELECT body FROM messages WHERE room_id='commons' AND message_id='open'").get().body,original.body);
+ const before=saved();assert.throws(()=>f.store.transaction(()=>withCurrentRoomWriter(db,'commons',()=>{db.prepare("UPDATE messages SET body='drift' WHERE room_id='commons' AND message_id='open'").run();throw Error('Interrupted synthetic corruption');})),/Interrupted synthetic corruption/);assert.deepEqual(saved(),before);assert.equal(f.read().runs.open.state,'working');
+ const damage=body=>f.store.transaction(()=>withCurrentRoomWriter(db,'commons',()=>db.prepare("UPDATE messages SET body=? WHERE room_id='commons' AND message_id='open'").run(body)));
+ damage('drift');assert.throws(()=>f.read(),/current_room_corrupt|message.*proof|message.*fields|projection_corrupt/);damage(original.body);assert.deepEqual(db.prepare("SELECT * FROM messages WHERE room_id='commons' AND message_id='open'").get(),original);assert.deepEqual(guards(),beforeGuards);assert.equal(f.read().runs.open.state,'working');assert.doesNotThrow(()=>auditRecovery(f.store));
 });

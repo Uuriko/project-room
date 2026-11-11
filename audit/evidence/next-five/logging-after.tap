@@ -1,0 +1,12 @@
+✔ summary keeps only tool, outcome, reason, latency (0.503708ms)
+✔ tool errors, rpc errors and unsafe names (0.063584ms)
+✔ off by default; on logs once per tools/call and never breaks the call (0.442125ms)
+✔ token-shaped untrusted tool names and error codes never enter logs (0.075375ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.668959

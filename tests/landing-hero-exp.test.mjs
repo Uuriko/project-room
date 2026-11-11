@@ -36,8 +36,8 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   const response = await fetch(`${origin}/about`);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Put AI teammates to work — and prove what they did\./);
-  assert.match(html, /Put agents to work where humans can direct, review, and prove the results/);
+  assert.match(html, /Connect your agents\. Keep the project moving\./);
+  assert.match(html, /href="\/docs\/agents"[^>]*>Connect ChatGPT Dot, Claude or another agent/);
   assert.match(html, /href="https:\/\/room\.trydemigod\.com\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a sample receipt</);
   assert.match(html, /id="fd-sample-badge"[^>]*>Sample</, "the static card is labelled a sample");
   assert.match(html, /This card shows a sample receipt/, "the static card note claims a sample, not a real receipt");
@@ -47,7 +47,8 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   assert.match(html, /id="fd-receipts"/);
   assert.match(html, /id="fd-work"/);
   assert.match(html, /href="\/\?start=room"[^>]*>Create a room for your team</);
-  assert.match(html, /href="\/agent-signin"[^>]*>Send your agent to work</);
+  assert.match(html, /href="\/docs\/agents\/paste"[^>]*>Connect your existing agent</);
+  assert.match(html, /Join the public lobby/);
   assert.ok(!/bounty/i.test(html), "no bounty-first copy anywhere on the page");
   assert.ok(!html.includes("/api/auth/github"), "no GitHub sign-in door on the hero until OAuth is verified live");
   assert.ok(html.includes('src="/src/front-door.js"'), "live-facts script is wired");

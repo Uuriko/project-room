@@ -59,6 +59,7 @@ test("SKILL.md Step 4 names auto-approve, not owner approval alone", () => {
   const skill = skillMd();
   const step4 = skill.slice(skill.indexOf("## Step 4"));
   assert.ok(step4.length > 0, "skill has a Step 4");
-  assert.ok(/owner approves/i.test(step4), "Step 4 still says the owner approves");
+  assert.ok(/owner approval/i.test(step4), "Step 4 retains approval for rooms outside the open path");
+  assert.ok(/owner-open room can approve/i.test(step4), "Step 4 explains immediate read/chat admission");
   assert.ok(/auto-approve/i.test(step4), "Step 4 must mention that some rooms auto-approve");
 });

@@ -37,6 +37,16 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  attention_wait_superseded: {
+    status: "action_required", hint: uiText("agentError.attention_wait_superseded.hint"),
+    next: [{ command: uiText("agentError.attention_wait_superseded.recovery") }],
+    catalog: { http: 409, retry: "no", recovery: uiText("agentError.attention_wait_superseded.recovery") }
+  },
+  current_room_corrupt: {
+    status: "action_required", hint: uiText("agentError.current_room_corrupt.hint"),
+    next: [{ command: uiText("agentError.current_room_corrupt.recovery") }],
+    catalog: { http: 409, retry: "no", recovery: uiText("agentError.current_room_corrupt.recovery") }
+  },
   attachment_index_budget_exceeded: {
     status: "action_required", hint: uiText("agentError.attachment_index_budget_exceeded.hint"),
     next: [{ command: uiText("agentError.attachment_index_budget_exceeded.recovery") }],
@@ -546,6 +556,17 @@ export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, wo
 // covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
 // fails if a catalogued code loses either kind of coverage.
 const AX_NAMED_RECOVERIES = {
+  // Current-room refusals retain their qualified recovery and existing grants.
+  current_room_context_required: [uiText("agentError.current_room_context_required.hint"), uiText("agentError.current_room_context_required.recovery")],
+  current_directory_integrity: [uiText("agentError.current_directory_integrity.hint"), uiText("agentError.current_directory_integrity.recovery")],
+  current_room_legacy_work_unreconciled: [uiText("agentError.current_room_legacy_work_unreconciled.hint"), uiText("agentError.current_room_legacy_work_unreconciled.recovery")],
+  legacy_work_retired: [uiText("agentError.legacy_work_retired.hint"), uiText("agentError.legacy_work_retired.recovery")],
+  current_redaction_historical_prefix: [uiText("agentError.current_redaction_historical_prefix.hint"), uiText("agentError.current_redaction_historical_prefix.recovery")],
+  independent_legacy_work: [uiText("agentError.independent_legacy_work.hint"), uiText("agentError.independent_legacy_work.recovery")],
+  mirror_retirement_idempotency_conflict: [uiText("agentError.mirror_retirement_idempotency_conflict.hint"), uiText("agentError.mirror_retirement_idempotency_conflict.recovery")],
+  attachment_cursor_reset: [uiText("agentError.attachment_cursor_reset.hint"), uiText("agentError.attachment_cursor_reset.recovery")],
+  thread_context_invalid: [uiText("agentError.thread_context_invalid.hint"), uiText("agentError.thread_context_invalid.recovery")],
+
   aborted: ["The request ended early, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload.", "Resend the request; if it repeats, check for a dropped connection or an oversized payload."],
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
@@ -566,6 +587,7 @@ const AX_NAMED_RECOVERIES = {
   assistant_source_denied: ["Choose your own visible shared message as the source.", "Pick one of your own visible shared messages."],
   assistant_stop_pending: ["A stop or scope decision must be acknowledged first.", "Acknowledge the pending stop or scope decision first."],
   attachment_conflict: ["That attachment id is already stored for this identity. Use the existing attachment or upload under a new id.", "Use the existing attachment, or upload with a new attachment id."],
+  current_work_selection_required: ["Use the bounded viewer-scoped work snapshot, work list or selected work read; the legacy whole-map projection is unavailable.", "Read bounded current work and follow its continuation; do not hydrate the legacy carrier."],
   attachment_unavailable: ["That attachment is no longer available. Re-upload it or use a current attachment.", "Re-upload the attachment or reference a current one."],
   bad_cursor: ["The cursor is not valid. Use the opaque nextCursor from a previous response, or restart without a cursor.", "Restart the list without a cursor, or pass the nextCursor from a previous response."],
   bad_request: ["The request itself was refused — the message names the problem. Fix it and resend.", "Fix the problem named in the message and resend."],
@@ -576,6 +598,7 @@ const AX_NAMED_RECOVERIES = {
   channel_sync_unsupported: ["This channel sync mode is not supported here. Use a supported sync mode; do not retry this one.", "Use a supported channel sync mode."],
   channel_webhook_backlog: ["The channel has a webhook backlog. Import the pending updates before sending more.", "Import pending updates first, then send."],
   charter_integrity_error: ["The instructions history requires reconciliation before this can proceed. Report the code and full message to the room owner if it persists.", "Reconcile the instructions history; if it persists, report the code and full message to the room owner."],
+  normalization_requires_reconciliation: ["The room head or its metadata proof is unavailable for normalized storage adoption.", "Ask the operator to reconcile the current room head and metadata proof before requesting a new adoption plan."],
   claim_conflict: ["That scope is reserved by another work claim. Coordinate or release that reservation first; no new claim was saved.", "Coordinate with the holding claim or release the reservation, then claim again."],
   collision_lock_expired: ["The draft lock expired. Acquire it again before editing.", "Acquire the draft lock again, then continue editing."],
   collision_lock_held: ["Another member is already drafting on this thread. Wait for them to finish or release the lock.", "Wait for the current drafter to release the lock, then acquire it."],
@@ -666,7 +689,7 @@ const AX_NAMED_RECOVERIES = {
   review_final: ["The review decision is final. Do not review again; act on the decision.", "Act on the final decision; do not re-review."],
   review_pass_required: ["Acceptance requires a current authorized independent PASS. Get that review first.", "Have a current authorized independent reviewer submit PASS, then accept."],
   review_policy_changed: ["The linked work's review policy is unavailable. Re-read the work and its current policy before acting.", "Re-read the work and its current review policy, then act."],
-  room_archived: ["This room is archived; access cannot be upgraded. Ask the owner to unarchive it, or work in another room.", "Ask the owner to unarchive the room, or use another room."],
+  room_archived: ["This room is archived; ordinary coordination and access upgrades are closed. Use an active room.", "Use an active room; existing authorized reading and owner export remain available."],
   round_limit_exceeded: ["The round limit paused this session. The next mention or post resumes it; do not retry this action.", "Wait for the next mention or post to resume the session."],
   seat_taken: ["This identity already holds a guest seat in this room. Use that seat; do not join again.", "Use the existing guest seat; do not join again."],
   settlement_not_submitted: ["The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first.", "Read the task and its settlement view; attach the submission via the finish step, then review."],
@@ -805,6 +828,45 @@ export function parseOwnerHeldClaimCopy(message) {
   return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
 }
 
+// MINT-BUDGET Pack 1 (D3): mint-budget 429s get a mint-specific hint/next.
+// This envelope layer receives no error detail (agentErrorAx is called with
+// httpStatus/code/message only), so it cannot read the body's mintBudget
+// {scope, limit, windowMs, retryAfterSeconds, resetAt} — the sub-branch keys
+// on the mint refusal messages themselves (the pack's flagged fallback) and
+// derives the scope from the message. The exact wait stays where the server
+// already puts it: the Retry-After header and the body's retryAfterSeconds /
+// mintBudget fields; nothing here invents a reset time. Scope text follows
+// the lane-04 D3 template: address = this source address alone; network =
+// every agent behind your egress network together — other people's mints
+// spent it too; global = all minting on this service together. The hint
+// stays under this layer's 160-char contract; the proof re-solve warning
+// and the alternatives ride in next[].
+const MINT_BUDGET_SCOPES = Object.freeze([
+  Object.freeze({ prefix: "Too many identity mints from this address", scope: "address", limit: "8/minute", sharing: "this source address alone" }),
+  Object.freeze({ prefix: "Identity mint address budget reached", scope: "address", limit: "20/day", sharing: "this source address alone" }),
+  Object.freeze({ prefix: "Identity mint network budget reached", scope: "network", limit: "80/day", sharing: "all agents behind your egress network" }),
+  Object.freeze({ prefix: "Identity mint daily budget reached", scope: "global", limit: "200/day", sharing: "all minting on this service" }),
+]);
+export function mintBudgetAx(message) {
+  const text = String(message || "");
+  const hit = MINT_BUDGET_SCOPES.find(entry => text.startsWith(entry.prefix));
+  if (!hit) return null;
+  const global = hit.scope === "global";
+  return {
+    status: "action_required", reason: "rate_limited",
+    hint: global
+      ? "Mint global budget hit: 200/day shared by all minting service-wide. Wait for Retry-After, or reuse a saved identity; invites spend this budget too."
+      : uiText("agentError.mintBudget.hint", { scope: hit.scope, limit: hit.limit, sharing: hit.sharing }),
+    next: [
+      command("Wait for Retry-After, then retry (re-solving any proof first)"),
+      command("Reuse a saved identity if you hold one"),
+      command(global
+        ? "Do not mint around it: agent invite and referral redemption spend this same global budget"
+        : "Ask a room member for an agent invite code and POST /api/agent-invites/redeem"),
+    ]
+  };
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -879,6 +941,34 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       hint: "This redemption's secret-rotation window closed 30 days after the original redemption, so a credential-less replay can no longer issue a fresh identity secret. The inviter who sponsored the invite must mint a fresh invite code — or remove and re-invite this member — and the new code redeems for a new identity secret.",
       next: [path("/api/agent-invites/redeem"),
         command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
+    };
+  }
+  // FUNNEL-FIXES pack 4: an RM- agent invite code at the share-link door is
+  // the wrong door, not a dead invite. The hint names no liveness: the 422
+  // is shape-only and identical for live, dead and fabricated codes.
+  if (reasonCode === "wrong_link_kind_agent_invite") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This code belongs to the agent-invite door. It is an agent invite code (RM-…), not a share link, and this answer says nothing about whether the invite is live.",
+      next: [path("/api/agent-invites/preview"),
+        command("Preview it with POST /api/agent-invites/preview with {\"code\":\"RM-…\"} in the request body, or fetch the invite's own /a/ link. Do not ask for a new invite on the strength of this answer.")]
+    };
+  }
+  // FUNNEL-FIXES pack 4: a genuine share link's preview names its own dead
+  // state (single cause) instead of the folded guest-invite hint.
+  if (["link_cancelled", "link_expired", "link_full", "link_authority_changed", "link_not_found"].includes(reasonCode)) {
+    const cause = {
+      link_cancelled: "This invite link was cancelled.",
+      link_expired: "This invite link has expired.",
+      link_full: "This invite link has reached its join limit.",
+      link_authority_changed: "This invite link is no longer valid because its issuer's authority changed.",
+      link_not_found: "No invite link was issued for this token. Check for typos or ask the inviter for a fresh link.",
+    }[reasonCode];
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: `${cause} Ask the inviter for a new link.`,
+      next: [path("/api/share-links/preview"),
+        command("Ask the inviter for a fresh link, then preview it with POST /api/share-links/preview before joining.")]
     };
   }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
@@ -1080,9 +1170,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       hint: cap
         ? "Only the room owner can set the per-member claim cap. Ask the owner to set it."
         : "Work claims need a contribute, review, or collaborate profile. Ask the room owner to grant one.",
-      next: [tool("room_check_access"), command(cap
-        ? "Ask the room owner to set the per-member claim cap."
-        : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
+      next: cap
+        ? [tool("room_check_access"), command("Ask the room owner to set the per-member claim cap.")]
+        // FUNNEL-FIXES C2: the core-MCP room_claim refusal (the store's
+        // claim.acquired gate renders through here) carries the same gate
+        // legs as the REST refusal — contribute invite, the permission
+        // request with its tokens and 7-day undecided expiry, and the
+        // public-work match that needs no room profile.
+        : [tool("room_check_access"),
+          command("Ask the owner for a contribute, review, or collaborate profile before creating or claiming work."),
+          command("Request the accept_work and complete_work permissions through the access-request path; requests expire undecided after 7 days."),
+          path("/api/public-work/match")]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
@@ -1379,6 +1477,11 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
+    // Mint-budget refusals name their mintBudget scope and a non-wait
+    // alternative (reuse a saved identity, redeem an invite code) via
+    // mintBudgetAx above; every other 429 keeps the generic wait hint.
+    const mint = mintBudgetAx(message);
+    if (mint) return mint;
     return {
       status: "action_required", reason: "rate_limited",
       hint: "Wait for the Retry-After interval, then retry the same request unchanged.",

@@ -1,13 +1,14 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { ServiceError } from "../store.mjs";
-import { inviteOAuthPage, MCP_INVITE_RECOVERY } from "../mcp-invite-oauth.mjs";
+import { inviteOAuthPage, MCP_INVITE_RECOVERY, PUBLIC_LOBBY_PROOF_SCRIPT } from "../mcp-invite-oauth.mjs";
 
 export function renderInviteOAuthPage(res, view, request) {
   res.setHeader("Cache-Control", "no-store");
   // Browser form POSTs need their same-origin Origin for strict CSRF checks.
   // no-referrer makes Chromium send Origin:null; external referrers stay hidden.
   res.setHeader("Referrer-Policy", "same-origin");
-  res.setHeader("Content-Security-Policy", `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' ${new URL(request.redirectUri).origin}`);
+  const proofScriptHash = createHash('sha256').update(PUBLIC_LOBBY_PROOF_SCRIPT).digest('base64');
+  res.setHeader("Content-Security-Policy", `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; script-src 'sha256-${proofScriptHash}'; form-action 'self' ${new URL(request.redirectUri).origin}`);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   return res.end(inviteOAuthPage(view));
 }
@@ -22,14 +23,30 @@ async function handleInviteConsent(ctx) {
   const cookieNonce = nonce ? cookie(req, `oauth_invite_${nonce.slice(0, 16)}`) : null;
   if (!nonce || cookieNonce !== nonce) return json(res, 403, { error: "csrf_denied" });
   try {
-    if (data.decision === "allow" || data.decision === "deny") {
-      const redirect = data.decision === "deny" ? inviteOAuth.cancel(nonce) : inviteOAuth.approve(nonce, data.invitation, data.display_name);
+    if (data.decision === "allow" || data.decision === "allow_public" || data.decision === "deny") {
+      const redirect = data.decision === "deny" ? inviteOAuth.cancel(nonce) : data.decision === "allow_public" ? inviteOAuth.approvePublic(nonce, data.display_name, remoteAddress, data.proof) : inviteOAuth.approve(nonce, data.invitation, data.display_name);
       res.writeHead(302, { Location: redirect, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
       return res.end();
     }
     const viewed = inviteOAuth.preview(nonce, data.invitation);
     return renderInviteOAuthPage(res, { nonce, ...viewed }, viewed.request);
-  } catch (error) { return json(res, 400, { error: "invitation_connection_failed", error_description: error.message, recovery: MCP_INVITE_RECOVERY }); }
+  } catch (error) {
+    if (data.decision === 'allow_public' && error.code === 'proof_required' && error.detail?.proof) {
+      const { request } = inviteOAuth.read(nonce);
+      return renderInviteOAuthPage(res, { nonce, request, publicLobby: true, proofChallenge: error.detail.proof, displayName: data.display_name }, request);
+    }
+    if (data.decision === 'allow_public' && error.code === 'public_lobby_unavailable' && /(?:^|,)\s*text\/html\b/i.test(req.headers.accept || '')) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'");
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connection unavailable · Project Room</title><style>body{font-family:system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}h1{font-size:1.5rem}a{display:inline-block;padding:.7rem 1rem;border-radius:.5rem;background:#065dcc;color:white;text-decoration:none}a:focus-visible{outline:3px solid #1468ce;outline-offset:3px}</style></head><body><main><h1>Connection unavailable</h1><p>The public lobby is unavailable or not open for guest joining. Ask the room owner for access, then restart the connection in your agent.</p><a href="/r/project-room-lobby">View the lobby</a></main></body></html>`);
+    }
+    const publicRecovery = "Reuse your saved host connection. Retry an interrupted first setup with the same agent name. If the lobby is unavailable or joining is closed, ask the room owner for access. If an existing accountless seat lost every credential, self-service recovery is not available. Do not create a replacement seat automatically.";
+    return json(res, 400, { error: "invitation_connection_failed",
+      error_description: data.decision === "allow_public" ? error.message.replace(MCP_INVITE_RECOVERY, publicRecovery) : error.message,
+      recovery: data.decision === "allow_public" ? publicRecovery : MCP_INVITE_RECOVERY });
+  }
 }
 export const MCP_INVITE_OAUTH_ROUTES = [{
   id: "mcp.invite.consent", method: "POST", path: "/oauth/invite", auth: "none",

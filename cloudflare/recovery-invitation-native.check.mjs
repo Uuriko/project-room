@@ -1,0 +1,24 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {Miniflare} from 'miniflare';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {fileURLToPath} from 'node:url';
+const token=['synthetic','independent','invitation','restore'].join('-');
+test('actual Native invitation audit cold-resumes exact source, faults atomically and refuses independent journal damage',{timeout:180000},async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'invitation-native-recovery-')),script=(await build({entryPoints:[fileURLToPath(new URL('./recovery-invitation-native.test-fixture.mjs',import.meta.url))],bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']})).outputFiles[0].text;
+ const create=()=>new Miniflare({modules:true,script,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjectsPersist:directory,durableObjects:{ROOM:{className:'InvitationRecoveryRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:'https://room.example.test',ROOM_RESTORE_TOKEN:token},serviceBindings:{ASSETS:async()=>new Response('Not found',{status:404})}});let mf=create(),base=await mf.ready;
+ const call=async(surface,path,body)=>{const url=new URL(path,base);url.searchParams.set('surface',surface);const response=await fetch(url,{...(body===undefined?{}:{method:'POST',headers:{authorization:'Bearer '+token,...(typeof body==='string'?{}:{'content-type':'application/json'})},body:typeof body==='string'?body:JSON.stringify(body)})});return{status:response.status,body:await response.json(),cost:JSON.parse(response.headers.get('x-fixture-cost')??'null'),fault:response.headers.get('x-fixture-fault')==='true'};};
+ try{
+  const expected=(await call('source','/__seed')).body,exportUrl=new URL('/__export?surface=source',base),text=await(await fetch(exportUrl)).text(),sampled=[];
+  for(const surface of ['target','damaged']){
+   assert.equal((await call(surface,'/__partial',text)).body.pending,true);await mf.dispose();mf=create();base=await mf.ready;assert.equal((await call(surface,'/api/ready')).status,503);
+   let response=await call(surface,'/api/operator/restore?resume=1',text),steps=0,saw=false,faulted=false,damaged=false,lastInput;
+   while(response.body.pending){const before=(await call(surface,'/__progress')).body,input={restoreId:response.body.restoreId,sourceSeal:response.body.sourceSeal,expectedRevision:response.body.revision,requestId:'invite-native-'+steps};lastInput=input;
+    const invitation=before.progress?.audit?.stage==='invitations';
+    if(invitation){saw=true;if(surface==='damaged'&&!damaged){await call(surface,'/__corrupt');damaged=true;}else if(surface==='target'&&!faulted){const failed=await call(surface,'/api/operator/restore?fault=1',input);assert.equal(failed.fault,true,JSON.stringify(failed.body));assert.equal(failed.status,422);assert.deepEqual((await call(surface,'/__progress')).body,before);faulted=true;}}
+    if(steps%2===0){await mf.dispose();mf=create();base=await mf.ready;}
+    response=await call(surface,'/api/operator/restore',input);const retry=await call(surface,'/api/operator/restore',input);if(response.status===422){assert.equal(surface,'damaged');assert.equal(damaged,true,JSON.stringify(response.body));assert.deepEqual((await call(surface,'/__progress')).body,before);break;}assert.ok([200,202].includes(response.status),JSON.stringify(response.body));assert.equal(retry.status,response.status);assert.deepEqual(retry.body,response.body);if(invitation){assert.equal(response.cost.unknown,0);const units=response.body.auditProgress.units-before.progress.audit.units,bytes=response.body.auditProgress.bytes-before.progress.audit.bytes;assert.ok(units<=32);assert.ok(bytes<=4*1024*1024);sampled.push({surface,cost:response.cost,units,bytes,stage:response.body.auditProgress.invitations.stage,checked:response.body.auditProgress.invitations.invitations});}assert.ok(++steps<700);
+   }
+   assert.equal(saw,true);
+   if(surface==='target'){assert.equal(faulted,true);assert.equal(response.body.verified,true);assert.deepEqual(response.body.subsystemContinuation.invitations,expected);assert.equal(response.body.replayContinuation.originalFullOracleRequired,true);await mf.dispose();mf=create();base=await mf.ready;assert.equal((await call(surface,'/api/ready')).status,200);assert.deepEqual((await call(surface,'/api/operator/restore',lastInput)).body,response.body);}
+   else{assert.equal(response.status,422);assert.equal((await call(surface,'/api/ready')).status,503);}
+  }
+  console.log('INVITATION_NATIVE '+JSON.stringify({expected,sampled,originalFullOracleRequired:true,coldResume:true,saveFaultRollback:true,corruptionRefused:true,sourceBytes:Buffer.byteLength(text)}));
+ }finally{await mf.dispose();await rm(directory,{recursive:true,force:true});}
+});

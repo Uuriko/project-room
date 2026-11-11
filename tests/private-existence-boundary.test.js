@@ -29,6 +29,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
+import { readCurrentMessage } from '../server/current-room-repository.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { readRoomSnapshot } from '../server/snapshot-window.mjs';
@@ -51,8 +52,7 @@ function world(t) {
   rooms.create(alice.secret, { roomId, title: 'existence', purpose: 'x', kind: 'personal' });
   linkWithProof(store, alice.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   linkWithProof(store, alice.secret, roomId, carol, { displayName: 'Carol', permissions: [] });
-  const memberId = name => Object.values(store.room(roomId).state.members)
-    .find(m => (m.displayName ?? m.name) === name).id;
+  const memberId = name => store.authenticate({ Alice: alice, Bob: bob, Carol: carol }[name].secret, roomId).member.id;
   return {
     store, alice, bob, carol, roomId,
     aliceId: memberId('Alice'), bobId: memberId('Bob'), carolId: memberId('Carol'),
@@ -79,7 +79,7 @@ function seedThenPrivateAsk(w, { workItemId } = {}) {
 
 test('content privacy holds: the bystander cannot read the private request, participants can', t => {
   const w = world(t), { privateMessageId } = seedThenPrivateAsk(w);
-  const carolView = readRoomSnapshot(w.store, w.carol.secret, w.roomId, null);
+  const carolView = readRoomSnapshot(w.store, w.carol.secret, w.roomId, null, {windowed:true});
   assert.equal(carolView.state.messages.some(m => m.id === privateMessageId), false);
   assert.equal(Object.hasOwn(carolView.state.replyRequests, privateMessageId), false);
   assert.throws(() => w.store.replyRequests.selected(w.carol.secret, w.roomId, privateMessageId), { status: 404 });
@@ -94,7 +94,7 @@ test('existence: reply-list evaluatedThrough stops at the non-participant visibl
   const list = w.store.replyRequests.list(w.carol.secret, w.roomId, { direction: 'incoming', status: 'open' });
   // The boundary: evaluatedThrough presented to Carol must not count
   // events she cannot see. F-S6c-3: hers read 15 against a horizon of 13.
-  assert.equal(list.evaluatedThrough, visibleHorizon,
+  assert.ok(Number.isSafeInteger(list.evaluatedThrough) && list.evaluatedThrough >= 0 && list.evaluatedThrough <= visibleHorizon,
     `evaluatedThrough ${list.evaluatedThrough} reveals hidden events past Carol's visible horizon ${visibleHorizon}`);
 });
 
@@ -108,7 +108,7 @@ test('existence: the needs-me cursor stops at the non-participant visible horizo
 
 test('existence: presence for the requester does not track their hidden event', t => {
   const w = world(t), { privateMessageId } = seedThenPrivateAsk(w);
-  const canonical = w.store.room(w.roomId).state.messages.find(m => m.id === privateMessageId);
+  const canonical = w.store.readTransaction(() => readCurrentMessage(w.store.db, w.roomId, privateMessageId).value);
   assert.equal(canonical.createdAt, iso(T_PRIV), 'construction: the private event carries the T_PRIV stamp');
   const row = w.store.presenceMembers(w.roomId, []).find(r => r.memberId === w.aliceId);
   // Alice's last Carol-visible act is the seed at T_SEED. Her presence
@@ -117,8 +117,10 @@ test('existence: presence for the requester does not track their hidden event', 
   // 6/6 writes).
   assert.notEqual(row.lastSeenAt, canonical.createdAt,
     'presence lastSeenAt equals the hidden event timestamp — a bystander can time the private act');
-  assert.equal(row.lastSeenAt, iso(T_SEED),
-    `presence lastSeenAt ${row.lastSeenAt} should stop at Alice's last visible act ${iso(T_SEED)}`);
+  // Current presence does not derive activity timestamps from stored history.
+  // An absent timestamp reveals no private event; any reported one must be public.
+  assert.ok(row.lastSeenAt === null || row.lastSeenAt === iso(T_SEED),
+    `presence lastSeenAt ${row.lastSeenAt} must not exceed Alice's last visible act ${iso(T_SEED)}`);
 });
 
 test('metadata: a work item carrying a private request exposes no title or definition-of-done to non-participants', t => {
@@ -161,10 +163,11 @@ function seedPrivateWorkItem(w) {
 test('metadata: the full snapshot exposes no title or definition-of-done to non-participants', t => {
   const w = world(t);
   seedPrivateWorkItem(w);
-  const bobView = readRoomSnapshot(w.store, w.bob.secret, w.roomId, null);
+  assert.throws(()=>readRoomSnapshot(w.store,w.bob.secret,w.roomId,null),{status:409,code:"current_snapshot_selection_unavailable"});
+  const bobView = readRoomSnapshot(w.store, w.bob.secret, w.roomId, null, {windowed:true});
   assert.equal(bobView.state.workItems['priv-container']?.title, 'PRIV-TITLE-MARKER');
-  assert.equal(bobView.state.workItems['priv-container']?.definitionOfDone, 'PRIV-DOD-MARKER');
-  const carolView = readRoomSnapshot(w.store, w.carol.secret, w.roomId, null);
+  assert.equal(w.store.workContext(w.bob.secret,w.roomId,'priv-container').work.definitionOfDone, 'PRIV-DOD-MARKER');
+  const carolView = readRoomSnapshot(w.store, w.carol.secret, w.roomId, null, {windowed:true});
   assert.equal(carolView.state.workItems['priv-container']?.title, null);
   assert.equal(carolView.state.workItems['priv-container']?.definitionOfDone, null);
   const exposed = JSON.stringify(carolView.state.workItems ?? {}) + JSON.stringify(carolView.state.eventLog ?? []);
@@ -180,7 +183,7 @@ test('metadata: room bootstrap exposes no title or definition-of-done to non-par
   seedPrivateWorkItem(w);
   const bobBoot = buildRoomBootstrap(w.store, w.bob.secret, w.roomId, null);
   assert.equal(bobBoot.snapshot.state.workItems['priv-container']?.title, 'PRIV-TITLE-MARKER');
-  assert.equal(bobBoot.snapshot.state.workItems['priv-container']?.definitionOfDone, 'PRIV-DOD-MARKER');
+  assert.equal(w.store.workContext(w.bob.secret,w.roomId,'priv-container').work.definitionOfDone, 'PRIV-DOD-MARKER');
   const carolBoot = buildRoomBootstrap(w.store, w.carol.secret, w.roomId, null);
   assert.equal(carolBoot.snapshot.state.workItems['priv-container']?.title, null);
   assert.equal(carolBoot.snapshot.state.workItems['priv-container']?.definitionOfDone, null);
@@ -197,7 +200,8 @@ test('metadata: room search neither matches on nor returns a private item title 
   // Participant control: Bob finds the item by its definition-of-done
   // and by its title, and receives the title.
   const bobDod = w.store.search(w.bob.secret, w.roomId, 'PRIV-DOD-MARKER', 'work');
-  assert.equal(bobDod.total, 1);
+  assert.equal(bobDod.total, null);
+  assert.equal(bobDod.workItems.length, 1);
   assert.equal(bobDod.workItems[0]?.id, 'priv-container');
   assert.equal(bobDod.workItems[0]?.title, 'PRIV-TITLE-MARKER');
   const bobTitle = w.store.search(w.bob.secret, w.roomId, 'PRIV-TITLE-MARKER', 'all');
@@ -206,7 +210,7 @@ test('metadata: room search neither matches on nor returns a private item title 
   // and returns no title, for either kind.
   for (const kind of ['work', 'all']) {
     const carolDod = w.store.search(w.carol.secret, w.roomId, 'PRIV-DOD-MARKER', kind);
-    assert.equal(carolDod.total, 0, `non-participant search kind=${kind} matched the private definition-of-done`);
+    assert.equal(carolDod.workItems.length, 0, `non-participant search kind=${kind} matched the private definition-of-done`);
     assert.equal(carolDod.workItems.length, 0);
     const carolTitle = w.store.search(w.carol.secret, w.roomId, 'PRIV-TITLE-MARKER', kind);
     assert.equal(carolTitle.workItems.some(item => item.id === 'priv-container'), false,

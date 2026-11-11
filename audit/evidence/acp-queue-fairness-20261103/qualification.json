@@ -1,0 +1,40 @@
+{
+  "source": "443b82b7197c26734c60f20b8d5c2bbc55b2f01d",
+  "base": "5c83d57138d64680a7f704d6dfc7cdfd661285d3",
+  "node": "v24.22.1",
+  "before": {
+    "tests": 3,
+    "fail": 3
+  },
+  "after": {
+    "tests": 77,
+    "pass": 77,
+    "skipped": 0
+  },
+  "manifest": {
+    "tests": 8,
+    "pass": 8
+  },
+  "logs": {
+    "before": {
+      "sha256": "177734af7eb365b212563c5034cb76e7ceb3f33db59de3b4ad173d01d2ee1a1d",
+      "bytes": 3001
+    },
+    "after": {
+      "sha256": "eb1cd794e47b49c61c97018ee44b5252ed8fd11704c944561bdd80b95e076166",
+      "bytes": 33835
+    },
+    "lint": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "secret": {
+      "sha256": "799e3201a5b88eae4477b159c57bac86af93f46933970440cbcf135ef2e3b94d",
+      "bytes": 24
+    },
+    "manifest": {
+      "sha256": "78c674158582b0ef3be9b5ac9cdf52a7ca6901e8fe4bbc5a40431c03cad798b9",
+      "bytes": 687
+    }
+  }
+}

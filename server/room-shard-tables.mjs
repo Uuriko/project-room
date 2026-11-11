@@ -5,11 +5,12 @@
 // rooms projection and its bodies, messages, that room's work claims and
 // work entities, its bounties, and the journals whose rows carry room_id.
 // Accounts, sessions, credentials, grants, and anything ambiguous stay
-// "directory" on invite-only-pilot. Tables in REPLAY_SKIPPED_TABLES are
+// "directory" on invite-only-pilot. Other tables in REPLAY_SKIPPED_TABLES are
 // "skipped": a fresh Node store does not create them, and replay already
 // refuses to invent a home for them.
 //
-// A table missing from all three sets throws. Copy will not guess.
+// Target-local controls are created and owned by each destination; they never
+// move with room bytes or directory authority. A missing classification throws.
 import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 import { MCP_EVENT_ADDITIVE_TABLES } from "./writer-fence.mjs";
 import { REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
@@ -28,6 +29,9 @@ export const ROOM_TABLE_KEYS = Object.freeze({
   bounty_sybil_flags: "room_id",
   bounty_watchers: "room_id",
   commands: "room_id",
+  current_room_head: "room_id",
+  current_room_records: "room_id",
+  current_room_record_proofs: "room_id",
   events: "room_id",
   jev_shadow_decisions: "room_id",
   membership_delegation_journal: "room_id",
@@ -42,6 +46,8 @@ export const ROOM_TABLE_KEYS = Object.freeze({
   work_claims: "room_id",
   work_entities: "room_id",
 });
+
+export const LOCAL_TABLES = Object.freeze(["current_restore_admission", "current_restore_audit_scratch", "current_room_writer_permit"]);
 
 export const DIRECTORY_TABLES = Object.freeze([
   "access_requests", "account_access_events", "account_credentials", "account_login_methods",
@@ -111,11 +117,13 @@ export function roomTablesPresent(db) {
 
 // Grant families and callback secrets remain directory authority. They are
 // optional because a fresh store has never mounted OAuth or event delivery.
-const optionalDirectory = new Set([...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
+const optionalDirectory = new Set(["message_replay_units", ...OAUTH_PROVIDER_TABLES, ...MCP_EVENT_ADDITIVE_TABLES]);
 const directory = new Set(DIRECTORY_TABLES);
+const local = new Set(LOCAL_TABLES);
 const skipped = new Set(REPLAY_SKIPPED_TABLES);
 
 export function tableHome(name) {
+  if (local.has(name)) return "local";
   if (skipped.has(name)) return "skipped";
   if (Object.hasOwn(ROOM_TABLE_KEYS, name)) return "room";
   if (directory.has(name) || optionalDirectory.has(name)) return "directory";
@@ -144,6 +152,9 @@ export function assertShardClassification(names) {
   }
   for (const name of Object.keys(ROOM_TABLE_KEYS)) {
     if (!seen.has(name)) problems.push(`room table ${name} is not in the live schema`);
+  }
+  for (const name of LOCAL_TABLES) {
+    if (!seen.has(name)) problems.push(`local table ${name} is not in the live schema`);
   }
   for (const name of DIRECTORY_TABLES) {
     if (!seen.has(name)) problems.push(`directory table ${name} is not in the live schema`);

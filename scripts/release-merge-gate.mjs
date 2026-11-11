@@ -221,7 +221,7 @@ async function main() {
   if (!connection) fail('Use the existing Room connection; do not create a new identity');
   const { readAgentConnection } = await import('../client/agent-connection.mjs');
   const { RoomAgentClient } = await import('../client/room-agent.mjs');
-  const room = new RoomAgentClient({ ...readAgentConnection(connection), roomId: 'muse-room', fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(55000) }) });
+  const room = new RoomAgentClient({ ...readAgentConnection(connection), roomId: flag('--room') || process.env.PROJECT_ROOM_OPERATIONAL_ROOM || 'room-fafdae79cf8c', fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(55000) }) });
   const inspect = async () => {
     const access = await roomRead('connection', () => room.checkConnection());
     const slot = await roomRead('merge-slot', () => room.workClaimGet('MERGE-SLOT'));

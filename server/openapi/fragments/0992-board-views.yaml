@@ -1,0 +1,38 @@
+  /api/rooms/{roomId}/board-views:
+    post:
+      x-room-permission: member
+      operationId: postBoardViews
+      summary: Board saved views (ROOM_BOARD_VIEWS=1 only)
+      description: |
+        Named, room-shared Board list queries (Linear custom views). Body is
+        exactly one of `{list: true}`, `{create: {name, query}}` or
+        `{delete: viewId}`. `query` holds Board list params (state, queue,
+        view, priority, cycleId, milestone, dueBefore, sort). Read a view with
+        GET /api/rooms/{roomId}/work-claims?savedView={viewId}; explicit params
+        win. Any member may save a view; its creator or the room owner may
+        delete it. 404 while the flag is off.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                list: { type: boolean }
+                create:
+                  type: object
+                  required: [name, query]
+                  properties:
+                    name: { type: string }
+                    query: { type: object }
+                delete: { type: string }
+      responses:
+        '200': { description: Views listed or a view deleted }
+        '201': { description: View created }
+        '401': { description: unauthenticated }
+        '403': { description: not_view_creator or access_denied }
+        '404': { description: not_found (flag off) or unknown_view }
+        '422': { description: invalid_body, invalid_name or invalid_query }

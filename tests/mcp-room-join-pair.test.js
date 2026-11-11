@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { PAIR_POLL_INTERVAL_MS } from "../server/pairing.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 
 function boot(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-pair-"));
@@ -42,7 +43,7 @@ async function call(origin, name, args, secret) {
 test("room_join pairs, a stranger is not_member, and the owner can merge", async t => {
   const { origin, store, rooms, advance } = await boot(t);
   const owner = store.identities.create("Rowan Hale");
-  const room = rooms.create(owner.secret, { roomId: "pair-den", title: "Pair den", purpose: "Pair agents", displayName: "Rowan Hale" });
+  const room = rooms.create(owner.secret, { roomId: "pair-den", title: "Pair den", purpose: "Pair agents", displayName: "Rowan Hale", visibility: "private" });
   const stranger = store.identities.create("Kit Arden");
   const blocked = await call(origin, "room_post_message", { roomId: room.roomId, body: "hello" }, stranger.secret);
   assert.equal(blocked.isError, true);
@@ -77,5 +78,6 @@ test("room_join pairs, a stranger is not_member, and the owner can merge", async
   }, owner.secret);
   assert.equal(merged.isError, false, JSON.stringify(merged.body));
   assert.equal(merged.value.retired, true);
-  assert.equal(store.room(room.roomId).state.members[redeemed.memberId].active, false);
+  assert.equal(store.roomAuthority(room.roomId, { memberId: redeemed.memberId }).members[redeemed.memberId].active, false);
+  assert.doesNotThrow(() => auditRecovery(store));
 });

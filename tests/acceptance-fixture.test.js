@@ -15,7 +15,7 @@ test("acceptance setup is isolated, repeatable, scoped and includes invitation s
     assert.deepEqual(state.members.guest.permissions, []);
     assert.equal(state.workItems["test-handoff"].sourceMessageId, "test-request");
     assert.equal(a.store.shareLinks.preview(a.links.valid).link.remainingJoins, 10);
-    for (const label of ["expired", "cancelled", "full"]) assert.throws(() => a.store.shareLinks.preview(a.links[label]), { code: "link_unavailable" });
+    for (const [label, code] of [["expired", "link_expired"], ["cancelled", "link_cancelled"], ["full", "link_full"]]) assert.throws(() => a.store.shareLinks.preview(a.links[label]), { code });
     assert.equal(a.store.verifyInvitationAudit().consistent, true);
   } finally {
     for (const f of [a, b]) { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }

@@ -15,6 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
+import { uiText } from "../src/strings.js";
 
 // The secret-scan allowlist already covers this synthetic fixture password.
 const PASSWORD = "synthetic-email-password";
@@ -51,6 +52,18 @@ async function setup(t, { mailConfigured = true } = {}) {
   return { ...f, origin, open, sent, mailTo, session };
 }
 
+// page.route cannot own requests forwarded by a service worker. Only tests
+// that inject network behavior opt out via f.open({ ...kind, serviceWorkers: "block" }).
+// Raw route promises also need a deadline: page.setDefaultTimeout does not apply.
+async function intercepted(promise, target) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Expected page.route interception of ${target} within 10s`)), 10000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 async function signUp(page, origin, email) {
   await page.goto(origin);
   await page.locator('#auth-signin-ui [data-password-mode="signup"]').first().click();
@@ -63,11 +76,11 @@ async function signUp(page, origin, email) {
 }
 
 for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) {
-  test(`late sign-in capabilities preserve typed fields and focus (${label})`, async t => {
-    const f = await setup(t), page = await f.open(viewport);
+  test(`late sign-in capabilities preserve typed fields and focus (${label})`, { timeout: 60000 }, async t => {
+    const f = await setup(t), page = await f.open({ ...viewport, serviceWorkers: "block" });
     let resolve; const pending = new Promise(done => { resolve = done; });
     await page.route('**/api/auth/signin-options', route => resolve(route));
-    await page.goto(f.origin); const route = await pending;
+    await page.goto(f.origin); const route = await intercepted(pending, "/api/auth/signin-options");
     const email = page.locator('#auth-signin-ui [name=email]'), password = page.locator('#auth-signin-ui [name=password]');
     await email.fill('draft@example.invalid'); await password.fill(PASSWORD);
     await route.fulfill({ status: 200, json: { providers: { mail: { configured: false } } } });
@@ -78,9 +91,10 @@ for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) {
   });
 }
 
-test('pending password sign-in fences provider navigation until it settles', async t => {
-  const f = await setup(t), page = await f.open();
-  await page.route('**/api/auth/signin-options', route => route.fulfill({ status: 200, json: { providers: { google: { configured: true } } } }));
+test('pending password sign-in fences provider navigation until it settles', { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open({ ...DESK, serviceWorkers: "block" });
+  let optionsInjected = 0;
+  await page.route('**/api/auth/signin-options', route => { optionsInjected++; return route.fulfill({ status: 200, json: { providers: { google: { configured: true } } } }); });
   let resolve; const pending = new Promise(done => { resolve = done; });
   await page.route('**/api/auth/password/login', route => resolve(route));
   let oauth = 0;
@@ -88,7 +102,8 @@ test('pending password sign-in fences provider navigation until it settles', asy
   await page.goto(f.origin);
   await page.locator('#auth-signin-ui [name=email]').fill('pending@example.invalid');
   await page.locator('#auth-signin-ui [name=password]').fill(PASSWORD);
-  await page.locator('#auth-signin-ui button[type=submit]').click(); const route = await pending;
+  await page.locator('#auth-signin-ui button[type=submit]').click(); const route = await intercepted(pending, "/api/auth/password/login");
+  assert.ok(optionsInjected > 0, "provider capabilities were injected before the pending login");
   assert.equal(await page.locator('#auth-panel').evaluate(node => node.inert), true);
   const box = await page.locator('#google-signin').boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -168,15 +183,21 @@ test("verification navigation does not select a different signed-in account", as
 });
 
 for (const [label, viewport] of [["desktop", DESK], ["mobile", PHONE]]) test(`a failed methods read during verification resume still lands the signed-in tab (${label})`, { timeout: 60000 }, async t => {
-  const f = await setup(t), page = await f.open(viewport);
+  const f = await setup(t), page = await f.open({ ...viewport, serviceWorkers: "block" });
   const email = "journey-resume-error@example.invalid";
   assert.equal(await signUp(page, f.origin, email), 202);
   await page.locator("#main").waitFor({ state: "visible" });
   const mail = f.mailTo(email, "verify-email") ?? f.mailTo(email);
   const account = (await f.session(page)).account.id;
   // Service outage while the link's intent is stored.
-  await page.route("**/api/auth/methods", route => route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "Synthetic outage" } } }));
+  let injected;
+  const outage = new Promise(resolve => { injected = resolve; });
+  await page.route("**/api/auth/methods", async route => {
+    await route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "Synthetic outage" } } });
+    injected();
+  });
   await page.goto(mail.link);
+  await intercepted(outage, "/api/auth/methods 503 during verification resume");
   await page.locator("#main").waitFor({ state: "visible" });
   // A later plain load of the same tab is not held hostage by the stored intent.
   await page.goto(f.origin);
@@ -302,13 +323,15 @@ test("fresh / with mail configured: recovery waits for a credential rejection", 
 });
 
 test("a failed workspace download after signup resumes the same account without repeating signup", { timeout: 45000 }, async t => {
-  const f = await setup(t), page = await f.open(PHONE), writes = [];
+  const f = await setup(t), page = await f.open({ ...PHONE, serviceWorkers: "block" }), writes = [];
   page.on("request", request => { if (request.method() === "POST") writes.push(new URL(request.url()).pathname); });
-  await page.route("**/src/app.js", route => route.abort());
+  let aborted = 0;
+  await page.route("**/src/app.js", async route => { await route.abort(); aborted++; });
   const email = "entry-recovery@example.invalid";
   assert.equal(await signUp(page, f.origin, email), 202);
   await page.locator("#entry-retry").waitFor({ state: "visible" });
   const account = (await f.session(page)).account.id;
+  assert.ok(aborted > 0, "/src/app.js download was actually aborted");
   await page.unroute("**/src/app.js");
   await page.locator("#entry-retry").click();
   await page.locator("#main").waitFor({ state: "visible" });
@@ -321,31 +344,36 @@ test("a failed workspace download after signup resumes the same account without 
   assert.equal(writes.filter(path => /\/commands$/.test(path)).length, 1, "one composer handler after the handoff");
 });
 
-test("a failed sign-in module download offers reload without losing the URL", async t => {
-  const f = await setup(t), page = await f.open(PHONE);
-  await page.route("**/src/signin-entry.js", route => route.abort());
+test("a failed sign-in module download offers reload without losing the URL", { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open({ ...PHONE, serviceWorkers: "block" });
+  let aborted = 0;
+  await page.route("**/src/signin-entry.js", async route => { await route.abort(); aborted++; });
   await page.goto(f.origin);
   await page.locator("#entry-retry").waitFor({ state: "visible" });
   assert.equal(page.url(), f.origin + "/");
+  assert.ok(aborted > 0, "/src/signin-entry.js download was actually aborted");
   await page.unroute("**/src/signin-entry.js");
   await page.locator("#entry-retry").click();
   await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
 });
 
-test("cached HTML that names app.js directly still starts the existing workspace", async t => {
-  const f = await setup(t), page = await f.open();
+test("cached HTML that names app.js directly still starts the existing workspace", { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open({ ...DESK, serviceWorkers: "block" });
+  let htmlReplaced = false;
   await page.route(f.origin + "/", async route => {
     const response = await route.fetch();
     const body = (await response.text()).replace('src="./src/entry.js"', 'src="./src/app.js"');
     await route.fulfill({ response, body });
+    htmlReplaced = true;
   });
   await page.goto(f.origin);
   await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  assert.ok(htmlReplaced, "the cached HTML response was injected");
   assert.equal(await page.locator("#auth-signin-ui").count(), 1);
 });
 
-test("an incoming room link owns navigation while its workspace module downloads", async t => {
-  const f = await setup(t), page = await f.open(), requests = [];
+test("an incoming room link owns navigation while its workspace module downloads", { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open({ ...DESK, serviceWorkers: "block" }), requests = [];
   await page.goto(f.origin);
   await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
   let release;
@@ -353,7 +381,7 @@ test("an incoming room link owns navigation while its workspace module downloads
   await page.route("**/src/app.js", route => release(route));
   page.on("request", request => requests.push(new URL(request.url()).pathname));
   await page.evaluate(() => { location.hash = "#room/commons"; });
-  const route = await held;
+  const route = await intercepted(held, "/src/app.js");
   assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
   assert.equal(await page.locator("#session-menu-button").isDisabled(), true, "account controls wait for their handlers");
   const button = await page.locator('[data-signin-form="password"] button[type="submit"]').boundingBox();
@@ -363,4 +391,65 @@ test("an incoming room link owns navigation while its workspace module downloads
   await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
   assert.equal(await page.locator("#session-menu-button").isEnabled(), true);
   assert.match(page.url(), /#room\/commons$/);
+});
+
+test('account session survives nine hours and expires at the server deadline', { timeout: 60000 }, async t => {
+  const f = await setup(t), page = await f.open();
+  assert.equal(await signUp(page, f.origin, 'session-lifetime@example.invalid'), 202);
+  await page.locator('#main').waitFor({state:'visible'});
+  const cookie = (await page.context().cookies()).find(c => c.name === 'account_session');
+  assert.ok(cookie?.httpOnly);
+  const remaining = cookie.expires * 1000 - Date.now();
+  assert.ok(remaining > 29 * 86400000 && remaining <= 30 * 86400000, `cookie remaining ${remaining}`);
+  f.store.now = () => Date.now() + 9 * 3600000;
+  await page.reload();
+  await page.locator('#main').waitFor({state:'visible'});
+  assert.equal((await f.session(page)).authenticated, true);
+  f.store.now = () => Date.now() + 31 * 86400000;
+  await page.reload();
+  await page.locator('#auth-panel').waitFor({state:'visible'});
+  assert.equal((await f.session(page)).authenticated, false);
+});
+
+test('refresh after expiry ends at actionable sign-in', {timeout:60000}, async t => {
+  const f=await setup(t),page=await f.open();
+  assert.equal(await signUp(page,f.origin,'reconnect-expiry@example.invalid'),202);
+  await page.locator('#main').waitFor({state:'visible'});
+  f.store.now=()=>Date.now()+31*86400000;
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await page.locator('#auth-panel').waitFor({state:'visible'});
+  const initial=(await page.locator('#auth-error').innerText()).trim();
+  const reconnect=page.getByRole('button',{name:'Reconnect',exact:true});
+  assert.equal(initial,uiText("room.session_changed_reconnect"));
+  assert.equal(await reconnect.isVisible(),true);
+  assert.equal(await reconnect.isEnabled(),true);
+  await page.waitForFunction(()=>document.activeElement?.id==='auth-reconnect');
+  await reconnect.click();
+  await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('sign in required'),null,{timeout:10000});
+  assert.equal((await f.session(page)).authenticated,false);
+  await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').waitFor({state:'visible'});
+});
+
+test('account confirmation capacity error keeps the open room and draft', {timeout:60000}, async t => {
+  const f=await setup(t),page=await f.open({ ...DESK, serviceWorkers: "block" });
+  assert.equal(await signUp(page,f.origin,'confirm-capacity@example.invalid'),202);
+  await page.locator('#main').waitFor({state:'visible'});
+  const draft='Synthetic unsent draft';await page.locator('#message-input').fill(draft);
+  let injected;const seen=new Promise(resolve=>{injected=resolve;});
+  const handler=route=>{
+    if(route.request().method()==='GET'&&route.request().headers()['x-session-binding']){
+      injected();return route.fulfill({status:409,json:{error:{code:'pilot_limit',message:'Storage capacity'}}});
+    }
+    return route.continue();
+  };
+  await page.route('**/api/account-session',handler);
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await intercepted(seen, "GET /api/account-session with session binding");
+  await page.waitForFunction(()=>document.querySelector('#account-status').textContent.includes('Couldn’t confirm account'));
+  assert.equal(await page.locator('#main').isVisible(),true);
+  assert.equal(await page.locator('#auth-panel').isVisible(),false);
+  assert.equal(await page.locator('#message-input').inputValue(),draft);
+  await page.unroute('**/api/account-session',handler);
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await page.waitForFunction(()=>document.querySelector('#account-status').textContent==='');
+  assert.equal(await page.locator('#message-input').inputValue(),draft);
 });

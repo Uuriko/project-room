@@ -1,6 +1,6 @@
 # Isolated staging
 
-`project-room-stage` is a separate Worker with its own Durable Object namespace. It runs the same code as production and is reached only at `https://project-room-stage.getdasha.workers.dev`. It does not use a custom domain, and its `ROOM` binding has no `script_name`, so it cannot see production data.
+`project-room-stage` is a separate Worker with its own Durable Object namespace. It runs an explicitly selected candidate and is reached only at `https://project-room-stage.getdasha.workers.dev`. It does not use a custom domain, and its `ROOM` binding has no `script_name`, so it cannot see production data.
 
 The Worker named `project-room-staging` is not this environment. That script name is historical. It is the public entry for getdasha.com/room and it forwards to the production Durable Object. Leave that script name as it is. Deploy it with `wrangler deploy --keep-vars` and no `--env`.
 
@@ -15,7 +15,13 @@ pnpm exec wrangler deploy --env staging --keep-vars
 
 `--keep-vars` keeps secrets already stored on `project-room-stage`. The first deploy creates the `room-sqlite-v1` SQLite class on that script only.
 
-GitHub Actions does the same on every push to `main`, then runs the cold-start probe, `scripts/live-smoke.mjs --browser`, and uploads both results. The workflow is `.github/workflows/staging.yml`. It also runs from the Actions tab.
+GitHub Actions deploys only on explicit dispatch, then runs the cold-start probe, `scripts/live-smoke.mjs --browser`, and uploads both results. In the Actions tab, select the staging workflow and the candidate branch or tag before choosing **Run workflow**. The checkout uses that selected ref. Equivalently:
+
+```sh
+gh workflow run staging.yml --ref <candidate-branch-or-tag>
+```
+
+The workflow is `.github/workflows/staging.yml`. A push to `main` does not deploy staging. Its Durable Object namespace persists between runs and can be ahead of main: a schema 44 main build must not replace an explicitly rehearsed schema 45 candidate. Select a runtime compatible with the stored schema and writer format; dispatch does not bypass those checks or reset the namespace. Existing serialized deployment, secret requirements and smoke checks remain in force.
 
 Staging sets `ROOM_SMOKE_ISOLATED=1` for smoke. Discovery documents deliberately
 retain their signed canonical service URLs; this mode leaves those documents

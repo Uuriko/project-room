@@ -41,6 +41,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
     "/api/health", "/llms.txt", "/join.txt", "/mcp", "/mcp/server-card", "/.well-known/mcp.json", "/room/mcp", "/room/mcp/server-card", "/llms-full.txt", "/kits.txt", "/skills", "/procedures", "/agents.json", "/.well-known/agent.json", "/.well-known/governance.json", "/openapi.json",
     "/.well-known/agent-card.json", "/.well-known/jwks.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
     "/agent-card.json",
+    "/ard.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/procedures", "/room/agents.json", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
@@ -108,7 +109,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["muse-room", "orient", "claims-board", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
+  assert.deepEqual(card.skills.map(row => row.id), ["join-existing-room", "orient", "claims-board", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
   assert.equal(card.capabilities["agent-identities"], true);
   assert.equal(card.capabilities["webhooks"], true);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -298,13 +299,25 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.match(skill.type, /text\/markdown/, "served as markdown");
   assert.ok(skill.body.startsWith("---\nname: work-in-project-room"), "skill frontmatter names the skill");
   assert.ok(skill.body.includes("## Step 1"), "skill walks setup steps");
-  assert.ok(skill.body.includes("Step 5"), "skill walks a listening step: setup ends in a verified wake loop");
+  assert.ok(skill.body.includes("Step 5"), "skill retains the optional listening reference");
   assert.ok(skill.body.includes("/api/agent-wakes/poll"), "skill teaches the wake poll endpoint");
   assert.ok(skill.body.includes("/api/agent-heartbeats"), "skill teaches host heartbeat registration");
-  assert.ok(skill.body.includes("not done until"), "skill names the listening done-condition: never claim setup done before the first verified poll");
+  assert.ok(skill.body.includes("connection and listening status separately"), "connection and listening remain separately reported");
+  assert.ok(!skill.body.includes("You are done only when you are listening"), "connecting does not require an unrequested background worker");
   assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
   assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
   assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  const money = skill.body.slice(skill.body.indexOf("## Money honesty"), skill.body.indexOf("## If you get stuck"));
+  assert.match(money, /public-work receipts are unsigned/, "receipt hashes must not be sold as signatures");
+  assert.match(money, /some receipts include system-executed checks/, "do not erase stronger recorded checks");
+  assert.match(money, /does not itself transfer money/, "an offer is not a payment");
+  assert.match(money, /not proof that funding or payment is configured/, "proposed cash rewards are not funding commitments");
+  assert.doesNotMatch(money, /every finished task produces a signed|amounts are committed|standing authority|payout executes/i);
+  assert.match(skill.body, /follow `nextCursor` as `after`/, "a bounded empty match page is not an empty board");
+  assert.match(skill.body, /matcher currently recommends volunteer tasks/, "matcher and funded board capabilities remain distinct");
+  assert.doesNotMatch(skill.body, /hash-checkable evidence, forever|every open task is claimed/);
+
+
   // Stranger-onboarding recovery contract (qa200-AO-02): /SKILL.md is the whole
   // onboarding for a first-contact agent, so it must document the two dead
   // ends a stranger can hit before earning anything: a 429 on the identity
@@ -349,7 +362,7 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
 // The rendered onboarding requests are a copy/paste contract. These checks
 // catch malformed bodies and missing transport headers without source greps.
 for (const [path, expectedBody, originRequired] of [
-  ["/api/access-requests", { roomId: "muse-room", identityId: "<your identityId>", displayName: "Your agent name", requestedPermissions: [], requestId: "YOUR-STABLE-ID-3" }, false],
+  ["/api/access-requests", { roomId: "THE_CONFIRMED_ROOM_ID", identityId: "<your identityId>", displayName: "Your agent name", requestedPermissions: [], requestId: "YOUR-STABLE-ID-3" }, false],
   ["/api/share-links/join-agent", { linkToken: "TOKEN", displayName: "Your agent name" }, false],
   ["/api/auth/agent/rooms", { identityId: "<your identityId>" }, true],
 ]) {
@@ -374,7 +387,7 @@ test("onboarding skill explains read/chat approval limits", () => {
   const text = discoveryDoc("/SKILL.md").body;
   const step4 = text.slice(text.indexOf("## Step 4"), text.indexOf("## Money honesty"));
   assert.match(step4, /empty `requestedPermissions` asks for read and chat access/);
-  assert.match(step4, /read\/chat request waits until the room owner approves it/);
+  assert.match(step4, /owner-open room can approve this ordinary read\/chat request immediately; otherwise it waits for an invitation or owner approval/);
   assert.match(step4, /non-empty permission request may be auto-approved[\s\S]*covered by the room's standing rule/);
   assert.match(step4, /Reuse the same `requestId` when you retry/);
 });
@@ -673,6 +686,23 @@ test("anonymous discovery has eight entries but only seven public actions; the a
   assert.equal(mcpRpcStatus(denied), 401, "the eighth entry grants no anonymous execution");
 });
 
+
+test("front-door packets scope the query-parameter rule and name the no-credential catalog (#3634)", () => {
+  // Tip adaptation after catalog restructure: operational detail lives in
+  // llms-full.txt; llms.txt may be a short index. Pin the query-param rule
+  // and no-credential naming without asserting obsolete 11/22 totals.
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!packet.includes("- query params - unknown query parameters are silently ignored"), `${label}: query-param rule must be scoped per endpoint family, not a blanket silently-ignored`);
+    assert.ok(!packet.includes("four documents"), `${label}: the outside catalog's four are join tools, not documents`);
+    assert.ok(!packet.includes("about 22"), `${label}: member core totals must not say about 22`);
+  }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("- query params - there is no single global rule"), "llms-full.txt: query-param bullet must state the per-family rule");
+  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), "llms-full.txt: the strict public-work list rule must be stated");
+  assert.ok(full.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), "llms-full.txt: the lenient family must be stated as the scoped case");
+  assert.ok(full.includes("no-credential catalog") || full.includes("no-credential catalog is seven"), "llms-full.txt: the anonymous catalog must be named distinctly");
+});
+
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
   const text = llmsTxt();
   // llmstxt.org: H1, then a blockquote summary, before anything else.
@@ -774,11 +804,11 @@ test("discovery surfaces advertise only the canonical MCP origin", () => {
 // llms.txt is the single front door (John's decision, 2026-10-13): its first
 // screen states the path and names the activation pack as the connected
 // proof + work menu an agent reads right after joining.
-test("llms.txt first screen routes to the activation pack as connected proof", () => {
+test("llms.txt first screen names the official connection and its access check", () => {
   const firstScreen = llmsTxt().split("\n").slice(0, 20).join("\n");
-  assert.match(firstScreen, /this packet is the front door/, "first screen names the single front door");
+  assert.match(firstScreen, /Connection guide: https:\/\/room\.trydemigod\.com\/docs\/agents/);
   assert.ok(firstScreen.includes("/activation-pack"), "first screen names the activation pack");
-  assert.match(firstScreen, /proves you are connected/, "first screen frames the pack as connected proof");
+  assert.match(firstScreen, /confirm the actual member and room/, "access is verified after joining");
 });
 
 // Guest door demotion (John's decision, 2026-10-13): the packet presents
@@ -854,4 +884,25 @@ test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extende
   assert.match(doc, /1,000,000/);
   assert.match(doc, /proof search exhausted/);
   assert.match(doc, /client\/room-agent\.mjs/);
+});
+
+
+test("public connection examples require the intended room and never advertise a private default", () => {
+  const skill = agentCard().skills.find(row => row.id === "join-existing-room");
+  assert.deepEqual(skill.examples, ["Join the room in my invitation", "Connect to Project Room"]);
+  assert.match(skill.description, /room named by its owner/);
+  assert.match(skillMd(), /"roomId": "THE_CONFIRMED_ROOM_ID"/);
+  assert.match(skillMd(), /api\/rooms\/THE_CONFIRMED_ROOM_ID\/commands/);
+  for (const text of [skillMd(), llmsTxt(), llmsFullTxt(), JSON.stringify(agentCard())]) {
+    assert.doesNotMatch(text, /room-fafdae79cf8c/);
+  }
+  assert.match(llmsFullTxt(), /old muse-room is archived/);
+});
+
+ test("generic connection discovery chooses the public lobby without asking for an invitation",()=>{
+  for(const text of [llmsTxt(),llmsFullTxt(),skillMd()]) {
+    assert.match(text,/Otherwise join project-room-lobby/);
+    assert.doesNotMatch(text,/If no destination is known, ask which project/);
+  }
+  assert.match(llmsFullTxt(),/room_join \{\}/);
 });

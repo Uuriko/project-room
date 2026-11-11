@@ -5,7 +5,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, installWriterFence, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
+import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, installWriterFence, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION, WRITER_FUNCTION } from "../server/writer-fence.mjs";
+
+const currentWriterRefusal = new RegExp(`no such function: ${WRITER_FUNCTION}|unsupported database writer`);
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
@@ -53,7 +55,7 @@ test("schema upgrade preserves existing records and fences a previously opened c
     assert.doesNotThrow(() => verifyWriterFence(current.db));
     assert.equal(writerFenceDefinitions.length, (applicationTables.length - unfencedAdditiveTables.length) * 3,
       "the current fence covers every application table except intentionally-unfenced additive tables");
-    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v44|unsupported database writer/);
+    assert.throws(() => legacyStatement.run("fixture-account"), currentWriterRefusal);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);
   } finally { current.close(); earlier.close(); }
@@ -98,13 +100,13 @@ test("failure after fence installation rolls back its schema marker and all trig
 
 test("read-only audit does not upgrade a pre-fence database", t => {
   const filename = legacyFixture(t);
-  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v44/);
+  assert.throws(() => new RoomStore(filename, { readOnly: true }), new RegExp(`requires schema v${STORE_SCHEMA_VERSION}`));
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try { assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5); }
   finally { inspected.close(); }
 });
 
-test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", t => {
+test("the current migration preserves v6 guards while retiring pre-open v6 writers", t => {
   const filename = legacyFixture(t), earlier = new DatabaseSync(filename);
   earlier.function("project_room_writer_v6", () => 6);
   for (const definition of fenceDefinitions(6)) earlier.exec(definition.sql);
@@ -114,7 +116,7 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   const current = new RoomStore(filename);
   try {
     assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
-    assert.throws(() => oldWrite.run(), /project_room_writer_v44|unsupported database writer/);
+    assert.throws(() => oldWrite.run(), currentWriterRefusal);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
   } finally { current.close(); earlier.close(); }
@@ -160,7 +162,7 @@ test("verifyWriterFence(28) requires deployed-lineage triggers when their tables
   finally { rebuilt.close(); }
 });
 
-test("v7 to v9 preserves every existing table row and retires a pre-open v7 connection", t => {
+test("v7 to current preserves every existing table row and retires a pre-open v7 connection", t => {
   const filename = legacyFixture(t), old = new DatabaseSync(filename);
   old.function("project_room_writer_v7", () => 7);
   for (const { sql } of fenceDefinitions(7)) old.exec(sql);
@@ -171,7 +173,7 @@ test("v7 to v9 preserves every existing table row and retires a pre-open v7 conn
   const current = new RoomStore(filename);
   try {
     assert.deepEqual(Object.fromEntries(tables.map(name => [name, current.db.prepare(`SELECT * FROM ${name}`).all()])), before);
-    assert.throws(() => cached.run(), /project_room_writer_v44|unsupported database writer/);
+    assert.throws(() => cached.run(), currentWriterRefusal);
     assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
   } finally { current.close(); old.close(); }
 });
@@ -206,14 +208,21 @@ test('v42 metadata upgrades and retires an already-open v42 writer',t=>{
  const directory=mkdtempSync(join(tmpdir(),'room-v42-upgrade-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
  const file=join(directory,'room.sqlite');const seeded=new RoomStore(file);seeded.createAccount('before');
  seeded.transaction(()=>{
-  for(const {name} of [...fenceDefinitions(43),...fenceDefinitions(44)])seeded.db.exec(`DROP TRIGGER IF EXISTS ${name}`);
+  for(let version=43;version<=STORE_SCHEMA_VERSION;version++)
+   for(const {name} of fenceDefinitions(version))seeded.db.exec(`DROP TRIGGER IF EXISTS ${name}`);
   for(const {sql} of fenceDefinitions(42))seeded.db.exec(sql);
   seeded.db.exec('PRAGMA user_version=42');
  });seeded.close();
  const legacy=new DatabaseSync(file);t.after(()=>legacy.close());
  for(let version=6;version<=42;version++)legacy.function(`project_room_writer_v${version}`,()=>version);
+ assert.equal(legacy.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name GLOB ?").get(`writer_v${STORE_SCHEMA_VERSION}_*`).n,0,'the synthetic v42 source must not retain current guards');
  const cached=legacy.prepare("UPDATE accounts SET revision=revision+1 WHERE id='before'");cached.run();
+ const before=legacy.prepare("SELECT * FROM accounts WHERE id='before'").get();
  const upgraded=new RoomStore(file);t.after(()=>upgraded.close());
  upgraded.createAccount('after');assert.equal(upgraded.account('after').id,'after');
- assert.throws(()=>cached.run(),/project_room_writer_v44|unsupported database writer/);
+ assert.equal(upgraded.db.prepare('PRAGMA user_version').get().user_version,STORE_SCHEMA_VERSION);
+ assert.deepEqual(upgraded.db.prepare("SELECT * FROM accounts WHERE id='before'").get(),before);
+ assert.throws(()=>cached.run(),currentWriterRefusal);
+ assert.deepEqual(upgraded.db.prepare("SELECT * FROM accounts WHERE id='before'").get(),before,'the refused prepared writer must not mutate the existing record');
+ assert.doesNotThrow(()=>verifyWriterFence(upgraded.db));
 });

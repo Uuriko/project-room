@@ -1,3 +1,4 @@
+import {legacyAccountRoom} from './helpers/legacy-account-room.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -48,7 +49,7 @@ async function deletionAccount(origin, f) {
   assert.ok(token, "signup sets a fresh account_session cookie");
   const session = f.store.authenticateAccountSession(token);
   f.store.accountLogins.markEmailVerified(session.account.id, email);
-  return { token, binding: session.sessionBinding, creds: { cookie: `account_session=${token}`, csrf: session.csrf } };
+  return { token, accountId:session.account.id, binding: session.sessionBinding, creds: { cookie: `account_session=${token}`, csrf: session.csrf } };
 }
 
 function parityAtSeq(store, roomId) {
@@ -65,7 +66,7 @@ for (const canonical of [false, true]) test(`account deletion in an already-arch
   const origin = await startServer(t, f);
   const ctx = await deletionAccount(origin, f);
   const roomId = "solo-parity";
-  f.store.createAccountRoom(ctx.token, ctx.binding, {
+  legacyAccountRoom(f.store, ctx.accountId, {
     roomId, title: "Solo parity", purpose: "Deletion parity coverage", kind: "personal", displayName: "Owner"
   });
   const key = f.store.issueAccessKey(roomId, "owner");

@@ -1,0 +1,42 @@
+{
+  "kind": "current-bootstrap-reader-checkpoint",
+  "base": "a9f77dfb2bb7095ac51fce31471b0e35b634eb3f",
+  "status": "offline intermediate",
+  "before": {
+    "log": "/tmp/current-bootstrap-root-red-1101.log",
+    "error": "current_room_context_required"
+  },
+  "after": {
+    "focusedLegacyAndClientSuite": {
+      "tests": 22,
+      "pass": 22,
+      "fail": 0,
+      "skip": 0,
+      "log": "/tmp/current-bootstrap-client-after-1101.log"
+    },
+    "currentBuilderClientHttp": {
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "skip": 0,
+      "log": "/tmp/current-bootstrap-http-after-1101.log"
+    }
+  },
+  "contract": {
+    "snapshotVersion": 2,
+    "omitted": null,
+    "partialWork": "explicit workWindow",
+    "requestCoverage": "explicit unavailable and existing list pointer",
+    "messages": "existing indexed conversation, eight per page",
+    "wholeLegacyHydration": false
+  },
+  "limits": [
+    "Not full browser UI qualification: partial work and absent request metadata consumers still require integration.",
+    "Activity audit and help context remain explicit refusals.",
+    "Full recovery finalization remains unbounded.",
+    "No schema45 deployment or activation.",
+    "Client transport test uses actual RoomClient+store; separate actual HTTP test covers ordinary route.",
+    "Initial client test incorrectly constructed account-less session; corrected to real store-created room session.",
+    "A subsequent misplaced firstWindow branch caused a refresh loop in own test processes; stopped those processes, corrected placement and reran with Node24."
+  ]
+}

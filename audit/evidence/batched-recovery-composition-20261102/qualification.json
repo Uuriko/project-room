@@ -1,0 +1,53 @@
+{
+  "source": "6cad2f545",
+  "runtimeBatchingSource": "d43466fe900dd4e215b5f21e34a4aab617d52405",
+  "nodeExecutable": "/Users/johnpotter/.local/bin/node",
+  "core": {
+    "tests": 23,
+    "passed": 23,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 12237.758334
+  },
+  "originalFourRestoreFiles": {
+    "tests": 46,
+    "passed": 46,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 61016.554375,
+    "fixtureReduced": false,
+    "driverBoundRaised": false
+  },
+  "finalization600Messages": {
+    "priorReportCalls": 4218,
+    "currentReportCalls": 370,
+    "preReportCalls": 298,
+    "exactOracleRetained": true
+  },
+  "externalProbe": {
+    "source": "695004867",
+    "tests": 16,
+    "passed": 16,
+    "note": "Actual OAuth initialize401 and public tools/list200 coexist; no monitor semantics changed"
+  },
+  "logs": [
+    {
+      "file": "project-room-batched-core-composed.log.gz",
+      "uncompressedSha256": "7ac3910cb1ab17632a09accbe499de19b792cab40c2dee065e53ae1691f2dc72"
+    },
+    {
+      "file": "project-room-restore4-batched-composed.log.gz",
+      "uncompressedSha256": "2dfb63db69c1527c6a7046ff654c6200e753d27e454a1cb9037faca27de3ed01"
+    },
+    {
+      "file": "project-room-external-probe-composed.log.gz",
+      "uncompressedSha256": "7a053919d37fad8e541a6099cc875a084f5dee79b73bd0204c5e1afea6522b6d"
+    }
+  ],
+  "limits": [
+    "Local Node SQLite; elapsed times include concurrent qualification, not production SLA",
+    "Native proof is separately pinned by queue lane",
+    "Not full-suite, deployment or live migration proof",
+    "Production normalization operator entrypoint remains unfinished"
+  ]
+}

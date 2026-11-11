@@ -41,7 +41,7 @@ test('production DO wiring is opt-in and records readiness plus partial request 
       assert.ok(first.storeInitializationMs>=first.constructMs);
       if(enabled==='0') assert.equal(result.rows.length,0);
       else {
-        const readiness=result.rows.find(row=>row.scopeKind==='readiness');assert.equal(readiness.statements,1);
+        const readiness=result.rows.find(row=>row.scopeKind==='readiness');assert.equal(readiness.statements,3);
         const request=result.rows.find(row=>row.scopeKind==='request');assert.equal(request.complete,false);
         assert.equal(result.deniedStatus,401);
         assert.ok(result.rows.some(row=>row.scopeKind==='request' && row.operation==='room-view' && row.statements>0), 'ALS ownership survives actual HTTP adapter dispatch');

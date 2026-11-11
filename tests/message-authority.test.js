@@ -114,11 +114,17 @@ test('archived deletion preserves retained count and erases prior wording',t=>{
  f.certify();assert.doesNotThrow(()=>auditRecovery(f.s));
 });
 
-test('archived rooms retain their write refusal after authority conversion',t=>{
+test('archived authority rooms retain ordinary write refusal and the explicit owner privacy exception',t=>{
  const f=fixture(t);f.post('first');f.certify();f.s.migrateMessageAuthority('commons');f.send('room.archived',{});
- const head=f.s.headSequence('commons');
- assert.throws(()=>f.send('message.deleted',{messageId:'first',expectedMessageRevision:0,reason:'cleanup'}),error=>error.code==='room_archived');
+ const head=f.s.headSequence('commons'),archived=structuredClone(f.s.room('commons').state.room);
+ assert.throws(()=>f.post('forbidden'),error=>error.code==='room_archived');
+ assert.throws(()=>f.send('message.edited',{messageId:'first',expectedMessageRevision:0,body:'Forbidden edit'}),error=>error.code==='room_archived');
  assert.equal(f.s.headSequence('commons'),head);assert.equal(f.s.room('commons').state.messages[0].body,'Body first');
+ const data={messageId:'first',expectedMessageRevision:0,reason:'Explicit owner privacy cleanup'},saved=f.send('message.deleted',data,'erase-after-archive');
+ assert.equal(saved.duplicate,false);assert.equal(f.send('message.deleted',data,'erase-after-archive').duplicate,true);
+ assert.equal(f.s.room('commons').state.messages[0].body,null);assert.deepEqual(f.s.room('commons').state.room,archived);assert.equal(f.raw().messageAuthority.count,1);f.certify();assert.doesNotThrow(()=>auditRecovery(f.s));
+ assert.throws(()=>f.post('still-forbidden'),error=>error.code==='room_archived');
+ const cold=new RoomStore(':memory:',{maintainMessageCertification:true});t.after(()=>cold.close());replayNdjsonInto(exportNdjsonText(f.s.db),cold);assert.deepEqual(cold.room('commons').state.room,archived);assert.equal(cold.room('commons').state.messages[0].body,null);assert.doesNotThrow(()=>auditRecovery(cold));
 });
 
 test('retained top-level edit loads no unrelated room messages and preserves global count',t=>{

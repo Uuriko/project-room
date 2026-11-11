@@ -28,7 +28,8 @@ export function adapterHints(env = process.env) {
 export const ACP_PROTOCOL_VERSION = 1;
 // The bridge advertises no fs or terminal capability: agents use their own
 // tools in their working directory, and the bridge never touches files.
-export const CLIENT_CAPABILITIES = Object.freeze({ fs: { readTextFile: false, writeTextFile: false }, terminal: false });
+// Keep adapter configuration diagnostics separate from assistant reply text.
+export const CLIENT_CAPABILITIES = Object.freeze({ fs: { readTextFile: false, writeTextFile: false }, terminal: false, session: { notices: {} } });
 
 export function onPath(bin, env = process.env) {
   const exts = process.platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD").split(";") : [""];
@@ -39,10 +40,11 @@ export function onPath(bin, env = process.env) {
   return null;
 }
 
-// Split a user-supplied command line on whitespace, honoring double quotes.
+// Split a user-supplied command line on whitespace, honoring double and
+// single quotes (a single-quoted --agent-cmd path may contain spaces).
 export function splitCommand(text) {
   const parts = [];
-  for (const match of String(text).matchAll(/"([^"]*)"|(\S+)/g)) parts.push(match[1] ?? match[2]);
+  for (const match of String(text).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)) parts.push(match[1] ?? match[2] ?? match[3]);
   if (!parts.length) throw new Error("empty agent command");
   return { command: parts[0], args: parts.slice(1) };
 }
@@ -122,7 +124,7 @@ export async function probe(candidate, options = {}) {
     if (options.executionReady) {
       const { AgentHost } = await import("./agent-host.mjs");
       let permissionRequested = false;
-      host = new AgentHost({ candidate, cwd: options.cwd, env: options.env,
+      host = new AgentHost({ candidate, cwd: options.cwd, env: options.env, mode: options.mode,
         onPermission: async () => { permissionRequested = true; return { outcome: { outcome: "cancelled" } }; },
       });
       const capabilities = await host.start({ timeoutMs: options.timeoutMs ?? 30000 });

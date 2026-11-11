@@ -1,0 +1,23 @@
+{
+  "at": "2026-11-04T07:33:58.812Z",
+  "readOnly": true,
+  "source": "same authorized production page, two local presentation transforms",
+  "after": 2300,
+  "next": 2347,
+  "messages": 46,
+  "fullBytes": 101391,
+  "previousDigestBytes": 89086,
+  "newDigestBytes": 82939,
+  "reductionPct": 6.9,
+  "previousAddressed": 25,
+  "newAddressed": 19,
+  "ownGroups": [
+    {
+      "count": 22
+    }
+  ],
+  "limits": [
+    "Wire payload estimate on exact same visible page; not a SQL/cpu/latency reduction measurement.",
+    "New transform is local candidate, providerlive proof after deployment."
+  ]
+}

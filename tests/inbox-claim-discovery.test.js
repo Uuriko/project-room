@@ -90,7 +90,16 @@ test('index migration converges on warm startup and discovery survives restart',
 test('index DDL fails atomically on corrupt data and rejects conflicting definitions', async t => {
   const { store } = setup(t);
   store.db.exec('DROP INDEX work_claim_inbox_owner; DROP INDEX work_claim_inbox_review');
+  // Inject impossible JSON without having another expression index or the
+  // normalized admission guard reject it before the index under test runs.
+  for(const {name,sql} of store.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='index' AND tbl_name='work_claims'").all()) {
+    if(sql?.includes('json_')) store.db.exec(`DROP INDEX "${name.replaceAll('"','""')}"`);
+  }
+  const guards=store.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='work_claims'")
+    .all().filter(row=>row.name.startsWith('current_room_guard_')&&row.sql.includes('json_'));
+  for(const {name} of guards)store.db.exec(`DROP TRIGGER "${name.replaceAll('"','""')}"`);
   store.db.prepare('INSERT INTO work_claims VALUES(?,?,?,?)').run('commons', 'corrupt', '{', 0);
+  for(const {name,sql} of guards){store.db.exec(sql);assert.equal(store.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name).sql,sql);}
   const { workClaimInboxIndexSchema } = await import('../server/work-claim-sqlite.mjs');
   store.db.exec('BEGIN');
   assert.throws(() => store.db.exec(workClaimInboxIndexSchema), /malformed JSON/);

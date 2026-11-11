@@ -79,6 +79,7 @@ export class DmConsents {
 
   // ---- internals -------------------------------------------------------
   _roomState(roomId) {
+    const current=this.store.currentDmConsentAuthority?.(roomId);if(current)return current;
     const room = this.store.room(roomId);
     if (!room) fail(404, "room_not_found", "No such room");
     return room.state;
@@ -119,6 +120,8 @@ export class DmConsents {
     return memberId === state?.room?.ownerId;
   }
 
+  _transaction(roomId,operation){return this.store.currentDmConsentTransaction?this.store.currentDmConsentTransaction(roomId,operation):this.store.transaction(operation);}
+
   // ---- pair receipt ------------------------------------------------------
   // Consent rows bypass store.command(), so this module appends its own
   // thin receipt event (dm.consent_changed) through the store's side-table
@@ -153,7 +156,7 @@ export class DmConsents {
     if (typeof reason !== "string") fail(422, "invalid_dm_request", "reason must be text");
     const cleanReason = reason.trim().slice(0, MAX_DM_REASON_CHARS);
 
-    return this.store.transaction(() => {
+    return this._transaction(roomId,() => {
       const state = this._roomState(roomId);
       const requester = this._requireActiveMember(state, requesterId, "requester_not_found");
       this._requireActiveMember(state, targetId, "target_not_found");
@@ -196,7 +199,7 @@ export class DmConsents {
   // Only the target decides on a pending request.
   decide(roomId, targetId, requesterId, decision) {
     if (!DM_CONSENT_DECISIONS.includes(decision)) fail(422, "invalid_dm_decision", "decision must be approve, reject, or block");
-    return this.store.transaction(() => {
+    return this._transaction(roomId,() => {
       const state = this._roomState(roomId);
       this._requireActiveMember(state, targetId, "target_not_found");
       this._requireActiveMember(state, requesterId, "requester_not_found");
@@ -216,7 +219,7 @@ export class DmConsents {
   // Forward-looking: past messages stay readable.
   revoke(roomId, memberId, otherId) {
     if (typeof otherId !== "string" || !otherId) fail(422, "invalid_dm_request", "otherMemberId is required");
-    return this.store.transaction(() => {
+    return this._transaction(roomId,() => {
       const state = this._roomState(roomId);
       this._requireActiveMember(state, memberId, "member_not_found");
       const forward = this._get(roomId, memberId, otherId);
@@ -240,7 +243,7 @@ export class DmConsents {
   // Only the target that blocked may unblock. The row returns to rejected:
   // history is kept, and the requester may ask again.
   unblock(roomId, targetId, requesterId) {
-    return this.store.transaction(() => {
+    return this._transaction(roomId,() => {
       const state = this._roomState(roomId);
       this._requireActiveMember(state, targetId, "target_not_found");
       const existing = this._get(roomId, requesterId, targetId);
@@ -262,7 +265,7 @@ export class DmConsents {
   block(roomId, blockerId, blockedId) {
     if (typeof blockedId !== "string" || !blockedId) fail(422, "invalid_dm_block", "blockedMemberId is required");
     if (blockerId === blockedId) fail(422, "invalid_dm_block", "You cannot block yourself");
-    return this.store.transaction(() => {
+    return this._transaction(roomId,() => {
       const state = this._roomState(roomId);
       this._requireActiveMember(state, blockerId, "member_not_found");
       this._requireActiveMember(state, blockedId, "blocked_not_found");

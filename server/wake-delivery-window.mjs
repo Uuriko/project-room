@@ -79,7 +79,9 @@ const fields = Object.freeze({
 });
 // Source admission precedes wide TEXT / pointer transfer. The ordered partial
 // index bounds physical traversal even when every candidate is later filtered.
-export function readWakeWindow(db, table, agentId, after = null, roomId = null) {
+export function readWakeWindow(db, table, agentId, after = null, roomId = null, order = 'oldest') {
+  if (!['oldest', 'newest'].includes(order) || order === 'newest' && roomId === null) unavailable();
+  const newest = order === 'newest';
   const index = WAKE_INDEXES.find(value => value.table === table && value.scoped === (roomId !== null)); if (!index) unavailable();
   const columns = fields[table], text = columns.filter(column => !['created_at', 'delivered_at', 'invalidated_at', 'work_revision'].includes(column));
   const nullable = new Set(table === 'agent_wake_signals' ? ['room_id', 'message_id'] : []);
@@ -87,12 +89,12 @@ export function readWakeWindow(db, table, agentId, after = null, roomId = null) 
   const fieldLimit = { signal_id: 128, agent_id: 64, kind: 32, room_id: 128, message_id: 1024, member_id: 128, work_item_id: 128, event_id: 128, actor_id: 128, pointer: WAKE_WINDOW_LIMITS.fieldBytes };
   const valid = text.map(column => `(typeof(${column})='text'${nullable.has(column) ? ` OR ${column} IS NULL` : ''}) AND COALESCE(length(CAST(${column} AS BLOB)),0)<=${fieldLimit[column]}`).join(' AND ');
   const predicate = table === 'agent_work_wakes' ? 'delivered_at IS NULL AND invalidated_at IS NULL' : 'delivered_at IS NULL';
-  const range = after ? ' AND (created_at,signal_id)>(?,?)' : '';
+  const range = after ? ` AND (created_at,signal_id)${newest ? '<' : '>'}(?,?)` : '';
   const bindings = [agentId, ...(roomId !== null ? [roomId] : []), ...(after ? [after.createdAt, after.signalId] : [])];
   const scalars = db.prepare(`SELECT rowid AS rid,created_at,${bytes}+128 AS sourceBytes,
     CASE WHEN ${valid} AND typeof(created_at)='integer' AND created_at>=0${table === 'agent_work_wakes' ? " AND typeof(work_revision)='integer'" : ''} THEN 1 ELSE 0 END AS valid
     FROM ${table} INDEXED BY ${index.name} WHERE agent_id=?${roomId !== null ? ' AND room_id=?' : ''} AND ${predicate}${range}
-    ORDER BY created_at,signal_id LIMIT ?`).all(...bindings, WAKE_WINDOW_LIMITS.rows + 1);
+    ORDER BY created_at ${newest ? 'DESC' : 'ASC'},signal_id ${newest ? 'DESC' : 'ASC'} LIMIT ?`).all(...bindings, WAKE_WINDOW_LIMITS.rows + 1);
   const admitted = []; let used = 0;
   for (const scalar of scalars.slice(0, WAKE_WINDOW_LIMITS.rows)) {
     if (scalar.valid !== 1 || !Number.isSafeInteger(scalar.rid) || !Number.isSafeInteger(scalar.created_at)

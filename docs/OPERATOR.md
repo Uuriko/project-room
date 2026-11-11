@@ -20,6 +20,41 @@ Send it on each call as `Authorization: Operator <token>`. A room or account coo
 
 `ROOM_OPERATOR_PROTECTED_ROOMS` is an optional comma-separated list of room ids that purge refuses, in addition to `invite-only-pilot`.
 
+## Normalize room storage
+
+`POST /api/operator/normalization/plan` accepts `roomId` and an explicit boolean
+`discardLegacyAssignments`. It reads the exact current head, metadata proof and
+legacy assignment counts and returns a `planHash`. Planning changes no room data.
+
+`POST /api/operator/normalization/execute` accepts the same fields plus `planHash`,
+`requestId` (1–64 letters, digits, underscores or hyphens) and a nonblank `reason`
+of at most 280 UTF-8 bytes. Use the existing `Authorization: Operator` credential.
+The operation materializes the current state once into entity records and replaces
+the whole-room projection with a small carrier. This one-time operation scales with
+current state; it is not a bounded historical replay or a history certificate.
+
+Accounts, member IDs and revisions, permissions, credentials, revocations, OAuth
+grants, connections, original events, canonical messages and tasks remain intact.
+When explicitly selected, `discardLegacyAssignments: true` removes only this room's
+legacy `work_claims`, `work_claim_history` and `collab_assignments`. Review their
+counts in the plan. It does not complete or delete canonical tasks.
+
+Legacy inline rooms may explicitly select `adoptAbsentInlineProofs: true` in both
+plan and execute. The plan binds this intent and reports canonical message and
+missing-proof counts. This mode can adopt only a SQL NULL proof where independently
+protected inline state, verified body references, every persisted message field
+and the original indexed posting event agree. It refuses conflicting proofs,
+shadowed JSON keys and missing proofs justified only by an entity reference or
+archive membership. It does not certify historical replay. Omit the option to
+retain the ordinary strict refusal; a missing proof is not silently repaired.
+
+Publication and its receipt commit in one transaction. A save failure rolls back.
+After a lost response, resend the exact original execute body and request ID;
+the saved receipt returns with `duplicate: true`. A changed head or assignment
+census requires a fresh plan. Do not roll back to code that cannot read the new
+representation. After activation, check existing-agent access, a saved message and
+task update, exact retry, and cold restart before declaring the room qualified.
+
 ## Purge
 
 Purge is confirm-then-delete. Find and plan do not delete rows. Execute deletes only the ids in a plan that still matches.
@@ -64,6 +99,8 @@ After a purge the room id becomes available again. Old links to the room and its
 Exporting a room that is **not** lifecycle-archived requires the `confirmRoomId` query value set to the exact room id and a `reason` query value of 1 to 200 characters (for example, reason "cap diagnosis"). A lifecycle-archived room exports with neither. Every export writes an `operator_actions` row (`room_export`, with the reason, format, event count, byte count, and `scrubbed: true`) before the body is sent.
 
 Event bodies are scrubbed on the way out for this product's own token shapes only (`pri_…`, `rak_…`, `ga1.…` become sha256 hashes, at any nesting depth). The response header `X-Room-Export-Scrub: token-shapes` and the audit row carry that marker; nothing is added to the JSONL body itself. Any other secret pasted into a room passes through verbatim: **an export is as sensitive as the room itself**. Keep it with the same care as a backup, never in a shared drive or chat, and delete it when its purpose is done.
+
+Room-event exports are archival history, not full restore artifacts. They omit serving proofs, derived replay units and historical repair receipts. Ordinary import retains current strict replay rules; a historical event can therefore require a whole-store backup rather than event import. Use the existing physical SQLite backup or whole-store NDJSON backup/restore path for recovery, preserving its audit and grant-reconciliation requirements.
 
 This door needs only the operator token. It does not use or arm the whole-store export door; that door and its token are unchanged.
 

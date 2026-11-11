@@ -154,7 +154,7 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.equal(land.status, "failing");
   assert.equal(land.consecutiveFailures, 1);
   assert.equal(land.lastSuccessAt, new Date(now - 30_000).toISOString());
-  assert.match(land.lastError, /does not support RPC/);
+  assert.equal(land.lastError, "Job failed");
   assert.equal(failingView.status, "failing");
   assert.equal(jobHealthView(undefined, now).status, "stale", "never-run jobs are stale");
 });
@@ -223,7 +223,7 @@ test("channel drain ticks report the last completed drain, and a wedged drain fa
   const drain = jobHealthView(stored, now).jobs.find(job => job.name === "channel-drain");
   assert.equal(drain.status, "failing");
   assert.equal(drain.consecutiveFailures, 1);
-  assert.match(drain.lastError, /2 error\(s\) in tick/);
+  assert.equal(drain.lastError, "Job failed");
 
   // Inflight within the bound: a drain is legitimately running, no verdict.
   shape = channelDrainTickShape({ connections: 2, inflight: true, inflightSince: now - 1000, now, completed: null });
@@ -688,4 +688,49 @@ test("DO job health includes scheduler evidence without reconciling alarms", asy
     assert.equal(result.scheduler.scope, 'current-isolate');
     assert.equal(alarmReads, 1);
   } finally { store.close(); }
+});
+
+test("public Worker health hides old stored and new free-form errors without changing failure facts", async () => {
+  const now = Date.now();
+  const privateText = "Private Person private@example.invalid /Users/private-person/project aa/bb@db.invalid unknownprosevalue";
+  const { stub, self } = roomStub();
+  const env = { ROOM_ORIGIN: "https://room.example.test", ROOM: { getByName: () => stub }, ROOM_BACKUPS_KV: { async put() {}, async get() { return null; } } };
+  let stored = applyOutcomes({}, CRON_JOBS.map(job => ({ job: job.name, ok: true, at: now })));
+  stored["land-queue"] = { ...stored["land-queue"], lastError: privateText, lastErrorAt: now, consecutiveFailures: 4,
+    lastFailure: { code: "fetch_failed", errorClass: "network", subcheck: privateText },
+    lastSummary: { checked: 7, errors: 4, privateText } };
+  const read = async () => {
+    const response = await worker.fetch(new Request("https://room.example.test/api/health/jobs"), env);
+    const body = await response.json();
+    assert.doesNotMatch(JSON.stringify(body), /Private Person|private@example|private-person|unknownprosevalue|aa\/bb/);
+    return { response, body, row: body.jobs.find(job => job.name === "land-queue") };
+  };
+  await self.ctx.storage.put(HEARTBEAT_STORAGE_KEY, stored);
+  let result = await read();
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.status, "failing");
+  assert.equal(result.row.status, "failing");
+  assert.equal(result.row.stale, false);
+  assert.equal(result.row.lastError, "Job failed");
+  assert.equal(result.row.lastErrorCurrent, true);
+  assert.equal(result.row.lastErrorCode, "fetch_failed");
+  assert.equal(result.row.lastErrorClass, "network");
+  assert.equal(result.row.lastErrorSubcheck, null);
+  assert.equal(result.row.consecutiveFailures, 4);
+  assert.deepEqual(result.row.lastSummary, { checked: 7, errors: 4 });
+  assert.equal((await self.ctx.storage.get(HEARTBEAT_STORAGE_KEY))["land-queue"].lastError, privateText, "public read does not rewrite diagnostic storage");
+  const outcomes = await runCronJobs({ "land-queue": async () => { throw Object.assign(Error(privateText), { failureDetail: { code: "fetch_failed", errorClass: "network" } }); } }, { now: () => now, log: () => {} });
+  stored = applyOutcomes(stored, outcomes);
+  await self.ctx.storage.put(HEARTBEAT_STORAGE_KEY, stored);
+  result = await read();
+  assert.equal(result.row.lastError, "Job failed");
+  assert.equal(result.row.consecutiveFailures, 5);
+  assert.equal(result.row.status, "failing");
+  await self.ctx.storage.put(HEARTBEAT_STORAGE_KEY, applyOutcomes(stored, [{ job: "land-queue", ok: true, at: now }]));
+  result = await read();
+  assert.equal(result.response.status, 200);
+  assert.equal(result.row.status, "ok");
+  assert.equal(result.row.lastError, "Job failed", "historical error remains a fixed marker");
+  assert.equal(result.row.lastErrorCurrent, false);
+  assert.equal(result.row.consecutiveFailures, 0);
 });

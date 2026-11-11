@@ -3,7 +3,8 @@
 // beside PILOT_LIMITS into access requests, referrals, share links, guest and
 // agent invites, so raising PILOT_LIMITS left those paths refusing at the old
 // numbers. This walks every module under server/ and cloudflare/ (recursively)
-// and fails if a cap is hard-coded again.
+// and fails if a cap is hard-coded again. Executable test fixtures use both
+// .test.mjs and .check.mjs; their measured stress bounds are not runtime caps.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -16,13 +17,14 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const walk = dir => readdirSync(dir).flatMap(name => {
   const path = join(dir, name);
   if (name === "node_modules") return [];
-  return statSync(path).isDirectory() ? walk(path) : /\.(mjs|js)$/.test(name) && !/\.test\./.test(name) ? [path] : [];
+  return statSync(path).isDirectory() ? walk(path) : /\.(mjs|js)$/.test(name) && !/\.(?:test|check)\./.test(name) ? [path] : [];
 });
 const modules = [...walk(join(root, "server")), ...walk(join(root, "cloudflare"))];
 const scan = predicate => modules.flatMap(path => readFileSync(path, "utf8").split("\n")
   .map((line, i) => predicate(line) ? `${path.slice(root.length)}:${i + 1}` : null).filter(Boolean));
 
 test("the walk covers the write paths it guards", () => {
+  assert.ok(modules.every(path=>!/\.(?:test|check)\./.test(path)),"exclude executable test fixtures, not runtime paths");
   for (const name of ["store.mjs", "access-requests.mjs", "referrals.mjs", "share-links.mjs", "guest-invites.mjs", "agent-invites.mjs", "referral-invites.mjs", "storage.mjs"]) {
     assert.ok(modules.some(path => path.endsWith(`/${name}`)), name);
   }

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { AgentRooms } from "../server/agent-rooms.mjs";
+import { seedHistoricalNeedsMeRoom } from "./helpers/historical-needs-me-room.mjs";
 import { attachmentLimits } from "../server/attachment-schema.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -22,9 +22,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-attach-commit-del-"));
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => Date.now() });
-  const rooms = new AgentRooms(store);
+
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, rooms };
+  return { store };
 }
 
 const b64 = n => Buffer.alloc(n, 120).toString("base64");
@@ -45,11 +45,11 @@ function fillWithCommitted(store, roomId, memberId) {
 }
 
 test("uploader can delete a committed file whose staging deadline passed, and the quota frees", t => {
-  const { store, rooms } = serve(t);
+  const { store } = serve(t);
   const owner = store.identities.create("Quota owner");
-  const created = rooms.create(owner.secret, { roomId: "qa-commit-del", title: "q", purpose: "q", kind: "personal", displayName: "Quota owner" });
-  const roomId = created.roomId;
-  fillWithCommitted(store, roomId, created.ownerMemberId);
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: "qa-commit-del", title: "q", purpose: "q", kind: "personal", displayName: "Quota owner" });
+  const roomId = "qa-commit-del";
+  fillWithCommitted(store, roomId, owner.identityId);
 
   assert.throws(() => store.roomAttachments.stage(owner.secret, roomId, { id: "new", filename: "n.txt", mediaType: "text/plain", data: b64(10) }),
     error => error.code === "attachment_quota");
@@ -66,21 +66,21 @@ test("uploader can delete a committed file whose staging deadline passed, and th
 });
 
 test("a committed file whose bound message is gone stays hidden from non-uploaders, so they cannot delete it", t => {
-  const { store, rooms } = serve(t);
+  const { store } = serve(t);
   const owner = store.identities.create("Quota owner");
-  const created = rooms.create(owner.secret, { roomId: "qa-commit-del2", title: "q", purpose: "q", kind: "personal", displayName: "Quota owner" });
-  const roomId = created.roomId;
+  seedHistoricalNeedsMeRoom(store,owner, { roomId: "qa-commit-del2", title: "q", purpose: "q", kind: "personal", displayName: "Quota owner" });
+  const roomId = "qa-commit-del2";
   store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
     VALUES(?,?,?,'f.txt','text/plain',1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?,'committed',0,0,'m-gone')`).run(roomId, "theirs", "someone-else", Buffer.from("x"));
   assert.throws(() => store.roomAttachments.discard(owner.secret, roomId, "theirs"), error => error.code === "attachment_not_found");
   assert.equal(store.db.prepare("SELECT state FROM room_attachments WHERE room_id=? AND id='theirs'").get(roomId).state, "committed");
 });
 
-function visibilityFixture(t) {
+function visibilityFixture(t, normalized = false) {
   const clock = { now: Date.now() };
   const store = new RoomStore(":memory:", { now: () => clock.now });
   t.after(() => store.close());
-  store.initialize(initialRoom());
+  store.initialize(initialRoom(),normalized?{representation:"normalized-current-v1"}:undefined);
   const keys = { owner: store.issueAccessKey("commons", "owner") };
   for (const memberId of ["uploader", "recipient", "observer"]) {
     store.command(keys.owner, "commons", { id: `add-${memberId}`, type: "member.added",
@@ -225,3 +225,36 @@ for (const terminal of ["discarded", "expired"]) for (const operation of ["get",
     }
   });
 }
+
+for(const normalized of [false,true])test(`${normalized?"normalized":"legacy"} valid committed writers free full room byte quota after deadline`,t=>{
+ const {store,keys,files,commit,clock}=visibilityFixture(t,normalized);
+ if(normalized)store.room=()=>{throw Error("legacy full room hydration");};
+ const size=attachmentLimits.fileBytes;
+ for(const actor of ["uploader","recipient"]){
+  for(let i=0;i<attachmentLimits.memberBytes/size;i++){
+   const id=`${actor}-${i}`;
+   files.stage(keys[actor],"commons",{id,filename:"q.txt",mediaType:"text/plain",data:b64(size)});
+   store.command(keys[actor],"commons",{id:`post-${id}`,type:"message.posted",data:{messageId:`message-${id}`,body:"Quota context"}});
+   files.commit(keys[actor],"commons",{id,messageId:`message-${id}`});
+  }
+ }
+ assert.equal(store.db.prepare("SELECT sum(byte_length) n FROM room_attachments WHERE state='committed'").get().n,attachmentLimits.roomBytes);
+ clock.now+=attachmentLimits.lifetimeMs+1;
+ files.expire("commons",clock.now);
+ assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE state='committed'").get().n,16);
+ assert.throws(()=>files.stage(keys.owner,"commons",{id:"over-room",filename:"q.txt",mediaType:"text/plain",data:b64(1)}),e=>e.code==="attachment_quota"&&e.detail.quota.limit==="room_bytes");
+ assert.throws(()=>files.discard(keys.observer,"commons","uploader-0"),e=>e.status===403);
+ assert.equal(files.discard(keys.uploader,"commons","uploader-0").status,"deleted");
+ assert.equal(files.discard(keys.uploader,"commons","uploader-0").duplicate,true);
+ assert.equal(files.stage(keys.owner,"commons",{id:"after-delete",filename:"q.txt",mediaType:"text/plain",data:b64(1)}).status,"staged");
+ assert.equal(files.discard(keys.owner,"commons","recipient-0").status,"deleted");
+ assert.deepEqual({...store.db.prepare("SELECT state,bytes FROM room_attachments WHERE id='recipient-0'").get()},{state:"deleted",bytes:null});
+ // Real private binding and terminal states must not create a missing-ID oracle.
+ commit("private-terminal","recipient");
+ for(const actor of ["owner","observer"])for(const id of ["private-terminal","missing"]){
+  assert.throws(()=>files.get(keys[actor],"commons",id),e=>e.status===404&&e.code==="attachment_not_found");
+  assert.throws(()=>files.discard(keys[actor],"commons",id),e=>e.status===404&&e.code==="attachment_not_found");
+ }
+ files.discard(keys.uploader,"commons","private-terminal");
+ for(const actor of ["owner","observer"])assert.throws(()=>files.discard(keys[actor],"commons","private-terminal"),e=>e.status===404);
+});

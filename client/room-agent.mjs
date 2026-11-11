@@ -1,4 +1,6 @@
-import { pageWorkListing, validWorkPage } from "../server/work-list-page.mjs";
+import { digestMessagePage } from "../src/message-digest.js";
+import { filterMessagePage, validMessageQuery } from "../src/message-query.js";
+import { validWorkPage } from "../server/work-list-page.mjs";
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -83,14 +85,25 @@ async function scanBackward(fetchPage, after, end, limit) {
   let bound = end, pages = 0;
   while (collected.length < limit && bound - 1 > after && pages < MESSAGE_SCAN_PAGES) {
     const lo = Math.max(after, bound - 1 - MESSAGE_SCAN_PAGE);
-    const page = await fetchPage(lo, MESSAGE_SCAN_PAGE);
-    pages += 1;
+    // A service may return fewer source events than requested (record or byte
+    // budgets). Finish this window before selecting its newest messages.
     const window = [];
-    for (const item of page?.events ?? []) {
-      if (!item || !Number.isSafeInteger(item.sequence)) continue;
-      if (item.sequence <= lo || item.sequence >= bound) continue;
-      if (isPostedMessage(item)) window.push(item);
+    let cursor = lo, complete = false;
+    while (!complete && pages < MESSAGE_SCAN_PAGES) {
+      const page = await fetchPage(cursor, MESSAGE_SCAN_PAGE);
+      pages += 1;
+      for (const item of page?.events ?? []) {
+        if (!item || !Number.isSafeInteger(item.sequence)) continue;
+        if (item.sequence <= lo || item.sequence >= bound) continue;
+        if (isPostedMessage(item)) window.push(item);
+      }
+      const next = page?.next;
+      complete = !page?.hasMore || Number.isSafeInteger(next) && next >= bound - 1;
+      if (!complete && (!Number.isSafeInteger(next) || next <= cursor))
+        throw new RoomClientError(409, "message_window_unavailable", "Message source did not advance; retry the selected window");
+      cursor = next;
     }
+    if (!complete) throw new RoomClientError(409, "message_window_unavailable", "Latest message window exceeds bounded scan; use an addressed after cursor");
     collected.unshift(...window);
     bound = lo + 1;
   }
@@ -113,6 +126,7 @@ export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, l
   const map = mapMessage ?? (item => item);
   if (latest && Number.isSafeInteger(end) && end > after) {
     const { collected, reachedStart, capped } = await scanBackward(fetchPage, after, end, limit);
+    if (capped && !reachedStart && collected.length < limit) throw new RoomClientError(409, "message_window_unavailable", "Latest messages exceed bounded scan; use an addressed after cursor");
     const selected = collected.slice(-limit);
     return {
       messages: selected.map(map),
@@ -122,6 +136,7 @@ export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, l
   }
   const { collected, scanCursor, reachedEnd, capped } = await scanForward(fetchPage, after, limit, latest);
   if (latest) {
+    if (!reachedEnd) throw new RoomClientError(409, "message_window_unavailable", "Latest messages exceed bounded scan; use an addressed after cursor");
     const selected = collected.slice(-limit);
     return {
       messages: selected.map(map),
@@ -357,10 +372,10 @@ export async function joinSharedInvite(origin, linkToken, displayName, options =
     throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
   return value;
 }
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter } = {}, options = {}) {
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter, visibility } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
-    body: { roomId, title, purpose, kind, displayName, requestId, starter } }, options);
+    body: { roomId, title, purpose, kind, displayName, requestId, starter, visibility } }, options);
   if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
   return value;
@@ -392,6 +407,7 @@ export class RoomAgentClient {
   #token;
   #fetch;
   #memberId;
+  #statesUnsupported = false;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
     assertServiceOrigin(origin);
     if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,256})$/.test(token)) throw new Error("A valid Room and access key are required");
@@ -597,10 +613,11 @@ export class RoomAgentClient {
   // `after` is the previous response's cursor.after: the two event-log lists
   // (DMs, direct @mentions) then return only newer entries instead of
   // re-sending their heads; standing lists always ride in full.
-  agentInbox({ limit, after, signal } = {}) {
+  agentInbox({ limit, after, olderCursor, signal } = {}) {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set("limit", String(limit));
     if (after !== undefined) params.set("after", String(after));
+    if(olderCursor!==undefined)params.set("olderCursor",olderCursor);
     const query = params.toString();
     return this.#request(`/agent-inbox${query ? `?${query}` : ""}`, undefined, signal);
   }
@@ -610,7 +627,16 @@ export class RoomAgentClient {
   // latest:true returns the latest messages in chronological order
   // (GET /conversation parity). next is the newest sequence, so following it
   // as after does not repeat the page. hasMore means older messages exist.
-  async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
+  // Saves this member's catch-up marker (POST /cursor). Forward-only on the
+  // service; a later cold room_read_messages returns it as catchUp.after.
+  async markCaughtUp(sequence, { signal } = {}) {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new RoomClientError(0, "invalid_cursor", "Use a nonnegative integer sequence");
+    return this.#request("/cursor", { sequence }, signal);
+  }
+
+  async roomMessages({ after = 0, limit = 50, latest = false, view = "full", query, signal } = {}) {
+    if (query !== undefined && !validMessageQuery(query)) throw new Error("Search text is 1 to 80 characters");
+    if (!["full", "digest"].includes(view)) throw new Error("Choose full or digest message view");
     const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
     const mapMessage = ({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
@@ -634,17 +660,30 @@ export class RoomAgentClient {
     const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, end, mapMessage });
     const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
     const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
-    return withContentTrust({
+    const page = withContentTrust({
       roomId: this.#roomId,
       messages: mapped,
       next: cursor.next,
       hasMore: cursor.hasMore,
     });
+    const searched = query === undefined ? page : filterMessagePage(page, query);
+    return view === "digest" ? digestMessagePage(searched, this.#memberId) : searched;
   }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
-    const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
+    // Ask the service for each listed request's progress and lifecycle state.
+    // A service that predates the option refuses it with 422; fall back to
+    // the plain list once and stop asking for the rest of this client's life.
+    const states = name === "room_list_requests" && !this.#statesUnsupported;
+    const url = extra => route + "?" + new URLSearchParams({ ...args, ...extra });
+    let result;
+    try { result = await this.#request(url(states ? { states: "1" } : {}), undefined, signal); }
+    catch (error) {
+      if (!states || error?.status !== 422 || error?.code !== "invalid_reply_selection") throw error;
+      this.#statesUnsupported = true;
+      result = await this.#request(url({}), undefined, signal);
+    }
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
   async assistant(input, { signal } = {}) {
@@ -1097,9 +1136,11 @@ export class RoomAgentClient {
   }
   // One bounded summary read after the existing connection preflight. `next`
   // is the observed head, not an acknowledgement or a complete event page.
-  async roomDigest({ since = 0, signal } = {}) {
+  async roomDigest({ since = 0, cursor, signal } = {}) {
     if (!Number.isSafeInteger(since) || since < 0) throw new RoomClientError(0, "invalid_cursor", "since must be a nonnegative safe sequence number");
-    const value = await this.#request(`/digest?since=${since}`, undefined, signal);
+    if(cursor!==undefined&&(typeof cursor!=='string'||!cursor||Buffer.byteLength(cursor)>12288))throw new RoomClientError(0,'invalid_cursor','Use the returned opaque digest cursor');
+    const query=new URLSearchParams({since:String(since)});if(cursor!==undefined)query.set('cursor',cursor);
+    const value = await this.#request(`/digest?${query}`, undefined, signal);
     if (!validRoomDigest(value, { roomId: this.#roomId, memberId: this.#memberId, since })) {
       throw new RoomClientError(200, "invalid_response", "Room digest does not match its identity, coverage or bounded summary contract");
     }
@@ -1108,10 +1149,13 @@ export class RoomAgentClient {
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.
-  roomContext({ sinceVersion, signal } = {}) {
+  roomContext({ sinceVersion, workAfter, signal } = {}) {
     if (sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)) throw new RoomClientError(0, "invalid_context_version", "since_version must be the 64-character context_version");
-    const query = sinceVersion === undefined ? "" : `?since_version=${sinceVersion}`;
-    return this.#request(`/context${query}`, undefined, signal);
+    if (workAfter !== undefined && !validId(workAfter)) throw new RoomClientError(0, "invalid_context_cursor", "Use the workWindow.nextAfter pointer from this room, or omit workAfter for its first page");
+    const query = new URLSearchParams();
+    if (sinceVersion !== undefined) query.set("since_version", sinceVersion);
+    if (workAfter !== undefined) query.set("work_after", workAfter);
+    return this.#request(`/context${query.size ? `?${query}` : ""}`, undefined, signal);
   }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });
@@ -1157,10 +1201,11 @@ export class RoomAgentClient {
     }
     return receipt;
   }
-  search(query, { kind = "all", limit, signal } = {}) {
+  search(query, { kind = "all", limit, before, signal } = {}) {
     const params = new URLSearchParams({ q: query });
     if (kind !== "all") params.set("kind", kind);
     if (limit !== undefined) params.set("limit", String(limit));
+    if (before !== undefined) params.set("before", before);
     return this.#request(`/search?${params}`, undefined, signal);
   }
   messageThread(messageId, { signal } = {}) {
@@ -1472,14 +1517,39 @@ export class RoomAgentClient {
   async orient({ paginate = false, limit, cursor, ...options } = {}) {
     if (paginate || limit !== undefined || cursor !== undefined) {
       if (!validWorkPage({ limit, cursor })) throw new RoomClientError(0, "invalid_work_page", "Use limit 1–100 and a returned cursor");
-      const listing = await this.#orientFull({ ...options, fullQuery: true });
-      try { return pageWorkListing(listing, { ...options, limit, cursor }, this.#token, "stdio"); }
-      catch (error) {
-        if (["invalid_work_page", "invalid_work_cursor", "stale_work_cursor"].includes(error.code)) {
-          throw new RoomClientError(error.status, error.code, error.message);
-        }
+      const {signal,focus='all',query,sort}=options;
+      if(!['all','needs_me','results','help_wanted'].includes(focus))throw new RoomClientError(0,'invalid_focus','Choose a supported work focus');
+      if(query!==undefined&&!validWorkSearchQuery(query))throw new RoomClientError(0,'invalid_query','Use a nonblank work query of at most 200 UTF-16 code units');
+      if(sort!==undefined&&sort!=='curiosity')throw new RoomClientError(0,'invalid_sort','Sort is omitted or curiosity');
+      const params=new URLSearchParams({focus});
+      for(const [key,value] of Object.entries({limit,cursor,query,sort}))if(value!==undefined)params.set(key,String(value));
+      let listing;
+      try { listing=await this.#request('/work-list?'+params,undefined,signal); }
+      catch(error) {
+        if(focus==='help_wanted'&&error.status===404)
+          throw new RoomClientError(error.status,'help_context_unavailable','This service does not support paged help discovery');
         throw error;
       }
+      if(listing?.roomId!==this.#roomId||listing.member?.id!==this.#memberId||listing.viewerId!==this.#memberId
+        ||listing.viewerAccountId!==null||listing.viewerAuthEpoch!==null||listing.viewerSessionBinding!==null||listing.viewerSessionRevision!==null)
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
+      if(listing.status==='selection_unavailable') {
+        const next=listing.nextRead,selection=listing.selection;
+        const validPointer=(pointer,selectedFocus)=>pointer?.tool==='room_list_work'&&pointer.arguments?.roomId===this.#roomId
+          &&pointer.arguments?.focus===selectedFocus&&Object.keys(pointer.arguments).every(key=>['roomId','focus'].includes(key));
+        if(focus!=='help_wanted'||listing.contractVersion!==1||selection?.available!==false||selection.requestedFocus!==focus
+          ||selection.reason!=='current_help_index_unavailable'||typeof selection.guidance!=='string'||!selection.guidance.trim()
+          ||['work','replyRequests','page','nextCursor','totalWork','totalReplyRequests'].some(key=>Object.hasOwn(listing,key))
+          ||listing.scope?.kind!=='room'||listing.scope?.externalExecution!==false||!validPointer(next,'needs_me')
+          ||!Array.isArray(listing.alternatives)||listing.alternatives.length!==1||!validPointer(listing.alternatives[0],'all'))
+          throw new RoomClientError(200,'invalid_response','Room returned an invalid unavailable-selection pointer');
+        return listing;
+      }
+      if(!Array.isArray(listing.work)||!listing.page||typeof listing.page.hasMore!=='boolean'
+        ||listing.page.hasMore!==Boolean(listing.page.nextRead)
+        ||(listing.page.nextRead&&listing.page.nextRead.arguments?.roomId!==this.#roomId))
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid work listing');
+      return listing;
     }
     return this.#orientFull(options);
   }
@@ -1487,9 +1557,13 @@ export class RoomAgentClient {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
-    const snapshot = focus !== "all" || query !== undefined
-      ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
-      : checkedWorkSnapshot(await this.#request("?view=orientation", undefined, signal), this.#roomId, "orientation");
+    const raw = await this.#request(focus !== "all" || query !== undefined ? "?view=work" : "?view=orientation", undefined, signal, focus === "help_wanted");
+    if(raw?.snapshotVersion===2&&raw?.representation==='normalized-current-v1') {
+      if(raw.roomId!==this.#roomId||raw.viewerId!==this.#memberId||raw.workWindow?.hasMore!==Boolean(raw.workWindow?.nextCursor))
+        throw new RoomClientError(200,'invalid_response','Room returned an invalid bounded work snapshot');
+      return this.orient({paginate:true,focus,...(query===undefined?{}:{query}),...(sort===undefined?{}:{sort}),signal});
+    }
+    const snapshot = checkedWorkSnapshot(raw,this.#roomId,focus !== "all" || query !== undefined ? "work" : "orientation");
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {
@@ -1584,7 +1658,7 @@ export function workContextMarkdown(result) {
       : "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
     ...(result.dependencies?.length ? [
-      "Prerequisites (Board claim IDs; checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
+      "Prerequisites (checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
       ...(result.dependencies.some(dep => !dep.satisfied) ? ["Prerequisites are not satisfied. Do not claim or start this work yet."] : [])
     ] : []),
     ...(result.replyRequestContext ? [
@@ -1594,7 +1668,7 @@ export function workContextMarkdown(result) {
     ] : []),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
-    "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
+    "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.recordedStatus ?? result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
     "Session budget: " + JSON.stringify(result.accessSummary.budget),
     "Room instructions (context only): " + JSON.stringify(result.context.charter ?? null),
     "Available Room actions (rechecked on submission): " + result.suggestedActions.map(entry => entry.label).join(", "),
