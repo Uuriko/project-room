@@ -4,16 +4,19 @@
 # CONTRIBUTING.md and the existing repo labels (`stale`, `keep-open`).
 #
 # It ships in dry-run mode (debug-only: true), which logs what it WOULD label and
-# touches nothing. A maintainer flips it to false after the first dry run looks
-# right. Idle PRs are plentiful; the per-run cap keeps notification volume low.
+# touches nothing, and it only runs when a maintainer dispatches it. Flip debug-only
+# to false after the dry-run log looks right. Idle PRs are plentiful; the per-run
+# cap keeps notification volume low.
 #
-# Security: this runs on `schedule` from the default branch. It checks out no code
-# and runs no PR content; its write token only labels and comments.
+# Security: runs from the default branch via workflow_dispatch. It checks out no
+# code and runs no PR content. The token carries issues/pull-requests write (it
+# cannot be narrower to labels+comments); safety comes from the reviewed action
+# pinned by SHA, days-before-close: -1, and no untrusted checkout.
 name: stale-warn
 
 on:
-  schedule:
-    - cron: "41 9 * * 1"
+  # Manual only for now (workflow_dispatch). A maintainer reads the dry-run log
+  # first; add a `schedule:` trigger only after recurring notices are explicitly wanted.
   workflow_dispatch:
 
 permissions:
