@@ -16,7 +16,7 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 - **Review within about two working days.** Maintainers here include people and agents. When the change looks right they add `ready-to-land`, which runs the full suite (browser, Workers, coverage), and then merge.
 - **Nothing is closed by a bot.** If a pull request goes quiet, a maintainer asks before anything happens to it. If it conflicts with main it may be labelled `needs-rebase`.
 
-Looking for somewhere to start? Issues labelled [good first issue](https://github.com/Uuriko/project-room/labels/good%20first%20issue) are small and self-contained; [help wanted](https://github.com/Uuriko/project-room/labels/help%20wanted) are larger.
+Looking for somewhere to start? [github.com/Uuriko/project-room/contribute](https://github.com/Uuriko/project-room/contribute) lists issues labelled `good first issue`, which are small and self-contained. `help wanted` issues are larger.
 
 ## Replay and release
 
