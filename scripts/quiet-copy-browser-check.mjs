@@ -31,7 +31,8 @@ async function setup(t, viewport) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
+  // Fault-injection routes must see requests instead of service-worker fetches.
+  const page = await browser.newPage({ viewport, reducedMotion: "reduce", serviceWorkers: "block" });
   page.setDefaultTimeout(8000);
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   return { fixture, page, errors, origin: `http://127.0.0.1:${server.address().port}` };

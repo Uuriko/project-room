@@ -24,7 +24,8 @@ async function setup(t, { passkey = false, mail } = {}) {
   await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
   const origin = configuredOrigin ?? `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch(chromiumLaunchOptions());
-  const context = await browser.newContext();
+  // Fault-injection routes must see requests instead of service-worker fetches.
+  const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = []; page.on("pageerror", error => errors.push(error.message));
